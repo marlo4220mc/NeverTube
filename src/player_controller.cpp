@@ -1,8 +1,7 @@
 #include "player_controller.h"
 
-#include <cstdio>
-
 #include "db/repositories.h"
+#include "debug.h"
 #include "playerwidget.h"
 #include "yt.h"
 
@@ -93,7 +92,7 @@ void PlayerController::startResolve()
                                 if (gen == m_resolveGen)
                                     onStreamResolved(s);
                             });
-    m_resolveErrConn = connect(m_yt, &Yt::error, this,
+    m_resolveErrConn = connect(m_yt, &Yt::resolveError, this,
                                [this, gen](const QString &message) {
                                    if (gen == m_resolveGen)
                                        resolveFailed(message);
@@ -116,6 +115,7 @@ void PlayerController::onStreamResolved(const StreamInfo &stream)
 void PlayerController::resolveFailed(const QString &message)
 {
     m_errorMessage = message;
+    NT_DEBUG("E2E resolveFailed msg=%s\n", message.toUtf8().constData());
     setPhase(QStringLiteral("error"));
 }
 
@@ -150,6 +150,7 @@ void PlayerController::onPlayerPosition()
 void PlayerController::onPlayerError(const QString &message)
 {
     m_errorMessage = message;
+    NT_DEBUG("E2E playerError msg=%s\n", message.toUtf8().constData());
     setPhase(QStringLiteral("error"));
 }
 
@@ -158,7 +159,7 @@ void PlayerController::setPhase(const QString &phase)
     if (m_phase == phase)
         return;
     m_phase = phase;
-    fprintf(stderr, "E2E phase=%s\n", phase.toUtf8().constData());
+    NT_DEBUG("E2E phase=%s\n", phase.toUtf8().constData());
     emit phaseChanged(m_phase);
 }
 

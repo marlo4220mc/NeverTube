@@ -23,8 +23,13 @@ add_executable(nevertube_qt2
   src/playerwidget.h
   src/player_controller.cpp
   src/player_controller.h
+  src/player_selftest.cpp
+  src/player_selftest.h
+  src/debug.h
   src/yt.cpp
   src/yt.h
+  src/yt_innertube.cpp
+  src/yt_innertube.h
   src/mainwindow.cpp
   src/mainwindow.h
   src/ui/theme.cpp
