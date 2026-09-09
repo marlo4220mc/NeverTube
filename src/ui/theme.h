@@ -1,0 +1,20 @@
+#pragma once
+
+#include <QColor>
+#include <QString>
+
+namespace nt {
+
+inline const QColor kBg(0x0F, 0x0F, 0x0F);
+inline const QColor kPanel(0x18, 0x18, 0x18);
+inline const QColor kElevated(0x1F, 0x1F, 0x1F);
+inline const QColor kTop(0x10, 0x10, 0x10);
+inline const QColor kBorder(0x26, 0x26, 0x26);
+inline const QColor kHover(0x24, 0x24, 0x24);
+inline const QColor kText(0xEC, 0xEC, 0xEC);
+inline const QColor kMuted(0x8F, 0x8F, 0x8F);
+inline const QColor kAccent(0xFF, 0x00, 0x33);
+
+QString styleSheet();
+
+} // namespace nt
