@@ -1,7 +1,5 @@
 #include "search_page.h"
 
-#include <cstdio>
-
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
@@ -12,6 +10,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include "../../debug.h"
 #include "../../db/repositories.h"
 #include "../../models.h"
 #include "../../yt.h"
@@ -133,7 +132,7 @@ void SearchPage::doSearch()
 void SearchPage::onSearchReady(const QVector<VideoInfo> &videos)
 {
     m_searching = false;
-    fprintf(stderr, "E2E searchReady count=%d\n", (int)videos.size());
+    NT_DEBUG("E2E searchReady count=%d\n", (int)videos.size());
     for (auto *child : m_resultBox->findChildren<QLabel *>()) {
         if (child->text().startsWith(QStringLiteral("Buscando")))
             child->hide();

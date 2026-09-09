@@ -1,7 +1,5 @@
 #include "home_page.h"
 
-#include <cstdio>
-
 #include <QDateTime>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -9,6 +7,7 @@
 #include <QScrollArea>
 #include <QVBoxLayout>
 
+#include "../../debug.h"
 #include "../../db/repositories.h"
 #include "../../models.h"
 #include "../../yt.h"
@@ -136,7 +135,7 @@ void HomePage::loadTrending()
 void HomePage::onTrending(const QVector<VideoInfo> &videos)
 {
     m_loadingHome = false;
-    fprintf(stderr, "E2E trending count=%d\n", (int)videos.size());
+    NT_DEBUG("E2E trending count=%d\n", (int)videos.size());
     m_trending = videos;
     m_trendGrid->showVideos(m_trending, VideoListView::GridMode);
     adjustGridHeight(m_trendGrid);

@@ -22,6 +22,10 @@ public:
     QString state() const { return m_state; }
     double speed() const;
 
+    // Acceso de solo lectura para selftest --selftest-player.
+    QString hwdec() const { return m_hwdec; }
+    int redrawIntervalMs() const { return m_redrawTimerActive ? 33 : 0; }
+
 public slots:
     void playUrl(const QString &url);
     void playYtdl(const QString &watchUrl, int maxHeight);
@@ -57,9 +61,11 @@ private:
     double m_position = 0.0;
     double m_duration = 0.0;
     QString m_state;
+    QString m_hwdec;
     int64_t m_videoW = 0;
     int64_t m_videoH = 0;
     double m_aspect = 0.0;
+    bool m_redrawTimerActive = false;
 };
 
 #endif

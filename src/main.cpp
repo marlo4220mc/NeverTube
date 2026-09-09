@@ -6,6 +6,8 @@
 #include <QTimer>
 
 #include "db/repositories.h"
+#include "player_selftest.h"
+#include "yt_innertube.h"
 
 int main(int argc, char *argv[])
 {
@@ -23,6 +25,14 @@ int main(int argc, char *argv[])
             dir + QStringLiteral("/mini_tube.db");
         const bool ok = databaseSelfTest(path);
         return ok ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-player"))) {
+        return playerSelfTest() ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-innertube"))) {
+        return innertubeSelfTest() ? 0 : 1;
     }
 
     MainWindow window;

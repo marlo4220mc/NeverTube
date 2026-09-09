@@ -2,9 +2,11 @@
 
 #include <QJsonObject>
 #include <QObject>
+#include <QVector>
 
 #include "hls_server.h"
 #include "models.h"
+#include "yt_innertube.h"
 
 class Yt : public QObject
 {
@@ -35,16 +37,21 @@ signals:
                              const QVector<VideoInfo> &videos);
     void streamReady(const StreamInfo &stream);
     void error(const QString &message);
+    void resolveError(const QString &message);
 
 private:
+    void resolveWithYtDlp(const QString &videoId, int maxHeight);
     void execJson(QStringList args, std::function<void(const QJsonObject &)> done);
     void execLines(QStringList args, std::function<void(const QStringList &)> done);
     void getUrls(const QString &videoId, const QString &selector,
                  std::function<void(const QStringList &)> done);
     QString buildHlsMaster(const QString &videoId, const QString &videoUrl,
                            const QString &audioUrl);
+    QString buildFilteredMaster(const QString &videoId,
+                                const QByteArray &masterBody, int maxHeight);
 
     static QString qualityName(int height);
+    static int closestHeight(int requested, const QVector<int> &heights);
     static QString formatSelector(int maxHeight);
     static QVector<VideoInfo> parseVideos(const QJsonObject &root);
     static VideoInfo videoFromJson(const QJsonObject &j);
@@ -56,4 +63,6 @@ private:
     static QString publishedFrom(const QJsonObject &j);
 
     HlsServer m_hls;
+    Innertube m_innertube;
+    int m_resolveGen = 0;
 };

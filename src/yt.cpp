@@ -7,12 +7,16 @@
 #include <QJsonDocument>
 #include <QProcess>
 #include <QRandomGenerator>
+#include <QTextStream>
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
 
 #include <algorithm>
+#include <limits>
 #include <memory>
+
+#include "debug.h"
 
 namespace {
 
@@ -183,6 +187,101 @@ void Yt::playlistDetail(const QString &playlistId, int limit)
 
 void Yt::resolveStream(const QString &videoId, int maxHeight)
 {
+    auto *guard = new QObject(this);
+    auto *innTube = &m_innertube;
+    const int gen = ++m_resolveGen;
+
+    QMetaObject::Connection guardFail;
+    guardFail = connect(innTube, &Innertube::failed, guard,
+            [this, guard, videoId, maxHeight, gen](const QString &vid,
+                                                   const QString &reason) {
+                if (vid != videoId || gen != m_resolveGen)
+                    return;
+                guard->deleteLater();
+                qWarning("yt: innertube falló para %s (%s); fallback yt-dlp",
+                         vid.toUtf8().constData(), reason.toUtf8().constData());
+                resolveWithYtDlp(videoId, maxHeight);
+            });
+
+    connect(innTube, &Innertube::hlsReady, guard,
+            [this, guard, guardFail, innTube, videoId, maxHeight, gen](
+                const QString &vid, const QString &hlsUrl,
+                const QVector<int> &heights) {
+                if (vid != videoId || gen != m_resolveGen)
+                    return;
+                if (heights.isEmpty()) {
+                    // Sin tabla de alturas: entregar el master sin filtrar
+                    // (comportamiento previo).
+                    guard->deleteLater();
+                    StreamInfo s;
+                    s.url = hlsUrl;
+                    s.label = qualityName(maxHeight) + QLatin1Char('p');
+                    s.height = maxHeight;
+                    s.multipleUrls = false;
+                    emit streamReady(s);
+                    return;
+                }
+                const int wanted = closestHeight(maxHeight, heights);
+                // A partir de aquí el fallo lo gestiona filterGuard; el
+                // guard inicial queda liberado para evitar doble fallback.
+                disconnect(guardFail);
+                guard->deleteLater();
+                // Un segundo guard para la fase de filtrado del master.
+                auto *filterGuard = new QObject(this);
+                QMetaObject::Connection masterConn;
+                masterConn = connect(
+                    innTube, &Innertube::masterReady, filterGuard,
+                    [this, filterGuard, videoId, wanted, gen](
+                        const QString &fid, const QByteArray &masterBody) {
+                        if (fid != videoId || gen != m_resolveGen)
+                            return;
+                        const QString abs = buildFilteredMaster(
+                            videoId, masterBody, wanted);
+                        if (abs.isEmpty()) {
+                            // Master no filtrable: fallback yt-dlp.
+                            filterGuard->deleteLater();
+                            qWarning("yt: master sin variantes filtrables para %s; "
+                                     "fallback yt-dlp",
+                                     videoId.toUtf8().constData());
+                            resolveWithYtDlp(videoId, wanted);
+                            return;
+                        }
+                        const QString origin = m_hls.start();
+                        StreamInfo s;
+                        s.url = origin + QLatin1Char('/') + videoId
+                                + QLatin1String(".m3u8");
+                        s.label = QString::number(wanted) + QLatin1Char('p');
+                        s.height = wanted;
+                        s.multipleUrls = false;
+                        NT_DEBUG("E2E hls filtrado a %dp url=%s\n", wanted,
+                                 s.url.toUtf8().constData());
+                        filterGuard->deleteLater();
+                        emit streamReady(s);
+                    });
+                // Fracaso en la fase de master: fallback yt-dlp.
+                QMetaObject::Connection masterFail;
+                masterFail = connect(
+                    innTube, &Innertube::failed, filterGuard,
+                    [this, filterGuard, masterConn, videoId, maxHeight, gen](
+                        const QString &fid, const QString &reason) {
+                        if (fid != videoId || gen != m_resolveGen)
+                            return;
+                        disconnect(masterConn);
+                        filterGuard->deleteLater();
+                        qWarning("yt: innertube falló al filtrar master (%s); "
+                                 "fallback yt-dlp",
+                                 reason.toUtf8().constData());
+                        resolveWithYtDlp(videoId, maxHeight);
+                    });
+                Q_UNUSED(masterFail)
+                innTube->fetchMaster(vid, hlsUrl);
+            });
+
+    m_innertube.fetchHls(videoId);
+}
+
+void Yt::resolveWithYtDlp(const QString &videoId, int maxHeight)
+{
     const QString sel =
         QStringLiteral("bestvideo[height<=%1][ext=mp4][vcodec^=avc1]"
                        "[protocol=m3u8_native]/bestvideo[height<=%1]"
@@ -190,7 +289,7 @@ void Yt::resolveStream(const QString &videoId, int maxHeight)
             .arg(maxHeight);
     getUrls(videoId, sel, [this, videoId, maxHeight](const QStringList &videoUrls) {
         if (videoUrls.isEmpty()) {
-            emit error(QStringLiteral("yt-dlp no devolvió ninguna URL de streaming."));
+            emit resolveError(QStringLiteral("yt-dlp no devolvió ninguna URL de streaming."));
             return;
         }
         const QString videoUrl = videoUrls.first();
@@ -263,6 +362,89 @@ QString Yt::qualityName(int height)
     if (height <= 720)
         return QStringLiteral("720");
     return QStringLiteral("1080");
+}
+
+// Elige la altura a pedir: exactamente la solicitada si existe; si no, la
+// inmediatamente inferior disponible; nunca sube de forma automática salvo
+// que no exista ninguna inferior (último recurso).
+int Yt::closestHeight(int requested, const QVector<int> &heights)
+{
+    if (heights.isEmpty())
+        return requested;
+    if (std::binary_search(heights.begin(), heights.end(), requested))
+        return requested;
+    int lower = -1;
+    for (int h : heights) {
+        if (h < requested && h > lower)
+            lower = h;
+    }
+    if (lower > 0)
+        return lower;
+    int upper = std::numeric_limits<int>::max();
+    for (int h : heights) {
+        if (h > requested && h < upper)
+            upper = h;
+    }
+    return upper == std::numeric_limits<int>::max() ? requested : upper;
+}
+
+// Filtra el master HLS de YouTube dejando únicamente las variantes con
+// RESOLUTION= altura <= maxHeight. El abreviado se sirve desde el HlsServer
+// local para que el reproductor solo vea las calidades permitidas.
+QString Yt::buildFilteredMaster(const QString &videoId,
+                                const QByteArray &masterBody, int maxHeight)
+{
+    if (masterBody.isEmpty())
+        return QString();
+
+    QStringList out;
+    const QStringList lines = QString::fromUtf8(masterBody).split(QLatin1Char('\n'));
+    // Conservamos la cabecera y las líneas #EXT-X-MEDIA (audio/subtítulos);
+    // las variantes #EXT-X-STREAM-INF se filtran por RESOLUTION=.
+    bool sawHeader = false;
+    for (const QString &line : lines) {
+        if (line.startsWith(QLatin1String("#EXTM3U"))) {
+            out.append(line);
+            sawHeader = true;
+        } else if (line.startsWith(QLatin1String("#EXT-X-MEDIA:"))) {
+            out.append(line);
+        } else if (line.startsWith(QLatin1String("#EXT-X-STREAM-INF:"))) {
+            int height = 0;
+            const int resPos = line.indexOf(QLatin1String("RESOLUTION="));
+            if (resPos >= 0) {
+                const QString rest =
+                    line.mid(resPos + int(QLatin1String("RESOLUTION=").size()));
+                const int comma = rest.indexOf(QLatin1Char(','));
+                const QString dim = comma >= 0 ? rest.left(comma) : rest;
+                const int x = dim.indexOf(QLatin1Char('x'));
+                if (x >= 0)
+                    height = dim.mid(x + 1).toInt();
+            }
+            if (height > 0 && height <= maxHeight)
+                out.append(line);
+            // La URL de la variante va en la línea siguiente; se conserva
+            // solo si su #EXT-X-STREAM-INF fue conservado.
+        } else if (!line.isEmpty() && !line.startsWith(QLatin1Char('#'))) {
+            // Línea de URL de variante: solo se mantiene si la línea
+            // previa es un #EXT-X-STREAM-INF filtrado.
+            if (out.size() > 0
+                && out.last().startsWith(QLatin1String("#EXT-X-STREAM-INF:")))
+                out.append(line);
+        }
+    }
+    if (!sawHeader || out.size() < 2)
+        return QString();
+
+    const QString dir = HlsServer::masterDirPath();
+    const QString filePath = dir + QLatin1Char('/') + videoId + QLatin1String(".m3u8");
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return QString();
+    QTextStream ts(&file);
+    for (const QString &line : out)
+        ts << line << QLatin1Char('\n');
+    file.close();
+    return filePath;
 }
 
 QString Yt::formatSelector(int maxHeight)

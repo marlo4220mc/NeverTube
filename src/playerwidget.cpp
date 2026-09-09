@@ -6,10 +6,11 @@
 #include <QTimer>
 
 #include <clocale>
-#include <cstdio>
 #include <cstring>
 
 #include <mpv/render_gl.h>
+
+#include "debug.h"
 
 static void *getProcAddress(void *ctx, const char *name)
 {
@@ -41,6 +42,12 @@ PlayerWidget::PlayerWidget(QWidget *parent)
     if (mpv_initialize(m_mpv) < 0) {
         qWarning("player: mpv_initialize fallo");
         return;
+    }
+
+    char *hwdec = nullptr;
+    if (mpv_get_property(m_mpv, "hwdec", MPV_FORMAT_STRING, &hwdec) >= 0 && hwdec) {
+        m_hwdec = QString::fromUtf8(hwdec);
+        mpv_free(hwdec);
     }
 
     mpv_observe_property(m_mpv, 0, "time-pos", MPV_FORMAT_DOUBLE);
@@ -76,8 +83,8 @@ double PlayerWidget::speed() const
 
 void PlayerWidget::initializeGL()
 {
-    fprintf(stderr, "E2E initializeGL w=%d h=%d rctx=%p\n",
-            width(), height(), (void *)m_rctx);
+    NT_DEBUG("E2E initializeGL w=%d h=%d rctx=%p\n",
+             width(), height(), (void *)m_rctx);
     mpv_opengl_init_params init{ getProcAddress, nullptr };
     mpv_render_param params[] = {
         { MPV_RENDER_PARAM_API_TYPE, const_cast<char *>(MPV_RENDER_API_TYPE_OPENGL) },
@@ -95,12 +102,13 @@ void PlayerWidget::initializeGL()
     connect(redrawTimer, &QTimer::timeout, this,
             qOverload<>(&QWidget::update));
     redrawTimer->start();
+    m_redrawTimerActive = true;
 }
 
 void PlayerWidget::paintGL()
 {
     if (!m_rctx) {
-        fprintf(stderr, "E2E paintGL no-rctx\n");
+        NT_DEBUG("E2E paintGL no-rctx\n");
         return;
     }
     QOpenGLFunctions *gl = QOpenGLContext::currentContext()->functions();
@@ -118,8 +126,8 @@ void PlayerWidget::paintGL()
     if (res < 0)
         qWarning("player: render error: %s", mpv_error_string(res));
     else if ((++m_logFrames % 90) == 1)
-        fprintf(stderr, "E2E paintGL ok frames=%d w=%d h=%d res=%d\n",
-                m_logFrames, width(), height(), res);
+        NT_DEBUG("E2E paintGL ok frames=%d w=%d h=%d res=%d\n",
+                 m_logFrames, width(), height(), res);
 }
 
 void PlayerWidget::playUrl(const QString &url)
@@ -130,8 +138,8 @@ void PlayerWidget::playUrl(const QString &url)
     m_duration = 0.0;
     const QByteArray u = url.toUtf8();
     const char *cmd[] = { "loadfile", u.constData(), nullptr };
-    fprintf(stderr, "E2E playUrl len=%d http=%d\n", int(u.size()),
-            url.startsWith(QLatin1String("http")) ? 1 : 0);
+    NT_DEBUG("E2E playUrl len=%d http=%d\n", int(u.size()),
+             url.startsWith(QLatin1String("http")) ? 1 : 0);
     mpv_command_async(m_mpv, 0, cmd);
     emit positionChanged();
     emit durationChanged();
@@ -260,7 +268,7 @@ void PlayerWidget::handleEvent(mpv_event *event)
     case MPV_EVENT_LOG_MESSAGE: {
         mpv_event_log_message *log =
             static_cast<mpv_event_log_message *>(event->data);
-        fprintf(stderr, "[mpv:%s] %s", log->prefix, log->text);
+        NT_DEBUG("[mpv:%s] %s", log->prefix, log->text);
         break;
     }
     default:

@@ -11,6 +11,7 @@
 #include <QVBoxLayout>
 
 #include "../../db/repositories.h"
+#include "../../debug.h"
 #include "../../models.h"
 #include "../../player_controller.h"
 #include "../../playerwidget.h"
@@ -19,8 +20,6 @@
 #include "../icons.h"
 #include "../theme.h"
 #include "../video_list_view.h"
-
-#include <cstdio>
 
 namespace {
 
@@ -66,7 +65,7 @@ protected:
         m_overlay->setGeometry(rect());
         if (m_aspect > 0.0)
             emitSetHeight();
-        fprintf(stderr, "E2E pc resize %dx%d\n", width(), height());
+        NT_DEBUG("E2E pc resize %dx%d\n", width(), height());
     }
 
 private:

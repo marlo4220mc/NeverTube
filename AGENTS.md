@@ -1,0 +1,69 @@
+# nevertube_qt2
+
+Cliente ligero de YouTube en Qt5 (C++17 / CMake). Núcleo de reproducción
+basado en un POC probado. Philosophy: ligero antes que completo, reproducir
+antes que decorar, estabilidad y bajo consumo.
+
+## Build
+
+```sh
+cmake -B build && cmake --build build
+```
+
+Dependencias: Qt5 (Core Gui Widgets Network Sql), OpenGL, libmpv, yt-dlp.
+
+## Pieza protegida (NO modificar sin razón técnica y prueba)
+
+El reproductor funcional es una pieza protegida. Los siguientes elementos NO
+se deben tocar sin una razón técnica respaldada por una prueba concreta:
+
+- `QOpenGLWidget` (clase `PlayerWidget`) como superficie de video
+- `QTimer` de redibujado a **33 ms** forzando `QWidget::update()`
+  (`initializeGL`)
+- `vo=libmpv` + `hwdec=auto` (funciona con y sin aceleración de hardware)
+- Renderizado directo a FBO (`mpv_render_context_render`) en `paintGL`
+- Cualquier cambio a la integración mpv (libmpv / mpv_render_context)
+
+Contexto: el primer intento de separar los controles multimedia (overlay
+flotante sobre el video) rompió la app y fue revertido. Hacer cambios de UI
+que toquen el reproductor por incrementos pequeños y verificando cada uno.
+
+## Pruebas de regresión
+
+```sh
+./build/nevertube_qt2 --selftest-db        # repos/SQLite
+./build/nevertube_qt2 --selftest-player    # hwdec=auto + timer=33ms + render ok
+./build/nevertube_qt2 --selftest-innertube # sw.js_data→visitorData→player→hlsManifestUrl
+```
+
+El selftest del player verifica invariantes del núcleo protegido sin
+reproducir ningún archivo. Ejecutar ambos antes de considerar estable un
+cambio que toque el reproductor.
+
+## Logging de depuración
+
+El logging `E2E ...` está activado por variable de entorno (no imprime por
+defecto, evitando ruido en el bucle de 33 ms):
+
+```sh
+NEVERTUBE_DEBUG=1 ./build/nevertube_qt2
+```
+
+Usar `NT_DEBUG(...)` (src/debug.h) para trazas de depuración.
+
+## Puntos de entrada CLI
+
+- `./build/nevertube_qt2` → app normal
+- `./build/nevertube_qt2 --search <consulta>` → buscar al arrancar
+- `./build/nevertube_qt2 http://...` → reproducir una URL al arrancar
+- `./build/nevertube_qt2 --selftest-db` / `--selftest-player` / `--selftest-innertube` → pruebas
+
+## Convenciones
+
+- UI, lógica y reproducción separadas. `PlayerController` (estado/cola) vs
+  `PlayerWidget` (render) vs páginas (vistas).
+- Repos SQLite en `src/db/`; infraestructura reutilizable en `src/ui/`.
+- Resolución de streams: Innertube (cliente VISIONOS, `src/yt_innertube.*`) primero y yt-dlp como fallback (`Yt::resolveWithYtDlp`).
+- Overlay de los controles NO es un widget separado: vive dentro de
+  `WatchPage::m_overlay`/`PlayerContainer` (src/ui/pages/watch_page.cpp).
+  Cualquier cambio ahí que afecte el área de video requiere el selftest.
