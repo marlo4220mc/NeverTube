@@ -130,13 +130,19 @@ void PlayerWidget::paintGL()
                  m_logFrames, width(), height(), res);
 }
 
-void PlayerWidget::playUrl(const QString &url)
+void PlayerWidget::playUrl(const QString &url, double startAt)
 {
     if (url.isEmpty() || !m_mpv)
         return;
     m_position = 0.0;
     m_duration = 0.0;
     const QByteArray u = url.toUtf8();
+    const QByteArray opt = startAt > 0.0
+        ? QByteArray("+") + QByteArray::number(startAt, 'f', 2)
+        : QByteArray();
+    mpv_set_option_string(m_mpv, "start", opt.constData());
+    if (startAt > 0.0)
+        NT_DEBUG("E2E playUrl start=%s\n", opt.constData());
     const char *cmd[] = { "loadfile", u.constData(), nullptr };
     NT_DEBUG("E2E playUrl len=%d http=%d\n", int(u.size()),
              url.startsWith(QLatin1String("http")) ? 1 : 0);
@@ -257,7 +263,13 @@ void PlayerWidget::handleEvent(mpv_event *event)
             emitAspectIfReady();
         } else if (std::strcmp(prop->name, "video-params/h") == 0 && prop->data) {
             m_videoH = *static_cast<int64_t *>(prop->data);
+            if (m_videoW > 0)
+                NT_DEBUG("E2E mpv video-params %lldx%lld\n",
+                         static_cast<long long>(m_videoW),
+                         static_cast<long long>(m_videoH));
             emitAspectIfReady();
+            if (m_videoW > 0 && m_videoH > 0)
+                emit videoSizeChanged(int(m_videoW), int(m_videoH));
         } else if (std::strcmp(prop->name, "pause") == 0) {
             // Consume el cambio para no dejar eventos pendientes.
         } else if (std::strcmp(prop->name, "volume") == 0) {

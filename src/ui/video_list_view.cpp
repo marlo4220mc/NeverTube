@@ -214,7 +214,7 @@ VideoListView::VideoListView(ThumbnailCache *thumbs, QWidget *parent)
     setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setMouseTracking(true);
-    setViewMode(QListView::IconMode);
+    setViewMode(QListView::ListMode);
 
     auto *delegate = new VideosDelegate(thumbs, this);
     delegate->setMode(ListMode);

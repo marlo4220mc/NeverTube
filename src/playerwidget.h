@@ -27,7 +27,7 @@ public:
     int redrawIntervalMs() const { return m_redrawTimerActive ? 33 : 0; }
 
 public slots:
-    void playUrl(const QString &url);
+    void playUrl(const QString &url, double startAt = 0.0);
     void playYtdl(const QString &watchUrl, int maxHeight);
     void stop();
     void setPaused(bool paused);
@@ -40,6 +40,7 @@ signals:
     void stateChanged();
     void mediaError(const QString &message);
     void videoAspectChanged(double aspect);
+    void videoSizeChanged(int width, int height);
 
 protected:
     void initializeGL() override;

@@ -109,7 +109,8 @@ void PlayerController::onStreamResolved(const StreamInfo &stream)
         m_errorMessage = QStringLiteral("No se obtuvo URL de streaming.");
         return;
     }
-    m_player->playUrl(stream.url);
+    m_player->playUrl(stream.url, m_seekBack);
+    m_seekBack = 0.0;
 }
 
 void PlayerController::resolveFailed(const QString &message)
@@ -125,6 +126,7 @@ void PlayerController::onPlayerState()
     if (s == QLatin1String("playing")) {
         setPhase(QStringLiteral("playing"));
         if (m_seekBack > 2.0) {
+            NT_DEBUG("E2E seekBack aplicado=%.1f\n", m_seekBack);
             m_player->seek(m_seekBack);
             m_seekBack = 0.0;
         }
@@ -222,6 +224,7 @@ void PlayerController::reloadCurrent()
     const double target = m_position;
     savePosition();
     m_seekBack = target;
+    NT_DEBUG("E2E reloadCurrent target=%.1f seekBack=%.1f\n", target, m_seekBack);
     m_player->stop();
     setPhase(QStringLiteral("loading"));
     startResolve();

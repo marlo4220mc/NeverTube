@@ -1,6 +1,5 @@
 #include "watch_page.h"
 
-#include <QComboBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
@@ -33,58 +32,62 @@ public:
     {
         setStyleSheet(QStringLiteral("background:#000;"));
         player->setParent(this);
-        overlay->setParent(this);
+        overlay->setParent(player);
+        overlay->setGeometry(player->rect());
+        overlay->raise();
+        overlay->show();
 
         auto *lay = new QVBoxLayout(this);
         lay->setContentsMargins(0, 0, 0, 0);
         lay->setSpacing(0);
         lay->addWidget(player);
 
-        overlay->raise();
-        overlay->setGeometry(rect());
-        overlay->hide();
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-        setMinimumHeight(180);
-        emitSetHeight();
+        setMinimumHeight(0);
+        updateMaxHeight();
     }
 
-    QSize sizeHint() const override { return QSize(320, 180); }
+    QSize sizeHint() const override
+    {
+        if (m_aspect > 0.0)
+            return QSize(320, qRound(320.0 / m_aspect));
+        return QSize(320, 180);
+    }
 
     void setVideoAspect(double aspect)
     {
         if (aspect <= 0.0)
             return;
         m_aspect = aspect;
-        emitSetHeight();
+        updateMaxHeight();
     }
 
 protected:
     void resizeEvent(QResizeEvent *event) override
     {
         QWidget::resizeEvent(event);
-        m_overlay->setGeometry(rect());
-        if (m_aspect > 0.0)
-            emitSetHeight();
+        m_overlay->setGeometry(m_player->rect());
+        m_overlay->raise();
+        updateMaxHeight();
         NT_DEBUG("E2E pc resize %dx%d\n", width(), height());
     }
 
 private:
-    void emitSetHeight()
+    void updateMaxHeight()
     {
-        if (m_resizing || m_aspect <= 0.0)
+        if (m_aspect <= 0.0)
             return;
         const int h = qRound(width() / m_aspect);
-        if (h == height())
+        NT_DEBUG("E2E pc aspect=%.3f width=%d maxH=%d curMax=%d\n",
+                 m_aspect, width(), h, maximumHeight());
+        if (h == maximumHeight())
             return;
-        m_resizing = true;
-        setFixedHeight(h);
-        m_resizing = false;
+        setMaximumHeight(h);
     }
 
     QWidget *m_overlay;
     PlayerWidget *m_player;
     double m_aspect = 0.0;
-    bool m_resizing = false;
 };
 
 } // namespace
@@ -106,23 +109,57 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     splitOuter->setSpacing(0);
 
     m_overlay = new QStackedWidget(this);
+    m_overlay->setAttribute(Qt::WA_TranslucentBackground, true);
+    m_overlay->setStyleSheet(QStringLiteral("background: transparent;"));
 
     auto *gl = new QWidget;
     auto *gl1 = new QVBoxLayout(gl);
     gl1->setContentsMargins(16, 16, 16, 16);
     gl1->setSpacing(0);
     gl1->addStretch(1);
-    m_quality = new QComboBox(this);
-    m_quality->addItems(QStringList() << "360p" << "480p" << "720p" << "1080p"
-                                      << "1440p" << "2160p");
-    m_quality->setCurrentIndex(2);
-    m_quality->setFixedWidth(100);
     auto *qualityRow = new QHBoxLayout;
     qualityRow->addStretch(1);
+
+    m_quality = new QPushButton(QStringLiteral("720p"), this);
+    m_quality->setObjectName(QStringLiteral("qualityBtn"));
+    m_quality->setFixedWidth(98);
+    m_quality->setCursor(Qt::PointingHandCursor);
+    connect(m_quality, &QPushButton::clicked, this,
+            &WatchPage::toggleQualityMenu);
     qualityRow->addWidget(m_quality);
     gl1->addLayout(qualityRow);
-    gl->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    m_quality->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+    gl->setStyleSheet(QStringLiteral("background: transparent;"));
+
+    m_qualityMenu = new QFrame(gl);
+    m_qualityMenu->setObjectName(QStringLiteral("qualityMenu"));
+    m_qualityMenu->setAttribute(Qt::WA_StyledBackground, true);
+    m_qualityMenu->setStyleSheet(
+        QStringLiteral("QFrame#qualityMenu { background-color:#1F1F1F;"
+                       " border:1px solid #2D2D2D; border-radius:6px; }"
+                       "QPushButton { background:transparent; color:#ECECEC;"
+                       " border:none; text-align:left; padding:6px 8px;"
+                       " border-radius:4px; }"
+                       "QPushButton:hover { background:#2D2D2D; }"));
+    auto *menuLay = new QVBoxLayout(m_qualityMenu);
+    menuLay->setContentsMargins(4, 4, 4, 4);
+    menuLay->setSpacing(1);
+    static const int kQualities[] = {360, 480, 720, 1080, 1440, 2160};
+    for (int i = 0; i < 6; ++i) {
+        auto *item = new QPushButton(
+            QStringLiteral("%1p").arg(kQualities[i]), m_qualityMenu);
+        item->setFixedWidth(90);
+        const int idx = i;
+        connect(item, &QPushButton::clicked, this, [this, idx]() {
+            setQualityIndex(idx);
+            m_qualityMenu->hide();
+            m_qualityMenuActive = false;
+        });
+        menuLay->addWidget(item);
+    }
+    m_qualityMenu->adjustSize();
+    m_qualityMenu->hide();
+
+    m_qualityMenuAnchor = gl;
 
     m_overlay->addWidget(gl);
     auto *spinner = new QLabel(QStringLiteral("Cargando…"), this);
@@ -240,9 +277,6 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             &WatchPage::onToggleMute);
     connect(m_favBtn, &QPushButton::clicked, this,
             &WatchPage::onFavToggle);
-    connect(m_quality,
-            QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &WatchPage::onQualityChanged);
     connect(m_slider, &QSlider::sliderReleased, this, [this]() {
         m_player->seek(m_slider->value());
     });
@@ -268,6 +302,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             &WatchPage::onPhaseChanged);
     connect(m_player, &PlayerController::positionChanged, this,
             &WatchPage::onPositionChanged);
+    connect(playerWidget, &PlayerWidget::videoSizeChanged, this,
+            &WatchPage::onVideoSizeChanged);
     connect(m_yt, &Yt::detailReady, this, &WatchPage::onDetailReady);
     connect(m_nextUpList, &VideoListView::videoActivated, this,
             &WatchPage::onNextUpActivated);
@@ -390,6 +426,10 @@ void WatchPage::onDetailReady(const VideoInfo &video, const QString &desc,
 
 void WatchPage::onPhaseChanged(const QString &phase)
 {
+    if (m_qualityMenuActive) {
+        m_qualityMenu->hide();
+        m_qualityMenuActive = false;
+    }
     if (phase == QLatin1String("loading")) {
         m_overlay->setCurrentIndex(1);
         m_playPauseBtn->hide();
@@ -397,6 +437,17 @@ void WatchPage::onPhaseChanged(const QString &phase)
         m_overlay->setCurrentIndex(0);
         m_playPauseBtn->show();
     }
+    NT_DEBUG("E2E overlay visible=%d idx=%d\n", m_overlay->isVisible(),
+             m_overlay->currentIndex());
+    const QPoint qp = m_quality->mapToGlobal(QPoint(0, 0));
+    NT_DEBUG("E2E combo geo global=(%d,%d) %dx%d\n", qp.x(), qp.y(),
+             m_quality->width(), m_quality->height());
+    if (QWidget *tw = m_quality->window())
+        NT_DEBUG("E2E win-top global=(%d,%d) size=%dx%d combo-rel=(%d,%d)\n",
+                 tw->mapToGlobal(QPoint(0, 0)).x(),
+                 tw->mapToGlobal(QPoint(0, 0)).y(), tw->width(), tw->height(),
+                 qp.x() - tw->mapToGlobal(QPoint(0, 0)).x(),
+                 qp.y() - tw->mapToGlobal(QPoint(0, 0)).y());
     m_playPauseBtn->setIcon(nt::icon(
         m_player->isPaused() ? nt::Icon::Play : nt::Icon::Pause,
         nt::kText, 22));
@@ -418,11 +469,75 @@ void WatchPage::onQualityChanged(int index)
 {
     static const int qualities[] = {360, 480, 720, 1080, 1440, 2160};
     const int height = qualities[index];
+    NT_DEBUG("E2E qualityChanged index=%d -> %dp\n", index, height);
     m_player->setMaxHeight(height);
     if (m_settings)
         m_settings->set(QStringLiteral("quality"), QString::number(height));
     if (m_player->isActive())
         m_player->reloadCurrent();
+}
+
+int WatchPage::qualityIndexForHeight(int height) const
+{
+    static const int qualities[] = {360, 480, 720, 1080, 1440, 2160};
+    constexpr int n = 6;
+    int best = 0;
+    for (int i = 0; i < n; ++i) {
+        if (qualities[i] <= height)
+            best = i;
+        else
+            break;
+    }
+    return best;
+}
+
+void WatchPage::onVideoSizeChanged(int width, int height)
+{
+    if (height <= 0 || !m_player->isActive())
+        return;
+    const int idx = qualityIndexForHeight(height);
+    m_qualityIndex = idx;
+    m_quality->setText(QStringLiteral("%1p").arg(idxToQuality(idx)));
+    NT_DEBUG("E2E combo sync %dx%d -> idx=%d\n", width, height, idx);
+}
+
+int WatchPage::idxToQuality(int idx) const
+{
+    static const int qualities[] = {360, 480, 720, 1080, 1440, 2160};
+    if (idx >= 0 && idx < 6)
+        return qualities[idx];
+    return 720;
+}
+
+void WatchPage::setQualityIndex(int index)
+{
+    m_qualityIndex = index;
+    onQualityChanged(index);
+    m_quality->setText(QStringLiteral("%1p").arg(idxToQuality(index)));
+}
+
+void WatchPage::toggleQualityMenu()
+{
+    if (m_qualityMenuActive) {
+        m_qualityMenu->hide();
+        m_qualityMenuActive = false;
+        return;
+    }
+    QWidget *anchor = m_qualityMenuAnchor ? m_qualityMenuAnchor : m_quality;
+    const QPoint btnPos = m_quality->mapTo(anchor, QPoint(0, 0));
+    m_qualityMenu->move(btnPos.x(), btnPos.y() - m_qualityMenu->height() - 4);
+    m_qualityMenu->raise();
+    m_qualityMenu->show();
+    m_qualityMenuActive = true;
+    const QPoint mg = m_qualityMenu->mapToGlobal(QPoint(0, 0));
+    NT_DEBUG("E2E menu shown global=(%d,%d) size=%dx%d\n",
+             mg.x(), mg.y(), m_qualityMenu->width(),
+             m_qualityMenu->height());
+    if (QWidget *tw = m_quality->window())
+        NT_DEBUG("E2E win-top global=(%d,%d) size=%dx%d\n",
+                 tw->mapToGlobal(QPoint(0, 0)).x(),
+                 tw->mapToGlobal(QPoint(0, 0)).y(),
+                 tw->width(), tw->height());
 }
 
 void WatchPage::onPlayPause()
