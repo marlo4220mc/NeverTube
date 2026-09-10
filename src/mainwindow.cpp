@@ -272,6 +272,8 @@ void MainWindow::goHome()
 
 void MainWindow::goSearch()
 {
+    m_currentTab = 1;
+    m_pages->setCurrentIndex(1);
     if (m_navButtons.value(1))
         m_navButtons[1]->setChecked(true);
 }

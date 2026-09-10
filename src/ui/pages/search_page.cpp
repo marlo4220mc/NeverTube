@@ -7,6 +7,7 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -72,8 +73,9 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     m_list->showVideos(QVector<VideoInfo>(), VideoListView::ListMode);
     rBox->addWidget(spinner);
     rBox->addWidget(empty);
-    rBox->addWidget(m_list);
+    rBox->addWidget(m_list, 1);
     outer->addWidget(m_resultBox);
+    outer->setStretch(2, 1);
     m_resultBox->hide();
 
     connect(m_field, &QLineEdit::textChanged, this,
@@ -92,12 +94,14 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
 
 void SearchPage::startSearch(const QString &query)
 {
+    const QSignalBlocker blocker(m_field);
     m_field->setText(query);
     doSearch();
 }
 
 void SearchPage::doSearch()
 {
+    m_debounce->stop();
     const QString q = m_field->text().trimmed();
     if (q.isEmpty()) {
         m_resultBox->hide();

@@ -282,68 +282,65 @@ void Yt::resolveStream(const QString &videoId, int maxHeight)
 
 void Yt::resolveWithYtDlp(const QString &videoId, int maxHeight)
 {
-    const QString sel =
-        QStringLiteral("bestvideo[height<=%1][ext=mp4][vcodec^=avc1]"
-                       "[protocol=m3u8_native]/bestvideo[height<=%1]"
-                       "[protocol=m3u8_native]/bestvideo[height<=%1]")
-            .arg(maxHeight);
-    getUrls(videoId, sel, [this, videoId, maxHeight](const QStringList &videoUrls) {
-        if (videoUrls.isEmpty()) {
-            emit resolveError(QStringLiteral("yt-dlp no devolvió ninguna URL de streaming."));
-            return;
-        }
-        const QString videoUrl = videoUrls.first();
-        getUrls(videoId, formatSelector(maxHeight),
-                [this, videoId, maxHeight, videoUrl](const QStringList &tryCombined) {
-                    if (tryCombined.size() == 1) {
-                        StreamInfo s;
-                        s.url = tryCombined.first();
-                        s.label = qualityName(maxHeight) + QLatin1Char('p');
-                        s.height = maxHeight;
-                        s.multipleUrls = false;
-                        emit streamReady(s);
-                        return;
-                    }
-                    if (videoUrl.contains(QLatin1String(".m3u8"))) {
-                        getUrls(videoId,
-                                QStringLiteral("bestaudio[protocol=m3u8_native]/bestaudio"),
-                                [this, videoId, maxHeight, videoUrl](
-                                    const QStringList &audioUrls) {
-                                    if (!audioUrls.isEmpty()) {
-                                        const QString master = buildHlsMaster(
-                                            videoId, videoUrl, audioUrls.first());
-                                        if (!master.isEmpty()) {
-                                            const QString origin = m_hls.start();
-                                            if (!origin.isEmpty()) {
-                                                StreamInfo s;
-                                                s.url = origin + QLatin1Char('/')
-                                                        + videoId + QLatin1String(".m3u8");
-                                                s.label = qualityName(maxHeight)
-                                                          + QLatin1Char('p');
-                                                s.height = maxHeight;
-                                                s.multipleUrls = false;
-                                                emit streamReady(s);
-                                                return;
-                                            }
-                                        }
-                                    }
-                                    StreamInfo s;
-                                    s.url = videoUrl;
-                                    s.label = qualityName(maxHeight) + QLatin1Char('p');
-                                    s.height = maxHeight;
-                                    s.multipleUrls = false;
-                                    emit streamReady(s);
-                                });
-                        return;
-                    }
+    getUrls(videoId, formatSelector(maxHeight),
+            [this, videoId, maxHeight](const QStringList &combinedUrls) {
+                if (combinedUrls.size() == 1) {
                     StreamInfo s;
-                    s.url = videoUrl;
+                    s.url = combinedUrls.first();
                     s.label = qualityName(maxHeight) + QLatin1Char('p');
                     s.height = maxHeight;
                     s.multipleUrls = false;
                     emit streamReady(s);
-                });
-    });
+                    return;
+                }
+
+                const QString videoSel =
+                    QStringLiteral("bestvideo[height<=%1][ext=mp4][vcodec^=avc1]"
+                                   "[protocol=m3u8_native]/bestvideo[height<=%1]"
+                                   "[protocol=m3u8_native]/bestvideo[height<=%1]")
+                        .arg(maxHeight);
+                getUrls(videoId, videoSel,
+                        [this, videoId, maxHeight](const QStringList &videoUrls) {
+                            if (videoUrls.isEmpty()) {
+                                emit resolveError(QStringLiteral(
+                                    "yt-dlp no devolvió una URL reproducible; "
+                                    "el video puede requerir iniciar sesión."));
+                                return;
+                            }
+                            const QString videoUrl = videoUrls.first();
+                            if (!videoUrl.contains(QLatin1String(".m3u8"))) {
+                                emit resolveError(QStringLiteral(
+                                    "yt-dlp solo devolvió video sin audio."));
+                                return;
+                            }
+                            getUrls(videoId,
+                                    QStringLiteral("bestaudio[protocol=m3u8_native]/bestaudio"),
+                                    [this, videoId, maxHeight, videoUrl](
+                                        const QStringList &audioUrls) {
+                                        if (audioUrls.isEmpty()) {
+                                            emit resolveError(QStringLiteral(
+                                                "yt-dlp no devolvió una pista de audio; "
+                                                "el video puede requerir iniciar sesión."));
+                                            return;
+                                        }
+                                        const QString master = buildHlsMaster(
+                                            videoId, videoUrl, audioUrls.first());
+                                        const QString origin = m_hls.start();
+                                        if (master.isEmpty() || origin.isEmpty()) {
+                                            emit resolveError(QStringLiteral(
+                                                "No se pudo preparar el stream de respaldo."));
+                                            return;
+                                        }
+                                        StreamInfo s;
+                                        s.url = origin + QLatin1Char('/')
+                                                + videoId + QLatin1String(".m3u8");
+                                        s.label = qualityName(maxHeight) + QLatin1Char('p');
+                                        s.height = maxHeight;
+                                        s.multipleUrls = false;
+                                        emit streamReady(s);
+                                    });
+                        });
+            });
 }
 
 QString Yt::downloadVideoSelector(int maxHeight) const

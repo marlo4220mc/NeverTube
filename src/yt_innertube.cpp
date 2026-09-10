@@ -1,6 +1,7 @@
 #include "yt_innertube.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QHostAddress>
 #include <QHostInfo>
 #include <QJsonArray>
@@ -189,6 +190,7 @@ public:
             {QByteArrayLiteral("Accept-Encoding"), QByteArrayLiteral("identity")},
             {QByteArrayLiteral("Connection"), QByteArrayLiteral("close")},
             {QByteArrayLiteral("Content-Type"), QByteArrayLiteral("application/json")},
+            {QByteArrayLiteral("Cookie"), QByteArrayLiteral("CONSENT=YES+1")},
             {QByteArrayLiteral("Host"), QByteArray(kYoutubeName)},
             {QByteArrayLiteral("Origin"), QByteArrayLiteral("https://www.youtube.com")},
             {QByteArrayLiteral("Sec-Fetch-Mode"), QByteArrayLiteral("navigate")},
@@ -537,6 +539,11 @@ void Innertube::requestPlayer()
     const QJsonObject body{
         {QStringLiteral("context"),
          QJsonObject{{QStringLiteral("client"), visionOsClient(m_visitorData)}}},
+        {QStringLiteral("playbackContext"),
+         QJsonObject{{QStringLiteral("contentPlaybackContext"),
+                      QJsonObject{{QStringLiteral("signatureTimestamp"),
+                                   static_cast<qint64>(QDateTime::currentSecsSinceEpoch()
+                                                       / 86400 - 1)}}}}},
         {QStringLiteral("videoId"), m_videoId},
         {QStringLiteral("contentCheckOk"), true},
         {QStringLiteral("racyCheckOk"), true},

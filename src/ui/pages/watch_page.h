@@ -13,7 +13,7 @@ class PlayerWidget;
 class ThumbnailCache;
 class Yt;
 
-class QComboBox;
+class QFrame;
 class QLabel;
 class QListWidget;
 class QPushButton;
@@ -46,6 +46,7 @@ private slots:
     void onDetailReady(const VideoInfo &video, const QString &desc,
                        qint64 likes, const QVector<FormatInfo> &formats);
     void onQualityChanged(int index);
+    void onVideoSizeChanged(int width, int height);
     void onPlayPause();
     void onToggleMute();
     void onFavToggle();
@@ -55,6 +56,10 @@ private:
     void updateQueue();
     void updateFavIcon();
     void updateInfo();
+    int qualityIndexForHeight(int height) const;
+    int idxToQuality(int idx) const;
+    void setQualityIndex(int index);
+    void toggleQualityMenu();
 
     Yt *m_yt;
     PlayerController *m_player;
@@ -72,7 +77,11 @@ private:
     QPushButton *m_nextBtn;
     QPushButton *m_muteBtn;
     QPushButton *m_favBtn;
-    QComboBox *m_quality;
+    QPushButton *m_quality;
+    QFrame *m_qualityMenu;
+    QWidget *m_qualityMenuAnchor;
+    int m_qualityIndex = 2;
+    bool m_qualityMenuActive = false;
     QSlider *m_slider;
     QLabel *m_time;
     QLabel *m_descLabel;
