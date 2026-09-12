@@ -52,6 +52,7 @@ private slots:
     void onPositionChanged(double position, double duration);
     void onDetailReady(const VideoInfo &video, const QString &desc,
                        qint64 likes, const QVector<FormatInfo> &formats);
+    void onDetailFailed(const QString &videoId);
     void onChannelInfo(const ChannelInfo &channel);
     void onAvatarReady(const QString &key);
     void onQualityChanged(int index);

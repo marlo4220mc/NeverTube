@@ -74,6 +74,9 @@ signals:
     void channelInfoReady(const ChannelInfo &channel);
     void detailReady(const VideoInfo &video, const QString &description,
                      qint64 likeCount, const QVector<FormatInfo> &formats);
+    // Todos los intentos de getDetail fallaron para este vídeo (ningún
+    // cliente yt-dlp devolvió metadatos válidos).
+    void detailFailed(const QString &videoId);
     void playlistDetailReady(const PlaylistInfo &info,
                              const QVector<VideoInfo> &videos);
     void streamReady(const StreamInfo &stream);
@@ -89,6 +92,7 @@ private:
                              int preferredClient);
     void execJson(QStringList args, std::function<void(const QJsonObject &)> done);
     void execLines(QStringList args, std::function<void(const QStringList &)> done);
+    void getDetailTry(const QString &videoId, int clientIndex);
     void getUrls(const QString &videoId, const QString &selector,
                  std::function<void(const QStringList &)> done);
     QString buildHlsMaster(const QString &videoId, const QString &videoUrl,

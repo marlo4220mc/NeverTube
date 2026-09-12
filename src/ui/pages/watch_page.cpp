@@ -509,6 +509,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     connect(playerWidget, &PlayerWidget::videoSizeChanged, this,
             &WatchPage::onVideoSizeChanged);
     connect(m_yt, &Yt::detailReady, this, &WatchPage::onDetailReady);
+    connect(m_yt, &Yt::detailFailed, this, &WatchPage::onDetailFailed);
     connect(m_yt, &Yt::relatedReady, this, &WatchPage::onRelatedReady);
     connect(m_yt, &Yt::radioReady, this, &WatchPage::onRadioReady);
     connect(m_yt, &Yt::channelInfoReady, this,
@@ -688,6 +689,18 @@ void WatchPage::onAvatarReady(const QString &key)
     const QPixmap pm = m_thumbs->pixmap(key);
     if (!pm.isNull())
         m_channelBtn->setIcon(avatarWithGap(circularAvatar(pm, 40), 40, 3));
+}
+
+void WatchPage::onDetailFailed(const QString &videoId)
+{
+    if (!m_player->isActive() || videoId != m_player->current().id)
+        return;
+    // Ningún cliente devolvió metadatos; no dejar "Cargando detalles…"
+    // clavado. Se muestra lo que ya se conoce del elemento de la cola.
+    m_fetchingDetail = false;
+    m_description.clear();
+    m_descLabel->hide();
+    updateInfo();
 }
 
 void WatchPage::onDetailReady(const VideoInfo &video, const QString &desc,
