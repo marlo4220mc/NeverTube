@@ -53,6 +53,18 @@ static QString stripWebpParam(const QString &url)
     return q.toString(QUrl::FullyEncoded);
 }
 
+// Miniatura estándar por id de vídeo. Se usa como fallback cuando la URL que
+// trae el panel/radio (p. ej. hq720_custom_1.jpg) responde 404.
+static QString standardThumbFor(const QString &key)
+{
+    if (!key.startsWith(QLatin1String("v_")))
+        return QString();
+    const QString id = key.mid(2);
+    if (id.size() != 11)
+        return QString();
+    return QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg").arg(id);
+}
+
 void ThumbnailCache::request(const QString &key, const QString &url)
 {
     if (key.isEmpty() || url.isEmpty())
@@ -106,6 +118,15 @@ void ThumbnailCache::onFinished(QNetworkReply *reply)
         NT_DEBUG("thumbnail failed key=%s error=%s url=%s\n",
                  key.toUtf8().constData(), reply->errorString().toUtf8().constData(),
                  reply->url().toString().toUtf8().constData());
+        // Fallback: si la URL del panel/radio (variante custom_1, etc.) ya no
+        // existe, pedir la miniatura estándar por id y reintentar una vez.
+        const QString stdUrl = standardThumbFor(key);
+        if (!stdUrl.isEmpty()
+            && QUrl(stdUrl) != reply->request().url()) {
+            NT_DEBUG("thumbnail fallback standard key=%s url=%s\n",
+                     key.toUtf8().constData(), stdUrl.toUtf8().constData());
+            request(key, stdUrl);
+        }
         return;
     }
 

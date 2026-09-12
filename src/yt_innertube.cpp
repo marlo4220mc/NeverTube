@@ -129,14 +129,15 @@ QVector<int> videoHeights(const QJsonObject &streamingData)
 
 // Contexto de cliente genérico para la cascada, construido a partir de la
 // tabla kPlayerClients. Cada cliente aporta sus campos device/os/UA propios
-// (valores reales de yt-dlp/NewPipe). "hl"/"gl" se fijan en "en"/"US" y
-// todos los clientes llevan visitorData.
+// (valores reales de yt-dlp/NewPipe). "hl" se fija en "es" (igual que
+// yt-dlp --extractor-args youtube:lang=es: sin esto YouTube auto-traduce los
+// títulos al inglés) y todos los clientes llevan visitorData.
 QJsonObject clientContext(const PlayerClient &pc, const QString &visitorData)
 {
     QJsonObject client{
         {QStringLiteral("clientName"), QString::fromLatin1(pc.name)},
         {QStringLiteral("clientVersion"), QString::fromLatin1(pc.version)},
-        {QStringLiteral("hl"), QStringLiteral("en")},
+        {QStringLiteral("hl"), QStringLiteral("es")},
         {QStringLiteral("gl"), QStringLiteral("US")},
         {QStringLiteral("visitorData"), visitorData},
     };
