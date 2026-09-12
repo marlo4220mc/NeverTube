@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 
+#include <QAbstractButton>
 #include <QButtonGroup>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -17,7 +18,6 @@
 #include <QMouseEvent>
 
 #include "models.h"
-#include "debug.h"
 #include "playerwidget.h"
 #include "ui/icons.h"
 #include "ui/pages/home_page.h"
@@ -166,11 +166,19 @@ bool MainWindow::handleShortcut(QKeyEvent *event)
 
     switch (event->key()) {
     case Qt::Key_Space:
-    case Qt::Key_K:
+        // El espacio nunca debe activar un botón con foco: está reservado
+        // para play/pausa. Si el foco está en un botón, lo consumimos igual
+        // (con o sin reproductor) para que no se pulse con la barra.
+        if (qobject_cast<QAbstractButton *>(focusWidget())) {
+            if (m_player.isActive())
+                m_player.playPause();
+            return true;
+        }
         if (!m_player.isActive())
             return false;
         m_player.playPause();
         return true;
+    case Qt::Key_K:
     case Qt::Key_Left:
         if (!m_player.isActive())
             return false;
