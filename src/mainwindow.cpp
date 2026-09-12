@@ -5,15 +5,19 @@
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QTextEdit>
 #include <QVBoxLayout>
 #include <QMouseEvent>
 
 #include "models.h"
+#include "debug.h"
 #include "playerwidget.h"
 #include "ui/icons.h"
 #include "ui/pages/home_page.h"
@@ -35,6 +39,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_db.open();
     m_yt->setVisitorStorage(&m_settings);
     m_player.setPlayer(m_playerWidget);
+    installEventFilter(this);
 
     const int qh = m_settings.getInt(QStringLiteral("quality"));
     if (qh > 0)
@@ -141,13 +146,82 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow() = default;
 
+// Atajos de teclado del reproductor. Devuelve true si consumió la tecla.
+bool MainWindow::handleShortcut(QKeyEvent *event)
+{
+    // No robar teclas cuando se está escribiendo en un campo de texto.
+    if (const auto *fw = focusWidget()) {
+        if (qobject_cast<const QLineEdit *>(fw)
+            || qobject_cast<const QTextEdit *>(fw)
+            || qobject_cast<const QPlainTextEdit *>(fw))
+            return false;
+    }
+
+    const Qt::KeyboardModifiers mods = event->modifiers()
+        & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
+    if (mods)
+        return false;
+
+    switch (event->key()) {
+    case Qt::Key_Space:
+    case Qt::Key_K:
+        if (m_player.isActive())
+            m_player.playPause();
+        return true;
+    case Qt::Key_Left:
+        if (m_player.isActive())
+            m_player.seek(m_player.position() - 5.0);
+        return true;
+    case Qt::Key_Right:
+        if (m_player.isActive())
+            m_player.seek(m_player.position() + 5.0);
+        return true;
+    case Qt::Key_Up:
+        if (m_player.isActive()) {
+            const double v = qMin(m_player.volume() + 5.0, 100.0);
+            m_player.setVolume(v);
+            updateMiniIcons();
+        }
+        return true;
+    case Qt::Key_Down:
+        if (m_player.isActive()) {
+            const double v = qMax(m_player.volume() - 5.0, 0.0);
+            m_player.setVolume(v);
+            updateMiniIcons();
+        }
+        return true;
+    case Qt::Key_M:
+        if (m_player.isActive()) {
+            m_player.toggleMute();
+            updateMiniIcons();
+        }
+        return true;
+    case Qt::Key_F:
+        m_watch->toggleFullscreen();
+        return true;
+    case Qt::Key_Escape:
+        if (isFullScreen())
+            m_watch->toggleFullscreen();
+        return true;
+    default:
+        return false;
+    }
+}
+
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
-    if (event->key() == Qt::Key_Escape && isFullScreen()) {
-        m_watch->toggleFullscreen();
-        return;
+    if (!handleShortcut(event))
+        QMainWindow::keyPressEvent(event);
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::KeyPress && watched->isWidgetType()) {
+        if (auto *ke = static_cast<QKeyEvent *>(event))
+            if (handleShortcut(ke))
+                return true;
     }
-    QMainWindow::keyPressEvent(event);
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::setupNav()

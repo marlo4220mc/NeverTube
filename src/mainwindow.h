@@ -38,6 +38,7 @@ public:
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private slots:
     void openWatch(const QVector<VideoInfo> &videos, int startIndex);
@@ -53,6 +54,7 @@ private:
     void setupMiniBar();
     void updateMiniBar();
     void updateMiniIcons();
+    bool handleShortcut(QKeyEvent *event);
     QPushButton *makeNavButton(nt::Icon icon, const QString &text, int index);
 
     AppDatabase m_db;
