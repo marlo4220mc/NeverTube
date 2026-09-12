@@ -392,14 +392,6 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     connect(m_overlayTimer, &QTimer::timeout, this,
             &WatchPage::hideOverlayControls);
 
-    // Tap vs doble click en el vídeo: un solo click espera el intervalo de
-    // doble click; si llega un doble click se cancela y se alterna fullscreen.
-    m_videoTapTimer = new QTimer(this);
-    m_videoTapTimer->setSingleShot(true);
-    m_videoTapTimer->setInterval(QApplication::doubleClickInterval());
-    connect(m_videoTapTimer, &QTimer::timeout, this, &WatchPage::onVideoTap);
-    m_videoClickClock.start();
-
     auto *pc = new PlayerContainer(playerWidget, m_overlay, this);
     pc->setObjectName(QStringLiteral("playerArea"));
     splitOuter->addWidget(pc, 3);
@@ -929,34 +921,12 @@ bool WatchPage::eventFilter(QObject *watched, QEvent *event)
             break;
         m_lastMousePos = gp;
         showOverlayControls();
-        const bool onVideo = isVideoClick(watched);
-        if (event->type() == QEvent::MouseButtonPress) {
-            // Un solo click sobre el vídeo: play/pausa (espera al doble click).
-            if (!onVideo) {
-                m_videoTapTimer->stop();
-                break;
-            }
-            const qint64 nowMs = m_videoClickClock.restart() / 1000000;
-            const bool isDouble = m_hasVideoClick
-                && nowMs <= QApplication::doubleClickInterval()
-                && (gp - m_lastVideoClickPos).manhattanLength() <= 12;
-            m_hasVideoClick = true;
-            m_lastVideoClickPos = gp;
-            if (isDouble) {
-                // Doble click rápido: Wayland puede no mandar
-                // MouseButtonDblClick y el segundo Press volvería a arrancar
-                // el timer; lo detectamos manualmente por tiempo y posición.
-                m_videoTapTimer->stop();
-                m_hasVideoClick = false;
-                toggleFullscreen();
-            } else {
-                m_videoTapTimer->start();
-            }
-        } else if (event->type() == QEvent::MouseButtonDblClick) {
-            m_videoTapTimer->stop();
-            m_hasVideoClick = false;
-            if (onVideo)
-                toggleFullscreen();
+        // Un solo click sobre el vídeo alterna play/pausa de forma inmediata
+        // (sin esperar a un posible doble click). El fullscreen se controla
+        // con el botón de la barra: el doble click no es fiable en Wayland.
+        if (event->type() == QEvent::MouseButtonPress
+            && isVideoClick(watched)) {
+            m_player->playPause();
         }
         break;
     }
@@ -965,11 +935,6 @@ bool WatchPage::eventFilter(QObject *watched, QEvent *event)
     }
     // Deja pasar el evento: el overlay no consume clics del vídeo.
     return QWidget::eventFilter(watched, event);
-}
-
-void WatchPage::onVideoTap()
-{
-    m_player->playPause();
 }
 
 // Considera "click sobre el vídeo" cualquier click que no apunte a la barra de
