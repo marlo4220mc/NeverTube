@@ -2,6 +2,8 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -10,6 +12,9 @@
 #include <QSignalBlocker>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QRegularExpression>
+
+#include <utility>
 
 #include "../../debug.h"
 #include "../../db/repositories.h"
@@ -69,11 +74,26 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     empty->setAlignment(Qt::AlignCenter);
     empty->setContentsMargins(0, 40, 0, 0);
     empty->hide();
+    m_channelBox = new QWidget(this);
+    auto *channelLayout = new QVBoxLayout(m_channelBox);
+    channelLayout->setContentsMargins(0, 0, 0, 0);
+    channelLayout->setSpacing(2);
+    m_channelBox->hide();
     m_list = new VideoListView(m_thumbs, this);
     m_list->showVideos(QVector<VideoInfo>(), VideoListView::ListMode);
+    m_moreButton = new QPushButton(QStringLiteral("Mostrar más"), this);
+    m_moreButton->setObjectName(QStringLiteral("ghost"));
+    m_moreButton->setCursor(Qt::PointingHandCursor);
+    m_moreButton->hide();
+    connect(m_moreButton, &QPushButton::clicked, this, [this]() {
+        m_moreButton->setEnabled(false);
+        m_yt->search(m_activeQuery, 20, m_results.size());
+    });
     rBox->addWidget(spinner);
     rBox->addWidget(empty);
+    rBox->addWidget(m_channelBox);
     rBox->addWidget(m_list, 1);
+    rBox->addWidget(m_moreButton, 0, Qt::AlignHCenter);
     outer->addWidget(m_resultBox);
     outer->setStretch(2, 1);
     m_resultBox->hide();
@@ -83,6 +103,7 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     connect(m_field, &QLineEdit::returnPressed, this, &SearchPage::doSearch);
     connect(searchBtn, &QPushButton::clicked, this, &SearchPage::doSearch);
     connect(m_yt, &Yt::searchFinished, this, &SearchPage::onSearchReady);
+    connect(m_yt, &Yt::channelInfoReady, this, &SearchPage::onChannelInfo);
 
     connect(m_list, &VideoListView::videoActivated, this,
             [this](int index, const VideoInfo &) {
@@ -109,7 +130,17 @@ void SearchPage::doSearch()
         return;
     }
     m_searching = true;
+    m_activeQuery = q;
+    m_results.clear();
+    m_moreButton->hide();
     m_list->clearVideos();
+    while (QLayoutItem *item = m_channelBox->layout()->takeAt(0)) {
+        delete item->widget();
+        delete item;
+    }
+    m_channelButtons.clear();
+    m_channels.clear();
+    m_channelBox->hide();
     m_historyBox->hide();
     m_resultBox->show();
     m_list->showVideos(QVector<VideoInfo>(), VideoListView::ListMode);
@@ -133,27 +164,139 @@ void SearchPage::doSearch()
     m_yt->search(q);
 }
 
-void SearchPage::onSearchReady(const QVector<VideoInfo> &videos)
+void SearchPage::onSearchReady(const QString &query, const QVector<VideoInfo> &videos)
 {
+    if (query != m_activeQuery)
+        return;
     m_searching = false;
     NT_DEBUG("E2E searchReady count=%d\n", (int)videos.size());
     for (auto *child : m_resultBox->findChildren<QLabel *>()) {
         if (child->text().startsWith(QStringLiteral("Buscando")))
             child->hide();
     }
-    m_results = videos;
+    if (m_results.isEmpty())
+        m_results = videos;
+    else
+        m_results += videos;
     if (m_results.isEmpty()) {
         m_list->clearVideos();
+        m_moreButton->hide();
         for (auto *child : m_resultBox->findChildren<QLabel *>()) {
             if (child->text().startsWith(QStringLiteral("Sin")))
                 child->show();
         }
-    } else {
-        for (auto *child : m_resultBox->findChildren<QLabel *>()) {
-            if (child->text().startsWith(QStringLiteral("Sin")))
-                child->hide();
-        }
+        return;
+    }
+    for (auto *child : m_resultBox->findChildren<QLabel *>()) {
+        if (child->text().startsWith(QStringLiteral("Sin")))
+            child->hide();
+    }
+    if (m_list->isEmpty()) {
+        buildChannelButtons();
         m_list->showVideos(m_results, VideoListView::ListMode);
+    } else {
+        m_list->appendVideos(videos);
+    }
+    m_moreButton->setVisible(videos.size() >= 20);
+    m_moreButton->setEnabled(true);
+}
+
+void SearchPage::buildChannelButtons()
+{
+    while (QLayoutItem *item = m_channelBox->layout()->takeAt(0)) {
+        delete item->widget();
+        delete item;
+    }
+    m_channels.clear();
+    m_channelButtons.clear();
+    QSet<QString> seenChannels;
+    for (const VideoInfo &video : m_results) {
+        if (video.channelId.isEmpty() || seenChannels.contains(video.channelId))
+            continue;
+        seenChannels.insert(video.channelId);
+        ChannelInfo channel;
+        channel.id = video.channelId;
+        channel.name = video.channel;
+        m_channels.append(channel);
+    }
+    if (m_channels.isEmpty()) {
+        m_channelBox->hide();
+        return;
+    }
+    auto *title = new QLabel(QStringLiteral("Canales en los resultados"), this);
+    title->setObjectName(QStringLiteral("sectionSub"));
+    m_channelBox->layout()->addWidget(title);
+    auto *scroll = new QScrollArea(m_channelBox);
+    scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setFixedHeight(148);
+    auto *strip = new QWidget(scroll);
+    auto *row = new QHBoxLayout;
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(6);
+    strip->setLayout(row);
+    scroll->setWidget(strip);
+    for (const ChannelInfo &channel : std::as_const(m_channels)) {
+        auto *button = new QPushButton(m_channelBox);
+        button->setFixedSize(120, 132);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setToolTip(channel.name);
+        auto *vbox = new QVBoxLayout(button);
+        vbox->setContentsMargins(8, 10, 8, 8);
+        vbox->setSpacing(6);
+        auto *avatar = new QLabel(button);
+        avatar->setObjectName(QStringLiteral("chAvatar"));
+        avatar->setFixedSize(64, 64);
+        avatar->setAlignment(Qt::AlignCenter);
+        avatar->setPixmap(nt::icon(nt::Icon::User, nt::kMuted, 32).pixmap(48, 48));
+        auto *name = new QLabel(channel.name, button);
+        name->setObjectName(QStringLiteral("chName"));
+        name->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
+        name->setWordWrap(true);
+        name->setFixedHeight(40);
+        vbox->addWidget(avatar, 0, Qt::AlignHCenter);
+        vbox->addWidget(name, 0, Qt::AlignHCenter);
+        connect(button, &QPushButton::clicked, this,
+                [this, channel]() { emit channelRequested(channel.id); });
+        row->addWidget(button);
+        m_channelButtons.insert(channel.id, button);
+        m_yt->channelInfo(channel.id);
+    }
+    row->addStretch(1);
+    m_channelBox->layout()->addWidget(scroll);
+    m_channelBox->show();
+}
+
+void SearchPage::onChannelInfo(const ChannelInfo &channel)
+{
+    QPushButton *button = m_channelButtons.value(channel.id, nullptr);
+    if (!button)
+        return;
+    if (QLabel *name = button->findChild<QLabel *>(QStringLiteral("chName")))
+        name->setText(channel.name);
+    if (!channel.avatarUrl.isEmpty()) {
+        const QString key = QStringLiteral("ch_%1").arg(channel.id);
+        if (QLabel *avatar = button->findChild<QLabel *>(QStringLiteral("chAvatar"))) {
+            const QPixmap pm = m_thumbs->pixmap(key);
+            if (!pm.isNull()) {
+                avatar->setPixmap(pm.scaled(64, 64, Qt::KeepAspectRatioByExpanding,
+                                            Qt::SmoothTransformation));
+            } else {
+                connect(m_thumbs, &ThumbnailCache::ready, button,
+                        [this, button, key](const QString &readyKey) {
+                            if (readyKey == key) {
+                                if (QLabel *a = button->findChild<QLabel *>(
+                                        QStringLiteral("chAvatar")))
+a->setPixmap(m_thumbs->pixmap(key).scaled(
+                                    64, 64, Qt::KeepAspectRatioByExpanding,
+                                    Qt::SmoothTransformation));
+                            }
+                        });
+            }
+        }
+        m_thumbs->requestChannelAvatar(channel.id, channel.avatarUrl);
     }
 }
 

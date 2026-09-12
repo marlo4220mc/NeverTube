@@ -7,6 +7,10 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QStandardPaths>
+#include <QUrl>
+#include <QUrlQuery>
+
+#include "../debug.h"
 
 ThumbnailCache::ThumbnailCache(QObject *parent)
     : QObject(parent)
@@ -37,10 +41,25 @@ QPixmap ThumbnailCache::pixmap(const QString &key) const
     return QPixmap();
 }
 
+static QString stripWebpParam(const QString &url)
+{
+    QUrl q{url};
+    const QString sqp = QUrlQuery{q}.queryItemValue(QStringLiteral("sqp"));
+    if (sqp.isEmpty())
+        return url;
+    QUrlQuery clean{q};
+    clean.removeQueryItem(QStringLiteral("sqp"));
+    q.setQuery(clean);
+    return q.toString(QUrl::FullyEncoded);
+}
+
 void ThumbnailCache::request(const QString &key, const QString &url)
 {
     if (key.isEmpty() || url.isEmpty())
         return;
+    const QString jpegUrl = stripWebpParam(url);
+    NT_DEBUG("thumbnail request key=%s url=%s\n", key.toUtf8().constData(),
+             jpegUrl.toUtf8().constData());
     if (m_cache.contains(key) || m_inFlight.contains(key))
         return;
 
@@ -57,9 +76,13 @@ void ThumbnailCache::request(const QString &key, const QString &url)
     }
 
     m_inFlight.insert(key);
-    QNetworkRequest req{QUrl(url)};
+    QNetworkRequest req{QUrl(jpegUrl)};
     req.setHeader(QNetworkRequest::UserAgentHeader,
-                  QStringLiteral("MiniTube/1.0"));
+                  QStringLiteral("Mozilla/5.0 MiniTube/1.0"));
+    req.setRawHeader("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
+    req.setRawHeader("Referer", "https://www.youtube.com/");
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                     QNetworkRequest::NoLessSafeRedirectPolicy);
     req.setTransferTimeout(15000);
     QNetworkReply *reply = m_nam->get(req);
     reply->setProperty("nt_key", key);
@@ -79,10 +102,16 @@ void ThumbnailCache::onFinished(QNetworkReply *reply)
     m_inFlight.remove(key);
     reply->deleteLater();
 
-    if (reply->error() != QNetworkReply::NoError)
+    if (reply->error() != QNetworkReply::NoError) {
+        NT_DEBUG("thumbnail failed key=%s error=%s url=%s\n",
+                 key.toUtf8().constData(), reply->errorString().toUtf8().constData(),
+                 reply->url().toString().toUtf8().constData());
         return;
+    }
 
     const QByteArray data = reply->readAll();
+    NT_DEBUG("thumbnail response key=%s bytes=%d\n", key.toUtf8().constData(),
+             data.size());
     QImage image;
     if (!image.loadFromData(data))
         return;

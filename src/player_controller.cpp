@@ -60,6 +60,28 @@ void PlayerController::playQueue(const QVector<VideoInfo> &videos,
     playIndex(startIndex);
 }
 
+void PlayerController::appendVideos(const QVector<VideoInfo> &videos)
+{
+    bool added = false;
+    for (const VideoInfo &v : videos) {
+        if (v.id.isEmpty())
+            continue;
+        bool dup = false;
+        for (const VideoInfo &q : m_queue) {
+            if (q.id == v.id) {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup) {
+            m_queue.append(v);
+            added = true;
+        }
+    }
+    if (added)
+        emit queueChanged();
+}
+
 void PlayerController::playIndex(int index)
 {
     if (index < 0 || index >= m_queue.size())
@@ -172,6 +194,38 @@ VideoInfo PlayerController::current() const
     return VideoInfo();
 }
 
+void PlayerController::applyCurrentDetail(const VideoInfo &detail)
+{
+    if (m_index < 0 || m_index >= m_queue.size())
+        return;
+    VideoInfo &cur = m_queue[m_index];
+    if (cur.id != detail.id)
+        return;
+    bool changed = false;
+    if (cur.title.isEmpty() && !detail.title.isEmpty()) {
+        cur.title = detail.title;
+        changed = true;
+    }
+    if (cur.channel.isEmpty() && !detail.channel.isEmpty()) {
+        cur.channel = detail.channel;
+        changed = true;
+    }
+    if (cur.channelId.isEmpty() && !detail.channelId.isEmpty()) {
+        cur.channelId = detail.channelId;
+        changed = true;
+    }
+    if (cur.thumbnailUrl.isEmpty() && !detail.thumbnailUrl.isEmpty()) {
+        cur.thumbnailUrl = detail.thumbnailUrl;
+        changed = true;
+    }
+    if (cur.viewCount == 0 && detail.viewCount > 0) {
+        cur.viewCount = detail.viewCount;
+        changed = true;
+    }
+    if (changed)
+        emit metadataChanged();
+}
+
 void PlayerController::next()
 {
     if (hasNext())
@@ -209,7 +263,15 @@ void PlayerController::playPause()
 void PlayerController::toggleMute()
 {
     m_muted = !m_muted;
-    m_player->setVolume(m_muted ? 0.0 : 100.0);
+    m_player->setVolume(m_muted ? 0.0 : m_volume);
+}
+
+void PlayerController::setVolume(double volume)
+{
+    m_volume = qBound(0.0, volume, 100.0);
+    if (m_volume > 0.0)
+        m_muted = false;
+    m_player->setVolume(m_volume);
 }
 
 void PlayerController::seek(double seconds)

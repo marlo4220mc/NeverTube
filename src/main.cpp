@@ -45,6 +45,11 @@ int main(int argc, char *argv[])
             QTimer::singleShot(400, &window, [&window, query]() {
                 window.searchFor(query);
             });
+        } else if (arg == QLatin1String("--channel") && i + 1 < args.size()) {
+            const QString channelId = args.at(++i);
+            QTimer::singleShot(500, &window, [&window, channelId]() {
+                window.openChannel(channelId);
+            });
         } else if (arg.startsWith(QLatin1String("http"))) {
             const QString url = arg;
             QTimer::singleShot(500, &window, [&window, url]() {
