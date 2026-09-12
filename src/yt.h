@@ -23,12 +23,19 @@ enum class NextMode
 };
 NextMode nextMode();
 
+class SettingsRepo;
+
 class Yt : public QObject
 {
     Q_OBJECT
 
 public:
     explicit Yt(QObject *parent = nullptr);
+
+    // Persistencia del visitorData (settings): si el Innertube consigue uno
+    // nuevo se guarda aquí, y al arrancar se reutiliza para evitar el GET
+    // sw.js_data (una RTT menos antes del POST /player).
+    void setVisitorStorage(SettingsRepo *settings);
 
     void search(const QString &query, int limit = 20, int offset = 0);
     void trending(int limit = 30);
@@ -104,6 +111,7 @@ private:
 
     HlsServer m_hls;
     Innertube m_innertube;
+    SettingsRepo *m_visitorStore = nullptr;
     int m_resolveGen = 0;
     QString m_audioLang;
     // Método de resolución que logró reproducir cada vídeo: índice del

@@ -33,6 +33,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_playerWidget(new PlayerWidget(this))
 {
     m_db.open();
+    m_yt->setVisitorStorage(&m_settings);
     m_player.setPlayer(m_playerWidget);
 
     const int qh = m_settings.getInt(QStringLiteral("quality"));

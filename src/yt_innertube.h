@@ -35,6 +35,11 @@ public:
 
     bool isBusy() const;
 
+    // Usar un visitorData persistido de una sesión anterior (si la firma aún
+    // es válida, evita el GET sw.js_data al arrancar). Lo llama Yt/la app con
+    // el valor guardado en settings; si caducó, se ignora y se refresca solo.
+    void seedVisitorData(const QString &visitorData, qint64 expiresAt);
+
 public slots:
     void fetchHls(const QString &videoId, int preferredClient = -1);
     void fetchMaster(const QString &videoId, const QString &masterUrl);
@@ -70,6 +75,9 @@ signals:
     // Cola del mix/radio del vídeo pedido con /next (RDAMVM). Videos vacíos si
     // el cliente no devolvió cola (entonces la app decide mezclar o seguir).
     void radioReady(const QString &videoId, const QVector<VideoInfo> &videos);
+    // visitorData renovado o usado por primera vez; la app lo persiste para
+    // evitar el GET sw.js_data en el siguiente arranque.
+    void visitorDataReady(const QString &visitorData, qint64 expiresAt);
 
 private:
     void fetchVisitorData();

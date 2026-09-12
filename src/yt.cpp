@@ -17,6 +17,7 @@
 #include <memory>
 
 #include "debug.h"
+#include "db/repositories.h"
 
 namespace {
 
@@ -129,6 +130,30 @@ Yt::Yt(QObject *parent)
             &Yt::relatedReady);
     connect(&m_innertube, &Innertube::radioReady, this,
             &Yt::radioReady);
+}
+
+void Yt::setVisitorStorage(SettingsRepo *settings)
+{
+    m_visitorStore = settings;
+    if (!settings)
+        return;
+    // Reutilizar un visitorData persistido no caducado: evita el GET
+    // sw.js_data de arranque y una RTT antes del POST /player.
+    const QString saved =
+        settings->getString(QStringLiteral("visitorData"));
+    const qlonglong savedExp =
+        settings->getInt(QStringLiteral("visitorDataExpiresAt"), 0);
+    if (!saved.isEmpty())
+        m_innertube.seedVisitorData(saved, savedExp);
+    // y guardar los nuevos que lleguen en ejecución.
+    connect(&m_innertube, &Innertube::visitorDataReady, this,
+            [this](const QString &data, qlonglong expiresAt) {
+                if (!m_visitorStore)
+                    return;
+                m_visitorStore->set(QStringLiteral("visitorData"), data);
+                m_visitorStore->set(QStringLiteral("visitorDataExpiresAt"),
+                                    QString::number(expiresAt));
+            });
 }
 
 NextMode nextMode()

@@ -241,7 +241,10 @@ public:
 
     // GET a una URL HTTPS absoluta (p.ej. el master HLS en
     // manifest.googlevideo.com). Reutiliza el mismo transporte IPv4.
-    void getUrl(const QUrl &url, const char *ua)
+    // highPriority=true adelanta la petición al frente de la cola: el master
+    // es imprescindible para arrancar el vídeo y no debe esperar detrás de la
+    // siembra radio/next (que no bloquea la reproducción).
+    void getUrl(const QUrl &url, const char *ua, bool highPriority = false)
     {
         HttpRequest req;
         req.verb = QByteArrayLiteral("GET");
@@ -257,6 +260,7 @@ public:
             {QByteArrayLiteral("Host"), req.host},
             {QByteArrayLiteral("User-Agent"), QByteArray(ua)},
         };
+        req.highPriority = highPriority;
         start(req);
     }
 
@@ -330,6 +334,7 @@ private:
         ResultFn result;
         ErrorFn error;
         int timeoutMs = 30000;
+        bool highPriority = false;
     };
 
     void start(HttpRequest req)
@@ -343,7 +348,10 @@ private:
         m_result = nullptr;
         m_error = nullptr;
         m_nextTimeoutMs = 30000;
-        m_queue.enqueue(std::move(req));
+        if (req.highPriority)
+            m_queue.prepend(req);
+        else
+            m_queue.enqueue(req);
         pump();
     }
 
@@ -610,6 +618,19 @@ bool Innertube::isBusy() const
     return m_http->isBusy();
 }
 
+void Innertube::seedVisitorData(const QString &visitorData, qint64 expiresAt)
+{
+    if (visitorData.isEmpty() || expiresAt <= 0)
+        return;
+    if (QDateTime::currentSecsSinceEpoch() >= expiresAt)
+        return;
+    m_visitorData = visitorData;
+    m_visitorExpiresAt = expiresAt;
+    m_http->setVisitorId(visitorData);
+    NT_DEBUG("E2E innertube visitorData persistida ida=%d\n",
+             visitorData.size());
+}
+
 void Innertube::fetchHls(const QString &videoId, int preferredClient)
 {
     // Caché de sesión: si ya hay una hlsManifestUrl firmada y vigente, se
@@ -685,7 +706,9 @@ void Innertube::fetchMaster(const QString &videoId, const QString &masterUrl)
     m_http->setError([this](const QString &reason) {
         handleMaster(false, reason, QByteArray());
     });
-    m_http->getUrl(url, kVisionOSUA);
+    // High priority: el master es imprescindible para arrancar el vídeo; se
+    // adelanta a la siembra radio/next ya encolada (que no bloquea).
+    m_http->getUrl(url, kVisionOSUA, /*highPriority=*/true);
 }
 
 void Innertube::fetchVisitorData()
@@ -713,6 +736,7 @@ void Innertube::fetchVisitorData()
         m_visitorExpiresAt = QDateTime::currentSecsSinceEpoch() + 2592000;
         NT_DEBUG("E2E innertube visitorData sw.js_data len=%d\n",
                  visitorData.size());
+        emit visitorDataReady(m_visitorData, m_visitorExpiresAt);
         // Despachar TODAS las fases que esperaban visitorData (el player
         // primero para arrancar el vídeo cuanto antes), no solo una.
         dispatchPending();
