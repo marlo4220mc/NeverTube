@@ -398,6 +398,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_videoTapTimer->setSingleShot(true);
     m_videoTapTimer->setInterval(QApplication::doubleClickInterval());
     connect(m_videoTapTimer, &QTimer::timeout, this, &WatchPage::onVideoTap);
+    m_videoClickClock.start();
 
     auto *pc = new PlayerContainer(playerWidget, m_overlay, this);
     pc->setObjectName(QStringLiteral("playerArea"));
@@ -928,15 +929,33 @@ bool WatchPage::eventFilter(QObject *watched, QEvent *event)
             break;
         m_lastMousePos = gp;
         showOverlayControls();
+        const bool onVideo = isVideoClick(watched);
         if (event->type() == QEvent::MouseButtonPress) {
             // Un solo click sobre el vídeo: play/pausa (espera al doble click).
-            if (isVideoClick(watched))
-                m_videoTapTimer->start();
-            else
+            if (!onVideo) {
                 m_videoTapTimer->stop();
+                break;
+            }
+            const qint64 nowMs = m_videoClickClock.restart() / 1000000;
+            const bool isDouble = m_hasVideoClick
+                && nowMs <= QApplication::doubleClickInterval()
+                && (gp - m_lastVideoClickPos).manhattanLength() <= 12;
+            m_hasVideoClick = true;
+            m_lastVideoClickPos = gp;
+            if (isDouble) {
+                // Doble click rápido: Wayland puede no mandar
+                // MouseButtonDblClick y el segundo Press volvería a arrancar
+                // el timer; lo detectamos manualmente por tiempo y posición.
+                m_videoTapTimer->stop();
+                m_hasVideoClick = false;
+                toggleFullscreen();
+            } else {
+                m_videoTapTimer->start();
+            }
         } else if (event->type() == QEvent::MouseButtonDblClick) {
             m_videoTapTimer->stop();
-            if (isVideoClick(watched))
+            m_hasVideoClick = false;
+            if (onVideo)
                 toggleFullscreen();
         }
         break;
