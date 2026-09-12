@@ -179,6 +179,10 @@ bool MainWindow::handleShortcut(QKeyEvent *event)
         m_player.playPause();
         return true;
     case Qt::Key_K:
+        if (!m_player.isActive())
+            return false;
+        m_player.playPause();
+        return true;
     case Qt::Key_Left:
         if (!m_player.isActive())
             return false;
