@@ -62,7 +62,8 @@ public:
         const QFontMetricsF fm(f);
         const QString text = QStringLiteral("Reproduciendo");
         const QRectF bg(r.right() - fm.horizontalAdvance(text) - 14,
-                        r.top() + 8, fm.horizontalAdvance(text) + 10,
+                        r.bottom() - fm.height() - 12,
+                        fm.horizontalAdvance(text) + 10,
                         fm.height() + 4);
         p->setPen(Qt::NoPen);
         p->setBrush(nt::kAccent);

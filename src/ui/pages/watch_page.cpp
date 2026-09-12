@@ -626,8 +626,9 @@ void WatchPage::onRadioReady(const QString &videoId,
     const VideoInfo cur = m_player->current();
     if (cur.id != m_relatedVideoId)
         return;
-    NT_DEBUG("E2E nextUp radio append id=%s count=%d\n",
-             videoId.toUtf8().constData(), (int)videos.size());
+    NT_DEBUG("E2E nextUp radio append id=%s count=%d 1º=%s\n",
+             videoId.toUtf8().constData(), (int)videos.size(),
+             videos.first().title.toUtf8().constData());
     m_player->appendVideos(videos);
 }
 
