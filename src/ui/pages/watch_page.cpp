@@ -449,6 +449,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
                        " color:#ECECEC; font-weight:600; font-size:13px; }"
                        "QPushButton:hover { background:#1F1F1F; }"));
     m_channelBtn->setMinimumHeight(56);
+    m_channelBtn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
     infoLay->addWidget(m_channelBtn);
 
     m_descLabel = new QLabel(this);
