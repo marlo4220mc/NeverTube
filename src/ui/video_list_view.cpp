@@ -56,15 +56,15 @@ public:
         p->drawRoundedRect(QRectF(r).adjusted(1.5, 1.5, -1.5, -1.5), 6, 6);
 
         QFont f = p->font();
-        f.setPointSizeF(f.pointSizeF() - 1);
+        f.setPointSizeF(f.pointSizeF() - 2);
         f.setBold(true);
         p->setFont(f);
         const QFontMetricsF fm(f);
         const QString text = QStringLiteral("Reproduciendo");
-        const QRectF bg(r.right() - fm.horizontalAdvance(text) - 14,
-                        r.bottom() - fm.height() - 12,
-                        fm.horizontalAdvance(text) + 10,
-                        fm.height() + 4);
+        const QRectF bg(r.right() - fm.horizontalAdvance(text) - 6,
+                        r.bottom() - fm.height() - 7,
+                        fm.horizontalAdvance(text) + 6,
+                        fm.height() + 3);
         p->setPen(Qt::NoPen);
         p->setBrush(nt::kAccent);
         p->drawRoundedRect(bg, 4, 4);
