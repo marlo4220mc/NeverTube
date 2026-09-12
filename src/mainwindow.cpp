@@ -39,7 +39,9 @@ MainWindow::MainWindow(QWidget *parent)
     m_db.open();
     m_yt->setVisitorStorage(&m_settings);
     m_player.setPlayer(m_playerWidget);
-    installEventFilter(this);
+    // Filtro a nivel de aplicación: recibe todos los KeyPress aunque el foco
+    // esté en un widget profundo (QScrollArea, listas…), no solo en MainWindow.
+    QCoreApplication::instance()->installEventFilter(this);
 
     const int qh = m_settings.getInt(QStringLiteral("quality"));
     if (qh > 0)
@@ -165,43 +167,45 @@ bool MainWindow::handleShortcut(QKeyEvent *event)
     switch (event->key()) {
     case Qt::Key_Space:
     case Qt::Key_K:
-        if (m_player.isActive())
-            m_player.playPause();
+        if (!m_player.isActive())
+            return false;
+        m_player.playPause();
         return true;
     case Qt::Key_Left:
-        if (m_player.isActive())
-            m_player.seek(m_player.position() - 5.0);
+        if (!m_player.isActive())
+            return false;
+        m_player.seek(m_player.position() - 5.0);
         return true;
     case Qt::Key_Right:
-        if (m_player.isActive())
-            m_player.seek(m_player.position() + 5.0);
+        if (!m_player.isActive())
+            return false;
+        m_player.seek(m_player.position() + 5.0);
         return true;
     case Qt::Key_Up:
-        if (m_player.isActive()) {
-            const double v = qMin(m_player.volume() + 5.0, 100.0);
-            m_player.setVolume(v);
-            updateMiniIcons();
-        }
+        if (!m_player.isActive())
+            return false;
+        m_player.setVolume(qMin(m_player.volume() + 5.0, 100.0));
+        updateMiniIcons();
         return true;
     case Qt::Key_Down:
-        if (m_player.isActive()) {
-            const double v = qMax(m_player.volume() - 5.0, 0.0);
-            m_player.setVolume(v);
-            updateMiniIcons();
-        }
+        if (!m_player.isActive())
+            return false;
+        m_player.setVolume(qMax(m_player.volume() - 5.0, 0.0));
+        updateMiniIcons();
         return true;
     case Qt::Key_M:
-        if (m_player.isActive()) {
-            m_player.toggleMute();
-            updateMiniIcons();
-        }
+        if (!m_player.isActive())
+            return false;
+        m_player.toggleMute();
+        updateMiniIcons();
         return true;
     case Qt::Key_F:
         m_watch->toggleFullscreen();
         return true;
     case Qt::Key_Escape:
-        if (isFullScreen())
-            m_watch->toggleFullscreen();
+        if (!isFullScreen())
+            return false;
+        m_watch->toggleFullscreen();
         return true;
     default:
         return false;
