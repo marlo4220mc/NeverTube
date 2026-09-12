@@ -325,16 +325,45 @@ void Yt::getDetail(const QString &videoId)
 {
     // web_embedded evita el bloqueo anti-bot del cliente por defecto y
     // sigue devolviendo título/descripción en el idioma de lang (es).
+    // Algunos vídeos se reportan "Video unavailable" con ese cliente aunque
+    // sí son reproducibles (por Innertube); cascada de clientes para obtener
+    // los metadatos igualmente.
+    getDetailTry(videoId, 0);
+}
+
+void Yt::getDetailTry(const QString &videoId, int clientIndex)
+{
+    static const QStringList clients = {
+        QStringLiteral("web_embedded"),
+        QStringLiteral("tv"),
+        QStringLiteral("tv_embedded"),
+        QStringLiteral("mweb"),
+        QStringLiteral("android"),
+    };
+    if (clientIndex >= clients.size()) {
+        emit detailFailed(videoId);
+        return;
+    }
+    NT_DEBUG("E2E getDetail id=%s client=%s\n",
+             videoId.toUtf8().constData(),
+             clients[clientIndex].toUtf8().constData());
     const QStringList args = {
         kNoWarnings,
         QStringLiteral("--extractor-args"),
-        QStringLiteral("youtube:player_client=web_embedded,lang=es"),
+        QStringLiteral("youtube:player_client=%1,lang=es")
+            .arg(clients[clientIndex]),
         QStringLiteral("--skip-download"),
         QStringLiteral("--dump-single-json"),
         QStringLiteral("https://www.youtube.com/watch?v=%1").arg(videoId),
     };
-    execJson(args, [this](const QJsonObject &j) {
+    execJson(args, [this, videoId, clientIndex](const QJsonObject &j) {
         const VideoInfo video = videoFromJson(j);
+        if (video.id.isEmpty()) {
+            // Fracaso de este cliente (JSON vacío o "Video unavailable");
+            // probar el siguiente antes de rendirse.
+            getDetailTry(videoId, clientIndex + 1);
+            return;
+        }
         QVector<FormatInfo> formats;
         const QJsonArray raw = j.value(QStringLiteral("formats")).toArray();
         for (const QJsonValue &val : raw) {
