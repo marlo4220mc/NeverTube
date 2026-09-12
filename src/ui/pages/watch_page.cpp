@@ -921,11 +921,21 @@ bool WatchPage::eventFilter(QObject *watched, QEvent *event)
             break;
         m_lastMousePos = gp;
         showOverlayControls();
-        // Un solo click sobre el vídeo alterna play/pausa de forma inmediata
-        // (sin esperar a un posible doble click). El fullscreen se controla
-        // con el botón de la barra: el doble click no es fiable en Wayland.
+        // Un solo click sobre el vídeo alterna play/pausa de forma inmediata.
+        // Ojo: un mismo click engancha eventos en dos widgets (PlayerWidget y
+        // el QWidget del overlay), así que deduplicamos el mismo click físico
+        // por posición en una ventana de 50 ms: si no, saldría pause+play.
         if (event->type() == QEvent::MouseButtonPress
             && isVideoClick(watched)) {
+            const qint64 nowMs =
+                static_cast<const QMouseEvent *>(event)->timestamp();
+            if (nowMs == m_lastVideoPressMs
+                && gp == m_lastVideoPressPos)
+                break;
+            m_lastVideoPressMs = nowMs;
+            m_lastVideoPressPos = gp;
+            NT_DEBUG("E2E playPause phase=%s\n",
+                     m_player->phase().toUtf8().constData());
             m_player->playPause();
         }
         break;

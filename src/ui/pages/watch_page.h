@@ -123,6 +123,8 @@ private:
     QPoint m_lastMousePos = QPoint(-100000, -100000);
     double m_volume = 100.0;
     bool m_subsVisible = false;
+    qint64 m_lastVideoPressMs = -100000;
+    QPoint m_lastVideoPressPos = QPoint(-100000, -100000);
 
     QVector<VideoInfo> m_queue;
     int m_queueStart = -1;
