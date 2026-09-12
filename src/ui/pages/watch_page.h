@@ -1,6 +1,5 @@
 #pragma once
 
-#include <QElapsedTimer>
 #include <QWidget>
 #include <QVector>
 
@@ -59,7 +58,6 @@ private slots:
     void onVideoSizeChanged(int width, int height);
     void onPlayPause();
     void onToggleMute();
-    void onVideoTap();
     void onNextUpActivated(int index, const VideoInfo &video);
     void onRelatedReady(const QString &videoId, const QVector<VideoInfo> &videos);
     void onRadioReady(const QString &videoId, const QVector<VideoInfo> &videos);
@@ -122,14 +120,6 @@ private:
     QPushButton *m_ovSubsBtn = nullptr;
     QPushButton *m_ovFsBtn = nullptr;
     QTimer *m_overlayTimer = nullptr;
-    QTimer *m_videoTapTimer = nullptr;
-    // Detección manual de doble click (tiempo + posición): en Wayland con un
-    // doble click rápido Qt a veces no sintetiza MouseButtonDblClick y el
-    // segundo click llega como un Press normal, con lo que el tap timer corría
-    // y acababa en play/pausa en vez de alternar fullscreen.
-    QElapsedTimer m_videoClickClock;
-    QPoint m_lastVideoClickPos = QPoint(-100000, -100000);
-    bool m_hasVideoClick = false;
     QPoint m_lastMousePos = QPoint(-100000, -100000);
     double m_volume = 100.0;
     bool m_subsVisible = false;

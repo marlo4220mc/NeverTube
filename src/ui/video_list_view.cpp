@@ -25,6 +25,19 @@ QString cacheKeyFor(const VideoInfo &v)
     return QStringLiteral("v_%1").arg(v.id);
 }
 
+// Fuente reducida sin warnings: si la fuente base no trae point size definido
+// (devuelve -1, lo normal si la app usa pixel size), partimos de un tamaño
+// lógico por defecto y nunca bajamos de 4pt.
+QFont shrunkFont(const QFont &base, qreal delta)
+{
+    QFont f = base;
+    qreal pt = f.pointSizeF();
+    if (pt <= 0)
+        pt = 9.0;
+    f.setPointSizeF(qMax(pt - delta, 4.0));
+    return f;
+}
+
 class VideosDelegate : public QStyledItemDelegate
 {
 public:
@@ -55,11 +68,8 @@ public:
         p->setBrush(Qt::NoBrush);
         p->drawRoundedRect(QRectF(r).adjusted(1.5, 1.5, -1.5, -1.5), 6, 6);
 
-        QFont f = p->font();
-        f.setPointSizeF(f.pointSizeF() - 2);
-        f.setBold(true);
-        p->setFont(f);
-        const QFontMetricsF fm(f);
+        p->setFont(shrunkFont(p->font(), 2));
+        const QFontMetricsF fm(p->font());
         const QString text = QStringLiteral("Reproduciendo");
         const QRectF bg(r.right() - fm.horizontalAdvance(text) - 6,
                         r.bottom() - fm.height() - 7,
@@ -68,6 +78,9 @@ public:
         p->setPen(Qt::NoPen);
         p->setBrush(nt::kAccent);
         p->drawRoundedRect(bg, 4, 4);
+        QFont bf = p->font();
+        bf.setBold(true);
+        p->setFont(bf);
         p->setPen(Qt::white);
         p->drawText(bg, Qt::AlignCenter, text);
         p->restore();
@@ -95,8 +108,7 @@ public:
         if (text.isEmpty())
             return;
         const QFont f = p->font();
-        QFont bf = f;
-        bf.setPointSizeF(f.pointSizeF() - 1);
+        QFont bf = shrunkFont(f, 1);
         bf.setBold(true);
         p->save();
         p->setFont(bf);
@@ -172,8 +184,7 @@ private:
         p->restore();
 
         p->save();
-        QFont m = p->font();
-        m.setPointSizeF(m.pointSizeF() - 0.5);
+        QFont m = shrunkFont(p->font(), 0.5);
         p->setFont(m);
         p->setPen(nt::kMuted);
         QStringList meta;
@@ -215,8 +226,7 @@ private:
         p->restore();
 
         p->save();
-        QFont m = p->font();
-        m.setPointSizeF(m.pointSizeF() - 0.5);
+        QFont m = shrunkFont(p->font(), 0.5);
         p->setFont(m);
         p->setPen(nt::kMuted);
         QStringList meta;
