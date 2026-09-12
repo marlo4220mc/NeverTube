@@ -10,6 +10,7 @@
 #include "ui/icons.h"
 
 class HomePage;
+class ChannelPage;
 class SearchPage;
 class WatchPage;
 class PlaceholderPage;
@@ -17,6 +18,7 @@ class PlayerWidget;
 class ThumbnailCache;
 class Yt;
 
+class QKeyEvent;
 class QLabel;
 class QPushButton;
 class QStackedWidget;
@@ -32,6 +34,10 @@ public:
 
     void searchFor(const QString &query);
     void playVideo(const QString &url);
+    void openChannel(const QString &channelId);
+
+protected:
+    void keyPressEvent(QKeyEvent *event) override;
 
 private slots:
     void openWatch(const QVector<VideoInfo> &videos, int startIndex);
@@ -64,6 +70,7 @@ private:
 
     HomePage *m_home = nullptr;
     SearchPage *m_search = nullptr;
+    ChannelPage *m_channel = nullptr;
     WatchPage *m_watch = nullptr;
     PlaceholderPage *m_library = nullptr;
     PlaceholderPage *m_settingsPage = nullptr;

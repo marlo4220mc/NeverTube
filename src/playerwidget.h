@@ -33,6 +33,7 @@ public slots:
     void setPaused(bool paused);
     void seek(double seconds);
     void setVolume(double volume);
+    void setSubVisibility(bool visible);
 
 signals:
     void positionChanged();

@@ -7,10 +7,13 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
+#include <QQueue>
 #include <QSslError>
 #include <QSslSocket>
 #include <QTimer>
 #include <QUrl>
+#include <QList>
 
 #include <cstdio>
 #include <algorithm>
@@ -26,16 +29,79 @@ const char kYoutubeName[] = "www.youtube.com";
 const char kSwJsData[] = "/sw.js_data";
 const char kPlayerEndpoint[] =
     "/youtubei/v1/player?prettyPrint=false";
+const char kNextEndpoint[] =
+    "/youtubei/v1/next?prettyPrint=false";
 
 // UA del fork de youtube_explode_dart usado para /sw.js_data.
 const char kChromeUA[] =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
 
-// UA de cliente VISIONOS (coincide con el del body player).
+// UA de cliente VISIONOS (coincide con el del body player). Valores tomados
+// de yt-dlp INNERTUBE_CLIENTS y NewPipeExtractor ClientsConstants.
 const char kVisionOSUA[] =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
+
+// UA del cliente IOS (com.google.ios.youtube).
+const char kIOSUA[] =
+    "com.google.ios.youtube/21.26.4 "
+    "(iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)";
+
+// UA del cliente ANDROID_VR (Oculus/Quest).
+const char kAndroidVRUA[] =
+    "com.google.android.apps.youtube.vr.oculus/1.65.10 "
+    "(Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
+
+const char kFallbackVisitorData[] =
+    "CgttN24wcmd5UzNSWSi2lvq2BjIKCgJKUBIEGgAgYQ%3D%3D";
+
+// Timeouts por fase del transporte Ipv4Https (ms). El fallback a yt-dlp y la
+// regeneración de visitorData no deben esperar el timeout largo de player.
+constexpr int kVisitorTimeoutMs = 10000;
+constexpr int kPlayerTimeoutMs = 12000;
+constexpr int kMasterTimeoutMs = 15000;
+
+// Cascada de clientes para /player, en orden de preferencia. VISIONOS es el
+// primario (único que hoy no requiere poToken y devuelve hlsManifestUrl en
+// VODs); los demás son el fallback estilo NewPipe/yt-dlp para vídeos que
+// exigen login (edad/miembros) o que no responden en VISIONOS. Los valores
+// (versión actual de 2026, device/os/UA) vienen de yt-dlp INNERTUBE_CLIENTS
+// y de NewPipeExtractor ClientsConstants, no son inventados.
+struct PlayerClient
+{
+    const char *name;
+    const char *version;
+    int clientId; // X-Youtube-Client-Name numérico
+    const char *ua;
+    const char *deviceMake; // nullptr si no aplica
+    const char *deviceModel;
+    const char *osName;
+    const char *osVersion;
+    int androidSdkVersion; // 0 si no aplica
+    bool embed;            // requiere thirdParty.embedUrl + Referer
+    const char *embedUrl;
+};
+
+const PlayerClient kPlayerClients[] = {
+    {"VISIONOS", "1.02", 101, kVisionOSUA,
+     "Apple", "RealityDevice17,1", "visionOS", "26.5.23O471",
+     0, false, nullptr},
+    {"IOS", "21.26.4", 5, kIOSUA,
+     "Apple", "iPhone16,2", "iPhone", "18.3.2.22D82",
+     0, false, nullptr},
+    {"WEB_EMBEDDED_PLAYER", "2.20260708.00.00", 56, kChromeUA,
+     nullptr, nullptr, nullptr, nullptr,
+     0, true, "https://www.reddit.com/"},
+    {"TVHTML5_SIMPLY", "1.0", 75, kChromeUA,
+     nullptr, nullptr, nullptr, nullptr,
+     0, false, nullptr},
+    {"ANDROID_VR", "1.65.10", 28, kAndroidVRUA,
+     "Oculus", "Quest 3", "Android", "12L",
+     32, false, nullptr},
+};
+constexpr int kPlayerClientCount =
+    static_cast<int>(sizeof(kPlayerClients) / sizeof(kPlayerClients[0]));
 
 const char kFieldMask[] =
     "playabilityStatus.status,playabilityStatus.reason,"
@@ -61,19 +127,32 @@ QVector<int> videoHeights(const QJsonObject &streamingData)
     return heights;
 }
 
-QJsonObject visionOsClient(const QString &visitorData)
+// Contexto de cliente genérico para la cascada, construido a partir de la
+// tabla kPlayerClients. Cada cliente aporta sus campos device/os/UA propios
+// (valores reales de yt-dlp/NewPipe). "hl"/"gl" se fijan en "en"/"US" y
+// todos los clientes llevan visitorData.
+QJsonObject clientContext(const PlayerClient &pc, const QString &visitorData)
 {
-    return QJsonObject{
-        {QStringLiteral("clientName"), QStringLiteral("VISIONOS")},
-        {QStringLiteral("clientVersion"), QStringLiteral("1.02")},
-        {QStringLiteral("deviceMake"), QStringLiteral("Apple")},
-        {QStringLiteral("deviceModel"), QStringLiteral("RealityDevice17,1")},
-        {QStringLiteral("userAgent"), QString::fromLatin1(kVisionOSUA)},
-        {QStringLiteral("osName"), QStringLiteral("visionOS")},
-        {QStringLiteral("osVersion"), QStringLiteral("26.5.23O471")},
+    QJsonObject client{
+        {QStringLiteral("clientName"), QString::fromLatin1(pc.name)},
+        {QStringLiteral("clientVersion"), QString::fromLatin1(pc.version)},
         {QStringLiteral("hl"), QStringLiteral("en")},
+        {QStringLiteral("gl"), QStringLiteral("US")},
         {QStringLiteral("visitorData"), visitorData},
     };
+    if (pc.ua && *pc.ua)
+        client.insert(QStringLiteral("userAgent"), QString::fromLatin1(pc.ua));
+    if (pc.deviceMake && *pc.deviceMake)
+        client.insert(QStringLiteral("deviceMake"), QString::fromLatin1(pc.deviceMake));
+    if (pc.deviceModel && *pc.deviceModel)
+        client.insert(QStringLiteral("deviceModel"), QString::fromLatin1(pc.deviceModel));
+    if (pc.osName && *pc.osName)
+        client.insert(QStringLiteral("osName"), QString::fromLatin1(pc.osName));
+    if (pc.osVersion && *pc.osVersion)
+        client.insert(QStringLiteral("osVersion"), QString::fromLatin1(pc.osVersion));
+    if (pc.androidSdkVersion > 0)
+        client.insert(QStringLiteral("androidSdkVersion"), pc.androidSdkVersion);
+    return client;
 }
 
 QString visitorDataFromSwJsData(const QByteArray &body)
@@ -142,6 +221,7 @@ public:
 
     void abort()
     {
+        m_queue.clear();
         reset(nullptr);
     }
 
@@ -180,7 +260,9 @@ public:
         start(req);
     }
 
-    void post(const char *path, const QByteArray &jsonBody, const char *ua)
+    void post(const char *path, const QByteArray &jsonBody, const char *ua,
+              int clientId, const char *clientVersion, const char *referer = nullptr,
+              const char *apiKey = nullptr, const char *fieldMask = nullptr)
     {
         HttpRequest req;
         req.verb = QByteArrayLiteral("POST");
@@ -195,11 +277,18 @@ public:
             {QByteArrayLiteral("Origin"), QByteArrayLiteral("https://www.youtube.com")},
             {QByteArrayLiteral("Sec-Fetch-Mode"), QByteArrayLiteral("navigate")},
             {QByteArrayLiteral("User-Agent"), QByteArray(ua)},
-            {QByteArrayLiteral("X-Goog-FieldMask"), QByteArray(kFieldMask)},
-            {QByteArrayLiteral("X-Youtube-Client-Name"), QByteArrayLiteral("VISIONOS")},
-            {QByteArrayLiteral("X-Youtube-Client-Version"), QByteArrayLiteral("1.02")},
+            {QByteArrayLiteral("X-Youtube-Client-Name"), QByteArray::number(clientId)},
+            {QByteArrayLiteral("X-Youtube-Client-Version"), QByteArray(clientVersion)},
             {QByteArrayLiteral("Content-Length"), QByteArray::number(req.body.size())},
         };
+        if (fieldMask && *fieldMask)
+            headers.append({QByteArrayLiteral("X-Goog-FieldMask"),
+                            QByteArray(fieldMask)});
+        if (apiKey && *apiKey)
+            headers.append({QByteArrayLiteral("X-Goog-Api-Key"),
+                            QByteArray(apiKey)});
+        if (referer && *referer)
+            headers.append({QByteArrayLiteral("Referer"), QByteArray(referer)});
         if (!m_visitorData.isEmpty())
             headers.append({QByteArrayLiteral("X-Goog-Visitor-Id"),
                             m_visitorData.toUtf8()});
@@ -211,6 +300,13 @@ public:
     void setVisitorId(const QString &visitorData)
     {
         m_visitorData = visitorData;
+    }
+
+    void setTimeoutMs(int ms)
+    {
+        // Tiempo de espera de la PRÓXIMA petición que se encuele (cada
+        // petición lleva el suyo: el transporte es FIFO).
+        m_nextTimeoutMs = ms;
     }
 
     void setResult(ResultFn result)
@@ -231,13 +327,37 @@ private:
         QByteArray host;
         QByteArray body;
         QList<QPair<QByteArray, QByteArray>> headers;
+        ResultFn result;
+        ErrorFn error;
+        int timeoutMs = 30000;
     };
 
-    void start(const HttpRequest &req)
+    void start(HttpRequest req)
     {
-        m_request = req;
+        // Cada petición captura SUS callbacks y timeout al encolarse: si otra
+        // fase (player/next/radio/master) ya está usando el socket, la nueva
+        // espera en la cola FIFO en vez de abortar la conexión en curso.
+        req.result = std::move(m_result);
+        req.error = std::move(m_error);
+        req.timeoutMs = m_nextTimeoutMs;
+        m_result = nullptr;
+        m_error = nullptr;
+        m_nextTimeoutMs = 30000;
+        m_queue.enqueue(std::move(req));
+        pump();
+    }
+
+    void pump()
+    {
+        if (m_inFlight)
+            return;
+        if (m_queue.isEmpty())
+            return;
+        m_request = std::move(m_queue.dequeue());
+        m_inFlight = true;
         m_response.clear();
         m_responseHeaderSize = -1;
+        m_timeout->setInterval(m_request.timeoutMs);
         m_timeout->start();
 
         const QByteArray reqHost =
@@ -381,10 +501,11 @@ private:
         if (headIsChunked(head))
             body = dechunkBody(body);
         const int status = statusFromHead(head);
-        auto fn = std::move(m_result);
+        auto fn = std::move(m_request.result);
         reset(nullptr);
         if (fn)
             fn(status, body);
+        pump();
     }
 
     static int statusFromHead(const QByteArray &head)
@@ -437,15 +558,17 @@ private:
 
     void abortWithError(const QString &reason)
     {
-        auto fn = std::move(m_error);
+        auto fn = std::move(m_request.error);
         reset(nullptr);
         if (fn)
             fn(reason);
+        pump();
     }
 
     void reset(QSslSocket *newSocket)
     {
         m_timeout->stop();
+        m_inFlight = false;
         m_result = nullptr;
         m_error = nullptr;
         if (m_socket && m_socket != newSocket) {
@@ -464,6 +587,9 @@ private:
     QString m_visitorData;
     ResultFn m_result = nullptr;
     ErrorFn m_error = nullptr;
+    bool m_inFlight = false;
+    int m_nextTimeoutMs = 30000;
+    QQueue<HttpRequest> m_queue;
 };
 
 // ---------------------------------------------------------------------------
@@ -484,19 +610,62 @@ bool Innertube::isBusy() const
     return m_http->isBusy();
 }
 
-void Innertube::fetchHls(const QString &videoId)
+void Innertube::fetchHls(const QString &videoId, int preferredClient)
 {
+    // Caché de sesión: si ya hay una hlsManifestUrl firmada y vigente, se
+    // entrega al instante sin repetir el POST player.
+    if (serveCachedHls(videoId)) {
+        NT_DEBUG("E2E innertube hls caché hit id=%s\n",
+                 videoId.toUtf8().constData());
+        return;
+    }
+    // Single-flight: si ya hay una petición player en curso para este
+    // videoId (p.ej. dos cambios de resolución seguidos), no lanzar otra
+    // HTTP. La petición en curso emitirá hlsReady y los guards de Yt filtran
+    // por gen/propósito y la reciben.
+    if (m_hlsInFlight && m_flightVideoId == videoId) {
+        NT_DEBUG("E2E innertube hls single-flight id=%s\n",
+                 videoId.toUtf8().constData());
+        return;
+    }
+
+    m_flightVideoId = videoId;
+    m_hlsInFlight = true;
+    mMasterInFlight = false;
     m_videoId = videoId;
-    NT_DEBUG("E2E innertube fetchHls id=%s\n", videoId.toUtf8().constData());
-    if (m_visitorData.isEmpty())
+    m_retryingVisitor = false;
+    m_lastWinClient = -1;
+    m_clientIndex = 0;
+    if (preferredClient >= 0 && preferredClient < kPlayerClientCount)
+        m_clientIndex = preferredClient;
+    m_hlsStartMs = QDateTime::currentMSecsSinceEpoch();
+    NT_DEBUG("E2E innertube fetchHls id=%s client=%s\n",
+             videoId.toUtf8().constData(), kPlayerClients[m_clientIndex].name);
+    if (m_visitorData.isEmpty()
+        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+        m_playerPending = true;
         fetchVisitorData();
-    else
+    } else
         requestPlayer();
 }
 
 void Innertube::fetchMaster(const QString &videoId, const QString &masterUrl)
 {
+    // Caché de sesión del cuerpo del master (mismo videoId y firma vigente).
+    if (serveCachedMaster(videoId)) {
+        NT_DEBUG("E2E innertube master caché hit id=%s\n",
+                 videoId.toUtf8().constData());
+        return;
+    }
+    // Single-flight: si otra petición del mismo videoId está descargando el
+    // master, esperar su masterReady en vez de lanzar un segundo GET.
+    if (mMasterInFlight && m_flightVideoId == videoId) {
+        NT_DEBUG("E2E innertube master single-flight id=%s\n",
+                 videoId.toUtf8().constData());
+        return;
+    }
     if (videoId != m_videoId) {
+        // No es el videoId de la petición hls en curso: no se puede servir.
         fail(QStringLiteral("fetchMaster para id distinto del actual"));
         return;
     }
@@ -505,7 +674,11 @@ void Innertube::fetchMaster(const QString &videoId, const QString &masterUrl)
         fail(QStringLiteral("master URL inválida"));
         return;
     }
+    m_flightVideoId = videoId;
+    mMasterInFlight = true;
+    m_masterStartMs = QDateTime::currentMSecsSinceEpoch();
     NT_DEBUG("E2E innertube fetchMaster id=%s\n", videoId.toUtf8().constData());
+    m_http->setTimeoutMs(kMasterTimeoutMs);
     m_http->setResult([this](int status, const QByteArray &body) {
         handleMaster(status == 200, QString(), body);
     });
@@ -517,28 +690,726 @@ void Innertube::fetchMaster(const QString &videoId, const QString &masterUrl)
 
 void Innertube::fetchVisitorData()
 {
+    // El flujo documentado (AGENTS.md) es sw.js_data -> visitorData. La
+    // homepage (/) devuelve un body vacío (JS challenge) y no sirve.
+    if (m_visitorInFlight) {
+        NT_DEBUG("E2E innertube visitorData single-flight\n");
+        return;
+    }
+    m_visitorInFlight = true;
     m_http->setResult([this](int status, const QByteArray &body) {
-        handleVisitorData(status == 200, QString(), body);
+        m_visitorInFlight = false;
+        if (status != 200) {
+            useFallbackVisitorData();
+            return;
+        }
+        const QString visitorData = visitorDataFromSwJsData(body);
+        if (visitorData.isEmpty()) {
+            NT_DEBUG("E2E innertube sw.js_data sin visitorData, fallback\n");
+            useFallbackVisitorData();
+            return;
+        }
+        m_visitorData = visitorData;
+        m_visitorExpiresAt = QDateTime::currentSecsSinceEpoch() + 2592000;
+        NT_DEBUG("E2E innertube visitorData sw.js_data len=%d\n",
+                 visitorData.size());
+        // Despachar TODAS las fases que esperaban visitorData (el player
+        // primero para arrancar el vídeo cuanto antes), no solo una.
+        dispatchPending();
     });
     m_http->setError([this](const QString &reason) {
-        handleVisitorData(false, reason, QByteArray());
+        m_visitorInFlight = false;
+        NT_DEBUG("E2E innertube sw.js_data err: %s\n",
+                 reason.toUtf8().constData());
+        useFallbackVisitorData();
     });
+    m_http->setTimeoutMs(kVisitorTimeoutMs);
     m_http->get(kSwJsData, kChromeUA);
+}
+
+void Innertube::useFallbackVisitorData()
+{
+    m_visitorData = QString::fromLatin1(kFallbackVisitorData);
+    m_visitorExpiresAt = QDateTime::currentSecsSinceEpoch() + 2592000;
+    NT_DEBUG("E2E innertube visitorData fixed fallback len=%d\n",
+             m_visitorData.size());
+    dispatchPending();
+}
+
+// Dispatcher tras refrescar visitorData: lanza las fases player/next/radio
+// que quedaron esperando, con prioridad al player. El transporte FIFO
+// serializa los POSTs sin abortarlos entre sí.
+void Innertube::dispatchPending()
+{
+    if (m_playerPending) {
+        m_playerPending = false;
+        requestPlayer();
+    }
+    if (m_nextPending) {
+        m_nextPending = false;
+        requestNext();
+    }
+    if (m_radioPending) {
+        m_radioPending = false;
+        requestRadio();
+    }
+}
+
+void Innertube::fetchNext(const QString &videoId)
+{
+    if (m_nextInFlight && m_nextVideoId == videoId) {
+        NT_DEBUG("E2E innertube next single-flight id=%s\n",
+                 videoId.toUtf8().constData());
+        return;
+    }
+    m_nextInFlight = true;
+    m_nextVideoId = videoId;
+    m_nextClientIndex = 0;
+    m_bestNext.clear();
+    NT_DEBUG("E2E innertube fetchNext id=%s\n", videoId.toUtf8().constData());
+    if (m_visitorData.isEmpty()
+        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+        m_nextPending = true;
+        fetchVisitorData();
+        return;
+    }
+    requestNext();
+}
+
+void Innertube::requestNext()
+{
+    const QString videoId = m_nextVideoId;
+    m_http->setResult([this, videoId](int status, const QByteArray &body) {
+        NT_DEBUG("E2E innertube next HTTP status=%d client=%s\n", status,
+                 kPlayerClients[m_nextClientIndex].name);
+        handleNext(videoId, status == 200, QString(), body);
+    });
+    m_http->setError([this, videoId](const QString &reason) {
+        handleNext(videoId, false, reason, QByteArray());
+    });
+    m_http->setTimeoutMs(kPlayerTimeoutMs);
+    m_http->setVisitorId(m_visitorData);
+
+    const PlayerClient &pc = kPlayerClients[m_nextClientIndex];
+    const QJsonObject client = clientContext(pc, m_visitorData);
+    QJsonObject context{{QStringLiteral("client"), client}};
+    if (pc.embed) {
+        context.insert(QStringLiteral("thirdParty"),
+                       QJsonObject{{QStringLiteral("embedUrl"),
+                                    QString::fromLatin1(pc.embedUrl)}});
+    }
+
+    const QJsonObject body{
+        {QStringLiteral("context"), context},
+        {QStringLiteral("videoId"), videoId},
+        {QStringLiteral("racyCheckOk"), true},
+        {QStringLiteral("contentCheckOk"), true},
+    };
+    const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    m_http->post(kNextEndpoint, json, pc.ua, pc.clientId, pc.version,
+                 pc.embed ? pc.embedUrl : nullptr, nullptr, nullptr);
+}
+
+void Innertube::handleNext(const QString &videoId, bool ok,
+                           const QString &error, const QByteArray &body)
+{
+    m_nextInFlight = false;
+    // Cascada de clientes estilo NewPipe: probar el siguiente cliente antes
+    // de abandonar con una respuesta vacía.
+    auto tryNextClient = [this, videoId]() {
+        if (m_nextClientIndex + 1 < kPlayerClientCount) {
+            ++m_nextClientIndex;
+            m_nextInFlight = true;
+            NT_DEBUG("E2E innertube next trying client [%d] %s\n",
+                     m_nextClientIndex,
+                     kPlayerClients[m_nextClientIndex].name);
+            requestNext();
+            return true;
+        }
+        return false;
+    };
+
+    if (!ok) {
+        NT_DEBUG("E2E innertube next HTTP err: %s\n", error.toUtf8().constData());
+        if (tryNextClient())
+            return;
+        emit relatedReady(videoId, m_bestNext);
+        m_bestNext.clear();
+        return;
+    }
+    QJsonParseError err;
+    QByteArray json = body.trimmed();
+    if (json.startsWith(")]}'"))
+        json.remove(0, 4);
+    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        NT_DEBUG("E2E innertube next json fail size=%d prefix=%s\n", body.size(),
+                 body.left(120).constData());
+        if (tryNextClient())
+            return;
+        emit relatedReady(videoId, m_bestNext);
+        m_bestNext.clear();
+        return;
+    }
+    const QVector<VideoInfo> related = parseRelated(doc.object());
+    NT_DEBUG("E2E innertube next ok id=%s relacionados=%d\n",
+             videoId.toUtf8().constData(), related.size());
+    // Seleccionar la mejor respuesta: quedarse con la lista más larga y seguir
+    // probando clientes mientras no llegue a un "A continuación" razonable.
+    auto emitBest = [this, videoId]() {
+        emit relatedReady(videoId, m_bestNext);
+    };
+    if (related.size() >= 5) {
+        m_bestNext.clear();
+        emit relatedReady(videoId, related);
+        return;
+    }
+    if (related.size() > m_bestNext.size())
+        m_bestNext = related;
+    if (tryNextClient())
+        return;
+    QVector<VideoInfo> best = m_bestNext;
+    m_bestNext.clear();
+    emit relatedReady(videoId, best);
+}
+
+void Innertube::fetchRadio(const QString &videoId)
+{
+    if (m_radioInFlight) {
+        NT_DEBUG("E2E innertube radio single-flight id=%s\n",
+                 videoId.toUtf8().constData());
+        return;
+    }
+    m_radioInFlight = true;
+    m_radioVideoId = videoId;
+    m_radioContinuation.clear();
+    m_radioFallback.clear();
+    m_radioClientIndex = 0;
+    NT_DEBUG("E2E innertube fetchRadio id=%s\n", videoId.toUtf8().constData());
+    if (m_visitorData.isEmpty()
+        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+        m_radioPending = true;
+        fetchVisitorData();
+        return;
+    }
+    requestRadio();
+}
+
+void Innertube::fetchRadioMore()
+{
+    if (m_radioContinuation.isEmpty() || m_radioInFlight)
+        return;
+    m_radioInFlight = true;
+    NT_DEBUG("E2E innertube radio more id=%s\n",
+             m_radioVideoId.toUtf8().constData());
+    requestRadio();
+}
+
+void Innertube::requestRadio()
+{
+    const QString videoId = m_radioVideoId;
+    m_http->setResult([this, videoId](int status, const QByteArray &body) {
+        NT_DEBUG("E2E innertube radio HTTP status=%d client=%s\n", status,
+                 kPlayerClients[m_radioClientIndex].name);
+        handleRadio(videoId, status == 200, QString(), body);
+    });
+    m_http->setError([this, videoId](const QString &reason) {
+        handleRadio(videoId, false, reason, QByteArray());
+    });
+    m_http->setTimeoutMs(kPlayerTimeoutMs);
+    m_http->setVisitorId(m_visitorData);
+
+    const PlayerClient &pc = kPlayerClients[m_radioClientIndex];
+    const QJsonObject client = clientContext(pc, m_visitorData);
+    QJsonObject context{{QStringLiteral("client"), client}};
+    if (pc.embed) {
+        context.insert(QStringLiteral("thirdParty"),
+                       QJsonObject{{QStringLiteral("embedUrl"),
+                                    QString::fromLatin1(pc.embedUrl)}});
+    }
+
+    QJsonObject body;
+    if (m_radioContinuation.isEmpty()) {
+        // Primer batch: el mix RDAMVM<videoId> (radio) de YouTube.
+        body = {
+            {QStringLiteral("context"), context},
+            {QStringLiteral("videoId"), videoId},
+            {QStringLiteral("playlistId"),
+             QStringLiteral("RDAMVM") + videoId},
+            {QStringLiteral("params"), QStringLiteral("wAEB")},
+            {QStringLiteral("racyCheckOk"), true},
+            {QStringLiteral("contentCheckOk"), true},
+            {QStringLiteral("enablePersistentPlaylistPanel"), true},
+            {QStringLiteral("isAudioOnly"), true},
+        };
+    } else {
+        // Batch siguiente del mismo mix, por token de continuación.
+        body = {
+            {QStringLiteral("context"), context},
+            {QStringLiteral("continuation"), m_radioContinuation},
+        };
+    }
+    const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    m_http->post(kNextEndpoint, json, pc.ua, pc.clientId, pc.version,
+                 pc.embed ? pc.embedUrl : nullptr, nullptr, nullptr);
+}
+
+void Innertube::handleRadio(const QString &videoId, bool ok,
+                            const QString &error, const QByteArray &body)
+{
+    m_radioInFlight = false;
+    // Cascada de clientes solo en el primer batch: el token de continuación
+    // es específico del cliente que lo emitió.
+    auto tryNextClient = [this, videoId]() {
+        if (m_radioContinuation.isEmpty()
+            && m_radioClientIndex + 1 < kPlayerClientCount) {
+            ++m_radioClientIndex;
+            m_radioInFlight = true;
+            NT_DEBUG("E2E innertube radio trying client [%d] %s\n",
+                     m_radioClientIndex,
+                     kPlayerClients[m_radioClientIndex].name);
+            requestRadio();
+            return true;
+        }
+        return false;
+    };
+
+    if (!ok) {
+        NT_DEBUG("E2E innertube radio HTTP err: %s\n",
+                 error.toUtf8().constData());
+        if (tryNextClient())
+            return;
+        emit radioReady(videoId, QVector<VideoInfo>());
+        return;
+    }
+    QJsonParseError err;
+    QByteArray json = body.trimmed();
+    if (json.startsWith(")]}'"))
+        json.remove(0, 4);
+    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        NT_DEBUG("E2E innertube radio json fail size=%d prefix=%s\n",
+                 body.size(), body.left(120).constData());
+        if (tryNextClient())
+            return;
+        emit radioReady(videoId, QVector<VideoInfo>());
+        return;
+    }
+
+    QVector<VideoInfo> videos;
+    QString continuation;
+    parseWatchQueue(doc.object(), &videos, &continuation);
+    if (videos.isEmpty()) {
+        // El mix RDAMVM solo trae panel (playlistPanelVideoRenderer) para
+        // vídeos con edición de música; para el resto el /next responde la
+        // mezcla como recomendaciones (compactVideoRenderer). Se guarda la
+        // primera mezcla vista y se sigue cascadeando por si otro cliente
+        // trae el panel real; si ninguno lo trae, se emite la mezcla.
+        const QVector<VideoInfo> fb = parseRelated(doc.object());
+        if (!fb.isEmpty() && m_radioFallback.isEmpty()) {
+            m_radioFallback = fb;
+            NT_DEBUG("E2E innertube radio guarda mezcla id=%s n=%d\n",
+                     videoId.toUtf8().constData(), fb.size());
+        }
+        if (tryNextClient())
+            return;
+        if (!m_radioFallback.isEmpty()) {
+            NT_DEBUG("E2E innertube radio final recomendaciones id=%s n=%d\n",
+                     videoId.toUtf8().constData(),
+                     m_radioFallback.size());
+            emit radioReady(videoId, m_radioFallback);
+            m_radioFallback.clear();
+            return;
+        }
+        NT_DEBUG("E2E innertube radio empty id=%s\n",
+                 videoId.toUtf8().constData());
+        emit radioReady(videoId, QVector<VideoInfo>());
+        return;
+    }
+    m_radioFallback.clear();
+    if (!continuation.isEmpty())
+        m_radioContinuation = continuation;
+    NT_DEBUG("E2E innertube radio ok id=%s cola=%d cont=%s\n",
+             videoId.toUtf8().constData(), videos.size(),
+             m_radioContinuation.isEmpty() ? "no" : "si");
+    emit radioReady(videoId, videos);
+}
+
+// Cola "watch playlist" del mix RDAMVM: playlistPanelVideoRenderer de la
+// respuesta /next. Extrae el token de continuación (nextRadioContinuationData
+// / nextContinuationData / continuationItemRenderer) si el mix tiene más
+// batches. Soporta twoColumnWatchNextResults y el renderizado de una sola
+// columna (musicQueueRenderer del cliente de música).
+void Innertube::parseWatchQueue(const QJsonObject &root, QVector<VideoInfo> *out,
+                                QString *continuation) const
+{
+    const QJsonObject contents =
+        root.value(QStringLiteral("contents")).toObject();
+
+    auto textOf = [](const QJsonValue &val) {
+        const QJsonObject o = val.toObject();
+        const QJsonValue simple = o.value(QStringLiteral("simpleText"));
+        if (simple.isString())
+            return simple.toString();
+        const QJsonArray runs = o.value(QStringLiteral("runs")).toArray();
+        QString t;
+        for (const QJsonValue &r : runs)
+            t += r.toObject().value(QStringLiteral("text")).toString();
+        return t;
+    };
+
+    auto grabContinuation = [continuation](const QJsonObject &panel) {
+        if (!continuation->isEmpty())
+            return;
+        const QJsonArray conts =
+            panel.value(QStringLiteral("continuations")).toArray();
+        for (const QJsonValue &val : conts) {
+            const QJsonObject entry = val.toObject();
+            QString tok;
+            if (entry.contains(QStringLiteral("nextRadioContinuationData"))) {
+                tok = entry.value(QStringLiteral("nextRadioContinuationData"))
+                          .toObject()
+                          .value(QStringLiteral("continuation"))
+                          .toString();
+            } else if (entry.contains(QStringLiteral("nextContinuationData"))) {
+                tok = entry.value(QStringLiteral("nextContinuationData"))
+                          .toObject()
+                          .value(QStringLiteral("continuation"))
+                          .toString();
+            } else if (entry.contains(QStringLiteral("continuationItemRenderer"))) {
+                tok = entry.value(QStringLiteral("continuationItemRenderer"))
+                          .toObject()
+                          .value(QStringLiteral("continuationEndpoint"))
+                          .toObject()
+                          .value(QStringLiteral("continuationCommand"))
+                          .toObject()
+                          .value(QStringLiteral("token"))
+                          .toString();
+            }
+            if (!tok.isEmpty()) {
+                *continuation = tok;
+                return;
+            }
+        }
+    };
+
+    auto parsePanelContents = [&](const QJsonArray &items) {
+        for (const QJsonValue &val : items) {
+            const QJsonObject pvr =
+                val.toObject()
+                    .value(QStringLiteral("playlistPanelVideoRenderer"))
+                    .toObject();
+            if (pvr.isEmpty())
+                continue;
+            VideoInfo v;
+            v.id = pvr.value(QStringLiteral("navigationEndpoint"))
+                       .toObject()
+                       .value(QStringLiteral("watchEndpoint"))
+                       .toObject()
+                       .value(QStringLiteral("videoId"))
+                       .toString();
+            if (v.id.isEmpty())
+                v.id = pvr.value(QStringLiteral("videoId")).toString();
+            if (v.id.isEmpty())
+                continue;
+            v.title = textOf(pvr.value(QStringLiteral("title")));
+            v.channel = textOf(pvr.value(QStringLiteral("longBylineText")));
+            const QJsonArray thumbs = pvr.value(QStringLiteral("thumbnail"))
+                                          .toObject()
+                                          .value(QStringLiteral("thumbnails"))
+                                          .toArray();
+            if (!thumbs.isEmpty())
+                v.thumbnailUrl = thumbs.last().toObject()
+                                     .value(QStringLiteral("url")).toString();
+            QString durationText =
+                textOf(pvr.value(QStringLiteral("lengthText")));
+            if (durationText.isEmpty()) {
+                const QJsonArray overlays =
+                    pvr.value(QStringLiteral("thumbnailOverlays")).toArray();
+                for (const QJsonValue &over : overlays) {
+                    durationText = textOf(
+                        over.toObject()
+                            .value(QStringLiteral("thumbnailOverlayTimeStatusRenderer"))
+                            .toObject()
+                            .value(QStringLiteral("text")));
+                    if (!durationText.isEmpty())
+                        break;
+                }
+            }
+            const QStringList parts = durationText.split(QLatin1Char(':'));
+            if (parts.size() == 2) {
+                v.durationSeconds = parts.at(0).toInt() * 60
+                                    + parts.at(1).toInt();
+            } else if (parts.size() == 3) {
+                v.durationSeconds = parts.at(0).toInt() * 3600
+                                    + parts.at(1).toInt() * 60
+                                    + parts.at(2).toInt();
+            }
+            v.viewCount =
+                textOf(pvr.value(QStringLiteral("viewCountText"))).toInt();
+            out->append(v);
+        }
+    };
+
+    auto handlePanel = [&](const QJsonObject &panel) {
+        parsePanelContents(panel.value(QStringLiteral("contents")).toArray());
+        grabContinuation(panel);
+    };
+
+    // 1) Layout de dos columnas: la cola del mix vive en playlist.playlist.
+    const QJsonObject tw =
+        contents.value(QStringLiteral("twoColumnWatchNextResults")).toObject();
+    handlePanel(tw.value(QStringLiteral("playlist")).toObject()
+                    .value(QStringLiteral("playlist")).toObject());
+
+    // 1b) Layout de una columna de VISIONOS/ANDROID_VR: el mix también está
+    //     en playlist.playlist (contenidos playlistPanelVideoRenderer).
+    const QJsonObject scw =
+        contents.value(QStringLiteral("singleColumnWatchNextResults")).toObject();
+    handlePanel(scw.value(QStringLiteral("playlist")).toObject()
+                    .value(QStringLiteral("playlist")).toObject());
+
+    // 2) Cliente de música (singleColumnMusicWatchNextResultsRenderer): la
+    //    cola está en musicQueueRenderer → playlistPanelRenderer.
+    const QJsonObject scm =
+        contents.value(QStringLiteral("singleColumnMusicWatchNextResultsRenderer"))
+            .toObject();
+    const QJsonObject scmTabs =
+        scm.value(QStringLiteral("tabbedRenderer")).toObject()
+            .value(QStringLiteral("watchNextTabbedResultsRenderer")).toObject();
+    const QJsonArray scmTabsArr = scmTabs.value(QStringLiteral("tabs")).toArray();
+    for (const QJsonValue &tab : scmTabsArr) {
+        handlePanel(tab.toObject().value(QStringLiteral("tabRenderer"))
+                        .toObject().value(QStringLiteral("content"))
+                        .toObject().value(QStringLiteral("musicQueueRenderer"))
+                        .toObject().value(QStringLiteral("content"))
+                        .toObject().value(QStringLiteral("playlistPanelRenderer"))
+                        .toObject());
+    }
+
+    if (out->isEmpty())
+        NT_DEBUG("E2E innertube radio panel no encontrado\n");
+}
+
+QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
+{
+    const QJsonObject contents = root.value(QStringLiteral("contents")).toObject();
+    const QJsonObject tw = contents.value(QStringLiteral("twoColumnWatchNextResults")).toObject();
+    const QJsonObject sc = contents.value(QStringLiteral("singleColumnWatchNextResults")).toObject();
+    if (tw.isEmpty() && sc.isEmpty())
+        return {};
+
+    QVector<VideoInfo> out;
+
+    // Texto de un nodo de texto (runs o simpleText).
+    auto textOf = [](const QJsonValue &val) {
+        const QJsonObject o = val.toObject();
+        const QJsonValue simple = o.value(QStringLiteral("simpleText"));
+        if (simple.isString())
+            return simple.toString();
+        const QJsonArray runs = o.value(QStringLiteral("runs")).toArray();
+        QString t;
+        for (const QJsonValue &r : runs)
+            t += r.toObject().value(QStringLiteral("text")).toString();
+        return t;
+    };
+
+    auto durationSecondsOf = [textOf](const QJsonArray &overlays) {
+        for (const QJsonValue &val : overlays) {
+            const QJsonObject o = val.toObject();
+            if (!o.contains(QStringLiteral("thumbnailOverlayTimeStatusRenderer")))
+                continue;
+            const QString t = textOf(o.value(
+                QStringLiteral("thumbnailOverlayTimeStatusRenderer"))
+                    .toObject()
+                    .value(QStringLiteral("text")));
+            QStringList parts = t.split(QLatin1Char(':'));
+            if (parts.size() == 2) {
+                return parts.at(0).toInt() * 60 + parts.at(1).toInt();
+            }
+            if (parts.size() == 3) {
+                return parts.at(0).toInt() * 3600 + parts.at(1).toInt() * 60
+                       + parts.at(2).toInt();
+            }
+        }
+        return 0;
+    };
+
+    auto viewCountOf = [](const QString &s) {
+        QString t = s;
+        t.remove(QLatin1Char('.'));
+        t.remove(QLatin1Char(','));
+        t.remove(QLatin1Char(' '));
+        QLocale locale;
+        if (t.contains(QLatin1Char('M'))) {
+            t.remove(QLatin1Char('M'));
+            return qRound(t.toDouble() * 1e6);
+        }
+        if (t.contains(QLatin1Char('K'))) {
+            t.remove(QLatin1Char('K'));
+            return qRound(t.toDouble() * 1e3);
+        }
+        bool ok = false;
+        const qlonglong n = t.toLongLong(&ok);
+        return ok ? static_cast<int>(n) : 0;
+    };
+
+    auto pushRenderer = [&](const QJsonObject &item) {
+        const QJsonObject vr =
+            item.value(QStringLiteral("videoRenderer")).toObject();
+        const QJsonObject cr =
+            item.value(QStringLiteral("compactVideoRenderer")).toObject();
+        const QJsonObject *r = vr.isEmpty() ? &cr : &vr;
+        if (r->isEmpty())
+            return;
+        VideoInfo v;
+        v.id = r->value(QStringLiteral("navigationEndpoint"))
+                   .toObject()
+                   .value(QStringLiteral("watchEndpoint"))
+                   .toObject()
+                   .value(QStringLiteral("videoId"))
+                   .toString();
+        if (v.id.isEmpty())
+            return;
+        v.title = textOf(r->value(QStringLiteral("title")));
+        const QJsonArray ownerRuns =
+            r->value(QStringLiteral("ownerText")).toObject()
+                .value(QStringLiteral("runs")).toArray();
+        if (!ownerRuns.isEmpty()) {
+            const QJsonObject o0 = ownerRuns.at(0).toObject();
+            v.channel = o0.value(QStringLiteral("text")).toString();
+            v.channelId = o0.value(QStringLiteral("navigationEndpoint"))
+                              .toObject()
+                              .value(QStringLiteral("browseEndpoint"))
+                              .toObject()
+                              .value(QStringLiteral("browseId"))
+                              .toString();
+        } else {
+            v.channel = textOf(r->value(QStringLiteral("longBylineText")));
+        }
+        const QJsonArray thumbs = r->value(QStringLiteral("thumbnail"))
+                                      .toObject()
+                                      .value(QStringLiteral("thumbnails"))
+                                      .toArray();
+        if (!thumbs.isEmpty())
+            v.thumbnailUrl = thumbs.last().toObject()
+                                 .value(QStringLiteral("url")).toString();
+        v.durationSeconds = durationSecondsOf(
+            r->value(QStringLiteral("thumbnailOverlays")).toArray());
+        v.viewCount = viewCountOf(textOf(r->value(QStringLiteral("viewCountText"))));
+        out.append(v);
+    };
+
+    // Recorre cualquier contenedor de resultados (results y secondaryResults),
+    // bajando por richItemRenderer/itemSectionRenderer.
+    std::function<void(const QJsonArray &)> collect =
+        [&](const QJsonArray &items) {
+            for (const QJsonValue &val : items) {
+                if (!val.isObject())
+                    continue;
+                const QJsonObject o = val.toObject();
+                if (o.contains(QStringLiteral("videoRenderer"))
+                    || o.contains(QStringLiteral("compactVideoRenderer"))) {
+                    pushRenderer(o);
+                } else if (o.contains(QStringLiteral("richItemRenderer"))) {
+                    const QJsonValue content =
+                        o.value(QStringLiteral("richItemRenderer"))
+                            .toObject()
+                            .value(QStringLiteral("content"));
+                    if (content.isObject()) {
+                        collect(QJsonArray{content});
+                    }
+                } else if (o.contains(QStringLiteral("itemSectionRenderer"))) {
+                    collect(o.value(QStringLiteral("itemSectionRenderer"))
+                                .toObject()
+                                .value(QStringLiteral("contents"))
+                                .toArray());
+                }
+            }
+        };
+
+    collect(tw.value(QStringLiteral("results"))
+                .toObject().value(QStringLiteral("results"))
+                .toObject().value(QStringLiteral("contents")).toArray());
+    collect(tw.value(QStringLiteral("secondaryResults"))
+                .toObject().value(QStringLiteral("secondaryResults"))
+                .toObject().value(QStringLiteral("results")).toArray());
+    // Clientes de una sola columna (VISIONOS/ANDROID): la lista completa de
+    // recomendaciones vive en watchNextTabbedResultsRenderer → tabs[]
+    // → tabRenderer → content → sectionListRenderer → contents[] →
+    // itemSectionRenderer → contents → compactVideoRenderer / videoRenderer.
+    const QJsonArray scTabs =
+        sc.value(QStringLiteral("results")).toObject()
+            .value(QStringLiteral("watchNextTabbedResultsRenderer")).toObject()
+            .value(QStringLiteral("tabs")).toArray();
+    for (const QJsonValue &tab : scTabs) {
+        const QJsonObject content =
+            tab.toObject().value(QStringLiteral("tabRenderer")).toObject()
+                .value(QStringLiteral("content")).toObject();
+        const QJsonArray secs =
+            content.value(QStringLiteral("sectionListRenderer")).toObject()
+                .value(QStringLiteral("contents")).toArray();
+        for (const QJsonValue &sec : secs) {
+            collect(sec.toObject().value(QStringLiteral("itemSectionRenderer"))
+                        .toObject().value(QStringLiteral("contents")).toArray());
+        }
+    }
+    // Clientes de una sola columna (VISIONOS): la cola de auto-reproducción
+    // vive en autoplay.autoplay.sets[].autoplayVideoRenderer.compactVideoRenderer.
+    const QJsonArray sets =
+        sc.value(QStringLiteral("autoplay")).toObject()
+            .value(QStringLiteral("autoplay")).toObject()
+            .value(QStringLiteral("sets")).toArray();
+    for (const QJsonValue &val : sets) {
+        if (!val.isObject())
+            continue;
+        const QJsonObject avr =
+            val.toObject().value(QStringLiteral("autoplayVideoRenderer"))
+               .toObject();
+        if (!avr.isEmpty())
+            pushRenderer(avr);
+    }
+
+    // Dedupe por id (un mismo recomendado puede aparecer en ambos contenedores).
+    QVector<VideoInfo> unique;
+    for (const VideoInfo &v : out) {
+        bool seen = false;
+        for (const VideoInfo &d : unique) {
+            if (d.id == v.id) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen)
+            unique.append(v);
+    }
+    return unique;
 }
 
 void Innertube::requestPlayer()
 {
+    if (!m_hlsInFlight)
+        m_hlsInFlight = true; // asegurar el single-flight si se entró vía visitor
     m_http->setResult([this](int status, const QByteArray &body) {
         handlePlayer(status == 200, QString(), body);
     });
     m_http->setError([this](const QString &reason) {
         handlePlayer(false, reason, QByteArray());
     });
+    m_http->setTimeoutMs(kPlayerTimeoutMs);
     m_http->setVisitorId(m_visitorData);
 
+    const PlayerClient &pc = kPlayerClients[m_clientIndex];
+    const QJsonObject client = clientContext(pc, m_visitorData);
+    QJsonObject context{{QStringLiteral("client"), client}};
+    if (pc.embed) {
+        context.insert(QStringLiteral("thirdParty"),
+                       QJsonObject{{QStringLiteral("embedUrl"),
+                                    QString::fromLatin1(pc.embedUrl)}});
+    }
+
     const QJsonObject body{
-        {QStringLiteral("context"),
-         QJsonObject{{QStringLiteral("client"), visionOsClient(m_visitorData)}}},
+        {QStringLiteral("context"), context},
         {QStringLiteral("playbackContext"),
          QJsonObject{{QStringLiteral("contentPlaybackContext"),
                       QJsonObject{{QStringLiteral("signatureTimestamp"),
@@ -552,23 +1423,8 @@ void Innertube::requestPlayer()
 
     // X-Goog-Visitor-Id se añade al request dinámicamente; lo insertamos
     // directamente en las cabeceras por estado.
-    m_http->post(kPlayerEndpoint, json, kVisionOSUA);
-}
-
-void Innertube::handleVisitorData(bool ok, const QString &error, const QByteArray &body)
-{
-    if (!ok) {
-        fail(error.isEmpty() ? QStringLiteral("sw.js_data HTTP err") : error);
-        return;
-    }
-    const QString visitorData = visitorDataFromSwJsData(body);
-    if (visitorData.isEmpty()) {
-        fail(QStringLiteral("no se pudo extraer visitorData de sw.js_data"));
-        return;
-    }
-    m_visitorData = visitorData;
-    NT_DEBUG("E2E innertube visitorData ok len=%d\n", visitorData.size());
-    requestPlayer();
+    m_http->post(kPlayerEndpoint, json, pc.ua, pc.clientId, pc.version,
+                 pc.embed ? pc.embedUrl : nullptr);
 }
 
 void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &body)
@@ -593,49 +1449,191 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
     const QJsonObject playability =
         root.value(QStringLiteral("playabilityStatus")).toObject();
     const QString status = playability.value(QStringLiteral("status")).toString();
+    const QString reason = playability.value(QStringLiteral("reason")).toString();
     if (status != QLatin1String("OK")) {
-        const QString reason =
-            playability.value(QStringLiteral("reason")).toString();
+        if (status == QLatin1String("LOGIN_REQUIRED") && !m_retryingVisitor) {
+            m_retryingVisitor = true;
+            m_visitorData.clear();
+            m_visitorExpiresAt = 0;
+            // El visitor Data regenerado invalida las URLs firmadas previas
+            // para este vídeo (podrían quedar ligadas al token anterior).
+            m_hlsCache.remove(m_videoId);
+            NT_DEBUG("E2E innertube regenerating visitorData after "
+                     "LOGIN_REQUIRED\n");
+            m_playerPending = true;
+            fetchVisitorData();
+            return;
+        }
+        // Cascada de clientes estilo NewPipe: agotado el cliente actual o el
+        // intento con un visitorData fresco, probar el siguiente cliente antes
+        // de abandonar.
+        if (m_clientIndex + 1 < kPlayerClientCount) {
+            ++m_clientIndex;
+            m_retryingVisitor = false;
+            NT_DEBUG("E2E innertube trying client [%d] %s after status=%s\n",
+                     m_clientIndex, kPlayerClients[m_clientIndex].name,
+                     status.toUtf8().constData());
+            requestPlayer();
+            return;
+        }
         fail(reason.isEmpty()
                  ? QStringLiteral("player status=%1").arg(status)
                  : QStringLiteral("player status=%1: %2").arg(status, reason));
         return;
     }
+
+    // Respuesta falseada estilo "no disponible en esta app" (la detecta
+    // NewPipe) o rate-limit (Piped): el videoId devuelto no es el pedido.
+    const QString gotVideoId = root.value(QStringLiteral("videoDetails"))
+                                   .toObject()
+                                   .value(QStringLiteral("videoId"))
+                                   .toString();
+    if (gotVideoId != m_videoId) {
+        NT_DEBUG("E2E innertube invalid player response (got %s)\n",
+                 gotVideoId.isEmpty() ? "(sin id)" : gotVideoId.toUtf8().constData());
+        if (m_clientIndex + 1 < kPlayerClientCount) {
+            ++m_clientIndex;
+            m_retryingVisitor = false;
+            requestPlayer();
+            return;
+        }
+        fail(QStringLiteral("respuesta player no válida (videoId distinto)"));
+        return;
+    }
+
     const QJsonObject streamingData =
         root.value(QStringLiteral("streamingData")).toObject();
     const QString hls =
         streamingData.value(QStringLiteral("hlsManifestUrl")).toString();
     if (hls.isEmpty()) {
+        // En VODs solo los clientes Apple devuelven hlsManifestUrl; agotar la
+        // cascada antes de fallar.
+        NT_DEBUG("E2E innertube client %s sin hlsManifestUrl\n",
+                 kPlayerClients[m_clientIndex].name);
+        if (m_clientIndex + 1 < kPlayerClientCount) {
+            ++m_clientIndex;
+            m_retryingVisitor = false;
+            requestPlayer();
+            return;
+        }
         fail(QStringLiteral("player OK pero sin hlsManifestUrl"));
         return;
     }
     const QVector<int> heights = videoHeights(streamingData);
-    NT_DEBUG("E2E innertube hls ok len=%d alturas=%d\n", hls.size(),
-             heights.size());
+    m_lastWinClient = m_clientIndex;
+    const qint64 elapsed =
+        QDateTime::currentMSecsSinceEpoch() - m_hlsStartMs;
+    NT_DEBUG("E2E innertube hls ok len=%d alturas=%d client=%s (%lldms)\n",
+             hls.size(), heights.size(), kPlayerClients[m_clientIndex].name,
+             static_cast<long long>(elapsed));
+    // Caché de sesión: guarda hlsManifestUrl firmada y su expiración para
+    // no repetir el POST player en cambios de resolución del mismo vídeo.
+    const qint64 exp = expireFromUrl(hls);
+    m_hlsCache.insert(m_videoId, HlsCacheEntry{hls, QByteArray(), heights, exp,
+                                               m_clientIndex});
+    m_hlsInFlight = false;
+    mMasterInFlight = false;
     emit hlsReady(m_videoId, hls, heights);
 }
 
 void Innertube::handleMaster(bool ok, const QString &error,
                              const QByteArray &body)
 {
+    const qint64 elapsed =
+        QDateTime::currentMSecsSinceEpoch() - m_masterStartMs;
     if (!ok) {
+        mMasterInFlight = false;
         fail(error.isEmpty() ? QStringLiteral("master HTTP err") : error);
         return;
     }
     if (body.isEmpty()) {
+        mMasterInFlight = false;
         fail(QStringLiteral("master vacío"));
         return;
     }
-    NT_DEBUG("E2E innertube master ok len=%d\n", body.size());
+    NT_DEBUG("E2E innertube master ok len=%d (%lldms)\n", body.size(),
+             static_cast<long long>(elapsed));
+    // Guarda el cuerpo del master en la caché del videoId para evitar
+    // re-descargarlo en cambios de resolución.
+    auto it = m_hlsCache.find(m_videoId);
+    if (it != m_hlsCache.end())
+        it->masterBody = body;
+    else
+        m_hlsCache.insert(m_videoId,
+                          HlsCacheEntry{QString(), body, QVector<int>(), 0,
+                                        m_clientIndex});
+    mMasterInFlight = false;
     emit masterReady(m_videoId, body);
 }
 
 void Innertube::fail(const QString &reason)
 {
     const QString id = m_videoId;
+    m_hlsInFlight = false;
+    mMasterInFlight = false;
     NT_DEBUG("E2E innertube failed id=%s reason=%s\n", id.toUtf8().constData(),
              reason.toUtf8().constData());
     emit failed(id, reason);
+}
+
+bool Innertube::serveCachedHls(const QString &videoId)
+{
+    if (m_hlsInFlight && m_flightVideoId == videoId)
+        return false; // la petición en curso se resolverá sola
+    if (m_http->isBusy())
+        return false; // transporte ocupado (POST de otro vídeo): no emitir
+                      // señales que dispararían un GET real y lo abortaría
+    const auto it = m_hlsCache.constFind(videoId);
+    if (it == m_hlsCache.constEnd())
+        return false;
+    if (it->hlsUrl.isEmpty()
+        || (it->expiresAt > 0
+            && QDateTime::currentSecsSinceEpoch() >= it->expiresAt)) {
+        const_cast<Innertube *>(this)->m_hlsCache.erase(it);
+        return false;
+    }
+    m_lastWinClient = it->clientIndex;
+    m_videoId = videoId;
+    emit hlsReady(videoId, it->hlsUrl, it->heights);
+    return true;
+}
+
+bool Innertube::serveCachedMaster(const QString &videoId)
+{
+    if (mMasterInFlight && m_flightVideoId == videoId)
+        return false;
+    if (m_http->isBusy())
+        return false; // ver serveCachedHls
+    const auto it = m_hlsCache.constFind(videoId);
+    if (it == m_hlsCache.constEnd())
+        return false;
+    if (it->masterBody.isEmpty()
+        || (it->expiresAt > 0
+            && QDateTime::currentSecsSinceEpoch() >= it->expiresAt))
+        return false;
+    m_videoId = videoId;
+    emit masterReady(videoId, it->masterBody);
+    return true;
+}
+
+qint64 Innertube::expireFromUrl(const QString &url) const
+{
+    // La URL firmada incluye /expire/<timestamp unix>/. Si no aparece (o no
+    // es numérico) devolvemos 0 → la caché se considera caducada y se
+    // descarta en la siguiente consulta.
+    const QByteArray marker = "/expire/";
+    const int pos = url.indexOf(QString::fromLatin1(marker));
+    if (pos < 0)
+        return 0;
+    int end = pos + marker.size();
+    while (end < url.size() && url.at(end).isDigit())
+        ++end;
+    if (end == pos + marker.size())
+        return 0;
+    bool ok = false;
+    const qint64 ts = url.mid(pos + marker.size(), end - pos - marker.size())
+                          .toLongLong(&ok);
+    return ok ? ts : 0;
 }
 
 bool innertubeSelfTest()
@@ -647,18 +1645,17 @@ bool innertubeSelfTest()
     auto *timeout = new QTimer;
     timeout->setSingleShot(true);
     QObject::connect(timeout, &QTimer::timeout, [&success]() {
-        std::fprintf(stderr, "SELFTEST FAIL: innertube timeout sin HLS\n");
+        std::fprintf(stderr, "SELFTEST FAIL: innertube timeout sin HLS/next\n");
         QCoreApplication::exit(1);
     });
 
     QObject::connect(&tube, &Innertube::hlsReady,
-                     [&success, videoId](const QString &vid,
-                                         const QString &hlsUrl,
-                                         const QVector<int> &heights) {
-                         success = vid == videoId &&
-                                   hlsUrl.startsWith(QLatin1String("https://")) &&
-                                   !heights.isEmpty();
-                         if (!success) {
+                     [&tube, videoId](const QString &vid,
+                                      const QString &hlsUrl,
+                                      const QVector<int> &heights) {
+                         if (vid != videoId ||
+                             !hlsUrl.startsWith(QLatin1String("https://")) ||
+                             heights.isEmpty()) {
                              std::fprintf(stderr,
                                           "SELFTEST FAIL: hls inválida "
                                           "(id=%s hls=%s alturas=%d)\n",
@@ -670,10 +1667,48 @@ bool innertubeSelfTest()
                          }
                          std::fprintf(stderr,
                                       "SELFTEST OK (visitorData→player→hls+alturas) "
-                                      "id=%s hls=%s alturas=%d\n",
+                                      "id=%s hls=%s alturas=%d → next\n",
                                       vid.toUtf8().constData(),
                                       hlsUrl.toUtf8().constData(),
                                       heights.size());
+                         tube.fetchNext(videoId);
+                     });
+    QObject::connect(&tube, &Innertube::relatedReady,
+                     [&success, &tube, videoId](const QString &vid,
+                                                const QVector<VideoInfo> &videos) {
+                         if (vid != videoId || videos.isEmpty()) {
+                             std::fprintf(stderr,
+                                          "SELFTEST FAIL: next vacío "
+                                          "(id=%s relacionados=%d)\n",
+                                          vid.toUtf8().constData(),
+                                          videos.size());
+                             QCoreApplication::exit(1);
+                             return;
+                         }
+                         success = true;
+                         std::fprintf(stderr,
+                                      "SELFTEST OK next relacionados=%d "
+                                      "(1º: %s) → radio\n",
+                                      videos.size(),
+                                      videos.first().title.toUtf8().constData());
+                         tube.fetchRadio(videoId);
+                     });
+    QObject::connect(&tube, &Innertube::radioReady,
+                     [](const QString &vid,
+                        const QVector<VideoInfo> &videos) {
+                         if (videos.isEmpty()) {
+                             std::fprintf(stderr,
+                                          "SELFTEST FAIL: radio vacío (id=%s)\n",
+                                          vid.toUtf8().constData());
+                             QCoreApplication::exit(1);
+                             return;
+                         }
+                         std::fprintf(stderr,
+                                      "SELFTEST OK radio videos=%d "
+                                      "(1º: %s, dup=%s)\n",
+                                      videos.size(),
+                                      videos.first().title.toUtf8().constData(),
+                                      videos.first().id.toUtf8().constData());
                          QCoreApplication::exit(0);
                      });
     QObject::connect(&tube, &Innertube::failed,

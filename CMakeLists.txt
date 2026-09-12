@@ -44,6 +44,8 @@ add_executable(nevertube_qt2
   src/ui/video_list_view.h
   src/ui/pages/home_page.cpp
   src/ui/pages/home_page.h
+  src/ui/pages/channel_page.cpp
+  src/ui/pages/channel_page.h
   src/ui/pages/search_page.cpp
   src/ui/pages/search_page.h
   src/ui/pages/watch_page.cpp

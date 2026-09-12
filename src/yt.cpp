@@ -21,10 +21,96 @@
 namespace {
 
 const QString kNoWarnings = QStringLiteral("--no-warnings");
+// Idioma de los metadatos (títulos): sin esto YouTube auto-traduce títulos a
+// inglés según el contexto, aunque el vídeo sea de un creador hispanohablante.
+const QString kYtLang = QStringLiteral("--extractor-args");
+const QString kYtLangArg = QStringLiteral("youtube:lang=es");
+
+// Centinelas para m_winningClient (índices de cliente Innertube son >= 0).
+constexpr int kResolveYtDlp = -1;      // yt-dlp fue quien resolvió
+constexpr int kResolveUnknown = -2;    // aún sin ganador registrado
 
 int boundedSafe(int value)
 {
     return value < 0 ? 0 : value;
+}
+
+// Devuelve el valor del atributo EXT-X-MEDIA dado (p. ej. LANGUAGE, NAME).
+QString mediaAttr(const QString &line, const QLatin1String attr)
+{
+    const QString needle = QLatin1String(attr.data()) + QStringLiteral("=\"");
+    const int pos = line.indexOf(needle);
+    if (pos < 0)
+        return QString();
+    const int start = pos + needle.size();
+    const int end = line.indexOf(QLatin1Char('"'), start);
+    if (end < 0)
+        return QString();
+    return line.mid(start, end - start);
+}
+
+bool isOriginalAudio(const QString &line)
+{
+    return line.contains(QLatin1String("acont=original"))
+        || line.contains(QLatin1String("acont%3Doriginal"));
+}
+
+// Elige qué pistas de audio conservar del master, priorizando la preferencia
+// de idioma (m_audioLang). Con preferencia vacía (por defecto) solo se
+// conserva la pista original: YouTube incluye además doblajes de IA
+// ("dubbed-auto") que, sin DEFAULT=YES, mpv elegiría (usa la primera pista de
+// cada grupo). Para una preferencia concreta se emite la pista que encaja
+// antes que la original, que queda como respaldo.
+QStringList selectAudioTracks(const QStringList &audioLines,
+                              const QString &prefLang)
+{
+    QHash<QString, QStringList> byGroup;
+    QList<QString> groupOrder;
+    for (const QString &line : audioLines) {
+        const QString group = mediaAttr(line, QLatin1String("GROUP-ID"));
+        if (group.isEmpty())
+            continue;
+        if (!byGroup.contains(group))
+            groupOrder.append(group);
+        byGroup[group].append(line);
+    }
+
+    QStringList out;
+    for (const QString &group : std::as_const(groupOrder)) {
+        const QStringList tracks = byGroup.value(group);
+        QString original;
+        QString preflight;
+        QStringList dubbed;
+        for (const QString &t : tracks) {
+            if (isOriginalAudio(t)) {
+                original = t;
+            } else {
+                dubbed.append(t);
+                if (preflight.isEmpty() && !prefLang.isEmpty()) {
+                    const QString lang = mediaAttr(t, QLatin1String("LANGUAGE"));
+                    if (lang == prefLang
+                        || lang.startsWith(prefLang + QLatin1Char('-')))
+                        preflight = t;
+                }
+            }
+        }
+        if (!prefLang.isEmpty() && !preflight.isEmpty()) {
+            // Preferencia encontrada: ese doblaje primero, el resto atrás.
+            out.append(preflight);
+            for (const QString &t : std::as_const(dubbed)) {
+                if (t != preflight)
+                    out.append(t);
+            }
+        }
+        if (!original.isEmpty() && !out.contains(original)) {
+            out.append(original);
+        } else if (original.isEmpty() && !tracks.isEmpty()) {
+            // Sin pista original reconocible (vídeos sin `acont=original`):
+            // conservar la primera del grupo para no dejar el vídeo sin audio.
+            out.append(tracks.first());
+        }
+    }
+    return out;
 }
 
 } // namespace
@@ -37,6 +123,40 @@ Yt::Yt(QObject *parent)
     qRegisterMetaType<QVector<FormatInfo>>("QVector<FormatInfo>");
     qRegisterMetaType<StreamInfo>("StreamInfo");
     qRegisterMetaType<PlaylistInfo>("PlaylistInfo");
+
+    // /next: reenvío directo del Innertube al resto de la app.
+    connect(&m_innertube, &Innertube::relatedReady, this,
+            &Yt::relatedReady);
+    connect(&m_innertube, &Innertube::radioReady, this,
+            &Yt::radioReady);
+}
+
+NextMode nextMode()
+{
+    static const NextMode mode = []() {
+        const QByteArray raw = qgetenv("NEVERTUBE_NEXT_MODE").trimmed().toLower();
+        if (raw == "none")
+            return NextMode::None;
+        if (raw == "suggestions")
+            return NextMode::Suggestions;
+        return NextMode::Radio; // por defecto: modelo 3 (mix RDAMVM + continuación)
+    }();
+    return mode;
+}
+
+void Yt::relatedVideos(const QString &videoId)
+{
+    m_innertube.fetchNext(videoId);
+}
+
+void Yt::radioVideos(const QString &videoId)
+{
+    m_innertube.fetchRadio(videoId);
+}
+
+void Yt::radioMore()
+{
+    m_innertube.fetchRadioMore();
 }
 
 QString Yt::videoIdFromUrl(const QString &url)
@@ -56,17 +176,35 @@ QString Yt::videoIdFromUrl(const QString &url)
     return QString();
 }
 
-void Yt::search(const QString &query, int limit)
+void Yt::setAudioLanguage(const QString &lang)
 {
-    const QStringList args = {
+    const QString clean = lang.trimmed();
+    m_audioLang = clean.compare(QLatin1String("original"),
+                                Qt::CaseInsensitive) == 0
+            ? QString()
+            : clean;
+}
+
+QString Yt::audioLanguage() const
+{
+    return m_audioLang;
+}
+
+void Yt::search(const QString &query, int limit, int offset)
+{
+    QStringList args = {
         kNoWarnings,
+        kYtLang,
+        kYtLangArg,
         QStringLiteral("--flat-playlist"),
         QStringLiteral("--ignore-errors"),
         QStringLiteral("--dump-single-json"),
-        QStringLiteral("ytsearch%1:%2").arg(limit).arg(query),
+        QStringLiteral("ytsearch%1:%2").arg(offset + limit).arg(query),
     };
-    execJson(args, [this](const QJsonObject &root) {
-        emit searchFinished(parseVideos(root));
+    if (offset > 0)
+        args << QStringLiteral("--playlist-start") << QString::number(offset + 1);
+    execJson(args, [this, query](const QJsonObject &root) {
+        emit searchFinished(query, parseVideos(root));
     });
 }
 
@@ -74,6 +212,8 @@ void Yt::trending(int limit)
 {
     const QStringList args = {
         kNoWarnings,
+        kYtLang,
+        kYtLangArg,
         QStringLiteral("--flat-playlist"),
         QStringLiteral("--ignore-errors"),
         QStringLiteral("-I"),
@@ -91,15 +231,49 @@ void Yt::channelVideos(const QString &channelId, int limit)
     const QString uuId = QStringLiteral("UU%1").arg(channelId.mid(2));
     const QStringList args = {
         kNoWarnings,
+        kYtLang,
+        kYtLangArg,
         QStringLiteral("--flat-playlist"),
         QStringLiteral("--ignore-errors"),
-        QStringLiteral("-I"),
-        QStringLiteral("1:%1").arg(limit),
+        QStringLiteral("--playlist-end"),
+        QString::number(limit),
         QStringLiteral("--dump-single-json"),
         QStringLiteral("https://www.youtube.com/playlist?list=%1").arg(uuId),
     };
     execJson(args, [this](const QJsonObject &root) {
-        emit channelVideosFinished(parseVideos(root));
+        QVector<VideoInfo> videos = parseVideos(root);
+        std::sort(videos.begin(), videos.end(), [](const VideoInfo &a,
+                                                   const VideoInfo &b) {
+            return a.publishedAt > b.publishedAt;
+        });
+        emit channelVideosFinished(videos);
+    });
+}
+
+void Yt::channelTabVideos(const QString &channelId, const QString &tab, int limit,
+                          int offset)
+{
+    const QString path = tab == QLatin1String("shorts") ? QStringLiteral("/shorts")
+                       : tab == QLatin1String("live") ? QStringLiteral("/streams")
+                       : QStringLiteral("/videos");
+    QStringList args = {
+        kNoWarnings,
+        kYtLang,
+        kYtLangArg,
+        QStringLiteral("--flat-playlist"),
+        QStringLiteral("--ignore-errors"),
+        QStringLiteral("--playlist-end"),
+        QString::number(offset + limit),
+        QStringLiteral("--dump-single-json"),
+        QStringLiteral("https://www.youtube.com/channel/%1%2").arg(channelId, path),
+    };
+    if (offset > 0)
+        args << QStringLiteral("--playlist-start") << QString::number(offset + 1);
+    execJson(args, [this, tab](const QJsonObject &root) {
+        QVector<VideoInfo> videos = parseVideos(root);
+        NT_DEBUG("E2E channelTabVideos tab=%s count=%d\n",
+                 tab.toUtf8().constData(), (int)videos.size());
+        emit channelTabVideosFinished(tab, videos);
     });
 }
 
@@ -107,19 +281,29 @@ void Yt::channelInfo(const QString &channelId)
 {
     const QStringList args = {
         kNoWarnings,
+        QStringLiteral("--extractor-args"),
+        QStringLiteral("youtube:player_client=web_embedded,lang=es"),
         QStringLiteral("--skip-download"),
         QStringLiteral("--dump-single-json"),
         QStringLiteral("https://www.youtube.com/channel/%1/about").arg(channelId),
     };
     execJson(args, [this, channelId](const QJsonObject &root) {
-        emit channelInfoReady(channelFromJson(channelId, root));
+        const ChannelInfo info = channelFromJson(channelId, root);
+        NT_DEBUG("E2E channelInfo id=%s name=%s subs=%d\n",
+                 channelId.toUtf8().constData(),
+                 info.name.toUtf8().constData(), info.subscriberCount);
+        emit channelInfoReady(info);
     });
 }
 
 void Yt::getDetail(const QString &videoId)
 {
+    // web_embedded evita el bloqueo anti-bot del cliente por defecto y
+    // sigue devolviendo título/descripción en el idioma de lang (es).
     const QStringList args = {
         kNoWarnings,
+        QStringLiteral("--extractor-args"),
+        QStringLiteral("youtube:player_client=web_embedded,lang=es"),
         QStringLiteral("--skip-download"),
         QStringLiteral("--dump-single-json"),
         QStringLiteral("https://www.youtube.com/watch?v=%1").arg(videoId),
@@ -170,6 +354,8 @@ void Yt::playlistDetail(const QString &playlistId, int limit)
 {
     const QStringList args = {
         kNoWarnings,
+        kYtLang,
+        kYtLangArg,
         QStringLiteral("--flat-playlist"),
         QStringLiteral("--ignore-errors"),
         QStringLiteral("-I"),
@@ -186,6 +372,18 @@ void Yt::playlistDetail(const QString &playlistId, int limit)
 }
 
 void Yt::resolveStream(const QString &videoId, int maxHeight)
+{
+    const int winning = m_winningClient.value(videoId, kResolveUnknown);
+    NT_DEBUG("E2E resolveStream id=%s maxH=%d winner=%d\n",
+             videoId.toUtf8().constData(), maxHeight, winning);
+    if (winning == kResolveYtDlp)
+        resolveWithYtDlp(videoId, maxHeight, /*fallbackToInnertube*/ true);
+    else
+        resolveViaInnertube(videoId, maxHeight, winning);
+}
+
+void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
+                             int preferredClient)
 {
     auto *guard = new QObject(this);
     auto *innTube = &m_innertube;
@@ -213,6 +411,7 @@ void Yt::resolveStream(const QString &videoId, int maxHeight)
                     // Sin tabla de alturas: entregar el master sin filtrar
                     // (comportamiento previo).
                     guard->deleteLater();
+                    m_winningClient[videoId] = innTube->lastWinClient();
                     StreamInfo s;
                     s.url = hlsUrl;
                     s.label = qualityName(maxHeight) + QLatin1Char('p');
@@ -231,7 +430,7 @@ void Yt::resolveStream(const QString &videoId, int maxHeight)
                 QMetaObject::Connection masterConn;
                 masterConn = connect(
                     innTube, &Innertube::masterReady, filterGuard,
-                    [this, filterGuard, videoId, wanted, gen](
+                    [this, filterGuard, innTube, videoId, wanted, gen](
                         const QString &fid, const QByteArray &masterBody) {
                         if (fid != videoId || gen != m_resolveGen)
                             return;
@@ -253,6 +452,7 @@ void Yt::resolveStream(const QString &videoId, int maxHeight)
                         s.label = QString::number(wanted) + QLatin1Char('p');
                         s.height = wanted;
                         s.multipleUrls = false;
+                        m_winningClient[videoId] = innTube->lastWinClient();
                         NT_DEBUG("E2E hls filtrado a %dp url=%s\n", wanted,
                                  s.url.toUtf8().constData());
                         filterGuard->deleteLater();
@@ -277,14 +477,30 @@ void Yt::resolveStream(const QString &videoId, int maxHeight)
                 innTube->fetchMaster(vid, hlsUrl);
             });
 
-    m_innertube.fetchHls(videoId);
+    m_innertube.fetchHls(videoId, preferredClient);
 }
 
-void Yt::resolveWithYtDlp(const QString &videoId, int maxHeight)
+void Yt::resolveWithYtDlp(const QString &videoId, int maxHeight,
+                           bool fallbackToInnertube)
 {
+    // Helper interno: si hay fallback habilitado, al fallar reintentar
+    // Innertube con la cascada completa (solo la primera vez).
+    const auto onFail =
+            [this, videoId, maxHeight, fallbackToInnertube](const QString &msg) {
+                if (fallbackToInnertube) {
+                    qWarning("yt: yt-dlp preferido falló; reiniciando cascada "
+                             "innertube para %s",
+                             videoId.toUtf8().constData());
+                    resolveViaInnertube(videoId, maxHeight, -1);
+                    return;
+                }
+                emit resolveError(msg);
+            };
+
     getUrls(videoId, formatSelector(maxHeight),
-            [this, videoId, maxHeight](const QStringList &combinedUrls) {
+            [this, videoId, maxHeight, onFail](const QStringList &combinedUrls) {
                 if (combinedUrls.size() == 1) {
+                    m_winningClient[videoId] = kResolveYtDlp;
                     StreamInfo s;
                     s.url = combinedUrls.first();
                     s.label = qualityName(maxHeight) + QLatin1Char('p');
@@ -300,25 +516,26 @@ void Yt::resolveWithYtDlp(const QString &videoId, int maxHeight)
                                    "[protocol=m3u8_native]/bestvideo[height<=%1]")
                         .arg(maxHeight);
                 getUrls(videoId, videoSel,
-                        [this, videoId, maxHeight](const QStringList &videoUrls) {
+                        [this, videoId, maxHeight, onFail](
+                            const QStringList &videoUrls) {
                             if (videoUrls.isEmpty()) {
-                                emit resolveError(QStringLiteral(
+                                onFail(QStringLiteral(
                                     "yt-dlp no devolvió una URL reproducible; "
                                     "el video puede requerir iniciar sesión."));
                                 return;
                             }
                             const QString videoUrl = videoUrls.first();
                             if (!videoUrl.contains(QLatin1String(".m3u8"))) {
-                                emit resolveError(QStringLiteral(
+                                onFail(QStringLiteral(
                                     "yt-dlp solo devolvió video sin audio."));
                                 return;
                             }
                             getUrls(videoId,
                                     QStringLiteral("bestaudio[protocol=m3u8_native]/bestaudio"),
-                                    [this, videoId, maxHeight, videoUrl](
+                                    [this, videoId, maxHeight, videoUrl, onFail](
                                         const QStringList &audioUrls) {
                                         if (audioUrls.isEmpty()) {
-                                            emit resolveError(QStringLiteral(
+                                            onFail(QStringLiteral(
                                                 "yt-dlp no devolvió una pista de audio; "
                                                 "el video puede requerir iniciar sesión."));
                                             return;
@@ -327,10 +544,11 @@ void Yt::resolveWithYtDlp(const QString &videoId, int maxHeight)
                                             videoId, videoUrl, audioUrls.first());
                                         const QString origin = m_hls.start();
                                         if (master.isEmpty() || origin.isEmpty()) {
-                                            emit resolveError(QStringLiteral(
+                                            onFail(QStringLiteral(
                                                 "No se pudo preparar el stream de respaldo."));
                                             return;
                                         }
+                                        m_winningClient[videoId] = kResolveYtDlp;
                                         StreamInfo s;
                                         s.url = origin + QLatin1Char('/')
                                                 + videoId + QLatin1String(".m3u8");
@@ -388,6 +606,9 @@ int Yt::closestHeight(int requested, const QVector<int> &heights)
 // Filtra el master HLS de YouTube dejando únicamente las variantes con
 // RESOLUTION= altura <= maxHeight. El abreviado se sirve desde el HlsServer
 // local para que el reproductor solo vea las calidades permitidas.
+// Las pistas de audio se eligen con selectAudioTracks: con m_audioLang vacío
+// (por defecto) solo la original; el orden de publicación define cuál elige
+// mpv (elige la primera de cada grupo).
 QString Yt::buildFilteredMaster(const QString &videoId,
                                 const QByteArray &masterBody, int maxHeight)
 {
@@ -395,16 +616,18 @@ QString Yt::buildFilteredMaster(const QString &videoId,
         return QString();
 
     QStringList out;
+    QStringList audioLines;
     const QStringList lines = QString::fromUtf8(masterBody).split(QLatin1Char('\n'));
-    // Conservamos la cabecera y las líneas #EXT-X-MEDIA (audio/subtítulos);
-    // las variantes #EXT-X-STREAM-INF se filtran por RESOLUTION=.
     bool sawHeader = false;
     for (const QString &line : lines) {
         if (line.startsWith(QLatin1String("#EXTM3U"))) {
             out.append(line);
             sawHeader = true;
         } else if (line.startsWith(QLatin1String("#EXT-X-MEDIA:"))) {
-            out.append(line);
+            if (line.contains(QLatin1String("TYPE=AUDIO")))
+                audioLines.append(line);
+            else
+                out.append(line);
         } else if (line.startsWith(QLatin1String("#EXT-X-STREAM-INF:"))) {
             int height = 0;
             const int resPos = line.indexOf(QLatin1String("RESOLUTION="));
@@ -429,6 +652,19 @@ QString Yt::buildFilteredMaster(const QString &videoId,
                 out.append(line);
         }
     }
+
+    // Insertar las pistas de audio seleccionadas justo tras la cabecera.
+    if (sawHeader) {
+        const QStringList selected = selectAudioTracks(audioLines, m_audioLang);
+        int ins = 1;
+        for (const QString &line : selected) {
+            if (ins <= out.size())
+                out.insert(ins++, line);
+            else
+                out.append(line);
+        }
+    }
+
     if (!sawHeader || out.size() < 2)
         return QString();
 
@@ -532,7 +768,7 @@ ChannelInfo Yt::channelFromJson(const QString &id, const QJsonObject &j)
         c.subscriberCount = subs.toVariant().toLongLong();
     else
         c.subscriberCount = j.value(QStringLiteral("subscriber_count")).toVariant().toLongLong();
-    c.avatarUrl = pickThumbnail(j.value(QStringLiteral("thumbnails")).toArray());
+    c.avatarUrl = pickAvatar(j.value(QStringLiteral("thumbnails")).toArray());
     c.description = j.value(QStringLiteral("description")).toString();
     return c;
 }
@@ -568,6 +804,32 @@ QString Yt::pickThumbnail(const QJsonArray &thumbs)
         const int h = t.value(QStringLiteral("height")).toInt(0);
         const int pref = t.value(QStringLiteral("preference")).toInt(0);
         const int score = qMax(w * h, 1) + pref * 1000;
+        if (score > bestScore) {
+            bestScore = score;
+            best = url;
+        }
+    }
+    return best;
+}
+
+QString Yt::pickAvatar(const QJsonArray &thumbs)
+{
+    QString best;
+    int bestScore = -1;
+    for (const QJsonValue &val : thumbs) {
+        if (!val.isObject())
+            continue;
+        const QJsonObject t = val.toObject();
+        const QString url = t.value(QStringLiteral("url")).toString();
+        if (url.isEmpty())
+            continue;
+        const int w = t.value(QStringLiteral("width")).toInt(0);
+        const int h = t.value(QStringLiteral("height")).toInt(0);
+        if (w == 0 || h == 0)
+            continue;
+        const int ratio = qMax(w, h) * 100 / qMin(w, h);
+        const int sqPenalty = qAbs(ratio - 100);
+        const int score = w * h - sqPenalty * w * h / 4;
         if (score > bestScore) {
             bestScore = score;
             best = url;
@@ -712,6 +974,8 @@ void Yt::getUrls(const QString &videoId, const QString &selector,
     const QStringList args = {
         kNoWarnings,
         QStringLiteral("--no-playlist"),
+        QStringLiteral("--extractor-args"),
+        QStringLiteral("youtube:player_client=visionos"),
         QStringLiteral("--get-url"),
         QStringLiteral("-f"),
         selector,
