@@ -3,6 +3,7 @@
 #include <QButtonGroup>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QProgressBar>
 #include <QPushButton>
@@ -16,6 +17,7 @@
 #include "playerwidget.h"
 #include "ui/icons.h"
 #include "ui/pages/home_page.h"
+#include "ui/pages/channel_page.h"
 #include "ui/pages/placeholder_page.h"
 #include "ui/pages/search_page.h"
 #include "ui/pages/watch_page.h"
@@ -57,6 +59,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_pages = new QStackedWidget(central);
     m_home = new HomePage(m_yt, &m_subs, m_thumbs, this);
     m_search = new SearchPage(m_yt, &m_settings, m_thumbs, this);
+    m_channel = new ChannelPage(m_yt, m_thumbs, this);
     m_watch = new WatchPage(m_yt, &m_player, m_playerWidget, &m_videoCache,
                             &m_fav, &m_settings, m_thumbs, this);
     m_library = new PlaceholderPage(QStringLiteral("Biblioteca"), this);
@@ -64,18 +67,46 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_pages->addWidget(m_home);
     m_pages->addWidget(m_search);
+    m_pages->addWidget(m_channel);
     m_pages->addWidget(m_watch);
     m_pages->addWidget(m_library);
     m_pages->addWidget(m_settingsPage);
 
     connect(m_home, &HomePage::openRequested, this, &MainWindow::openWatch);
     connect(m_search, &SearchPage::openRequested, this, &MainWindow::openWatch);
+    connect(m_search, &SearchPage::channelRequested, this,
+            [this](const QString &channelId) {
+                m_lastTab = m_currentTab;
+                m_currentTab = 2;
+                m_channel->openChannel(channelId);
+                m_pages->setCurrentWidget(m_channel);
+            });
+    connect(m_channel, &ChannelPage::backRequested, this,
+            &MainWindow::showPreviousTab);
+    connect(m_channel, &ChannelPage::openRequested, this,
+            &MainWindow::openWatch);
     connect(m_watch, &WatchPage::backRequested, this,
             &MainWindow::showPreviousTab);
+    connect(m_watch, &WatchPage::fullscreenToggled, this,
+            [this](bool on) {
+                if (on) {
+                    m_nav->hide();
+                    m_miniBar->hide();
+                    statusBar()->hide();
+                    showFullScreen();
+                } else {
+                    m_nav->show();
+                    m_miniBar->show();
+                    statusBar()->show();
+                    showNormal();
+                }
+            });
     connect(m_watch, &WatchPage::channelRequested, this,
-            [this](const QString &, const QString &) {
-                statusBar()->showMessage(
-                    QStringLiteral("Canal: próximamente"), 2500);
+            [this](const QString &channelId, const QString &) {
+                m_lastTab = m_currentTab;
+                m_currentTab = 2;
+                m_channel->openChannel(channelId);
+                m_pages->setCurrentWidget(m_channel);
             });
 
     root->addWidget(m_pages, 1);
@@ -96,6 +127,8 @@ MainWindow::MainWindow(QWidget *parent)
             [this](const QString &) { updateMiniBar(); });
     connect(&m_player, &PlayerController::currentChanged, this,
             [this]() { updateMiniBar(); });
+    connect(&m_player, &PlayerController::metadataChanged, this,
+            [this]() { updateMiniBar(); });
     connect(&m_player, &PlayerController::positionChanged, this,
             [this](double pos, double dur) {
                 if (m_miniProgress) {
@@ -106,6 +139,15 @@ MainWindow::MainWindow(QWidget *parent)
 }
 
 MainWindow::~MainWindow() = default;
+
+void MainWindow::keyPressEvent(QKeyEvent *event)
+{
+    if (event->key() == Qt::Key_Escape && isFullScreen()) {
+        m_watch->toggleFullscreen();
+        return;
+    }
+    QMainWindow::keyPressEvent(event);
+}
 
 void MainWindow::setupNav()
 {
@@ -161,18 +203,18 @@ void MainWindow::onNavButton(int index)
         m_currentTab = 1;
         break;
     case 2:
-        m_currentTab = 3;
+        m_currentTab = 4;
         break;
     case 3:
-        m_currentTab = 4;
+        m_currentTab = 5;
         break;
     default:
         return;
     }
     m_pages->setCurrentIndex(m_currentTab);
-    if (m_currentTab == 3)
+    if (m_currentTab == 4)
         statusBar()->showMessage(QStringLiteral("Biblioteca: próximamente"), 2000);
-    else if (m_currentTab == 4)
+    else if (m_currentTab == 5)
         statusBar()->showMessage(QStringLiteral("Ajustes: próximamente"), 2000);
 }
 
@@ -236,7 +278,8 @@ void MainWindow::setupMiniBar()
     connect(playBtn, &QPushButton::clicked, this, [this]() {
         m_player.playPause();
         m_lastTab = m_currentTab;
-        m_pages->setCurrentIndex(2);
+        m_currentTab = 3;
+        m_pages->setCurrentIndex(3);
     });
 
     updateMiniBar();
@@ -292,19 +335,37 @@ void MainWindow::goSettings()
 
 void MainWindow::showPreviousTab()
 {
-    const int nav = m_lastTab == 3 ? 2 : m_lastTab == 4 ? 3 : m_lastTab;
-    m_pages->setCurrentIndex(m_lastTab);
-    if (m_navButtons.value(nav))
+    int dest = m_lastTab;
+    if (dest == m_currentTab || dest < 0 || dest >= m_pages->count())
+        dest = 0;
+    m_pages->setCurrentIndex(dest);
+    m_currentTab = dest;
+    // Canal (2) y reproductor (3) no tienen botón de nav: no marcar ninguno.
+    if (m_currentTab == 2 || m_currentTab == 3)
+        return;
+    const int nav = m_currentTab == 4 ? 2 : m_currentTab == 5 ? 3 : m_currentTab;
+    if (nav < m_navButtons.size())
         m_navButtons[nav]->setChecked(true);
-    m_currentTab = m_lastTab;
 }
 
 void MainWindow::openWatch(const QVector<VideoInfo> &videos, int startIndex)
 {
-    m_player.playQueue(videos, startIndex);
-    m_watch->setWatchData(m_player.queue(), m_player.index());
+    const NextMode mode = nextMode();
+    if (mode == NextMode::Radio) {
+        // Modo radio: abrir solo con el vídeo clicado y generar la cola del
+        // mix RDAMVM para "A continuación". Click explícito desde fuera de la
+        // lista (search, home, channel) dispara la radio; dentro de la lista
+        // no se regenera.
+        m_player.playQueue(QVector<VideoInfo>{videos.at(startIndex)}, 0);
+        m_watch->setWatchData(m_player.queue(), m_player.index());
+        m_watch->triggerRadio(videos.at(startIndex).id);
+    } else {
+        m_player.playQueue(videos, startIndex);
+        m_watch->setWatchData(m_player.queue(), m_player.index());
+    }
     m_lastTab = m_currentTab;
-    m_pages->setCurrentIndex(2);
+    m_currentTab = 3;
+    m_pages->setCurrentIndex(3);
 }
 
 void MainWindow::searchFor(const QString &query)
@@ -321,4 +382,12 @@ void MainWindow::playVideo(const QString &url)
     VideoInfo v;
     v.id = id;
     openWatch(QVector<VideoInfo>{v}, 0);
+}
+
+void MainWindow::openChannel(const QString &channelId)
+{
+    m_lastTab = m_currentTab;
+    m_currentTab = 2;
+    m_channel->openChannel(channelId);
+    m_pages->setCurrentWidget(m_channel);
 }

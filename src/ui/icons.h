@@ -16,6 +16,8 @@ enum class Icon {
     Prev,
     Mute,
     Unmute,
+    Subtitles,
+    Fullscreen,
     Star,
     StarFilled,
     Thumb,

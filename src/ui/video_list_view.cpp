@@ -39,6 +39,39 @@ public:
         m_mode = mode;
     }
 
+    void setCurrentRow(int row)
+    {
+        m_currentRow = row;
+    }
+
+    // Marca la fila que está siendo reproducida: recuadro + insignia.
+    void drawCurrentMark(QPainter *p, const QRect &r) const
+    {
+        p->save();
+        p->setRenderHint(QPainter::Antialiasing);
+        QPen pen(nt::kAccent);
+        pen.setWidth(2);
+        p->setPen(pen);
+        p->setBrush(Qt::NoBrush);
+        p->drawRoundedRect(QRectF(r).adjusted(1.5, 1.5, -1.5, -1.5), 6, 6);
+
+        QFont f = p->font();
+        f.setPointSizeF(f.pointSizeF() - 1);
+        f.setBold(true);
+        p->setFont(f);
+        const QFontMetricsF fm(f);
+        const QString text = QStringLiteral("Reproduciendo");
+        const QRectF bg(r.right() - fm.horizontalAdvance(text) - 14,
+                        r.top() + 8, fm.horizontalAdvance(text) + 10,
+                        fm.height() + 4);
+        p->setPen(Qt::NoPen);
+        p->setBrush(nt::kAccent);
+        p->drawRoundedRect(bg, 4, 4);
+        p->setPen(Qt::white);
+        p->drawText(bg, Qt::AlignCenter, text);
+        p->restore();
+    }
+
     QSize sizeHint(const QStyleOptionViewItem &, const QModelIndex &) const override
     {
         return m_mode == VideoListView::GridMode
@@ -53,7 +86,7 @@ public:
         if (m_mode == VideoListView::GridMode)
             paintGrid(p, opt, v);
         else
-            paintList(p, opt, v);
+            paintList(p, opt, v, index.row());
     }
 
     static void drawBadge(QPainter *p, const QRectF &r, const QString &text)
@@ -158,11 +191,13 @@ private:
     }
 
     void paintList(QPainter *p, const QStyleOptionViewItem &opt,
-                   const VideoInfo &v) const
+                   const VideoInfo &v, int row) const
     {
         const QRect r = opt.rect;
         if (opt.state & QStyle::State_MouseOver)
             p->fillRect(r, nt::kHover);
+        if (row == m_currentRow)
+            drawCurrentMark(p, r);
 
         const QRectF thumbR(r.left() + 6, r.top() + (r.height() - 76) / 2.0,
                             136, 76);
@@ -197,6 +232,7 @@ private:
 
     ThumbnailCache *m_thumbs;
     int m_mode = VideoListView::ListMode;
+    int m_currentRow = -1;
 };
 
 } // namespace
@@ -211,6 +247,7 @@ VideoListView::VideoListView(ThumbnailCache *thumbs, QWidget *parent)
     setUniformItemSizes(true);
     setSelectionMode(QAbstractItemView::NoSelection);
     setEditTriggers(QAbstractItemView::NoEditTriggers);
+    setUniformItemSizes(false);
     setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setMouseTracking(true);
@@ -248,7 +285,8 @@ void VideoListView::showVideos(const QVector<VideoInfo> &videos, Mode mode)
     for (const VideoInfo &v : m_videos) {
         auto *item = new QStandardItem;
         item->setData(QVariant::fromValue(v), Qt::UserRole);
-        item->setSizeHint(QSize(kGridW, kGridH));
+        item->setSizeHint(mode == GridMode ? QSize(kGridW, kGridH)
+                           : QSize(0, kListH));
         m_model->appendRow(item);
     }
     refreshThumbnails();
@@ -259,6 +297,32 @@ void VideoListView::clearVideos()
 {
     m_model->clear();
     m_videos.clear();
+    m_currentRow = -1;
+    viewport()->update();
+}
+
+void VideoListView::setCurrentRow(int row)
+{
+    if (row < 0 || row >= m_videos.size())
+        row = -1;
+    if (row == m_currentRow)
+        return;
+    m_currentRow = row;
+    static_cast<VideosDelegate *>(itemDelegate())->setCurrentRow(row);
+    viewport()->update();
+}
+
+void VideoListView::appendVideos(const QVector<VideoInfo> &videos)
+{
+    for (const VideoInfo &v : videos) {
+        auto *item = new QStandardItem;
+        item->setData(QVariant::fromValue(v), Qt::UserRole);
+        item->setSizeHint(m_mode == GridMode ? QSize(kGridW, kGridH)
+                           : QSize(0, kListH));
+        m_model->appendRow(item);
+    }
+    m_videos += videos;
+    refreshThumbnails();
     viewport()->update();
 }
 
@@ -274,8 +338,12 @@ QVector<VideoInfo> VideoListView::videos() const
 
 void VideoListView::refreshThumbnails()
 {
-    for (const VideoInfo &v : m_videos)
-        m_thumbs->request(cacheKeyFor(v), v.thumbnailUrl);
+    for (const VideoInfo &v : m_videos) {
+        QString url = v.thumbnailUrl;
+        if (url.isEmpty() && v.id.size() == 11)
+            url = QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg").arg(v.id);
+        m_thumbs->request(cacheKeyFor(v), url);
+    }
 }
 
 void VideoListView::onThumbReady(const QString &key)

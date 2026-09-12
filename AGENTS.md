@@ -51,10 +51,30 @@ NEVERTUBE_DEBUG=1 ./build/nevertube_qt2
 
 Usar `NT_DEBUG(...)` (src/debug.h) para trazas de depuración.
 
+## Modo de "A continuación" (siembra de la cola)
+
+El modo de siembra se elige con `NEVERTUBE_NEXT_MODE`:
+
+- `radio` (defecto) → mix `RDAMVM<videoId>` del vídeo clicado (`/next` con
+  `playlistId`, estilo YouTube Music); si el vídeo no trae panel de
+  reproducción, se usa la mezcla de recomendaciones del mismo `/next`.
+- `suggestions` → `/next` estático: ~20 recomendaciones del vídeo actual.
+- `none` → sin siembra (la cola queda como vino de la entrada).
+
+`radio` NO auto-siembra: la cola del mix se genera solo con un click explícito
+desde fuera de "A continuación" (`MainWindow::openWatch` → `WatchPage::triggerRadio`),
+es decir al abrir un vídeo desde search/home/channel/URL. Dentro de la lista
+"A continuación", cliqueando sus ítems solo se reproduce (no se regenera radio).
+`suggestions` sí auto-llena en `WatchPage::updateQueue` cuando quedan ≤5 ítems y
+cada vídeo nuevo se regenera. Innertube: `fetchRadio` (panel + mezcla),
+`fetchRadioMore` (continuación, si el cliente la emite). El selftest de
+innertube cubre el panel RDAMVM y el fallback.
+
 ## Puntos de entrada CLI
 
 - `./build/nevertube_qt2` → app normal
 - `./build/nevertube_qt2 --search <consulta>` → buscar al arrancar
+- `./build/nevertube_qt2 --channel <channelId>` → abrir canal al arrancar
 - `./build/nevertube_qt2 http://...` → reproducir una URL al arrancar
 - `./build/nevertube_qt2 --selftest-db` / `--selftest-player` / `--selftest-innertube` → pruebas
 

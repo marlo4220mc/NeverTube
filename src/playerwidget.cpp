@@ -30,7 +30,7 @@ PlayerWidget::PlayerWidget(QWidget *parent)
 
     mpv_set_option_string(m_mpv, "vo", "libmpv");
     mpv_set_option_string(m_mpv, "hwdec", "auto");
-    mpv_set_option_string(m_mpv, "keep-open", "yes");
+    mpv_set_option_string(m_mpv, "keep-open", "no");
     mpv_set_option_string(m_mpv, "terminal", "no");
     mpv_set_option_string(m_mpv, "message-level", "all=warn,vo=info,vd=info");
     mpv_set_option_string(m_mpv, "cache", "yes");
@@ -192,6 +192,14 @@ void PlayerWidget::setVolume(double volume)
     mpv_set_property(m_mpv, "volume", MPV_FORMAT_DOUBLE, &volume);
 }
 
+void PlayerWidget::setSubVisibility(bool visible)
+{
+    if (!m_mpv)
+        return;
+    int flag = visible ? 1 : 0;
+    mpv_set_property(m_mpv, "sub-visibility", MPV_FORMAT_FLAG, &flag);
+}
+
 void PlayerWidget::mpvWakeup(void *ctx)
 {
     PlayerWidget *self = static_cast<PlayerWidget *>(ctx);
@@ -228,23 +236,43 @@ void PlayerWidget::handleEvent(mpv_event *event)
         break;
     case MPV_EVENT_END_FILE: {
         mpv_event_end_file *end = static_cast<mpv_event_end_file *>(event->data);
-        QString s;
         switch (end->reason) {
         case MPV_END_FILE_REASON_QUIT:
             return;
+        case MPV_END_FILE_REASON_STOP:
+            // Parada intencional (stop()/loadfile de reemplazo). No es fin de
+            // reproducción: NO debe auto-avanzar. Se resetea m_state para que
+            // el próximo START_FILE reemita "playing" al controlador.
+            m_state.clear();
+            break;
         case MPV_END_FILE_REASON_ERROR:
-            s = QStringLiteral("error");
-            break;
-        default:
-            s = QStringLiteral("ended");
-            break;
-        }
-        if (m_state != s) {
-            m_state = s;
-            emit stateChanged();
-        }
-        if (end->reason == MPV_END_FILE_REASON_ERROR)
+            if (m_state != QLatin1String("error")) {
+                m_state = QStringLiteral("error");
+                emit stateChanged();
+            }
             emit mediaError(QString::fromUtf8(mpv_error_string(end->error)));
+            return;
+        default: {
+            // EOF. Distinguir final natural (position ~ duration) de una
+            // interrupción de red a mitad del vídeo.
+            const bool naturalEnd =
+                m_duration > 0.0 && m_position >= m_duration - 3.0;
+            if (!naturalEnd) {
+                if (m_state != QLatin1String("error")) {
+                    m_state = QStringLiteral("error");
+                    emit stateChanged();
+                }
+                emit mediaError(
+                    QStringLiteral("La reproducción se interrumpió (red)."));
+                return;
+            }
+            if (m_state != QLatin1String("ended")) {
+                m_state = QStringLiteral("ended");
+                emit stateChanged();
+            }
+            return;
+        }
+        }
         break;
     }
     case MPV_EVENT_PROPERTY_CHANGE: {
