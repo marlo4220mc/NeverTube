@@ -124,6 +124,22 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     bodyLayout->addWidget(m_contTitle);
     bodyLayout->addWidget(m_contGrid);
 
+    // 🎲 Descubre
+    auto *discRow = new QHBoxLayout;
+    discRow->setSpacing(4);
+    m_discTitle = new QLabel(QStringLiteral("🎲  Descubre"), this);
+    m_discTitle->setObjectName(QStringLiteral("sectionTitle"));
+    discRow->addWidget(m_discTitle);
+    discRow->addStretch(1);
+    m_discMoreBtn = new QPushButton(QStringLiteral("↻ Otro"), this);
+    m_discMoreBtn->setObjectName(QStringLiteral("ghost"));
+    discRow->addWidget(m_discMoreBtn);
+    bodyLayout->addLayout(discRow);
+    m_discGrid = new VideoListView(m_thumbs, this);
+    m_discGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_discGrid->setFixedHeight(kGridH);
+    bodyLayout->addWidget(m_discGrid);
+
     // 🔔 Nuevos de tus suscripciones
     m_feedTitle = new QLabel(
         QStringLiteral("🔔  Nuevos de tus suscripciones"), this);
@@ -143,22 +159,6 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     m_homeGrid->setFixedHeight(kGridH);
     bodyLayout->addWidget(m_homeTitle);
     bodyLayout->addWidget(m_homeGrid);
-
-    // 🎲 Descubre
-    auto *discRow = new QHBoxLayout;
-    discRow->setSpacing(4);
-    m_discTitle = new QLabel(QStringLiteral("🎲  Descubre"), this);
-    m_discTitle->setObjectName(QStringLiteral("sectionTitle"));
-    discRow->addWidget(m_discTitle);
-    discRow->addStretch(1);
-    m_discMoreBtn = new QPushButton(QStringLiteral("↻ Otro"), this);
-    m_discMoreBtn->setObjectName(QStringLiteral("ghost"));
-    discRow->addWidget(m_discMoreBtn);
-    bodyLayout->addLayout(discRow);
-    m_discGrid = new VideoListView(m_thumbs, this);
-    m_discGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_discGrid->setFixedHeight(kGridH);
-    bodyLayout->addWidget(m_discGrid);
 
     // 🔥 Tendencias
     m_trendTitle = new QLabel(QStringLiteral("🔥  Tendencias"), this);
@@ -331,7 +331,7 @@ void HomePage::loadSections()
         m_yt->home();
     }
 
-    // 4) 🎲 Descubre (solo cuando hay semilla válida)
+    // 🎲 Descubre (solo cuando hay semilla válida)
     ensureDiscover();
 
     // 5) 🔥 Tendencias
