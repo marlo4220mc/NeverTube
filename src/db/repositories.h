@@ -9,6 +9,8 @@
 class AppDatabase;
 class QSqlQuery;
 
+class DiscoverRepo;
+
 struct SubscriptionInfo
 {
     QString id;
@@ -40,7 +42,7 @@ private:
 class HistoryRepo
 {
 public:
-    explicit HistoryRepo(AppDatabase &db);
+    explicit HistoryRepo(AppDatabase &db, DiscoverRepo *discover = nullptr);
 
     bool add(const QString &videoId, qlonglong positionMs = 0);
     bool remove(const QString &videoId);
@@ -48,8 +50,18 @@ public:
     QStringList recentIds(int limit = 50) const;
     qlonglong positionOf(const QString &videoId) const;
 
+    // Un vídeo se considera COMPLETO si su posición guardada indica ≥95% visto
+    // o le quedan ≤15 s (final/créditos). En ese caso no debe ofrecerse en
+    // "Continuar viendo" y, si se reproduce desde el historial, arranca desde
+    // el principio.
+    static bool isCompleted(const VideoInfo &v, qlonglong positionMs);
+    // Posición inicial de reanudación para un vídeo del historial: 0 si está
+    // completo (o no tiene progreso), su posición de otro modo.
+    static qlonglong resumeStartMs(const VideoInfo &v, qlonglong positionMs);
+
 private:
     AppDatabase &m_db;
+    DiscoverRepo *m_discover = nullptr;
 };
 
 class FavoritesRepo
@@ -65,6 +77,36 @@ private:
     AppDatabase &m_db;
 };
 
+// Me gusta (pulgar) y Favoritos (estrella) son repos separados a propósito.
+// Esta es la estrella manual, distinta del toggle de "Me gusta".
+class StarredRepo
+{
+public:
+    explicit StarredRepo(AppDatabase &db);
+
+    bool toggle(const QString &videoId);
+    bool isStarred(const QString &videoId) const;
+    QStringList ids() const;
+    bool remove(const QString &videoId);
+
+private:
+    AppDatabase &m_db;
+};
+
+class WatchLaterRepo
+{
+public:
+    explicit WatchLaterRepo(AppDatabase &db);
+
+    bool toggle(const QString &videoId);
+    bool isWatchLater(const QString &videoId) const;
+    QStringList ids() const;
+    bool remove(const QString &videoId);
+
+private:
+    AppDatabase &m_db;
+};
+
 class SubscriptionsRepo
 {
 public:
@@ -72,6 +114,7 @@ public:
 
     bool add(const QString &channelId, const QString &title,
              const QString &avatarUrl = QString());
+    bool setAvatar(const QString &channelId, const QString &avatarUrl);
     bool remove(const QString &channelId);
     bool isSubscribed(const QString &channelId) const;
     QVector<SubscriptionInfo> all() const;
@@ -112,4 +155,59 @@ private:
     AppDatabase &m_db;
 };
 
+struct DiscoverRadio
+{
+    qlonglong id = 0;
+    QString seedVideoId;
+    qlonglong createdAt = 0;
+    qlonglong lastUsedAt = 0;
+};
+
+// Radios guardadas de Descubre (fuente persistente: no se generan al abrir
+// Home, se construyen al reproducir vídeos y aquí se almacenan). Los
+// metadatos de los vídeos reutilizan la tabla "videos" (VideoCacheRepo).
+class DiscoverRepo
+{
+public:
+    explicit DiscoverRepo(AppDatabase &db);
+
+    // Guarda (o reemplaza) la radio de una semilla: una radio por semilla, no
+    // se duplica si ya existe. Devuelve true si quedó guardada con contenido.
+    bool saveRadio(const QString &seedVideoId, const QVector<VideoInfo> &videos);
+    bool hasRadio(const QString &seedVideoId) const;
+    // Radios ordenadas por last_used_at ASC (menos usadas primero, variedad).
+    QVector<DiscoverRadio> radios() const;
+    // Ids de vídeo de una radio en orden de posición. Los metadatos se resuelven
+    // con VideoCacheRepo::getMany sobre el caché "videos".
+    QStringList radioVideoIds(qlonglong radioId) const;
+    // Ids de vídeo de la radio guardada para una semilla (orden de posición),
+    // para reusarla en "A continuación" sin volver a pedirla a YouTube.
+    QStringList radioVideoIdsForSeed(const QString &seedVideoId) const;
+    void markUsed(qlonglong radioId);
+    bool deleteRadio(qlonglong radioId);
+    int count() const;
+    AppDatabase &db() const { return m_db; }
+
+    // Limpieza transaccional con HistoryRepo: al borrar un vídeo del
+    // historial, elimina la radio cuyo seed sea ese vídeo.
+    void clearForSeed(const QString &seedVideoId);
+    // Al borrar todo el historial, elimina todas las radios.
+    void clearAll();
+
+private:
+    AppDatabase &m_db;
+};
+
+// Selección de vídeos para Descubre usando SOLO las radios almacenadas (sin
+// red). Coge hasta maxVideos de entre las radios guardadas menos usadas
+// (barajadas): hasta perRadio vídeos de cada una, sin repetir ids y excluyendo
+// excludeId. Las radios sin vídeo útil (borradas de "videos" o vacías) se
+// eliminan. Devuelve lo conseguido: puede ser < maxVideos si no hay contenido
+// válido, lista vacía si no hay radios.
+QVector<VideoInfo> pickDiscoverVideos(DiscoverRepo &discover,
+                                      VideoCacheRepo &cache,
+                                      const QString &excludeId,
+                                      int maxVideos = 5, int perRadio = 2);
+
 bool databaseSelfTest(const QString &dbPath);
+bool discoverSelfTest(const QString &dbPath);

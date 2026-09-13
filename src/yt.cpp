@@ -1,6 +1,7 @@
 #include "yt.h"
 
 #include <QDateTime>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -130,6 +131,29 @@ Yt::Yt(QObject *parent)
             &Yt::relatedReady);
     connect(&m_innertube, &Innertube::radioReady, this,
             &Yt::radioReady);
+    connect(&m_innertube, &Innertube::homeReady, this,
+            &Yt::homeReady);
+    connect(&m_innertube, &Innertube::homeMoreReady, this,
+            &Yt::homeMoreReady);
+    connect(&m_innertube, &Innertube::channelVideosReady, this,
+            [this](const QString &channelId, const QVector<VideoInfo> &videos) {
+                // Innertube primero; si no dio vídeos (fallo/500/vacío) cae al
+                // fallback yt-dlp. Si ese también falla, se emite vacío y la
+                // UI oculta la sección.
+                if (!videos.isEmpty()) {
+                    emit channelVideosFinished(videos);
+                    return;
+                }
+                channelVideosYtDlp(channelId);
+            });
+    connect(&m_innertube, &Innertube::trendingReady, this,
+            [this](const QVector<VideoInfo> &videos) {
+                if (!videos.isEmpty()) {
+                    emit trendingFinished(videos);
+                    return;
+                }
+                trendingYtDlp();
+            });
 }
 
 void Yt::setVisitorStorage(SettingsRepo *settings)
@@ -184,6 +208,21 @@ void Yt::radioMore()
     m_innertube.fetchRadioMore();
 }
 
+void Yt::home()
+{
+    m_innertube.fetchHome();
+}
+
+void Yt::homeMore()
+{
+    m_innertube.fetchHomeMore();
+}
+
+bool Yt::homeHasContinuation() const
+{
+    return m_innertube.hasHomeContinuation();
+}
+
 QString Yt::videoIdFromUrl(const QString &url)
 {
     if (url.size() == 11 && !url.contains(QStringLiteral("youtube")))
@@ -235,24 +274,21 @@ void Yt::search(const QString &query, int limit, int offset)
 
 void Yt::trending(int limit)
 {
-    const QStringList args = {
-        kNoWarnings,
-        kYtLang,
-        kYtLangArg,
-        QStringLiteral("--flat-playlist"),
-        QStringLiteral("--ignore-errors"),
-        QStringLiteral("-I"),
-        QStringLiteral("1:%1").arg(limit),
-        QStringLiteral("--dump-single-json"),
-        QStringLiteral("https://www.youtube.com/feed/trending"),
-    };
-    execJson(args, [this](const QJsonObject &root) {
-        emit trendingFinished(parseVideos(root));
-    });
+    Q_UNUSED(limit);
+    m_innertube.fetchTrending();
 }
 
 void Yt::channelVideos(const QString &channelId, int limit)
 {
+    Q_UNUSED(limit);
+    m_innertube.fetchChannelVideos(channelId);
+}
+
+// Fallback degradado del feed de canales cuando Innertube no da vídeos.
+void Yt::channelVideosYtDlp(const QString &channelId)
+{
+    NT_DEBUG("E2E channelVideos fallback yt-dlp id=%s\n",
+             channelId.toUtf8().constData());
     const QString uuId = QStringLiteral("UU%1").arg(channelId.mid(2));
     const QStringList args = {
         kNoWarnings,
@@ -261,7 +297,7 @@ void Yt::channelVideos(const QString &channelId, int limit)
         QStringLiteral("--flat-playlist"),
         QStringLiteral("--ignore-errors"),
         QStringLiteral("--playlist-end"),
-        QString::number(limit),
+        QStringLiteral("10"),
         QStringLiteral("--dump-single-json"),
         QStringLiteral("https://www.youtube.com/playlist?list=%1").arg(uuId),
     };
@@ -272,6 +308,26 @@ void Yt::channelVideos(const QString &channelId, int limit)
             return a.publishedAt > b.publishedAt;
         });
         emit channelVideosFinished(videos);
+    });
+}
+
+// Fallback degradado de tendencias cuando Innertube no da vídeos.
+void Yt::trendingYtDlp()
+{
+    NT_DEBUG("E2E trending fallback yt-dlp\n");
+    const QStringList args = {
+        kNoWarnings,
+        kYtLang,
+        kYtLangArg,
+        QStringLiteral("--flat-playlist"),
+        QStringLiteral("--ignore-errors"),
+        QStringLiteral("-I"),
+        QStringLiteral("1:8"),
+        QStringLiteral("--dump-single-json"),
+        QStringLiteral("https://www.youtube.com/feed/trending"),
+    };
+    execJson(args, [this](const QJsonObject &root) {
+        emit trendingFinished(parseVideos(root));
     });
 }
 
@@ -294,11 +350,12 @@ void Yt::channelTabVideos(const QString &channelId, const QString &tab, int limi
     };
     if (offset > 0)
         args << QStringLiteral("--playlist-start") << QString::number(offset + 1);
-    execJson(args, [this, tab](const QJsonObject &root) {
+    execJson(args, [this, tab, channelId](const QJsonObject &root) {
         QVector<VideoInfo> videos = parseVideos(root);
-        NT_DEBUG("E2E channelTabVideos tab=%s count=%d\n",
+        NT_DEBUG("E2E channelTabVideos id=%s tab=%s count=%d\n",
+                 channelId.toUtf8().constData(),
                  tab.toUtf8().constData(), (int)videos.size());
-        emit channelTabVideosFinished(tab, videos);
+        emit channelTabVideosFinished(channelId, tab, videos);
     });
 }
 
@@ -1036,4 +1093,78 @@ void Yt::getUrls(const QString &videoId, const QString &selector,
         QStringLiteral("https://www.youtube.com/watch?v=%1").arg(videoId),
     };
     execLines(args, done);
+}
+
+bool feedsChainSelfTest()
+{
+    std::fprintf(stderr, "FEEDS-CHAIN SELFTEST start\n");
+    Yt yt;
+    const QByteArray envChannel = qgetenv("NEVERTUBE_TEST_CHANNEL").trimmed();
+    const QString channel = envChannel.isEmpty()
+        ? QStringLiteral("UC36xmz34q02JYaZYKrMwXng")
+        : QString::fromUtf8(envChannel);
+    std::fprintf(stderr, "FEEDS-CHAIN canal=%s\n", channel.toUtf8().constData());
+
+    bool channelDone = false;
+    bool trendDone = false;
+    bool channelOk = false;
+    bool trendOk = false;
+    int channelVideos = 0;
+    int trendVideos = 0;
+
+    // Watchdog global: los fallbacks yt-dlp pueden tardar; no colgar el selftest.
+    QTimer watchdog;
+    watchdog.setSingleShot(true);
+    QObject::connect(&watchdog, &QTimer::timeout, []() {
+        std::fprintf(stderr, "SELFTEST FAIL: feeds cadena (timeout global)\n");
+        QCoreApplication::exit(1);
+    });
+    watchdog.start(90000);
+
+    const auto maybeExit = [&]() {
+        if (channelDone && trendDone)
+            QCoreApplication::exit(0);
+    };
+    QObject::connect(&yt, &Yt::channelVideosFinished,
+                     [&](const QVector<VideoInfo> &videos) {
+                         if (channelDone)
+                             return;
+                         channelDone = true;
+                         channelVideos = videos.size();
+                         channelOk = !videos.isEmpty();
+                         std::fprintf(stderr,
+                                      "FEEDS-CHAIN channelVideos videos=%d "
+                                      "(fuente=%s)\n",
+                                      videos.size(),
+                                      videos.isEmpty()
+                                          ? "yt-dlp vacío/degradado"
+                                          : "innertube (o fallback con datos)");
+                         maybeExit();
+                     });
+    QObject::connect(&yt, &Yt::trendingFinished,
+                     [&](const QVector<VideoInfo> &videos) {
+                         if (trendDone)
+                             return;
+                         trendDone = true;
+                         trendVideos = videos.size();
+                         trendOk = !videos.isEmpty();
+                         std::fprintf(stderr,
+                                      "FEEDS-CHAIN trending videos=%d "
+                                      "(fuente=%s)\n",
+                                      videos.size(),
+                                      videos.isEmpty()
+                                          ? "yt-dlp vacío/degradado"
+                                          : "innertube (o fallback con datos)");
+                         maybeExit();
+                     });
+
+    yt.channelVideos(channel, 10);
+    yt.trending(8);
+
+    QCoreApplication::exec();
+    std::fprintf(stderr,
+                 "FEEDS-CHAIN RESULT canal=%s videos=%d trend=%s videos=%d\n",
+                 channelOk ? "OK" : "vacío", channelVideos,
+                 trendOk ? "OK" : "vacío", trendVideos);
+    return channelDone && trendDone;
 }

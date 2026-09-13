@@ -4,7 +4,9 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QRandomGenerator>
 #include <QScrollArea>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "../../debug.h"
@@ -21,14 +23,66 @@ namespace {
 const int kGridW = 320;
 const int kGridH = 258;
 
+// Altura que reserva el mini player (miniatura 63 + márgenes/progreso). Es el
+// espacio inferior adicional que se añade al contenido desplazable cuando el
+// mini player está visible, para que la última sección quede por encima de él.
+const int kMiniBarReservedPx = 96;
+
+// Recolección del feed de suscripciones por canal: máximo de canales
+// consultados por actualización y …nº de vídeos por canal (5) a partir del
+// cual se deja de pedir en uno concreto. Cada canal aporta hasta 5 recientes.
+const int kFeedMaxChannels = 6;
+const int kFeedPerChannel = 5;
+const int kFeedTargetVideos = kFeedMaxChannels * kFeedPerChannel;
+
+// TTLs de caché por sección (ms). TTL != polling: al entrar Home se muestra lo
+// cached al momento y si caducó se refresca UNA vez en segundo plano.
+const qint64 kFeedTtlMs = 30 * 60 * 1000;
+const qint64 kHomeTtlMs = 60 * 60 * 1000;
+const qint64 kTrendTtlMs = 2 * 60 * 60 * 1000;
+const qint64 kDiscoverTtlMs = 60 * 60 * 1000;
+// Backoff de la generación de inicialización de Descubre (cuando no hay radios
+// guardadas): tras un intento sin resultados se espera antes de reintentar,
+// para no martillear la red al abrir Home repetidamente sin conexión.
+const qint64 kDiscoverRetryMs = 10 * 60 * 1000;
+// Radios de semilla distintas que se intentan guardar en la generación de
+// inicialización (excepción: solo ocurre si no hay ninguna radio útil).
+const int kDiscoverMinRadios = 3;
+
+qint64 nowMs()
+{
+    return QDateTime::currentMSecsSinceEpoch();
+}
+
+// Entradas válidas: con id y título (más robusto ante respuestas degradadas
+// de yt-dlp: "ytsearch", "Sin título", playlists rotas que se cuelan).
+QVector<VideoInfo> sanitizeVideos(const QVector<VideoInfo> &in)
+{
+    QVector<VideoInfo> out;
+    QSet<QString> seen;
+    for (const VideoInfo &v : in) {
+        if (v.id.isEmpty() || v.id.size() != 11 || seen.contains(v.id))
+            continue;
+        seen.insert(v.id);
+        out.append(v);
+    }
+    return out;
+}
+
 } // namespace
 
-HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, ThumbnailCache *thumbs,
+HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
+                   DiscoverRepo *discover, VideoCacheRepo *videoCache,
+                   ThumbnailCache *thumbs, SettingsRepo *settings,
                    QWidget *parent)
     : QWidget(parent)
     , m_yt(yt)
     , m_subs(subs)
+    , m_history(history)
+    , m_discover(discover)
+    , m_videoCache(videoCache)
     , m_thumbs(thumbs)
+    , m_settings(settings)
 {
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
@@ -40,8 +94,9 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, ThumbnailCache *thumbs,
     m_scroll->setWidget(m_body);
 
     auto *bodyLayout = new QVBoxLayout(m_body);
-    bodyLayout->setContentsMargins(16, 16, 16, 32);
-    bodyLayout->setSpacing(8);
+    m_bodyLayout = bodyLayout;
+    bodyLayout->setContentsMargins(14, 14, 14, 20);
+    bodyLayout->setSpacing(6);
 
     auto *topRow = new QHBoxLayout;
     auto *title = new QLabel(QStringLiteral("Inicio"), this);
@@ -57,11 +112,21 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, ThumbnailCache *thumbs,
     m_busy = new QLabel(QStringLiteral("Cargando…"), this);
     m_busy->setObjectName(QStringLiteral("sectionSub"));
     m_busy->setAlignment(Qt::AlignCenter);
-    m_busy->setContentsMargins(0, 48, 0, 48);
+    m_busy->setContentsMargins(0, 20, 0, 20);
     bodyLayout->addWidget(m_busy);
 
-    m_feedTitle = new QLabel(QStringLiteral("Recientes de tus suscripciones"),
-                             this);
+    // ▶ Continuar viendo
+    m_contTitle = new QLabel(QStringLiteral("▶  Continuar viendo"), this);
+    m_contTitle->setObjectName(QStringLiteral("sectionTitle"));
+    m_contGrid = new VideoListView(m_thumbs, this);
+    m_contGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_contGrid->setFixedHeight(kGridH);
+    bodyLayout->addWidget(m_contTitle);
+    bodyLayout->addWidget(m_contGrid);
+
+    // 🔔 Nuevos de tus suscripciones
+    m_feedTitle = new QLabel(
+        QStringLiteral("🔔  Nuevos de tus suscripciones"), this);
     m_feedTitle->setObjectName(QStringLiteral("sectionTitle"));
     m_feedGrid = new VideoListView(m_thumbs, this);
     m_feedGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -69,7 +134,34 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, ThumbnailCache *thumbs,
     bodyLayout->addWidget(m_feedTitle);
     bodyLayout->addWidget(m_feedGrid);
 
-    m_trendTitle = new QLabel(QStringLiteral("Tendencias"), this);
+    // ✨ Recomendado por YouTube
+    m_homeTitle = new QLabel(
+        QStringLiteral("✨  Recomendado por YouTube"), this);
+    m_homeTitle->setObjectName(QStringLiteral("sectionTitle"));
+    m_homeGrid = new VideoListView(m_thumbs, this);
+    m_homeGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_homeGrid->setFixedHeight(kGridH);
+    bodyLayout->addWidget(m_homeTitle);
+    bodyLayout->addWidget(m_homeGrid);
+
+    // 🎲 Descubre
+    auto *discRow = new QHBoxLayout;
+    discRow->setSpacing(4);
+    m_discTitle = new QLabel(QStringLiteral("🎲  Descubre"), this);
+    m_discTitle->setObjectName(QStringLiteral("sectionTitle"));
+    discRow->addWidget(m_discTitle);
+    discRow->addStretch(1);
+    m_discMoreBtn = new QPushButton(QStringLiteral("↻ Otro"), this);
+    m_discMoreBtn->setObjectName(QStringLiteral("ghost"));
+    discRow->addWidget(m_discMoreBtn);
+    bodyLayout->addLayout(discRow);
+    m_discGrid = new VideoListView(m_thumbs, this);
+    m_discGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_discGrid->setFixedHeight(kGridH);
+    bodyLayout->addWidget(m_discGrid);
+
+    // 🔥 Tendencias
+    m_trendTitle = new QLabel(QStringLiteral("🔥  Tendencias"), this);
     m_trendTitle->setObjectName(QStringLiteral("sectionTitle"));
     m_trendGrid = new VideoListView(m_thumbs, this);
     m_trendGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -84,7 +176,9 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, ThumbnailCache *thumbs,
                        "border: 1px solid #262626; border-radius: 10px; "
                        "padding: 16px; }"));
     m_banner->setText(QStringLiteral(
-        "No se encontró yt-dlp en el sistema.\nInstálalo con tu gestor de "
+        "No se encontró yt-dlp en el sistema. El Home por Innertube igual "
+        "funciona (Recomendado/Descubre), pero las Tendencias y el feed de "
+        "suscripciones necesitan yt-dlp.\nInstálalo con tu gestor de "
         "paquetes (p. ej. \"sudo pacman -S yt-dlp\" o \"pip install yt-dlp\") "
         "y reinicia la app. También puedes definir la ruta del binario en "
         "Ajustes."));
@@ -92,25 +186,75 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, ThumbnailCache *thumbs,
 
     outer->addWidget(m_scroll);
 
+    // Las secciones del Home llenan todo el ancho disponible (celdas que se
+    // estiran) con 5 vídeos por fila; su altura se deriva del ancho real de
+    // cada rejilla.
+    for (VideoListView *g : {m_contGrid, m_feedGrid, m_homeGrid,
+                             m_discGrid, m_trendGrid}) {
+        g->setGridFillWidth(kGridW);
+        g->setGridColumns(5);
+    }
+
+    // Timer para recalcular alturas de grids después del layout inicial
+    // y cuando se llenan videos asíncronamente
+    m_layoutTimer = new QTimer(this);
+    m_layoutTimer->setSingleShot(true);
+    m_layoutTimer->setInterval(50);
+    connect(m_layoutTimer, &QTimer::timeout, this,
+            &HomePage::applyGridSizes);
+
     connect(refresh, &QPushButton::clicked, this, &HomePage::reload);
+    connect(m_discMoreBtn, &QPushButton::clicked, this,
+            &HomePage::onDiscoveryAgain);
     connect(m_yt, &Yt::trendingFinished, this, &HomePage::onTrending);
     connect(m_yt, &Yt::channelVideosFinished, this, &HomePage::onChannelVideos);
+    connect(m_yt, &Yt::homeReady, this, &HomePage::onHomeReady);
+    connect(m_yt, &Yt::radioReady, this, &HomePage::onRadioReady);
 
+    connect(m_contGrid, &VideoListView::videoActivated, this,
+            [this](int index, const VideoInfo &) {
+                if (index >= 0 && index < m_continuePositions.size())
+                    emit resumeRequested(m_continueVideos, index,
+                                         m_continuePositions.at(index));
+                else
+                    emit openRequested(m_continueVideos, index);
+            });
     connect(m_feedGrid, &VideoListView::videoActivated, this,
             [this](int index, const VideoInfo &) {
                 emit openRequested(m_feed, index);
+            });
+    connect(m_homeGrid, &VideoListView::videoActivated, this,
+            [this](int index, const VideoInfo &) {
+                emit openRequested(m_home, index);
+            });
+    connect(m_discGrid, &VideoListView::videoActivated, this,
+            [this](int, const VideoInfo &video) {
+                if (!video.id.isEmpty())
+                    emit openRequested(QVector<VideoInfo>{video}, 0);
             });
     connect(m_trendGrid, &VideoListView::videoActivated, this,
             [this](int index, const VideoInfo &) {
                 emit openRequested(m_trending, index);
             });
 
+    m_contTitle->hide();
+    m_contGrid->hide();
     m_feedTitle->hide();
     m_feedGrid->hide();
+    m_homeTitle->hide();
+    m_homeGrid->hide();
+    m_discTitle->hide();
+    m_discMoreBtn->hide();
+    m_discGrid->hide();
     m_trendTitle->hide();
     m_trendGrid->hide();
     m_banner->hide();
     m_busy->show();
+}
+
+bool HomePage::cachedFresh(qint64 at, qint64 ttlMs) const
+{
+    return at > 0 && (nowMs() - at) < ttlMs;
 }
 
 void HomePage::setYtAvailable(bool ok)
@@ -119,28 +263,83 @@ void HomePage::setYtAvailable(bool ok)
     refreshBusy();
 }
 
+void HomePage::setCurrentVideoId(const QString &id)
+{
+    m_currentVideoId = id;
+}
+
 void HomePage::reload()
 {
-    loadTrending();
-    loadFeed();
+    loadContinueWatching();
+    loadSections();
 }
 
-void HomePage::loadTrending()
+// 1) ▶ Continuar viendo: historial local, sin red. Progreso entre 0 y 100%,
+//    con duración conocida, ordenados por última reproducción (máx 4).
+void HomePage::loadContinueWatching()
 {
-    m_loadingHome = true;
-    refreshBusy();
-    m_yt->trending(30);
+    m_continueVideos.clear();
+    m_continuePositions.clear();
+    const QStringList recent = m_history->recentIds(50);
+    QVector<VideoInfo> out;
+    QVector<QPair<QString, double>> progress;
+    for (const QString &id : recent) {
+        if (out.size() >= 4)
+            break;
+        const qlonglong pos = m_history->positionOf(id);
+        if (pos <= 0)
+            continue;
+        VideoInfo v;
+        if (!m_videoCache->get(id, v))
+            continue;
+        if (v.durationSeconds <= 0)
+            continue;
+        // Completado (visto o con ≤2:30 pendientes): no aparece en "Continuar
+        // viendo"; se reproduce desde el inicio si se abre desde el historial.
+        if (HistoryRepo::isCompleted(v, pos))
+            continue;
+        const double frac =
+            double(pos) / (double(v.durationSeconds) * 1000.0);
+        if (frac <= 0.0 || frac >= 1.0)
+            continue;
+        out.append(v);
+        m_continuePositions.append(pos);
+        progress.append({id, frac});
+    }
+    m_continueVideos = out;
+    m_contGrid->showVideos(m_continueVideos, VideoListView::GridMode);
+    for (const auto &p : progress)
+        m_contGrid->setProgress(p.first, p.second);
+    adjustGridHeight(m_contGrid);
+    m_contTitle->setVisible(!out.isEmpty());
+    m_contGrid->setVisible(!out.isEmpty());
 }
 
-void HomePage::onTrending(const QVector<VideoInfo> &videos)
+// Carga/refresca todas las secciones de red. Cada una: si la caché es fresca
+// no pide nada; si caducó, pide UNA vez (single-flight por m_*Busy) en segundo
+// plano mientras muestra lo cached.
+void HomePage::loadSections()
 {
-    m_loadingHome = false;
-    NT_DEBUG("E2E trending count=%d\n", (int)videos.size());
-    m_trending = videos;
-    m_trendGrid->showVideos(m_trending, VideoListView::GridMode);
-    adjustGridHeight(m_trendGrid);
-    m_trendTitle->show();
-    m_trendGrid->show();
+    // 2) 🔔 suscripciones
+    if (!cachedFresh(m_feedFetchedAt, kFeedTtlMs) && !m_feedBusy)
+        loadFeed();
+
+    // 3) ✨ Recomendado por YouTube
+    if (!cachedFresh(m_homeFetchedAt, kHomeTtlMs) && !m_homeBusy) {
+        m_homeBusy = true;
+        NT_DEBUG("E2E home fetchHome\n");
+        m_yt->home();
+    }
+
+    // 4) 🎲 Descubre (solo cuando hay semilla válida)
+    ensureDiscover();
+
+    // 5) 🔥 Tendencias
+    if (!cachedFresh(m_trendFetchedAt, kTrendTtlMs) && !m_trendBusy) {
+        m_trendBusy = true;
+        m_yt->trending(8);
+    }
+
     refreshBusy();
 }
 
@@ -154,10 +353,13 @@ void HomePage::loadFeed()
         m_feedBusy = false;
         m_feedTitle->hide();
         m_feedGrid->hide();
+        m_feedFetchedAt = nowMs();
         refreshBusy();
         return;
     }
+    m_channelNames.clear();
     for (const SubscriptionInfo &s : channels) {
+        m_channelNames.insert(s.id, s.title);
         m_pendingChannels << s.id;
         if (!s.avatar.isEmpty())
             m_thumbs->requestChannelAvatar(s.id, s.avatar);
@@ -169,23 +371,53 @@ void HomePage::loadFeed()
 
 void HomePage::requestNextChannel()
 {
-    if (m_pendingIdx < m_pendingChannels.size()) {
-        m_yt->channelVideos(m_pendingChannels.at(m_pendingIdx), 10);
-    } else {
+    if (m_pendingIdx >= m_pendingChannels.size()
+        || m_pendingIdx >= kFeedMaxChannels
+        || m_feed.size() >= kFeedTargetVideos) {
         m_feedBusy = false;
         onFeedDone();
+    } else {
+        m_yt->channelVideos(m_pendingChannels.at(m_pendingIdx), 10);
     }
 }
 
 void HomePage::onChannelVideos(const QVector<VideoInfo> &videos)
 {
-    m_feed += videos;
+    QVector<VideoInfo> patched = videos;
+    // Los items del tab "Vídeos" del canal no llevan nombre de canal: se
+    // rellena con la suscripción pedida (Innertube y, si falta, yt-dlp).
+    const QString cid = m_pendingIdx < m_pendingChannels.size()
+                            ? m_pendingChannels.at(m_pendingIdx)
+                            : QString();
+    for (VideoInfo &v : patched) {
+        if (v.id.isEmpty())
+            continue;
+        if (v.channel.isEmpty() && !cid.isEmpty())
+            v.channel = m_channelNames.value(cid);
+        if (v.channelId.isEmpty())
+            v.channelId = cid;
+    }
+    // Hasta 5 recientes por canal, ordenando ese canal por fecha.
+    std::stable_sort(patched.begin(), patched.end(), [](const VideoInfo &a,
+                                                        const VideoInfo &b) {
+        const QDateTime ad = QDateTime::fromString(a.publishedAt, Qt::ISODate);
+        const QDateTime bd = QDateTime::fromString(b.publishedAt, Qt::ISODate);
+        if (ad.isValid() && bd.isValid())
+            return bd < ad;
+        if (ad.isValid() != bd.isValid())
+            return ad.isValid();
+        return false;
+    });
+    if (patched.size() > kFeedPerChannel)
+        patched.resize(kFeedPerChannel);
+    m_feed += patched;
     m_pendingIdx++;
     requestNextChannel();
 }
 
 void HomePage::onFeedDone()
 {
+    m_feed = sanitizeVideos(m_feed);
     std::stable_sort(m_feed.begin(), m_feed.end(), [](const VideoInfo &a,
                                                       const VideoInfo &b) {
         const QDateTime ad = QDateTime::fromString(a.publishedAt, Qt::ISODate);
@@ -196,19 +428,295 @@ void HomePage::onFeedDone()
             return ad.isValid();
         return false;
     });
+    if (m_feed.size() > kFeedTargetVideos)
+        m_feed.resize(kFeedTargetVideos);
+    m_feedFetchedAt = nowMs();
     m_feedGrid->showVideos(m_feed, VideoListView::GridMode);
     adjustGridHeight(m_feedGrid);
-    m_feedTitle->setVisible(!m_feed.isEmpty());
-    m_feedGrid->setVisible(!m_feed.isEmpty());
+    const bool vis = !m_feed.isEmpty();
+    m_feedTitle->setVisible(vis);
+    m_feedGrid->setVisible(vis);
+    NT_DEBUG("E2E feed setVisible=%d height=%d visible=%d\n", vis, m_feedGrid->height(), m_feedGrid->isVisible());
+    // Recalcular alturas después de que el layout se estabilice
+    m_layoutTimer->start();
     refreshBusy();
+    ensureDiscover();
+}
+
+void HomePage::onHomeReady(const QVector<VideoInfo> &videos)
+{
+    NT_DEBUG("E2E home ready count=%d\n", (int)videos.size());
+    m_home = sanitizeVideos(videos);
+    m_homeFetchedAt = nowMs();
+    m_homeBusy = false;
+    m_homeGrid->showVideos(m_home, VideoListView::GridMode);
+    adjustGridHeight(m_homeGrid);
+    const bool vis = !m_home.isEmpty();
+    m_homeTitle->setVisible(vis);
+    m_homeGrid->setVisible(vis);
+    NT_DEBUG("E2E home setVisible=%d height=%d visible=%d\n", vis, m_homeGrid->height(), m_homeGrid->isVisible());
+    // Recalcular alturas después de que el layout se estabilice
+    m_layoutTimer->start();
+    refreshBusy();
+    ensureDiscover();
+}
+
+void HomePage::onTrending(const QVector<VideoInfo> &videos)
+{
+    NT_DEBUG("E2E trending count=%d\n", (int)videos.size());
+    if (!videos.isEmpty()) {
+        NT_DEBUG("E2E trending first id='%s' size=%d title='%s'\n", 
+                 videos[0].id.toUtf8().constData(), videos[0].id.size(),
+                 videos[0].title.left(40).toUtf8().constData());
+    }
+    m_trending = sanitizeVideos(videos);
+    NT_DEBUG("E2E trending after sanitize=%d\n", (int)m_trending.size());
+    if (m_trending.size() > 8)
+        m_trending.resize(8);
+    m_trendFetchedAt = nowMs();
+    m_trendBusy = false;
+    m_trendGrid->showVideos(m_trending, VideoListView::GridMode);
+    adjustGridHeight(m_trendGrid);
+    const bool vis = !m_trending.isEmpty();
+    m_trendTitle->setVisible(vis);
+    m_trendGrid->setVisible(vis);
+    NT_DEBUG("E2E trending setVisible=%d height=%d visible=%d\n", vis, m_trendGrid->height(), m_trendGrid->isVisible());
+    refreshBusy();
+    ensureDiscover();
+}
+
+// 4) 🎲 Descubre: fuente PERSISTENTE (SQLite). Abrir Home NUNCA genera radios
+// por sí solo: si la caché en memoria caducó, se re-seleccionan hasta 5 vídeos
+// de las radios YA GUARDADAS (pickDiscoverVideos, sin red). Las radios se
+// guardan al reproducir vídeos (MainWindow.onRadioReadyDiscover) y, como
+// EXCEPCIÓN de inicialización, cuando no existe ninguna radio útil la propia
+// sección las genera con semillas disponibles (historial/recomendado/
+// suscripciones/tendencias) y las guarda antes de consumirlas.
+void HomePage::ensureDiscover()
+{
+    if (m_discoverBusy)
+        return;
+    if (!m_discoverVideos.isEmpty()
+        && cachedFresh(m_discoverFetchedAt, kDiscoverTtlMs)) {
+        showDiscover();
+        return;
+    }
+    buildDiscoverSelection();
+}
+
+// Selección de Descubre consumiendo SOLO las radios guardadas. Las radios sin
+// vídeo útil se descartan en el propio pick. Si no queda ninguna, se dispara la
+// generación de inicialización (con backoff), única vía en la que Home toca
+// radioVideos() y solo la primera vez que la app se siembra (ver
+// discoverSeeded).
+void HomePage::buildDiscoverSelection()
+{
+    m_discoverVideos = pickDiscoverVideos(*m_discover, *m_videoCache,
+                                          m_currentVideoId);
+    m_discoverFetchedAt = nowMs();
+    m_discoverEmptyAt = 0;
+    showDiscover();
+    if (m_discoverVideos.isEmpty() && m_discover->count() == 0 && m_yt
+        && !discoverSeeded()
+        && !cachedFresh(m_discoverEmptyAt, kDiscoverRetryMs)) {
+        startDiscoverSeedGen();
+    } else if (m_discoverVideos.isEmpty()) {
+        m_discoverEmptyAt = nowMs();
+    }
+}
+
+bool HomePage::discoverSeeded() const
+{
+    return m_settings
+        && m_settings->getInt(QStringLiteral("discover_seeded"), 0) == 1;
+}
+
+void HomePage::markDiscoverSeeded()
+{
+    if (m_settings)
+        m_settings->set(QStringLiteral("discover_seeded"),
+                        QStringLiteral("1"));
+}
+
+// Semillas para la generación de radios de la excepción de inicialización,
+// variadas y barajadas: historial reciente (reusa el caché de metadatos local),
+// recomendado, suscripciones y tendencias. Se excluyen el vídeo en reproducción
+// y los duplicados.
+void HomePage::buildDiscoverSeeds()
+{
+    m_discoverSeeds.clear();
+    QSet<QString> seen;
+    auto addVideos = [&](const QVector<VideoInfo> &list) {
+        for (const VideoInfo &v : list) {
+            if (v.id.size() != 11 || v.id == m_currentVideoId
+                || seen.contains(v.id))
+                continue;
+            seen.insert(v.id);
+            m_discoverSeeds << v.id;
+        }
+    };
+    addVideos(m_home);
+    addVideos(m_feed);
+    addVideos(m_trending);
+    const QStringList recent = m_history->recentIds(20);
+    for (const QString &id : recent) {
+        if (seen.contains(id) || id == m_currentVideoId)
+            continue;
+        VideoInfo v;
+        if (!m_videoCache->get(id, v) || v.id.size() != 11)
+            continue;
+        seen.insert(id);
+        m_discoverSeeds << v.id;
+    }
+    for (int i = m_discoverSeeds.size() - 1; i > 0; --i) {
+        const int j = QRandomGenerator::global()->bounded(i + 1);
+        m_discoverSeeds.swapItemsAt(i, j);
+    }
+    NT_DEBUG("E2E discover gen seeds=%d\n", (int)m_discoverSeeds.size());
+}
+
+void HomePage::startDiscoverSeedGen()
+{
+    m_discoverTried.clear();
+    m_discoverSeedId.clear();
+    buildDiscoverSeeds();
+    if (m_discoverSeeds.isEmpty()) {
+        m_discoverEmptyAt = nowMs();
+        m_discoverBusy = false;
+        refreshBusy();
+        return;
+    }
+    m_discoverBusy = true;
+    refreshBusy();
+    fetchNextDiscoverSeed();
+}
+
+// Pide la radio de la siguiente semilla. UNA a UNA: Innertube.fetchRadio() es
+// single-flight. Las semillas que ya tienen radio guardada se saltan (no se
+// regenera). Se detiene al reunir kDiscoverMinRadios.
+void HomePage::fetchNextDiscoverSeed()
+{
+    if (m_discover->count() >= kDiscoverMinRadios) {
+        finishDiscoverSeedGen();
+        return;
+    }
+    while (!m_discoverSeeds.isEmpty()) {
+        const QString seed = m_discoverSeeds.takeFirst();
+        if (m_discoverTried.contains(seed))
+            continue;
+        if (m_discover->hasRadio(seed))
+            continue;
+        m_discoverTried.insert(seed);
+        m_discoverSeedId = seed;
+        NT_DEBUG("E2E discover gen fetch seed=%s\n",
+                 seed.toUtf8().constData());
+        m_yt->radioVideos(seed);
+        return;
+    }
+    finishDiscoverSeedGen();
+}
+
+// En el radioReady solo interesan las radios pedidas por el propio Descubre
+// (m_discoverSeedId). Las radios del reproductor ("A continuación") llegan con
+// otra semilla y se ignoran (MainWindow las guarda aparte). La radio se guarda
+// y se sigue con la siguiente semilla hasta reunir kDiscoverMinRadios.
+void HomePage::onRadioReady(const QString &videoId,
+                            const QVector<VideoInfo> &videos)
+{
+    if (videoId != m_discoverSeedId)
+        return;
+    m_discoverSeedId.clear();
+    const QVector<VideoInfo> valid = sanitizeVideos(videos);
+    NT_DEBUG("E2E discover gen radio seed=%s n=%d\n",
+             videoId.toUtf8().constData(), (int)valid.size());
+    if (!valid.isEmpty()) {
+        for (const VideoInfo &v : valid)
+            m_videoCache->upsert(v);
+        m_discover->saveRadio(videoId, valid);
+    }
+    if (m_discover->count() >= kDiscoverMinRadios)
+        finishDiscoverSeedGen();
+    else
+        fetchNextDiscoverSeed();
+}
+
+void HomePage::finishDiscoverSeedGen()
+{
+    m_discoverSeedId.clear();
+    m_discoverSeeds.clear();
+    m_discoverBusy = false;
+    if (m_discover->count() == 0)
+        m_discoverEmptyAt = nowMs(); // sin resultados: reintentar con backoff
+    else
+        markDiscoverSeeded(); // ya hubo siembra: no volver a auto-rellenar
+    refreshBusy();
+    buildDiscoverSelection();
+}
+
+// "↻ Otro": re-selecciona usando las radios YA GUARDADAS (no regenera, no pide
+// nada por red). Solo si no queda ninguna radio útil cae en la excepción de
+// inicialización.
+void HomePage::onDiscoveryAgain()
+{
+    interruptDiscover();
+    m_discoverVideos.clear();
+    m_discoverFetchedAt = 0;
+    ensureDiscover();
+}
+
+void HomePage::interruptDiscover()
+{
+    m_discoverSeedId.clear();
+    m_discoverSeeds.clear();
+    m_discoverBusy = false;
+}
+
+void HomePage::invalidateDiscover()
+{
+    m_discoverVideos.clear();
+    m_discoverFetchedAt = 0;
+    m_discoverEmptyAt = 0;
+    if (m_discoverBusy)
+        return;
+    buildDiscoverSelection();
+}
+
+void HomePage::showDiscover()
+{
+    const bool vis = !m_discoverVideos.isEmpty();
+    m_discGrid->showVideos(m_discoverVideos, VideoListView::GridMode);
+    adjustGridHeight(m_discGrid);
+    m_discTitle->setVisible(vis);
+    m_discMoreBtn->setVisible(vis);
+    m_discGrid->setVisible(vis);
+    NT_DEBUG("E2E discover setVisible=%d count=%d height=%d\n", vis ? 1 : 0,
+             (int)m_discoverVideos.size(), m_discGrid->height());
+    m_layoutTimer->start();
+}
+
+void HomePage::setMiniPlayerVisible(bool visible)
+{
+    if (m_miniVisible == visible)
+        return;
+    m_miniVisible = visible;
+    if (!m_bodyLayout)
+        return;
+    const int extra = visible ? kMiniBarReservedPx : 0;
+    NT_DEBUG("E2E miniVisible=%d bottomMargin=%d\n", visible ? 1 : 0,
+             20 + extra);
+    m_bodyLayout->setContentsMargins(14, 14, 14, 20 + extra);
 }
 
 void HomePage::refreshBusy()
 {
-    const bool loading = m_loadingHome || m_feedBusy;
-    const bool empty = m_trending.isEmpty() && m_feed.isEmpty();
-    m_busy->setVisible(loading && empty);
-    m_banner->setVisible(!m_ytAvailable && m_trending.isEmpty());
+    const bool anyContent = !m_continueVideos.isEmpty() || !m_feed.isEmpty()
+        || !m_home.isEmpty() || !m_discoverVideos.isEmpty()
+        || !m_trending.isEmpty();
+    const bool loading = m_feedBusy || m_homeBusy || m_trendBusy
+        || m_discoverBusy;
+    m_busy->setVisible(loading && !anyContent);
+    m_banner->setVisible(!m_ytAvailable && m_home.isEmpty()
+                         && m_trending.isEmpty());
 }
 
 void HomePage::adjustGridHeight(VideoListView *grid)
@@ -218,14 +726,41 @@ void HomePage::adjustGridHeight(VideoListView *grid)
         grid->setFixedHeight(kGridH);
         return;
     }
-    const int cols = qMax(1, qMax(grid->width(), 1) / kGridW);
+    const int w = grid->width();
+    const int cols = qMax(1, grid->gridColumns());
     const int rows = (count + cols - 1) / cols;
-    grid->setFixedHeight(rows * kGridH);
+    // Altura de una celda efectiva: si el grid llena el ancho, la celda escaló
+    // (16:9 según el ancho real); si no, la base.
+    const int cellH = grid->gridSize().height() > 0
+                          ? grid->gridSize().height()
+                          : kGridH;
+    const int newH = rows * cellH;
+    NT_DEBUG("E2E adjustGridHeight count=%d width=%d cols=%d rows=%d height=%d\n",
+             count, w, cols, rows, newH);
+    grid->setFixedHeight(newH);
+}
+
+void HomePage::applyGridSizes()
+{
+    NT_DEBUG("E2E applyGridSizes called\n");
+    adjustGridHeight(m_contGrid);
+    adjustGridHeight(m_feedGrid);
+    adjustGridHeight(m_homeGrid);
+    adjustGridHeight(m_discGrid);
+    adjustGridHeight(m_trendGrid);
+    NT_DEBUG("E2E applyGridSizes done: cont=%d feed=%d home=%d disc=%d trend=%d\n",
+             m_contGrid->height(), m_feedGrid->height(), m_homeGrid->height(),
+             m_discGrid->height(), m_trendGrid->height());
+}
+
+void HomePage::scheduleGridSizes()
+{
+    QTimer::singleShot(0, this, &HomePage::applyGridSizes);
 }
 
 void HomePage::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
-    adjustGridHeight(m_feedGrid);
-    adjustGridHeight(m_trendGrid);
+    applyGridSizes();
 }
+

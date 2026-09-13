@@ -1,9 +1,16 @@
 #include "player_controller.h"
 
+#include <QCoreApplication>
+#include <QTimer>
+
 #include "db/repositories.h"
 #include "debug.h"
 #include "playerwidget.h"
 #include "yt.h"
+
+namespace {
+constexpr int kPositionFlushMs = 60000;
+}
 
 PlayerController::PlayerController(Yt *yt, PlayerWidget *player,
                                    HistoryRepo *history,
@@ -14,6 +21,12 @@ PlayerController::PlayerController(Yt *yt, PlayerWidget *player,
     , m_history(history)
 {
     ensurePlayerConnections();
+    m_flushTimer = new QTimer(this);
+    m_flushTimer->setInterval(kPositionFlushMs);
+    connect(m_flushTimer, &QTimer::timeout, this, [this] { savePosition(); });
+    if (QCoreApplication *app = QCoreApplication::instance())
+        connect(app, &QCoreApplication::aboutToQuit, this,
+                [this] { savePosition(); });
 }
 
 void PlayerController::ensurePlayerConnections()
@@ -51,10 +64,13 @@ int PlayerController::maxHeight() const
 }
 
 void PlayerController::playQueue(const QVector<VideoInfo> &videos,
-                                 int startIndex)
+                                 int startIndex, qlonglong startPositionMs)
 {
     if (videos.isEmpty() || startIndex < 0 || startIndex >= videos.size())
         return;
+    m_indexStartMs.clear();
+    if (startPositionMs > 0)
+        m_indexStartMs.insert(startIndex, startPositionMs);
     m_queue = videos;
     emit queueChanged();
     playIndex(startIndex);
@@ -90,12 +106,13 @@ void PlayerController::playIndex(int index)
     m_index = index;
     m_seekBack = 0.0;
     m_errorMessage.clear();
+    m_pendingStartMs = m_indexStartMs.value(index, 0);
     setPhase(QStringLiteral("loading"));
     emit currentChanged();
 
     const VideoInfo &v = m_queue[index];
     if (m_history && !v.id.isEmpty())
-        m_history->add(v.id, 0);
+        m_history->add(v.id, m_pendingStartMs);
 
     if (v.id.isEmpty()) {
         setPhase(QStringLiteral("error"));
@@ -131,13 +148,24 @@ void PlayerController::onStreamResolved(const StreamInfo &stream)
         m_errorMessage = QStringLiteral("No se obtuvo URL de streaming.");
         return;
     }
-    m_player->playUrl(stream.url, m_seekBack);
+    double from = m_seekBack;
+    if (m_pendingStartMs > 0) {
+        from = double(m_pendingStartMs) / 1000.0;
+        m_pendingStartMs = 0;
+    }
+    // Consumida: el mismo índice no vuelve a arrancar desde esa posición en
+    // futuras visitas (p. ej. previous() tras terminar).
+    m_indexStartMs.remove(m_index);
+    NT_DEBUG("E2E playIndex=%d from=%.1f resumeMs=0\n", m_index, from);
+    m_player->playUrl(stream.url, from);
     m_seekBack = 0.0;
 }
 
 void PlayerController::resolveFailed(const QString &message)
 {
     m_errorMessage = message;
+    m_pendingStartMs = 0;
+    m_indexStartMs.remove(m_index);
     NT_DEBUG("E2E resolveFailed msg=%s\n", message.toUtf8().constData());
     setPhase(QStringLiteral("error"));
 }
@@ -183,6 +211,12 @@ void PlayerController::setPhase(const QString &phase)
     if (m_phase == phase)
         return;
     m_phase = phase;
+    if (m_flushTimer) {
+        if (phase == QLatin1String("playing"))
+            m_flushTimer->start();
+        else
+            m_flushTimer->stop();
+    }
     NT_DEBUG("E2E phase=%s\n", phase.toUtf8().constData());
     emit phaseChanged(m_phase);
 }
@@ -241,7 +275,9 @@ void PlayerController::previous()
 void PlayerController::savePosition()
 {
     const VideoInfo cur = current();
-    if (m_history && !cur.id.isEmpty() && m_phase != QLatin1String("stopped"))
+    const bool active = m_phase == QLatin1String("playing")
+                        || m_phase == QLatin1String("paused");
+    if (m_history && active && !cur.id.isEmpty())
         m_history->add(cur.id, qRound(m_position * 1000.0));
 }
 

@@ -38,6 +38,17 @@ QFont shrunkFont(const QFont &base, qreal delta)
     return f;
 }
 
+// Rectángulo del botón "X" de borrado (modo lista), centrado verticalmente a
+// la derecha de la fila. Compartido entre el delegate (paint) y el hit-test de
+// clics del view para que coincidan exactamente.
+QRectF removeButtonRect(const QRect &cell, qreal scale)
+{
+    const qreal side = 26 * scale;
+    const qreal right = cell.right() - 12 * scale;
+    return QRectF(right - side, cell.top() + (cell.height() - side) / 2.0,
+                  side, side);
+}
+
 class VideosDelegate : public QStyledItemDelegate
 {
 public:
@@ -52,9 +63,56 @@ public:
         m_mode = mode;
     }
 
+    void setScale(qreal scale)
+    {
+        m_scale = scale;
+    }
+
+    // Ancho/alto de celda efectivos cuando la rejilla llena el ancho
+    // disponible (0,0 = tamaño base fijo).
+    void setCellSize(int w, int h)
+    {
+        m_cellW = w;
+        m_cellH = h;
+    }
+
     void setCurrentRow(int row)
     {
         m_currentRow = row;
+    }
+
+    void setShowRemove(bool show)
+    {
+        m_showRemove = show;
+    }
+
+    // Mapa (opcional) de fracciones de progreso por videoId que el delegado
+    // dibuja como barra al pie de la miniatura en modo rejilla.
+    void setProgressMap(const QHash<QString, double> *progress)
+    {
+        m_progress = progress;
+    }
+
+    void drawProgressBar(QPainter *p, const QRectF &thumbR, const VideoInfo &v) const
+    {
+        if (!m_progress)
+            return;
+        const auto it = m_progress->constFind(v.id);
+        if (it == m_progress->constEnd())
+            return;
+        const double f = qBound(0.0, it.value(), 1.0);
+        if (f <= 0.0)
+            return;
+        const QRectF bar(thumbR.left() + 2, thumbR.bottom() - 4,
+                         thumbR.width() - 4, 3);
+        p->save();
+        p->setPen(Qt::NoPen);
+        p->setBrush(QColor(0, 0, 0, 170));
+        p->drawRoundedRect(bar, 1.5, 1.5);
+        p->setBrush(nt::kAccent);
+        p->drawRoundedRect(QRectF(bar.left(), bar.top(),
+                                  bar.width() * f, bar.height()), 1.5, 1.5);
+        p->restore();
     }
 
     // Marca la fila que está siendo reproducida: recuadro + insignia.
@@ -88,9 +146,12 @@ public:
 
     QSize sizeHint(const QStyleOptionViewItem &, const QModelIndex &) const override
     {
-        return m_mode == VideoListView::GridMode
-            ? QSize(kGridW, kGridH)
-            : QSize(0, kListH);
+        if (m_mode == VideoListView::GridMode) {
+            if (m_cellW > 0)
+                return QSize(m_cellW, m_cellH);
+            return QSize(qRound(kGridW * m_scale), qRound(kGridH * m_scale));
+        }
+        return QSize(0, qRound(kListH * m_scale));
     }
 
     void paint(QPainter *p, const QStyleOptionViewItem &opt,
@@ -168,18 +229,21 @@ private:
             p->fillRect(r, nt::kHover);
         }
 
-        const QRectF thumbR(r.left() + 6, r.top() + 6, kGridW - 12,
-                            (kGridW - 12) * 9.0 / 16.0);
+        const qreal gw = m_cellW > 0 ? m_cellW : kGridW * m_scale;
+        const QRectF thumbR(r.left() + 6 * m_scale, r.top() + 6 * m_scale,
+                            gw - 12 * m_scale, (gw - 12 * m_scale) * 9.0 / 16.0);
         drawThumb(p, thumbR, m_thumbs->pixmap(cacheKeyFor(v)), v,
                   durationLabel(v.durationSeconds));
+        drawProgressBar(p, thumbR, v);
 
         p->save();
         QFont t = p->font();
         t.setBold(true);
         p->setFont(t);
         p->setPen(nt::kText);
-        const QRect titleR(r.left() + 8, qRound(thumbR.bottom()) + 8,
-                           kGridW - 16, 34);
+        const QRect titleR(r.left() + 8 * m_scale,
+                           qRound(thumbR.bottom()) + 8 * m_scale,
+                           qRound(gw - 16 * m_scale), 34);
         elideTitle(p, titleR, v.title);
         p->restore();
 
@@ -197,8 +261,10 @@ private:
             meta << pub;
         const QFontMetricsF fm(m);
         const QString line = fm.elidedText(meta.join(QStringLiteral("  •  ")),
-                                           Qt::ElideRight, kGridW - 16);
-        p->drawText(QPointF(r.left() + 8, titleR.bottom() + 14), line);
+                                           Qt::ElideRight,
+                                           qRound(gw - 16 * m_scale));
+        p->drawText(QPointF(r.left() + 8 * m_scale, titleR.bottom() + 14),
+                    line);
         p->restore();
     }
 
@@ -211,17 +277,21 @@ private:
         if (row == m_currentRow)
             drawCurrentMark(p, r);
 
-        const QRectF thumbR(r.left() + 6, r.top() + (r.height() - 76) / 2.0,
-                            136, 76);
+        const qreal lh = kListH * m_scale;
+        const QRectF thumbR(r.left() + 6 * m_scale,
+                            r.top() + (r.height() - 76 * m_scale) / 2.0,
+                            136 * m_scale, 76 * m_scale);
         drawThumb(p, thumbR, m_thumbs->pixmap(cacheKeyFor(v)), v,
                   durationLabel(v.durationSeconds));
+        drawProgressBar(p, thumbR, v);
 
         p->save();
         QFont t = p->font();
         t.setBold(true);
         p->setFont(t);
         p->setPen(nt::kText);
-        const QRect titleR(r.left() + 152, r.top() + 10, r.width() - 162, 34);
+        const QRect titleR(r.left() + 152 * m_scale, r.top() + 10 * m_scale,
+                           qRound(r.width() - 162 * m_scale), 34);
         elideTitle(p, titleR, v.title);
         p->restore();
 
@@ -236,14 +306,37 @@ private:
             meta << viewsLabel(v.viewCount);
         const QFontMetricsF fm(m);
         const QString line = fm.elidedText(meta.join(QStringLiteral("  •  ")),
-                                           Qt::ElideRight, r.width() - 170);
-        p->drawText(QPointF(r.left() + 152, r.top() + 56), line);
+                                           Qt::ElideRight,
+                                           qRound(r.width() - 170 * m_scale));
+        p->drawText(QPointF(r.left() + 152 * m_scale, r.top() + 56 * m_scale),
+                    line);
         p->restore();
+
+        if (m_showRemove) {
+            p->save();
+            p->setRenderHint(QPainter::Antialiasing);
+            const QRectF xr = removeButtonRect(r, m_scale);
+            p->setPen(Qt::NoPen);
+            p->setBrush(nt::kHover);
+            p->drawEllipse(xr);
+            const int is = qRound(15 * m_scale);
+            const QPixmap pm =
+                nt::icon(nt::Icon::Clear, nt::kMuted, is).pixmap(is, is);
+            p->drawPixmap(QPointF(xr.center().x() - is / 2.0,
+                                  xr.center().y() - is / 2.0),
+                          pm);
+            p->restore();
+        }
     }
 
     ThumbnailCache *m_thumbs;
+    const QHash<QString, double> *m_progress = nullptr;
     int m_mode = VideoListView::ListMode;
     int m_currentRow = -1;
+    bool m_showRemove = false;
+    int m_cellW = 0;
+    int m_cellH = 0;
+    qreal m_scale = 1.0;
 };
 
 } // namespace
@@ -266,6 +359,7 @@ VideoListView::VideoListView(ThumbnailCache *thumbs, QWidget *parent)
 
     auto *delegate = new VideosDelegate(thumbs, this);
     delegate->setMode(ListMode);
+    delegate->setProgressMap(&m_progress);
     m_mode = ListMode;
     setItemDelegate(delegate);
 
@@ -273,17 +367,57 @@ VideoListView::VideoListView(ThumbnailCache *thumbs, QWidget *parent)
             &VideoListView::onThumbReady);
 }
 
+void VideoListView::setGridFillWidth(int minCellWidth)
+{
+    m_gridMinCellW = minCellWidth;
+    applyGridGeometry();
+}
+
+void VideoListView::setGridColumns(int columns)
+{
+    m_gridColumns = columns;
+    applyGridGeometry();
+}
+
+int VideoListView::gridColumns() const
+{
+    if (m_gridColumns > 0)
+        return m_gridColumns;
+    const int vw = viewport()->width();
+    if (m_gridMinCellW > 0 && vw > 0)
+        return qMax(1, vw / qMax(1, m_gridMinCellW));
+    return qMax(1, vw / qMax(1, kGridW));
+}
+
+void VideoListView::applyGridGeometry()
+{
+    if (m_mode != GridMode)
+        return;
+    const int vw = viewport()->width();
+    if (vw <= 0)
+        return;
+    const int spacing = 4;
+    const int cols = gridColumns();
+    const int avail = vw - (cols - 1) * spacing;
+    const int cellW = qMax(1, avail / qMax(1, cols));
+    const int cellH = qRound(qreal(cellW) * kGridH / kGridW);
+    setGridSize(QSize(cellW, cellH));
+    static_cast<VideosDelegate *>(itemDelegate())->setCellSize(cellW, cellH);
+    viewport()->update();
+}
+
 void VideoListView::showVideos(const QVector<VideoInfo> &videos, Mode mode)
 {
     m_model->clear();
     m_videos = videos;
+    m_progress.clear();
 
     if (mode != m_mode) {
         m_mode = mode;
         static_cast<VideosDelegate *>(itemDelegate())->setMode(mode);
         if (mode == GridMode) {
             setViewMode(QListView::IconMode);
-            setGridSize(QSize(kGridW, kGridH));
+            setGridSize(QSize(qRound(kGridW * m_scale), qRound(kGridH * m_scale)));
             setResizeMode(QListView::Adjust);
             setSpacing(4);
         } else {
@@ -293,11 +427,16 @@ void VideoListView::showVideos(const QVector<VideoInfo> &videos, Mode mode)
         }
     }
 
+    if (mode == GridMode)
+        applyGridGeometry();
+
     for (const VideoInfo &v : m_videos) {
         auto *item = new QStandardItem;
         item->setData(QVariant::fromValue(v), Qt::UserRole);
-        item->setSizeHint(mode == GridMode ? QSize(kGridW, kGridH)
-                           : QSize(0, kListH));
+        item->setSizeHint(mode == GridMode
+                              ? QSize(qRound(kGridW * m_scale),
+                                      qRound(kGridH * m_scale))
+                              : QSize(0, qRound(kListH * m_scale)));
         m_model->appendRow(item);
     }
     refreshThumbnails();
@@ -308,7 +447,34 @@ void VideoListView::clearVideos()
 {
     m_model->clear();
     m_videos.clear();
+    m_progress.clear();
     m_currentRow = -1;
+    viewport()->update();
+}
+
+void VideoListView::setScale(qreal scale)
+{
+    m_scale = scale;
+    static_cast<VideosDelegate *>(itemDelegate())->setScale(scale);
+    if (m_mode == GridMode)
+        setGridSize(QSize(qRound(kGridW * scale), qRound(kGridH * scale)));
+    applyGridGeometry();
+    updateGeometry();
+    viewport()->update();
+}
+
+void VideoListView::setRowRemoveVisible(bool visible)
+{
+    if (m_rowRemove == visible)
+        return;
+    m_rowRemove = visible;
+    static_cast<VideosDelegate *>(itemDelegate())->setShowRemove(visible);
+    viewport()->update();
+}
+
+void VideoListView::setProgress(const QString &videoId, double fraction)
+{
+    m_progress.insert(videoId, fraction);
     viewport()->update();
 }
 
@@ -328,8 +494,10 @@ void VideoListView::appendVideos(const QVector<VideoInfo> &videos)
     for (const VideoInfo &v : videos) {
         auto *item = new QStandardItem;
         item->setData(QVariant::fromValue(v), Qt::UserRole);
-        item->setSizeHint(m_mode == GridMode ? QSize(kGridW, kGridH)
-                           : QSize(0, kListH));
+        item->setSizeHint(m_mode == GridMode
+                              ? QSize(qRound(kGridW * m_scale),
+                                      qRound(kGridH * m_scale))
+                              : QSize(0, qRound(kListH * m_scale)));
         m_model->appendRow(item);
     }
     m_videos += videos;
@@ -367,8 +535,24 @@ void VideoListView::mouseReleaseEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
         const QModelIndex idx = indexAt(event->pos());
-        if (idx.isValid() && idx.row() >= 0 && idx.row() < m_videos.size())
+        if (idx.isValid() && idx.row() >= 0 && idx.row() < m_videos.size()) {
+            // En modo lista con la X activa, el click sobre ella borra en vez
+            // de reproducir.
+            if (m_rowRemove && m_mode == ListMode) {
+                const QRect cell = visualRect(idx);
+                if (removeButtonRect(cell, m_scale).contains(event->pos())) {
+                    emit removeRequested(idx.row(), m_videos.at(idx.row()));
+                    return;
+                }
+            }
             emit videoActivated(idx.row(), m_videos.at(idx.row()));
+        }
     }
     QListView::mouseReleaseEvent(event);
+}
+
+void VideoListView::resizeEvent(QResizeEvent *event)
+{
+    QListView::resizeEvent(event);
+    applyGridGeometry();
 }

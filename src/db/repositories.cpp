@@ -7,6 +7,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QRandomGenerator>
+#include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QSqlRecord>
@@ -140,6 +142,26 @@ bool databaseSelfTest(const QString &dbPath)
     ok &= yes(favorites.toggle(QStringLiteral("vidB"))
                   && favorites.ids() == QStringList(QStringLiteral("vidB")),
               "fav ids");
+
+    StarredRepo starred(db);
+    ok &= yes(!starred.isStarred(QStringLiteral("vidA")), "star initial");
+    ok &= yes(starred.toggle(QStringLiteral("vidA")), "star toggle on");
+    ok &= yes(starred.isStarred(QStringLiteral("vidA")), "star isStarred");
+    ok &= yes(starred.toggle(QStringLiteral("vidA")), "star toggle off");
+    ok &= yes(!starred.isStarred(QStringLiteral("vidA")), "star removed");
+    ok &= yes(starred.toggle(QStringLiteral("vidB"))
+                  && starred.ids() == QStringList(QStringLiteral("vidB")),
+              "star ids");
+
+    WatchLaterRepo watchLater(db);
+    ok &= yes(watchLater.toggle(QStringLiteral("vidA")), "wl toggle on");
+    ok &= yes(watchLater.isWatchLater(QStringLiteral("vidA")), "wl is");
+    ok &= yes(watchLater.toggle(QStringLiteral("vidA")), "wl toggle off");
+    ok &= yes(!watchLater.isWatchLater(QStringLiteral("vidA")), "wl removed");
+    ok &= yes(watchLater.toggle(QStringLiteral("vidB"))
+                  && watchLater.ids().size() == 1
+                  && watchLater.isWatchLater(QStringLiteral("vidB")),
+              "wl ids");
 
     ok &= yes(subscriptions.add(QStringLiteral("chanA"),
                                 QStringLiteral("Canal A"),
@@ -303,8 +325,8 @@ VideoInfo VideoCacheRepo::fromRow(const QSqlQuery &q) const
     return v;
 }
 
-HistoryRepo::HistoryRepo(AppDatabase &db)
-    : m_db(db)
+HistoryRepo::HistoryRepo(AppDatabase &db, DiscoverRepo *discover)
+    : m_db(db), m_discover(discover)
 {
 }
 
@@ -325,12 +347,27 @@ bool HistoryRepo::remove(const QString &videoId)
     QSqlQuery q(m_db.db());
     q.prepare(QStringLiteral("DELETE FROM history WHERE video_id=?"));
     q.addBindValue(videoId);
-    return q.exec();
+    if (!q.exec())
+        return false;
+
+    // Si se elimina el vídeo del historial, también se elimina su radio de
+    // Descubre (solo si el seed es ese vídeo, no si aparece como contenido).
+    if (m_discover)
+        m_discover->clearForSeed(videoId);
+
+    return true;
 }
 
 bool HistoryRepo::clear()
 {
-    return exec(m_db.db(), QStringLiteral("DELETE FROM history"));
+    if (!exec(m_db.db(), QStringLiteral("DELETE FROM history")))
+        return false;
+
+    // Al limpiar todo el historial, se eliminan todas las radios de Descubre.
+    if (m_discover)
+        m_discover->clearAll();
+
+    return true;
 }
 
 QStringList HistoryRepo::recentIds(int limit) const
@@ -356,6 +393,32 @@ qlonglong HistoryRepo::positionOf(const QString &videoId) const
     if (!q.exec() || !q.next())
         return 0;
     return q.value(0).toLongLong();
+}
+
+// Se considera un vídeo COMPLETADO si se vio ≥95% de su duración, o si le
+// quedan 15 segundos o menos (final/créditos). Regla relativa en vez de un
+// umbral fijo: escala con la duración.
+constexpr double kCompletedFraction = 0.95;
+constexpr qlonglong kCompletedRemainMs = 15000;
+
+bool HistoryRepo::isCompleted(const VideoInfo &v, qlonglong positionMs)
+{
+    if (positionMs <= 0 || v.durationSeconds <= 0)
+        return false;
+    const qlonglong durMs = qlonglong(v.durationSeconds) * 1000;
+    const bool watchedEnough = positionMs >= durMs * kCompletedFraction;
+    if (watchedEnough)
+        return true;
+    return durMs - positionMs <= kCompletedRemainMs;
+}
+
+qlonglong HistoryRepo::resumeStartMs(const VideoInfo &v, qlonglong positionMs)
+{
+    if (positionMs <= 0)
+        return 0;
+    if (HistoryRepo::isCompleted(v, positionMs))
+        return 0;
+    return positionMs;
 }
 
 FavoritesRepo::FavoritesRepo(AppDatabase &db)
@@ -400,6 +463,98 @@ QStringList FavoritesRepo::ids() const
     return ids;
 }
 
+StarredRepo::StarredRepo(AppDatabase &db)
+    : m_db(db)
+{
+}
+
+bool StarredRepo::toggle(const QString &videoId)
+{
+    if (isStarred(videoId))
+        return remove(videoId);
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "INSERT INTO starred (video_id, added_at) VALUES (?,?)"));
+    q.addBindValue(videoId);
+    q.addBindValue(nowMs());
+    return q.exec();
+}
+
+bool StarredRepo::isStarred(const QString &videoId) const
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "SELECT 1 FROM starred WHERE video_id=? LIMIT 1"));
+    q.addBindValue(videoId);
+    return q.exec() && q.next();
+}
+
+QStringList StarredRepo::ids() const
+{
+    QStringList ids;
+    QSqlQuery q(m_db.db());
+    if (!q.exec(QStringLiteral(
+            "SELECT video_id FROM starred ORDER BY added_at DESC")))
+        return ids;
+    while (q.next())
+        ids << q.value(0).toString();
+    return ids;
+}
+
+bool StarredRepo::remove(const QString &videoId)
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral("DELETE FROM starred WHERE video_id=?"));
+    q.addBindValue(videoId);
+    return q.exec();
+}
+
+WatchLaterRepo::WatchLaterRepo(AppDatabase &db)
+    : m_db(db)
+{
+}
+
+bool WatchLaterRepo::toggle(const QString &videoId)
+{
+    if (isWatchLater(videoId))
+        return remove(videoId);
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "INSERT INTO watch_later (video_id, added_at) VALUES (?,?)"));
+    q.addBindValue(videoId);
+    q.addBindValue(nowMs());
+    return q.exec();
+}
+
+bool WatchLaterRepo::isWatchLater(const QString &videoId) const
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "SELECT 1 FROM watch_later WHERE video_id=? LIMIT 1"));
+    q.addBindValue(videoId);
+    return q.exec() && q.next();
+}
+
+QStringList WatchLaterRepo::ids() const
+{
+    QStringList ids;
+    QSqlQuery q(m_db.db());
+    if (!q.exec(QStringLiteral(
+            "SELECT video_id FROM watch_later ORDER BY added_at DESC")))
+        return ids;
+    while (q.next())
+        ids << q.value(0).toString();
+    return ids;
+}
+
+bool WatchLaterRepo::remove(const QString &videoId)
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral("DELETE FROM watch_later WHERE video_id=?"));
+    q.addBindValue(videoId);
+    return q.exec();
+}
+
 SubscriptionsRepo::SubscriptionsRepo(AppDatabase &db)
     : m_db(db)
 {
@@ -423,6 +578,17 @@ bool SubscriptionsRepo::remove(const QString &channelId)
 {
     QSqlQuery q(m_db.db());
     q.prepare(QStringLiteral("DELETE FROM subscriptions WHERE channel_id=?"));
+    q.addBindValue(channelId);
+    return q.exec();
+}
+
+bool SubscriptionsRepo::setAvatar(const QString &channelId,
+                                  const QString &avatarUrl)
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "UPDATE subscriptions SET avatar_url=? WHERE channel_id=?"));
+    q.addBindValue(avatarUrl);
     q.addBindValue(channelId);
     return q.exec();
 }
@@ -613,4 +779,491 @@ QString SettingsRepo::getString(const QString &key, const QString &def) const
     if (!get(key, v))
         return def;
     return v;
+}
+
+DiscoverRepo::DiscoverRepo(AppDatabase &db)
+    : m_db(db)
+{
+}
+
+bool DiscoverRepo::saveRadio(const QString &seedVideoId,
+                             const QVector<VideoInfo> &videos)
+{
+    if (seedVideoId.isEmpty() || seedVideoId.size() != 11 || videos.isEmpty())
+        return false;
+
+    qlonglong radioId = 0;
+    {
+        QSqlQuery q(m_db.db());
+        q.prepare(QStringLiteral(
+            "SELECT id FROM discover_radios WHERE seed_video_id=? LIMIT 1"));
+        q.addBindValue(seedVideoId);
+        if (q.exec() && q.next())
+            radioId = q.value(0).toLongLong();
+    }
+
+    if (radioId == 0) {
+        QSqlQuery q(m_db.db());
+        q.prepare(QStringLiteral(
+            "INSERT INTO discover_radios (seed_video_id, created_at, "
+            "last_used_at) VALUES (?,?,0)"));
+        q.addBindValue(seedVideoId);
+        q.addBindValue(nowMs());
+        if (!q.exec())
+            return false;
+        radioId = q.lastInsertId().toLongLong();
+    } else {
+        // La radio ya existe: blindaje para no sobrescribir ni duplicar.
+        return false;
+    }
+    if (radioId <= 0)
+        return false;
+
+    int pos = 0;
+    QSet<QString> seen;
+    for (const VideoInfo &v : videos) {
+        if (v.id.size() != 11 || seen.contains(v.id))
+            continue;
+        seen.insert(v.id);
+        QSqlQuery q(m_db.db());
+        q.prepare(QStringLiteral(
+            "INSERT INTO discover_radio_videos (radio_id, video_id, position) "
+            "VALUES (?,?,?)"));
+        q.addBindValue(radioId);
+        q.addBindValue(v.id);
+        q.addBindValue(++pos);
+        q.exec();
+    }
+    return pos > 0;
+}
+
+bool DiscoverRepo::hasRadio(const QString &seedVideoId) const
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "SELECT 1 FROM discover_radios WHERE seed_video_id=? LIMIT 1"));
+    q.addBindValue(seedVideoId);
+    return q.exec() && q.next();
+}
+
+QVector<DiscoverRadio> DiscoverRepo::radios() const
+{
+    QVector<DiscoverRadio> result;
+    QSqlQuery q(m_db.db());
+    if (!q.exec(QStringLiteral(
+            "SELECT id, seed_video_id, created_at, last_used_at "
+            "FROM discover_radios ORDER BY last_used_at ASC")))
+        return result;
+    while (q.next()) {
+        DiscoverRadio r;
+        r.id = q.value(0).toLongLong();
+        r.seedVideoId = q.value(1).toString();
+        r.createdAt = q.value(2).toLongLong();
+        r.lastUsedAt = q.value(3).toLongLong();
+        result.append(r);
+    }
+    return result;
+}
+
+QStringList DiscoverRepo::radioVideoIds(qlonglong radioId) const
+{
+    QStringList ids;
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "SELECT video_id FROM discover_radio_videos WHERE radio_id=? "
+        "ORDER BY position ASC"));
+    q.addBindValue(radioId);
+    if (!q.exec())
+        return ids;
+    while (q.next())
+        ids << q.value(0).toString();
+    return ids;
+}
+
+QStringList DiscoverRepo::radioVideoIdsForSeed(const QString &seedVideoId) const
+{
+    QStringList ids;
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "SELECT drv.video_id FROM discover_radio_videos drv "
+        "JOIN discover_radios dr ON dr.id = drv.radio_id "
+        "WHERE dr.seed_video_id=? ORDER BY drv.position ASC"));
+    q.addBindValue(seedVideoId);
+    if (!q.exec())
+        return ids;
+    while (q.next())
+        ids << q.value(0).toString();
+    return ids;
+}
+
+void DiscoverRepo::markUsed(qlonglong radioId)
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "UPDATE discover_radios SET last_used_at=? WHERE id=?"));
+    q.addBindValue(nowMs());
+    q.addBindValue(radioId);
+    q.exec();
+}
+
+bool DiscoverRepo::deleteRadio(qlonglong radioId)
+{
+    {
+        QSqlQuery q(m_db.db());
+        q.prepare(QStringLiteral(
+            "DELETE FROM discover_radio_videos WHERE radio_id=?"));
+        q.addBindValue(radioId);
+        q.exec();
+    }
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral("DELETE FROM discover_radios WHERE id=?"));
+    q.addBindValue(radioId);
+    return q.exec();
+}
+
+int DiscoverRepo::count() const
+{
+    QSqlQuery q(m_db.db());
+    if (!q.exec(QStringLiteral("SELECT COUNT(*) FROM discover_radios"))
+        || !q.next())
+        return 0;
+    return q.value(0).toInt();
+}
+
+void DiscoverRepo::clearForSeed(const QString &seedVideoId)
+{
+    {
+        QSqlQuery q(m_db.db());
+        q.prepare(QStringLiteral(
+            "DELETE FROM discover_radio_videos WHERE radio_id IN ("
+            "SELECT id FROM discover_radios WHERE seed_video_id=?)"));
+        q.addBindValue(seedVideoId);
+        q.exec();
+    }
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral("DELETE FROM discover_radios WHERE seed_video_id=?"));
+    q.addBindValue(seedVideoId);
+    q.exec();
+}
+
+void DiscoverRepo::clearAll()
+{
+    exec(m_db.db(), QStringLiteral("DELETE FROM discover_radio_videos"));
+    exec(m_db.db(), QStringLiteral("DELETE FROM discover_radios"));
+}
+
+QVector<VideoInfo> pickDiscoverVideos(DiscoverRepo &discover,
+                                      VideoCacheRepo &cache,
+                                      const QString &excludeId, int maxVideos,
+                                      int perRadio)
+{
+    QVector<VideoInfo> picked;
+    const QVector<DiscoverRadio> radios = discover.radios();
+    if (radios.isEmpty())
+        return picked;
+
+    // Excluir radios cuyo seed ya no esté en el historial (seguridad extra).
+    QSet<QString> seedEnHistorial;
+    {
+        QStringList ids;
+        for (const DiscoverRadio &r : radios)
+            ids << r.seedVideoId;
+        QSqlQuery q(discover.db().db());
+        if (ids.isEmpty())
+            return picked;
+        QStringList marks;
+        for (int i = 0; i < ids.size(); ++i)
+            marks << QStringLiteral("?");
+        q.prepare(QStringLiteral(
+            "SELECT video_id FROM history WHERE video_id IN (%1)")
+                      .arg(marks.join(QStringLiteral(","))));
+        for (const QString &id : ids)
+            q.addBindValue(id);
+        if (q.exec())
+            while (q.next())
+                seedEnHistorial << q.value(0).toString();
+    }
+
+    // Variedad: de las radios menos usadas (últimas ventanas) se baraja una
+    // muestra al azar. Así no se repiten siempre las mismas ni se regenera.
+    const int n = qMin(radios.size(), 8);
+    QVector<DiscoverRadio> candidates;
+    for (int i = 0; i < n; ++i)
+        candidates.append(radios.at(i));
+    for (int i = candidates.size() - 1; i > 0; --i) {
+        const int j = QRandomGenerator::global()->bounded(i + 1);
+        candidates.swapItemsAt(i, j);
+    }
+
+    for (const DiscoverRadio &r : candidates) {
+        if (picked.size() >= maxVideos)
+            break;
+        // Saltar si el seed ya no está en el historial (medida de seguridad).
+        if (!seedEnHistorial.contains(r.seedVideoId)) {
+            discover.deleteRadio(r.id);
+            continue;
+        }
+        const QStringList ids = discover.radioVideoIds(r.id);
+        if (ids.isEmpty()) {
+            discover.deleteRadio(r.id);
+            continue;
+        }
+        const QVector<VideoInfo> vids = cache.getMany(ids);
+        if (vids.isEmpty()) {
+            discover.deleteRadio(r.id);
+            continue;
+        }
+        // Excluir radios cuyo seed ya no esté en el historial (seguridad extra).
+        QSqlQuery q(discover.db().db());
+        q.prepare(QStringLiteral("SELECT 1 FROM history WHERE video_id=?"));
+        q.addBindValue(r.seedVideoId);
+        if (!q.exec() || !q.next()) {
+            discover.deleteRadio(r.id);
+            continue;
+        }
+        discover.markUsed(r.id);
+        int added = 0;
+        for (const VideoInfo &v : vids) {
+            if (picked.size() >= maxVideos || added >= perRadio)
+                break;
+            if (!excludeId.isEmpty() && v.id == excludeId)
+                continue;
+            bool dup = false;
+            for (const VideoInfo &p : picked) {
+                if (p.id == v.id) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup)
+                continue;
+            picked.append(v);
+            ++added;
+        }
+    }
+    return picked;
+}
+
+bool discoverSelfTest(const QString &dbPath)
+{
+    if (dbPath.isEmpty())
+        return false;
+
+    const QStringList artifacts = {dbPath,
+                                   dbPath + QLatin1String("-wal"),
+                                   dbPath + QLatin1String("-shm")};
+    for (const QString &f : artifacts) {
+        if (QFileInfo::exists(f))
+            QFile::remove(f);
+    }
+
+    const auto yes = [](bool ok, const char *what) {
+        if (!ok)
+            fprintf(stderr, "SELFTEST FAIL: %s\n", what);
+        return ok;
+    };
+
+    bool ok = true;
+
+    const auto mkVideo = [](int n, const QString &title) {
+        VideoInfo v;
+        v.id = QStringLiteral("video%1").arg(n, 6, 10, QLatin1Char('0'));
+        v.title = title;
+        v.channel = QStringLiteral("Canal %1").arg(n);
+        return v;
+    };
+
+    AppDatabase db(dbPath);
+    if (!db.open())
+        return yes(false, "discover db open");
+    DiscoverRepo discover(db);
+    VideoCacheRepo cache(db);
+    HistoryRepo history(db, &discover);
+
+    // Metadatos en la caché para que las radios sean resolubles.
+    for (int i = 0; i < 12; ++i)
+        cache.upsert(mkVideo(i, QStringLiteral("Título %1").arg(i)));
+
+    ok &= yes(discover.count() == 0, "discover empieza vacío");
+
+    QVector<VideoInfo> radioA;
+    for (int i = 0; i < 4; ++i)
+        radioA.append(mkVideo(i, QStringLiteral("Título %1").arg(i)));
+    ok &= yes(discover.saveRadio(QStringLiteral("seedAAAAAAA"), radioA),
+              "discover save radio");
+    ok &= yes(discover.hasRadio(QStringLiteral("seedAAAAAAA")),
+              "discover hasRadio");
+    ok &= yes(discover.count() == 1, "discover count");
+    // El seed debe estar en el historial: el filtro de pickDiscoverVideos
+    // solo usa radios cuyo vídeo semilla siga en el historial.
+    history.add(QStringLiteral("seedAAAAAAA"));
+
+    const auto radiosA = discover.radios();
+    ok &= yes(!radiosA.isEmpty(), "discover radios list");
+    const QStringList idsA = radiosA.isEmpty()
+        ? QStringList()
+        : discover.radioVideoIds(radiosA.first().id);
+    ok &= yes(idsA.size() == 4
+                  && idsA[0] == QLatin1String("video000000")
+                  && idsA[3] == QLatin1String("video000003"),
+              "discover radio ids orden");
+    ok &= yes(discover.radioVideoIdsForSeed(QStringLiteral("seedAAAAAAA"))
+                      == idsA,
+              "discover radio ids por semilla (reuso)");
+
+    const int savedBefore = discover.count();
+    ok &= yes(!discover.saveRadio(QStringLiteral("seedAAAAAAA"),
+                                  radioA.mid(0, 3)),
+              "discover re-save misma semilla rechazado");
+    ok &= yes(discover.count() == savedBefore,
+              "discover sin duplicar semilla");
+    const auto radiosAfterResave = discover.radios();
+    ok &= yes(!radiosAfterResave.isEmpty()
+                  && discover.radioVideoIds(radiosAfterResave.first().id)
+                             .size() == 4,
+              "discover re-save NO reemplaza contenido");
+    discover.saveRadio(QStringLiteral("seedAAAAAAA"), radioA);
+
+    const auto radiosMark = discover.radios();
+    ok &= yes(!radiosMark.isEmpty(), "discover radios mark base");
+    if (!radiosMark.isEmpty()) {
+        const DiscoverRadio r0 = radiosMark.first();
+        ok &= yes(r0.lastUsedAt == 0, "discover last_used_at inicial 0");
+        QThread::msleep(2); // evita colisión de milisegundo con created_at
+        discover.markUsed(r0.id);
+        const DiscoverRadio r0b = discover.radios().first();
+        ok &= yes(r0b.lastUsedAt > r0.createdAt, "discover markUsed");
+    }
+
+    const QVector<VideoInfo> sola =
+        pickDiscoverVideos(discover, cache, QString());
+    ok &= yes(sola.size() == 2, "discover 1 radio -> hasta 2 vídeos");
+
+    // Generación de excepción y selección repetida no deben añadir radios.
+    ok &= yes(pickDiscoverVideos(discover, cache, QString()).size() == 2,
+              "discover re-selección reutiliza radios");
+
+    // Semillas B y C: radios con contenido parcial distinto.
+    QVector<VideoInfo> radioB;
+    radioB.append(mkVideo(2, QStringLiteral("Título 2")));
+    radioB.append(mkVideo(3, QStringLiteral("Título 3")));
+    radioB.append(mkVideo(4, QStringLiteral("Título 4")));
+    radioB.append(mkVideo(5, QStringLiteral("Título 5")));
+    ok &= yes(discover.saveRadio(QStringLiteral("seedBBBBBBB"), radioB),
+              "discover save radio B");
+    QVector<VideoInfo> radioC;
+    radioC.append(mkVideo(6, QStringLiteral("Título 6")));
+    radioC.append(mkVideo(7, QStringLiteral("Título 7")));
+    radioC.append(mkVideo(8, QStringLiteral("Título 8")));
+    ok &= yes(discover.saveRadio(QStringLiteral("seedCCCCCCC"), radioC),
+              "discover save radio C");
+    history.add(QStringLiteral("seedBBBBBBB"));
+    history.add(QStringLiteral("seedCCCCCCC"));
+
+    const int count3 = discover.count();
+    QVector<VideoInfo> picks;
+    QSet<QString> seenPicks;
+    bool dupes = false;
+    for (int round = 0; round < 3; ++round) {
+        picks = pickDiscoverVideos(discover, cache, QStringLiteral("video000000"));
+        ok &= yes(picks.size() <= 5, "discover máximo 5");
+        QSet<QString> roundSeen;
+        for (const VideoInfo &v : picks) {
+            if (roundSeen.contains(v.id))
+                dupes = true;
+            roundSeen.insert(v.id);
+            if (v.id == QLatin1String("video000000"))
+                dupes = true; // el excluido no debe aparecer
+        }
+        seenPicks.unite(roundSeen);
+        ok &= yes(discover.count() == count3,
+                  "discover re-uso no genera radios");
+    }
+    ok &= yes(!dupes, "discover sin duplicados ni excluido");
+
+    // Regla de 1-2 por radio: con 3 radios y perRadio=2 debe haber 4-5.
+    ok &= yes(picks.size() >= 4, "discover 3 radios -> 4-5 vídeos");
+
+    // Persistencia: cerrar y reabrir la base.
+    db.close();
+    AppDatabase db2(dbPath);
+    if (!db2.open())
+        return yes(false, "discover db reopen");
+    DiscoverRepo discover2(db2);
+    ok &= yes(discover2.count() == count3,
+              "discover persiste tras reiniciar");
+    ok &= yes(discover2.hasRadio(QStringLiteral("seedAAAAAAA")),
+              "discover radio persistida");
+
+    // ── Integración Historial ↔ Descubre ────────────────────────────────
+    DiscoverRepo purger(db2);
+    VideoCacheRepo cache2(db2);
+    HistoryRepo history2(db2, &purger);
+
+    // 1) Borrar un vídeo que aparece DENTRO de otras radios no las elimina.
+    //    "video000003" está en A y en B; la radio (semilla) es lo que cuenta.
+    ok &= yes(history2.remove(QStringLiteral("video000003")),
+              "history intern remove");
+    ok &= yes(purger.count() == count3,
+              "discover intacta si se borra vídeo interno");
+    ok &= yes(purger.hasRadio(QStringLiteral("seedBBBBBBB"))
+                  && purger.hasRadio(QStringLiteral("seedCCCCCCC")),
+              "radios internas siguen tras borrar vídeo interno");
+
+    // 2) Borrar el vídeo SEMILLA elimina únicamente su propia radio.
+    ok &= yes(history2.remove(QStringLiteral("seedAAAAAAA")),
+              "history seed remove");
+    ok &= yes(!purger.hasRadio(QStringLiteral("seedAAAAAAA")),
+              "radio del seed eliminada");
+    ok &= yes(purger.count() == count3 - 1,
+              "solo se elimina la radio del seed");
+    ok &= yes(purger.hasRadio(QStringLiteral("seedBBBBBBB"))
+                  && purger.hasRadio(QStringLiteral("seedCCCCCCC")),
+              "otras radios intactas");
+    // Sin registros huérfanos tras borrar la radio del seed.
+    QSqlQuery orphanSeed(db2.db());
+    ok &= yes(orphanSeed.exec(QStringLiteral(
+                  "SELECT COUNT(*) FROM discover_radio_videos "
+                  "WHERE radio_id NOT IN (SELECT id FROM discover_radios)"))
+                  && orphanSeed.next()
+                  && orphanSeed.value(0).toInt() == 0,
+              "limpieza sin huérfanos");
+
+    // 3) Descubre no vuelve a usar radios eliminadas (selección tras borrado).
+    QVector<VideoInfo> picksPostA;
+    for (int round = 0; round < 2; ++round) {
+        picksPostA = pickDiscoverVideos(purger, cache2, QString());
+        ok &= yes(discover2.count() == count3 - 1,
+                  "borrado no genera radios nuevas");
+    }
+    ok &= yes(picksPostA.size() >= 2, "descubre aún selecciona de B/C");
+
+    // 4) Borrar TODO el historial deja Descubre vacío y sin registros.
+    ok &= yes(history2.clear(), "history clear");
+    ok &= yes(purger.count() == 0, "descubre vacío tras borrar historial");
+    QSqlQuery orphanCheck(db2.db());
+    ok &= yes(orphanCheck.exec(
+                  QStringLiteral("SELECT COUNT(*) FROM discover_radio_videos"))
+                  && orphanCheck.next()
+                  && orphanCheck.value(0).toInt() == 0,
+              "discover_radio_videos vacío tras borrar historial");
+    ok &= yes(pickDiscoverVideos(purger, cache2, QString()).isEmpty(),
+              "descubre no usa radios eliminadas");
+    ok &= yes(purger.count() == 0, "borrado no genera radios");
+
+    // Radio rota (vídeos sin metadatos en la caché) se elimina al seleccionar.
+    QVector<VideoInfo> radioRota;
+    radioRota.append(mkVideo(9, QStringLiteral("Título 9")));
+    ok &= yes(purger.saveRadio(QStringLiteral("seedDDDDDDD"), radioRota),
+              "discover save radio D");
+    history2.add(QStringLiteral("seedDDDDDDD")); // seed válido: solo falta metadato
+    // Se vacía la caché de metadatos de la radio D para simular inválida.
+    QSqlQuery del(db2.db());
+    del.exec(QStringLiteral("DELETE FROM videos WHERE id='video000009'"));
+    const int beforeInvalid = purger.count();
+    pickDiscoverVideos(purger, cache2, QString());
+    ok &= yes(purger.count() == beforeInvalid - 1,
+              "discover radio inválida se descarta");
+
+    return ok;
 }

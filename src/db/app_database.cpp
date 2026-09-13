@@ -69,8 +69,7 @@ bool AppDatabase::open()
             m_lastError = q.lastError().text();
     }
 
-    if (!tableExists(m_db, QStringLiteral("videos")))
-        createSchema(m_db);
+    createSchema(m_db);
 
     return true;
 }
@@ -123,6 +122,16 @@ void AppDatabase::createSchema(QSqlDatabase &db)
         "  added_at INTEGER NOT NULL"
         ")"));
     exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS starred ("
+        "  video_id TEXT PRIMARY KEY,"
+        "  added_at INTEGER NOT NULL"
+        ")"));
+    exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS watch_later ("
+        "  video_id TEXT PRIMARY KEY,"
+        "  added_at INTEGER NOT NULL"
+        ")"));
+    exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS subscriptions ("
         "  channel_id TEXT PRIMARY KEY,"
         "  title TEXT NOT NULL,"
@@ -141,6 +150,25 @@ void AppDatabase::createSchema(QSqlDatabase &db)
         "  video_id TEXT NOT NULL,"
         "  position INTEGER NOT NULL,"
         "  PRIMARY KEY (playlist_id, video_id)"
+        ")"));
+    // Radios guardadas para Descubre. NO se regeneran al entrar Home: se
+    // construyen al reproducir vídeos (el reproductor usa la semilla como
+    // Yt::radioVideos y lo que llega por radioReady se guarda aquí) y Descubre
+    // solo las consume. Los metadatos de los vídeos reutilizan la tabla
+    // "videos"; aquí se guardan solo los ids y posiciones.
+    exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS discover_radios ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  seed_video_id TEXT NOT NULL UNIQUE,"
+        "  created_at INTEGER NOT NULL,"
+        "  last_used_at INTEGER NOT NULL DEFAULT 0"
+        ")"));
+    exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS discover_radio_videos ("
+        "  radio_id INTEGER NOT NULL,"
+        "  video_id TEXT NOT NULL,"
+        "  position INTEGER NOT NULL,"
+        "  PRIMARY KEY (radio_id, video_id)"
         ")"));
     exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS downloads ("

@@ -21,6 +21,8 @@ enum class Icon {
     Star,
     StarFilled,
     Thumb,
+    ThumbDown,
+    Share,
     Queue,
     Download,
     Refresh,
@@ -29,6 +31,7 @@ enum class Icon {
     ListAdd,
     QueueList,
     Back,
+    WatchLater,
 };
 
 QIcon icon(Icon kind, const QColor &color, int size = 20);

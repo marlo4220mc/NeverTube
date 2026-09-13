@@ -54,6 +54,12 @@ public:
     // agota. Llegan por radioReady().
     void radioVideos(const QString &videoId);
     void radioMore();
+    // Home real por Innertube (browse FEwhat_to_watch). Los resultados llegan
+    // por homeReady(); vacíos = usar el fallback (el Home por yt-dlp se
+    // mantiene). homeMore() pide la continuación si la respuesta la trajo.
+    void home();
+    void homeMore();
+    bool homeHasContinuation() const;
 
     QString downloadVideoSelector(int maxHeight) const;
     static QString videoIdFromUrl(const QString &url);
@@ -69,7 +75,7 @@ signals:
     void searchFinished(const QString &query, const QVector<VideoInfo> &videos);
     void trendingFinished(const QVector<VideoInfo> &videos);
     void channelVideosFinished(const QVector<VideoInfo> &videos);
-    void channelTabVideosFinished(const QString &tab,
+    void channelTabVideosFinished(const QString &channelId, const QString &tab,
                                   const QVector<VideoInfo> &videos);
     void channelInfoReady(const ChannelInfo &channel);
     void detailReady(const VideoInfo &video, const QString &description,
@@ -84,12 +90,16 @@ signals:
     void resolveError(const QString &message);
     void relatedReady(const QString &videoId, const QVector<VideoInfo> &videos);
     void radioReady(const QString &videoId, const QVector<VideoInfo> &videos);
+    void homeReady(const QVector<VideoInfo> &videos);
+    void homeMoreReady(const QVector<VideoInfo> &videos);
 
 private:
     void resolveWithYtDlp(const QString &videoId, int maxHeight,
                           bool fallbackToInnertube = false);
     void resolveViaInnertube(const QString &videoId, int maxHeight,
                              int preferredClient);
+    void channelVideosYtDlp(const QString &channelId);
+    void trendingYtDlp();
     void execJson(QStringList args, std::function<void(const QJsonObject &)> done);
     void execLines(QStringList args, std::function<void(const QStringList &)> done);
     void getDetailTry(const QString &videoId, int clientIndex);
@@ -123,3 +133,9 @@ private:
     // al cambiar de resolución (re-resolver el mismo vídeo).
     QHash<QString, int> m_winningClient;
 };
+
+// Selftest de la cadena real del feed en Yt: relay Innertube → fallback
+// yt-dlp → señal channelVideosFinished/trendingFinished. Verifica que llega un
+// resultado dentro de un plazo (Innertube o fallback) sin cuelgues, y registra
+// qué fuente respondió. No toca el reproductor ni SQLite.
+bool feedsChainSelfTest();
