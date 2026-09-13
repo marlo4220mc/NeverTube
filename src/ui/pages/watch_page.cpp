@@ -1,10 +1,16 @@
 #include "watch_page.h"
 
 #include <QApplication>
+#include <QAction>
+#include <QClipboard>
+#include <QCursor>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QEvent>
+#include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -17,6 +23,7 @@
 #include <QSlider>
 #include <QStackedWidget>
 #include <QTimer>
+#include <QToolTip>
 #include <QVBoxLayout>
 
 #include "../../db/repositories.h"
@@ -216,7 +223,9 @@ void enableOverlayTracking(QObject *filterObj, QWidget *root)
 
 WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidget,
                      VideoCacheRepo *cache, FavoritesRepo *favorites,
-                     SettingsRepo *settings, ThumbnailCache *thumbs,
+                     StarredRepo *starred, WatchLaterRepo *watchLater,
+                     SubscriptionsRepo *subs, SettingsRepo *settings,
+                     ThumbnailCache *thumbs, PlaylistsRepo *playlists,
                      QWidget *parent)
     : QWidget(parent)
     , m_yt(yt)
@@ -224,8 +233,12 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     , m_playerWidget(playerWidget)
     , m_cache(cache)
     , m_favs(favorites)
+    , m_starred(starred)
+    , m_watchLater(watchLater)
+    , m_subs(subs)
     , m_settings(settings)
     , m_thumbs(thumbs)
+    , m_playlists(playlists)
 {
     auto *splitOuter = new QVBoxLayout(this);
     splitOuter->setContentsMargins(0, 0, 0, 0);
@@ -450,7 +463,58 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
                        "QPushButton:hover { background:#1F1F1F; }"));
     m_channelBtn->setMinimumHeight(56);
     m_channelBtn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
-    infoLay->addWidget(m_channelBtn);
+
+    m_subscribeBtn = new QPushButton(QStringLiteral("Suscribirse"), this);
+    m_subscribeBtn->setCursor(Qt::PointingHandCursor);
+    m_subscribeBtn->setMinimumHeight(36);
+    m_subscribeBtn->setStyleSheet(
+        QStringLiteral("QPushButton { background:#FF0033;"
+                       " border-radius:18px; padding:0 18px;"
+                       " color:white; font-weight:600; font-size:13px; }"
+                       "QPushButton:hover { background:#FF1A47; }"));
+
+    auto *channelRow = new QHBoxLayout;
+    channelRow->setSpacing(8);
+    channelRow->addWidget(m_channelBtn);
+    channelRow->addStretch(1);
+    channelRow->addWidget(m_subscribeBtn, 0, Qt::AlignVCenter);
+    infoLay->addLayout(channelRow);
+
+    auto *actionsRow = new QHBoxLayout;
+    actionsRow->setSpacing(8);
+    auto makeAction = [this](nt::Icon icon, const QString &text,
+                             QPushButton **out, nt::Icon *iconOut)
+        -> QPushButton * {
+        auto *b = new QPushButton(text, this);
+        b->setObjectName(QStringLiteral("ghost"));
+        b->setCursor(Qt::PointingHandCursor);
+        b->setIcon(nt::icon(icon, nt::kMuted, 20));
+        b->setIconSize(QSize(20, 20));
+        *out = b;
+        *iconOut = icon;
+        return b;
+    };
+    actionsRow->addWidget(makeAction(nt::Icon::Thumb, QStringLiteral("Me gusta"),
+                                     &m_likeBtn, &m_likeIcon));
+    actionsRow->addWidget(makeAction(nt::Icon::ThumbDown,
+                                     QStringLiteral("No me gusta"),
+                                     &m_dislikeBtn, &m_dislikeIcon));
+actionsRow->addWidget(makeAction(nt::Icon::Share,
+                                      QStringLiteral("Compartir"),
+                                      &m_shareBtn, &m_shareIcon));
+    actionsRow->addWidget(makeAction(nt::Icon::Star,
+                                      QStringLiteral("Favorito"),
+                                      &m_starBtn, &m_starIcon));
+    actionsRow->addWidget(makeAction(nt::Icon::WatchLater,
+                                      QStringLiteral("Ver más tarde"),
+                                      &m_watchLaterBtn, &m_watchLaterIcon));
+    actionsRow->addWidget(makeAction(nt::Icon::ListAdd,
+                                      QStringLiteral("Agregar a playlist"),
+                                      &m_playlistBtn, &m_playlistIcon));
+    connect(m_playlistBtn, &QPushButton::clicked, this,
+            &WatchPage::showPlaylistMenu);
+    actionsRow->addStretch(1);
+    infoLay->addLayout(actionsRow);
 
     m_descLabel = new QLabel(this);
     m_descLabel->setWordWrap(true);
@@ -498,6 +562,59 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         if (!v.channelId.isEmpty())
             emit channelRequested(v.channelId, v.channel);
     });
+    connect(m_subscribeBtn, &QPushButton::clicked, this, [this]() {
+        if (m_player->index() < 0)
+            return;
+        const VideoInfo v = m_player->current();
+        if (v.channelId.isEmpty())
+            return;
+        updateSubscription(v, !m_subs->isSubscribed(v.channelId));
+    });
+    connect(m_likeBtn, &QPushButton::clicked, this, [this]() {
+        const VideoInfo v = m_player->current();
+        if (v.id.isEmpty())
+            return;
+        m_favs->toggle(v.id);
+        m_liked = m_favs->isFavorite(v.id);
+        if (m_liked)
+            m_disliked = false;
+        updateActionButtons();
+    });
+    connect(m_starBtn, &QPushButton::clicked, this, [this]() {
+        const VideoInfo v = m_player->current();
+        if (v.id.isEmpty())
+            return;
+        m_starred->toggle(v.id);
+        m_isStarred = m_starred->isStarred(v.id);
+        updateActionButtons();
+    });
+    connect(m_watchLaterBtn, &QPushButton::clicked, this, [this]() {
+        const VideoInfo v = m_player->current();
+        if (v.id.isEmpty())
+            return;
+        m_watchLater->toggle(v.id);
+        m_watchLaterMarked = m_watchLater->isWatchLater(v.id);
+        updateActionButtons();
+    });
+    connect(m_dislikeBtn, &QPushButton::clicked, this, [this]() {
+        const VideoInfo v = m_player->current();
+        if (v.id.isEmpty())
+            return;
+        m_disliked = !m_disliked;
+        if (m_disliked)
+            m_liked = false;
+        updateActionButtons();
+    });
+    connect(m_shareBtn, &QPushButton::clicked, this, [this]() {
+        const VideoInfo v = m_player->current();
+        if (v.id.isEmpty())
+            return;
+        const QString url = QStringLiteral(
+            "https://www.youtube.com/watch?v=%1").arg(v.id);
+        QGuiApplication::clipboard()->setText(url);
+        QToolTip::showText(m_shareBtn->mapToGlobal(QPoint(0, 0)),
+                           QStringLiteral("Enlace copiado"), m_shareBtn);
+    });
     connect(m_player, &PlayerController::currentChanged, this,
             &WatchPage::onCurrentChanged);
     connect(m_player, &PlayerController::queueChanged, this,
@@ -525,6 +642,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_meta->clear();
     m_channelBtn->setText(QStringLiteral("Canal"));
     m_descLabel->hide();
+    updateActionButtons();
 }
 
 void WatchPage::setWatchData(const QVector<VideoInfo> &queue, int startIndex)
@@ -553,6 +671,11 @@ void WatchPage::onCurrentChanged()
         return;
     }
     m_title->setText(m_player->current().title);
+    m_liked = m_favs->isFavorite(m_player->current().id);
+    m_disliked = false;
+    m_isStarred = m_starred->isStarred(m_player->current().id);
+    m_watchLaterMarked = m_watchLater->isWatchLater(m_player->current().id);
+    updateActionButtons();
     updateInfo();
     updateQueue();
     m_yt->getDetail(m_player->current().id);
@@ -666,6 +789,108 @@ void WatchPage::updateChannelRow()
     } else {
         m_channelBtn->setIcon(placeholder);
     }
+    updateSubscribeButton(m_subs->isSubscribed(v.channelId));
+}
+
+void WatchPage::updateSubscribeButton(bool subscribed)
+{
+    m_subscribeBtn->setText(subscribed ? QStringLiteral("Suscrito")
+                                       : QStringLiteral("Suscribirse"));
+    m_subscribeBtn->setIcon(QIcon());
+    if (subscribed) {
+        m_subscribeBtn->setProperty("subscribed", true);
+        m_subscribeBtn->setStyleSheet(
+            QStringLiteral("QPushButton { background:#262626;"
+                           " border-radius:18px; padding:0 18px;"
+                           " color:#ECECEC; font-weight:600; font-size:13px; }"
+                           "QPushButton:hover { background:#333333; }"));
+    } else {
+        m_subscribeBtn->setProperty("subscribed", false);
+        m_subscribeBtn->setStyleSheet(
+            QStringLiteral("QPushButton { background:#FF0033;"
+                           " border-radius:18px; padding:0 18px;"
+                           " color:white; font-weight:600; font-size:13px; }"
+                           "QPushButton:hover { background:#FF1A47; }"));
+    }
+}
+
+void WatchPage::updateSubscription(const VideoInfo &v, bool subscribe)
+{
+    if (!subscribe) {
+        m_subs->remove(v.channelId);
+    } else {
+        m_subs->add(v.channelId, v.channel, QString());
+    }
+    updateSubscribeButton(subscribe);
+}
+
+void WatchPage::updateActionButtons()
+{
+    auto paint = [this](QPushButton *b, nt::Icon icon, bool active) {
+        b->setIcon(nt::icon(icon, active ? QColor(QStringLiteral("#FF0033"))
+                                         : nt::kMuted, 20));
+        b->setIconSize(QSize(20, 20));
+        if (active)
+            b->setStyleSheet(
+                QStringLiteral("QPushButton { background:#262626;"
+                               " border-radius:16px; padding:7px 14px;"
+                               " color:#FF0033; font-weight:600; font-size:13px; }"
+                               "QPushButton:hover { background:#333333; }"));
+        else
+            b->setStyleSheet(
+                QStringLiteral("QPushButton { background:#1F1F1F;"
+                               " border-radius:16px; padding:7px 14px;"
+                               " color:#ECECEC; font-size:13px; }"
+                               "QPushButton:hover { background:#2A2A2A; }"));
+    };
+    paint(m_likeBtn, m_likeIcon, m_liked);
+    paint(m_dislikeBtn, m_dislikeIcon, m_disliked);
+    paint(m_shareBtn, m_shareIcon, false);
+    paint(m_starBtn, m_isStarred ? m_starFilledIcon : m_starIcon, m_isStarred);
+    paint(m_watchLaterBtn, m_watchLaterIcon, m_watchLaterMarked);
+}
+
+void WatchPage::showPlaylistMenu()
+{
+    if (!m_player->isActive())
+        return;
+    const VideoInfo v = m_player->current();
+    if (v.id.isEmpty())
+        return;
+
+    QMenu menu(this);
+    const auto playlists = m_playlists->all();
+    bool anyAdded = false;
+    for (const PlaylistItem &p : playlists) {
+        const bool contains = m_playlists->contains(p.id, v.id);
+        if (contains)
+            anyAdded = true;
+        const QString label = contains
+            ? QStringLiteral("✔ %1 (ya está)").arg(p.title)
+            : p.title;
+        QAction *act = menu.addAction(label);
+        act->setEnabled(!contains);
+        connect(act, &QAction::triggered, this,
+                [this, p, v]() { m_playlists->addVideo(p.id, v.id); });
+    }
+    menu.addSeparator();
+    QAction *newAct = menu.addAction(QStringLiteral("+ Nueva playlist"));
+    connect(newAct, &QAction::triggered, this, [this, v]() {
+        bool ok = false;
+        const QString title = QInputDialog::getText(
+            this, QStringLiteral("Nueva playlist"),
+            QStringLiteral("Nombre:"), QLineEdit::Normal, QString(), &ok);
+        if (!ok || title.trimmed().isEmpty())
+            return;
+        const QString id = m_playlists->create(title.trimmed());
+        if (!id.isEmpty())
+            m_playlists->addVideo(id, v.id);
+    });
+    if (playlists.isEmpty() && !anyAdded)
+        menu.addAction(QStringLiteral("Sin playlists todavía"))->setEnabled(false);
+    menu.exec(m_playlistBtn
+                  ? m_playlistBtn->mapToGlobal(QPoint(0, m_playlistBtn->height()))
+                  : QCursor::pos());
 }
 
 void WatchPage::onChannelInfo(const ChannelInfo &channel)
@@ -678,8 +903,11 @@ void WatchPage::onChannelInfo(const ChannelInfo &channel)
     if (!channel.name.isEmpty())
         m_channelBtn->setText(channel.name);
     m_channelAvatarKey = QStringLiteral("ch_%1").arg(channel.id);
-    if (!channel.avatarUrl.isEmpty())
+    if (!channel.avatarUrl.isEmpty()) {
         m_thumbs->requestChannelAvatar(channel.id, channel.avatarUrl);
+        if (m_subs->isSubscribed(channel.id))
+            m_subs->setAvatar(channel.id, channel.avatarUrl);
+    }
 }
 
 void WatchPage::onAvatarReady(const QString &key)

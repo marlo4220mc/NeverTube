@@ -137,9 +137,11 @@ void PlayerWidget::playUrl(const QString &url, double startAt)
     m_position = 0.0;
     m_duration = 0.0;
     const QByteArray u = url.toUtf8();
-    const QByteArray opt = startAt > 0.0
-        ? QByteArray("+") + QByteArray::number(startAt, 'f', 2)
-        : QByteArray();
+    // "start" SIEMPRE con valor concreto: mpv ignora/reserva el valor anterior si
+    // se le pasa una cadena vacía, y un vídeo reanudado (start=X) dejaría ese X
+    // como salida para TODOS los siguientes (cada vídeo de la cola arrancaría
+    // desde la posición del primero). Valor absoluto, sin el prefijo "+".
+    const QByteArray opt = QByteArray::number(startAt > 0.0 ? startAt : 0.0, 'f', 2);
     mpv_set_option_string(m_mpv, "start", opt.constData());
     if (startAt > 0.0)
         NT_DEBUG("E2E playUrl start=%s\n", opt.constData());

@@ -4,9 +4,14 @@
 #include <QVector>
 
 #include "../../models.h"
+#include "../icons.h"
 
 class VideoCacheRepo;
 class FavoritesRepo;
+class WatchLaterRepo;
+class PlaylistsRepo;
+class StarredRepo;
+class SubscriptionsRepo;
 class SettingsRepo;
 class PlayerController;
 class PlayerWidget;
@@ -16,6 +21,7 @@ class Yt;
 class QFrame;
 class QLabel;
 class QListWidget;
+class QMenu;
 class QPushButton;
 class QStackedWidget;
 class QTimer;
@@ -32,7 +38,9 @@ public:
     explicit WatchPage(Yt *yt, PlayerController *player,
                        PlayerWidget *playerWidget,
                        VideoCacheRepo *cache, FavoritesRepo *favorites,
-                       SettingsRepo *settings, ThumbnailCache *thumbs,
+                       StarredRepo *starred, WatchLaterRepo *watchLater,
+                       SubscriptionsRepo *subs, SettingsRepo *settings,
+                       ThumbnailCache *thumbs, PlaylistsRepo *playlists,
                        QWidget *parent = nullptr);
 
     void setWatchData(const QVector<VideoInfo> &queue, int startIndex);
@@ -70,12 +78,16 @@ private:
     void updateQueue();
     void updateInfo();
     void updateChannelRow();
+    void updateSubscribeButton(bool subscribed);
+    void updateSubscription(const VideoInfo &v, bool subscribe);
+    void updateActionButtons();
     void enterFullscreen();
     void leaveFullscreen();
     int qualityIndexForHeight(int height) const;
     int idxToQuality(int idx) const;
     void setQualityIndex(int index);
     void toggleQualityMenu();
+    void showPlaylistMenu();
     void showOverlayControls();
     void hideOverlayControls();
     void updateOverlayIcons();
@@ -88,8 +100,16 @@ private:
     PlayerWidget *m_playerWidget = nullptr;
     VideoCacheRepo *m_cache;
     FavoritesRepo *m_favs;
+    StarredRepo *m_starred;
+    WatchLaterRepo *m_watchLater;
+    SubscriptionsRepo *m_subs;
     SettingsRepo *m_settings;
     ThumbnailCache *m_thumbs;
+    PlaylistsRepo *m_playlists;
+    bool m_liked = false;
+    bool m_disliked = false;
+    bool m_isStarred = false;
+    bool m_watchLaterMarked = false;
 
     QPushButton *m_back;
     QStackedWidget *m_overlay;
@@ -102,6 +122,20 @@ private:
     QLabel *m_meta;
     QPushButton *m_channelBtn;
     QString m_channelAvatarKey;
+    QPushButton *m_subscribeBtn;
+    QPushButton *m_likeBtn;
+    QPushButton *m_dislikeBtn;
+    QPushButton *m_shareBtn;
+    QPushButton *m_starBtn = nullptr;
+    QPushButton *m_watchLaterBtn = nullptr;
+    QPushButton *m_playlistBtn = nullptr;
+    nt::Icon m_likeIcon = nt::Icon::Thumb;
+    nt::Icon m_dislikeIcon = nt::Icon::ThumbDown;
+    nt::Icon m_shareIcon = nt::Icon::Share;
+    nt::Icon m_starIcon = nt::Icon::Star;
+    nt::Icon m_starFilledIcon = nt::Icon::StarFilled;
+    nt::Icon m_watchLaterIcon = nt::Icon::WatchLater;
+    nt::Icon m_playlistIcon = nt::Icon::ListAdd;
     QPushButton *m_quality;
     QFrame *m_qualityMenu;
     QWidget *m_qualityMenuAnchor;

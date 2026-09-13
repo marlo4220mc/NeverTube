@@ -34,6 +34,7 @@ que toquen el reproductor por incrementos pequeños y verificando cada uno.
 ./build/nevertube_qt2 --selftest-db        # repos/SQLite
 ./build/nevertube_qt2 --selftest-player    # hwdec=auto + timer=33ms + render ok
 ./build/nevertube_qt2 --selftest-innertube # sw.js_data→visitorData→player→hlsManifestUrl
+./build/nevertube_qt2 --selftest-discover  # radios guardadas: guardar/recuperar/re-seleccionar/persistencia/descarte
 ```
 
 El selftest del player verifica invariantes del núcleo protegido sin
@@ -69,6 +70,14 @@ es decir al abrir un vídeo desde search/home/channel/URL. Dentro de la lista
 cada vídeo nuevo se regenera. Innertube: `fetchRadio` (panel + mezcla),
 `fetchRadioMore` (continuación, si el cliente la emite). El selftest de
 innertube cubre el panel RDAMVM y el fallback.
+
+**Radio ya guardada (reuso sin red)**: los radios se guardan COMPLETOS en
+`discover_radios`/`discover_radio_videos` al generarse. Si al abrir un vídeo
+(`openWatchAt`, modo Radio) su radio ya está guardada, se reusa desde la BD
+para "A continuación" (`MainWindow` con `DiscoverRepo::radioVideoIdsForSeed` +
+`VideoCacheRepo::getMany`) y NO se vuelve a pedir a YouTube. Solo se llama
+`WatchPage::triggerRadio` cuando no hay radio guardada (o sus metadatos no
+están en la caché). Para Descubre, `hasRadio` ya evitaba re-pedir.
 
 ## Puntos de entrada CLI
 

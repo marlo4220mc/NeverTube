@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QFile>
 #include <QHostAddress>
 #include <QHostInfo>
 #include <QJsonArray>
@@ -31,6 +32,8 @@ const char kPlayerEndpoint[] =
     "/youtubei/v1/player?prettyPrint=false";
 const char kNextEndpoint[] =
     "/youtubei/v1/next?prettyPrint=false";
+const char kBrowseEndpoint[] =
+    "/youtubei/v1/browse?prettyPrint=false";
 
 // UA del fork de youtube_explode_dart usado para /sw.js_data.
 const char kChromeUA[] =
@@ -735,6 +738,7 @@ void Innertube::fetchVisitorData()
         }
         m_visitorData = visitorData;
         m_visitorExpiresAt = QDateTime::currentSecsSinceEpoch() + 2592000;
+        m_visitorDataFreshRun = true;
         NT_DEBUG("E2E innertube visitorData sw.js_data len=%d\n",
                  visitorData.size());
         emit visitorDataReady(m_visitorData, m_visitorExpiresAt);
@@ -756,6 +760,10 @@ void Innertube::useFallbackVisitorData()
 {
     m_visitorData = QString::fromLatin1(kFallbackVisitorData);
     m_visitorExpiresAt = QDateTime::currentSecsSinceEpoch() + 2592000;
+    // Marcar como "fresco en esta sesión" también ante fallback: evita que el
+    // Home reintente sw.js_data en cada recarga cuando el endpoint está caído
+    // (el fallback fijo ya es usable).
+    m_visitorDataFreshRun = true;
     NT_DEBUG("E2E innertube visitorData fixed fallback len=%d\n",
              m_visitorData.size());
     dispatchPending();
@@ -778,6 +786,28 @@ void Innertube::dispatchPending()
         m_radioPending = false;
         requestRadio();
     }
+    if (m_homePending) {
+        m_homePending = false;
+        requestHome(QString());
+    }
+    if (m_channelPending) {
+        m_channelPending = false;
+        requestChannel();
+    }
+    if (m_trendPending) {
+        m_trendPending = false;
+        requestTrending();
+    }
+}
+
+bool Innertube::retryBrowseWithFreshVisitor(bool *retried, bool *pending)
+{
+    if (*retried)
+        return false;
+    *retried = true;
+    *pending = true;
+    fetchVisitorData();
+    return true;
 }
 
 void Innertube::fetchNext(const QString &videoId)
@@ -1058,6 +1088,641 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
              videoId.toUtf8().constData(), videos.size(),
              m_radioContinuation.isEmpty() ? "no" : "si");
     emit radioReady(videoId, videos);
+}
+
+// Límites del feed del Home (browse FEwhat_to_watch): hasta kHomeShelfCap
+// estantes y kHomeShelfVideos vídeos por estante; si no hay estantes (layout
+// distinto) se recolecta hasta kHomeShelfVideos sueltos.
+constexpr int kHomeShelfCap = 3;
+constexpr int kHomeShelfVideos = 8;
+
+// Params de la pestaña "Vídeos" de los canales (browse). Valor verificado
+// idéntico en los canales reales; sin él el browse devuelve la pestaña por
+// defecto ("Inicio") en lugar del listado de vídeos.
+const char kChannelVideosParams[] = "EgZ2aWRlb3PyBgQKAjoA";
+// Tendencias: browseId real, aunque hoy YouTube responde 400/redirección a la
+// Home para tendencias anónimas (el selftest registra el estado real).
+const char kTrendingBrowseId[] = "FEtrending";
+// Cuántos vídeos se recolectan por canal/tendencias (luego la UI decide/dedupe
+// y limita a 8). Suficiente para llenar la sección sin pedir más canales.
+constexpr int kChannelTake = 12;
+constexpr int kTrendingTake = 12;
+
+void Innertube::fetchHome()
+{
+    if (m_homeInFlight || m_homeMoreInFlight) {
+        NT_DEBUG("E2E innertube home single-flight\n");
+        return;
+    }
+    m_homeInFlight = true;
+    m_homeContinuation.clear();
+    m_homeVisitorRetried = false;
+    NT_DEBUG("E2E innertube fetchHome\n");
+    // El visitorData persistido vigente se usa directamente: ya no se fuerza
+    // el refresh una vez por sesión (gana una RTT en el arranque). Si el
+    // browse responde 500/vacío, handleHome refresca visitorData UNA vez y
+    // reintenta (m_homeVisitorRetried) sin bucle.
+    if (m_visitorData.isEmpty()
+        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+        m_homePending = true;
+        fetchVisitorData();
+        return;
+    }
+    requestHome(QString());
+}
+
+void Innertube::fetchHomeMore()
+{
+    if (m_homeContinuation.isEmpty() || m_homeInFlight || m_homeMoreInFlight) {
+        NT_DEBUG("E2E innertube home more ignorada\n");
+        return;
+    }
+    m_homeMoreInFlight = true;
+    NT_DEBUG("E2E innertube fetchHomeMore\n");
+    requestHome(m_homeContinuation);
+}
+
+void Innertube::requestHome(const QString &continuation)
+{
+    m_http->setResult([this, continuation](int status, const QByteArray &body) {
+        NT_DEBUG("E2E innertube home HTTP status=%d size=%d\n", status,
+                 body.size());
+        handleHome(status == 200, QString(), body, !continuation.isEmpty());
+    });
+    m_http->setError([this, continuation](const QString &reason) {
+        handleHome(false, reason, QByteArray(), !continuation.isEmpty());
+    });
+    m_http->setTimeoutMs(kPlayerTimeoutMs);
+    m_http->setVisitorId(m_visitorData);
+
+    // VISIONOS: el único cliente probado que devuelve el feed real del Home
+    // (62 compactVideoRenderer en la PRUEBA 1). Sin cascada: si falla/500, la
+    // app usa el fallback yt-dlp (no se regenera visitorData en bucle).
+    const PlayerClient &pc = kPlayerClients[0];
+    const QJsonObject client = clientContext(pc, m_visitorData);
+    QJsonObject context{{QStringLiteral("client"), client}};
+    QJsonObject body;
+    if (continuation.isEmpty()) {
+        body = {
+            {QStringLiteral("context"), context},
+            {QStringLiteral("browseId"), QStringLiteral("FEwhat_to_watch")},
+        };
+    } else {
+        body = {
+            {QStringLiteral("context"), context},
+            {QStringLiteral("continuation"), continuation},
+        };
+    }
+    const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    m_http->post(kBrowseEndpoint, json, pc.ua, pc.clientId, pc.version,
+                 nullptr, nullptr, nullptr);
+}
+
+void Innertube::handleHome(bool ok, const QString &error,
+                           const QByteArray &body, bool more)
+{
+    if (more)
+        m_homeMoreInFlight = false;
+    else
+        m_homeInFlight = false;
+    if (!ok) {
+        NT_DEBUG("E2E innertube home HTTP err: %s\n",
+                 error.toUtf8().constData());
+        if (more)
+            emit homeMoreReady(QVector<VideoInfo>());
+        else if (retryBrowseWithFreshVisitor(&m_homeVisitorRetried,
+                                             &m_homePending))
+            return;
+        else
+            emit homeReady(QVector<VideoInfo>());
+        return;
+    }
+    QJsonParseError err;
+    QByteArray json = body.trimmed();
+    if (json.startsWith(")]}'"))
+        json.remove(0, 4);
+    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        NT_DEBUG("E2E innertube home json fail size=%d\n", body.size());
+        if (more)
+            emit homeMoreReady(QVector<VideoInfo>());
+        else if (retryBrowseWithFreshVisitor(&m_homeVisitorRetried,
+                                             &m_homePending))
+            return;
+        else
+            emit homeReady(QVector<VideoInfo>());
+        return;
+    }
+    QString continuation;
+    const QVector<VideoInfo> videos =
+        parseHomeBrowse(doc.object(), &continuation);
+    m_homeContinuation = continuation;
+    NT_DEBUG("E2E innertube home ok videos=%d cont=%s\n", videos.size(),
+             continuation.isEmpty() ? "no" : "si");
+    if (more) {
+        emit homeMoreReady(videos);
+        return;
+    }
+    // Respuesta válida pero sin vídeos (p. ej. 200 con challenge/error):
+    // reintentar una vez con visitorData fresco antes de ocultar la sección.
+    if (videos.isEmpty()
+        && retryBrowseWithFreshVisitor(&m_homeVisitorRetried,
+                                       &m_homePending))
+        return;
+    emit homeReady(videos);
+}
+
+void Innertube::fetchChannelVideos(const QString &channelId)
+{
+    if (m_channelInFlight) {
+        NT_DEBUG("E2E innertube channel single-flight\n");
+        return;
+    }
+    m_channelInFlight = true;
+    m_channelId = channelId;
+    m_channelVisitorRetried = false;
+    NT_DEBUG("E2E innertube fetchChannelVideos id=%s\n",
+             channelId.toUtf8().constData());
+    if (m_visitorData.isEmpty()
+        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+        m_channelPending = true;
+        fetchVisitorData();
+        return;
+    }
+    requestChannel();
+}
+
+void Innertube::requestChannel()
+{
+    const QString channelId = m_channelId;
+    m_http->setResult([this, channelId](int status, const QByteArray &body) {
+        NT_DEBUG("E2E innertube channel HTTP status=%d size=%d id=%s\n",
+                 status, body.size(), channelId.toUtf8().constData());
+        handleChannel(status == 200, QString(), body);
+    });
+    m_http->setError([this](const QString &reason) {
+        handleChannel(false, reason, QByteArray());
+    });
+    m_http->setTimeoutMs(kPlayerTimeoutMs);
+    m_http->setVisitorId(m_visitorData);
+
+    const PlayerClient &pc = kPlayerClients[0];
+    const QJsonObject client = clientContext(pc, m_visitorData);
+    const QJsonObject body{
+        {QStringLiteral("context"), QJsonObject{{QStringLiteral("client"), client}}},
+        {QStringLiteral("browseId"), channelId},
+        {QStringLiteral("params"), QString::fromLatin1(kChannelVideosParams)},
+    };
+    const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    m_http->post(kBrowseEndpoint, json, pc.ua, pc.clientId, pc.version,
+                 nullptr, nullptr, nullptr);
+}
+
+void Innertube::handleChannel(bool ok, const QString &error,
+                              const QByteArray &body)
+{
+    m_channelInFlight = false;
+    if (!ok) {
+        NT_DEBUG("E2E innertube channel HTTP err: %s\n",
+                 error.toUtf8().constData());
+        if (retryBrowseWithFreshVisitor(&m_channelVisitorRetried,
+                                        &m_channelPending))
+            return;
+        emit channelVideosReady(m_channelId, QVector<VideoInfo>());
+        return;
+    }
+    QJsonParseError err;
+    QByteArray json = body.trimmed();
+    if (json.startsWith(")]}'"))
+        json.remove(0, 4);
+    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        NT_DEBUG("E2E innertube channel json fail size=%d\n", body.size());
+        if (retryBrowseWithFreshVisitor(&m_channelVisitorRetried,
+                                        &m_channelPending))
+            return;
+        emit channelVideosReady(m_channelId, QVector<VideoInfo>());
+        return;
+    }
+    QVector<VideoInfo> videos =
+        collectVideoRenderers(doc.object(), kChannelTake);
+    if (videos.isEmpty()
+        && retryBrowseWithFreshVisitor(&m_channelVisitorRetried,
+                                       &m_channelPending))
+        return;
+    NT_DEBUG("E2E innertube channel ok videos=%d\n", videos.size());
+    emit channelVideosReady(m_channelId, videos);
+}
+
+void Innertube::fetchTrending()
+{
+    if (m_trendInFlight) {
+        NT_DEBUG("E2E innertube trending single-flight\n");
+        return;
+    }
+    m_trendInFlight = true;
+    m_trendVisitorRetried = false;
+    NT_DEBUG("E2E innertube fetchTrending\n");
+    if (m_visitorData.isEmpty()
+        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+        m_trendPending = true;
+        fetchVisitorData();
+        return;
+    }
+    requestTrending();
+}
+
+void Innertube::requestTrending()
+{
+    m_http->setResult([this](int status, const QByteArray &body) {
+        NT_DEBUG("E2E innertube trending HTTP status=%d size=%d\n", status,
+                 body.size());
+        handleTrending(status == 200, QString(), body);
+    });
+    m_http->setError([this](const QString &reason) {
+        handleTrending(false, reason, QByteArray());
+    });
+    m_http->setTimeoutMs(kPlayerTimeoutMs);
+    m_http->setVisitorId(m_visitorData);
+
+    const PlayerClient &pc = kPlayerClients[0];
+    const QJsonObject client = clientContext(pc, m_visitorData);
+    const QJsonObject body{
+        {QStringLiteral("context"), QJsonObject{{QStringLiteral("client"), client}}},
+        {QStringLiteral("browseId"), QString::fromLatin1(kTrendingBrowseId)},
+    };
+    const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    m_http->post(kBrowseEndpoint, json, pc.ua, pc.clientId, pc.version,
+                 nullptr, nullptr, nullptr);
+}
+
+void Innertube::handleTrending(bool ok, const QString &error,
+                               const QByteArray &body)
+{
+    m_trendInFlight = false;
+    if (!ok) {
+        NT_DEBUG("E2E innertube trending HTTP err: %s\n",
+                 error.toUtf8().constData());
+        if (retryBrowseWithFreshVisitor(&m_trendVisitorRetried,
+                                        &m_trendPending))
+            return;
+        emit trendingReady(QVector<VideoInfo>());
+        return;
+    }
+    QJsonParseError err;
+    QByteArray json = body.trimmed();
+    if (json.startsWith(")]}'"))
+        json.remove(0, 4);
+    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        NT_DEBUG("E2E innertube trending json fail size=%d\n", body.size());
+        if (retryBrowseWithFreshVisitor(&m_trendVisitorRetried,
+                                        &m_trendPending))
+            return;
+        emit trendingReady(QVector<VideoInfo>());
+        return;
+    }
+    QVector<VideoInfo> videos =
+        collectVideoRenderers(doc.object(), kTrendingTake);
+    if (videos.isEmpty()
+        && retryBrowseWithFreshVisitor(&m_trendVisitorRetried,
+                                       &m_trendPending))
+        return;
+    NT_DEBUG("E2E innertube trending ok videos=%d\n", videos.size());
+    emit trendingReady(videos);
+}
+
+namespace {
+
+// Texto de un nodo (simpleText o runs).
+QString homeTextOf(const QJsonValue &val)
+{
+    const QJsonObject o = val.toObject();
+    const QJsonValue simple = o.value(QStringLiteral("simpleText"));
+    if (simple.isString())
+        return simple.toString();
+    const QJsonArray runs = o.value(QStringLiteral("runs")).toArray();
+    QString t;
+    for (const QJsonValue &r : runs)
+        t += r.toObject().value(QStringLiteral("text")).toString();
+    return t;
+}
+
+int homeDurationOf(const QJsonArray &overlays)
+{
+    for (const QJsonValue &val : overlays) {
+        const QJsonObject o = val.toObject();
+        if (!o.contains(QStringLiteral("thumbnailOverlayTimeStatusRenderer")))
+            continue;
+        const QString t = homeTextOf(o.value(
+            QStringLiteral("thumbnailOverlayTimeStatusRenderer")).toObject()
+                .value(QStringLiteral("text")));
+        QStringList parts = t.split(QLatin1Char(':'));
+        if (parts.size() == 2)
+            return parts.at(0).toInt() * 60 + parts.at(1).toInt();
+        if (parts.size() == 3)
+            return parts.at(0).toInt() * 3600 + parts.at(1).toInt() * 60
+                   + parts.at(2).toInt();
+    }
+    return 0;
+}
+
+int homeViewCountOf(const QString &s)
+{
+    QString t = s;
+    t.remove(QLatin1Char('.'));
+    t.remove(QLatin1Char(','));
+    t.remove(QLatin1Char(' '));
+    bool ok = false;
+    if (t.endsWith(QLatin1Char('M'))) {
+        t.chop(1);
+        return qRound(t.toDouble(&ok) * 1e6);
+    }
+    if (t.endsWith(QLatin1Char('K'))) {
+        t.chop(1);
+        return qRound(t.toDouble(&ok) * 1e3);
+    }
+    if (t.endsWith(QLatin1Char('B'))) {
+        t.chop(1);
+        return qRound(t.toDouble(&ok) * 1e9);
+    }
+    return t.toInt(&ok);
+}
+
+// "hace 3 días" / "3 giorni fa" → fecha ISO aproximada (para ordenar feeds
+// sin depender de una marca exacta). Si no reconoce el texto, devuelve vacío.
+QString relativeToIso(const QString &text)
+{
+    const QString t = text.trimmed().toLower();
+    QStringList parts = t.split(QLatin1Char(' '));
+    if (parts.size() < 3)
+        return QString();
+    QString countText;
+    QString unit;
+    if (parts.at(0) == QLatin1String("hace")) {         // "hace X unidad"
+        countText = parts.at(1);
+        unit = parts.at(2);
+    } else if (parts.at(1) == QLatin1String("hace")) {  // "X hace"
+        countText = parts.at(0);
+        unit = parts.at(2);
+    } else {
+        return QString();
+    }
+    bool ok = false;
+    double n = countText.toDouble(&ok);
+    if (!ok)
+        return QString();
+    qint64 secs = 0;
+    if (unit.contains(QStringLiteral("segundo")))
+        secs = qint64(n);
+    else if (unit.contains(QStringLiteral("minuto")))
+        secs = qint64(n * 60);
+    else if (unit.contains(QStringLiteral("hora")))
+        secs = qint64(n * 3600);
+    else if (unit.contains(QStringLiteral("día"))
+             || unit.contains(QStringLiteral("dia")))
+        secs = qint64(n * 86400);
+    else if (unit.contains(QStringLiteral("semana")))
+        secs = qint64(n * 7 * 86400);
+    else if (unit.contains(QStringLiteral("mes")))
+        secs = qint64(n * 30 * 86400);
+    else if (unit.contains(QStringLiteral("año"))
+             || unit.contains(QStringLiteral("ano")))
+        secs = qint64(n * 365 * 86400);
+    else
+        return QString();
+    if (secs <= 0)
+        return QString();
+    return QDateTime::currentDateTimeUtc().addSecs(-secs)
+        .toString(Qt::ISODate);
+}
+
+} // namespace
+
+// compactVideoRenderer / videoRenderer → VideoInfo.
+VideoInfo Innertube::videoFromHomeRenderer(const QJsonObject &item) const
+{
+    const QJsonObject vr = item.value(QStringLiteral("videoRenderer")).toObject();
+    const QJsonObject cr = item.value(QStringLiteral("compactVideoRenderer")).toObject();
+    const QJsonObject *r = vr.isEmpty() ? &cr : &vr;
+    if (r->isEmpty())
+        return VideoInfo{};
+    VideoInfo v;
+    v.id = r->value(QStringLiteral("navigationEndpoint")).toObject()
+               .value(QStringLiteral("watchEndpoint")).toObject()
+               .value(QStringLiteral("videoId")).toString();
+    if (v.id.isEmpty())
+        v.id = r->value(QStringLiteral("videoId")).toString();
+    if (v.id.isEmpty())
+        return VideoInfo{};
+    v.title = homeTextOf(r->value(QStringLiteral("title")));
+    const QJsonArray ownerRuns =
+        r->value(QStringLiteral("ownerText")).toObject()
+            .value(QStringLiteral("runs")).toArray();
+    if (!ownerRuns.isEmpty()) {
+        const QJsonObject o0 = ownerRuns.at(0).toObject();
+        v.channel = o0.value(QStringLiteral("text")).toString();
+        v.channelId = o0.value(QStringLiteral("navigationEndpoint"))
+                          .toObject().value(QStringLiteral("browseEndpoint"))
+                          .toObject().value(QStringLiteral("browseId"))
+                          .toString();
+    } else {
+        v.channel = homeTextOf(r->value(QStringLiteral("longBylineText")));
+    }
+    const QJsonArray thumbs = r->value(QStringLiteral("thumbnail"))
+                                  .toObject().value(QStringLiteral("thumbnails"))
+                                  .toArray();
+    // TEMPORAL: logging de variantes de thumbnail
+    if (!thumbs.isEmpty() && !v.id.isEmpty()) {
+        fprintf(stderr, "THUMB_VARIANTS id=%s count=%d\n", 
+                v.id.toUtf8().constData(), thumbs.size());
+        for (int i = 0; i < thumbs.size(); ++i) {
+            const QJsonObject th = thumbs[i].toObject();
+            const int w = th.value(QStringLiteral("width")).toInt();
+            const int h = th.value(QStringLiteral("height")).toInt();
+            const QString url = th.value(QStringLiteral("url")).toString();
+            const double aspect = h > 0 ? double(w) / double(h) : 0;
+            fprintf(stderr, "  [%d] %dx%d aspect=%.3f url=%s\n", 
+                    i, w, h, aspect, url.right(40).toUtf8().constData());
+        }
+    }
+    if (!thumbs.isEmpty())
+        v.thumbnailUrl = thumbs.last().toObject()
+                             .value(QStringLiteral("url")).toString();
+    v.durationSeconds = homeDurationOf(
+        r->value(QStringLiteral("thumbnailOverlays")).toArray());
+    v.viewCount = homeViewCountOf(homeTextOf(r->value(QStringLiteral("viewCountText"))));
+    v.publishedAt = relativeToIso(homeTextOf(
+        r->value(QStringLiteral("publishedTimeText"))));
+    if (v.thumbnailUrl.isEmpty() && v.id.size() == 11)
+        v.thumbnailUrl = QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg")
+                             .arg(v.id);
+    return v;
+}
+
+// Recorre el árbol recolectando compactVideoRenderer/videoRenderer sin
+// duplicar ids, respetando el orden de la respuesta y el límite.
+QVector<VideoInfo> Innertube::collectVideoRenderers(const QJsonObject &root,
+                                                    int maxCount) const
+{
+    QVector<VideoInfo> out;
+    std::function<void(const QJsonValue &)> collect =
+        [&](const QJsonValue &val) {
+            if (out.size() >= maxCount)
+                return;
+            if (val.isArray()) {
+                const QJsonArray arr = val.toArray();
+                for (const QJsonValue &e : arr)
+                    collect(e);
+                return;
+            }
+            if (!val.isObject())
+                return;
+            const QJsonObject o = val.toObject();
+            if (o.contains(QStringLiteral("compactVideoRenderer"))
+                || o.contains(QStringLiteral("videoRenderer"))) {
+                const VideoInfo v = videoFromHomeRenderer(o);
+                if (!v.id.isEmpty()) {
+                    bool seen = false;
+                    for (const VideoInfo &d : std::as_const(out))
+                        if (d.id == v.id) { seen = true; break; }
+                    if (!seen)
+                        out.append(v);
+                }
+                return;
+            }
+            for (auto it = o.begin(); it != o.end(); ++it)
+                collect(it.value());
+        };
+    collect(QJsonValue(root));
+    return out;
+}
+
+// Feed del Home (FEwhat_to_watch) con el layout verificado en la PRUEBA 1 con
+// VISIONOS: singleColumnBrowseResultsRenderer → tabs → tabRenderer → content →
+// sectionListRenderer → contents[] → shelfRenderer → content →
+// verticalListRenderer → items[] → compactVideoRenderer / videoRenderer.
+QVector<VideoInfo> Innertube::parseHomeBrowse(const QJsonObject &root,
+                                              QString *continuation) const
+{
+    QVector<VideoInfo> out;
+    if (continuation)
+        continuation->clear();
+
+    // Primer token de continuación que aparezca (en cualquier parte de la
+    // respuesta; los estantes no lo llevan, va en el propio sectionListRenderer
+    // o en continuations del listado).
+    std::function<void(const QJsonValue &)> grabCont;
+    grabCont = [&](const QJsonValue &val) {
+        if (continuation && !continuation->isEmpty())
+            return;
+        if (val.isArray()) {
+            const QJsonArray arr = val.toArray();
+            for (const QJsonValue &e : arr)
+                grabCont(e);
+            return;
+        }
+        if (!val.isObject())
+            return;
+        const QJsonObject o = val.toObject();
+        QString tok;
+        if (o.contains(QStringLiteral("continuationCommand")) && tok.isEmpty()) {
+            tok = o.value(QStringLiteral("continuationCommand")).toObject()
+                      .value(QStringLiteral("token")).toString();
+        }
+        if (tok.isEmpty() && o.contains(QStringLiteral("nextContinuationData"))) {
+            tok = o.value(QStringLiteral("nextContinuationData")).toObject()
+                      .value(QStringLiteral("continuation")).toString();
+        }
+        if (tok.isEmpty() && o.contains(QStringLiteral("reloadContinuationData"))) {
+            tok = o.value(QStringLiteral("reloadContinuationData")).toObject()
+                      .value(QStringLiteral("continuation")).toString();
+        }
+        if (continuation && !tok.isEmpty())
+            *continuation = tok;
+        for (auto it = o.begin(); it != o.end(); ++it)
+            grabCont(it.value());
+    };
+    for (auto it = root.begin(); it != root.end(); ++it)
+        grabCont(it.value());
+
+    // Recolecta renderers de vídeo dentro de una sección (subárbol). Respeta
+    // los límites por estante y total.
+    int shelves = 0;
+    int shelfVideos = 0;
+    std::function<void(const QJsonValue &)> collect =
+        [&](const QJsonValue &val) {
+            if (out.size() >= kHomeShelfCap * kHomeShelfVideos
+                || shelfVideos >= kHomeShelfVideos)
+                return;
+            if (val.isArray()) {
+                const QJsonArray arr = val.toArray();
+                for (const QJsonValue &e : arr)
+                    collect(e);
+                return;
+            }
+            if (!val.isObject())
+                return;
+            const QJsonObject o = val.toObject();
+            if (o.contains(QStringLiteral("compactVideoRenderer"))
+                || o.contains(QStringLiteral("videoRenderer"))) {
+                const VideoInfo v = videoFromHomeRenderer(o);
+                if (!v.id.isEmpty() && shelfVideos < kHomeShelfVideos
+                    && out.size() < kHomeShelfCap * kHomeShelfVideos)
+                    out.append(v);
+                ++shelfVideos;
+                return;
+            }
+            for (auto it = o.begin(); it != o.end(); ++it)
+                collect(it.value());
+        };
+
+    const QJsonObject contents = root.value(QStringLiteral("contents")).toObject();
+    const QJsonObject sc = contents
+        .value(QStringLiteral("singleColumnBrowseResultsRenderer")).toObject();
+    const QJsonArray tabs = sc.value(QStringLiteral("tabs")).toArray();
+    if (!tabs.isEmpty()) {
+        const QJsonObject content = tabs.first().toObject()
+            .value(QStringLiteral("tabRenderer")).toObject()
+            .value(QStringLiteral("content")).toObject();
+        const QJsonArray sections = content
+            .value(QStringLiteral("sectionListRenderer")).toObject()
+            .value(QStringLiteral("contents")).toArray();
+        for (const QJsonValue &sec : sections) {
+            if (out.size() >= kHomeShelfCap * kHomeShelfVideos)
+                break;
+            const QJsonObject shelf = sec.toObject()
+                .value(QStringLiteral("shelfRenderer")).toObject();
+            if (shelf.isEmpty())
+                continue;
+            if (shelves >= kHomeShelfCap)
+                break;
+            ++shelves;
+            shelfVideos = 0;
+            collect(shelf.value(QStringLiteral("content")));
+        }
+    }
+
+    // Layout distinto (p. ej. richGrid): recolectar hasta kHomeShelfVideos
+    // directamente desde el árbol raíz como si fuera un único "estante".
+    if (out.isEmpty()) {
+        shelfVideos = 0;
+        collect(QJsonValue(root));
+    }
+    // Dedupe por id (un mismo vídeo puede repetirse en estantes).
+    QVector<VideoInfo> unique;
+    for (const VideoInfo &v : std::as_const(out)) {
+        bool seen = false;
+        for (const VideoInfo &d : std::as_const(unique)) {
+            if (d.id == v.id) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen)
+            unique.append(v);
+    }
+    return unique;
 }
 
 // Cola "watch playlist" del mix RDAMVM: playlistPanelVideoRenderer de la
@@ -1749,5 +2414,793 @@ bool innertubeSelfTest()
     QCoreApplication::exec();
     return success;
 }
+
+// ---------------------------------------------------------------------------
+// Sondeo de diagnóstico del Home real (POST /browse, browseId FEwhat_to_watch).
+// Investigación SOLO (no es el Home de la app y no toca HomePage ni player):
+//   - visitorData: el persistido si se pasa en NEVERTUBE_HOME_VISITOR (valor
+//     tal como está guardado en settings), o uno freso vía sw.js_data.
+//   - prueba FEwhat_to_watch con los clientes ya existentes (VISIONOS primero;
+//     IOS/ANDROID_VR/WEB_EMBEDDED como comparación si VISIONOS falla/vacío).
+//   - reporta estado HTTP, tiempo, tamaño, renderers, vídeos, continuations y
+//     posibles desafíos (alertRenderer), sin inventar campos.
+// La lista de titles impresa permite contar manualmente la aparición de un
+// tema (PRUEBA 2: sesión A persistida vs sesión B fresca).
+//
+// Se lanza con:  ./build/nevertube_qt2 --selftest-home
+// (opcional)          NEVERTUBE_HOME_VISITOR='<visitorData persistido>'
+
+namespace {
+
+struct HomeVideoRow
+{
+    QString id;
+    QString title;
+    QString channel;
+    QString duration;
+    int seconds = 0;
+};
+
+struct HomeStats
+{
+    QHash<QString, int> renderers; // renderer/viewmodel -> conteo
+    QVector<HomeVideoRow> videos;
+    QString continuation;
+    bool hasAlerts = false;
+};
+
+QString probeTextOf(const QJsonValue &val)
+{
+    const QJsonObject o = val.toObject();
+    const QJsonValue simple = o.value(QStringLiteral("simpleText"));
+    if (simple.isString())
+        return simple.toString();
+    const QJsonArray runs = o.value(QStringLiteral("runs")).toArray();
+    QString t;
+    for (const QJsonValue &r : runs)
+        t += r.toObject().value(QStringLiteral("text")).toString();
+    return t;
+}
+
+void walkHomeJson(const QJsonValue &v, HomeStats *st)
+{
+    if (v.isArray()) {
+        const QJsonArray arr = v.toArray();
+        for (const QJsonValue &e : arr)
+            walkHomeJson(e, st);
+        return;
+    }
+    if (!v.isObject())
+        return;
+    const QJsonObject o = v.toObject();
+    for (auto it = o.begin(); it != o.end(); ++it) {
+        const QString key = it.key();
+        if (key.endsWith(QLatin1String("Renderer"))
+            || key.endsWith(QLatin1String("ViewModel")))
+            st->renderers[key]++;
+        if (key == QLatin1String("alertRenderer"))
+            st->hasAlerts = true;
+        if (key == QLatin1String("continuationCommand")) {
+            if (st->continuation.isEmpty())
+                st->continuation = it.value().toObject()
+                                       .value(QStringLiteral("token")).toString();
+        } else if (key == QLatin1String("nextContinuationData")) {
+            if (st->continuation.isEmpty())
+                st->continuation = it.value().toObject()
+                                       .value(QStringLiteral("continuation")).toString();
+        } else if (key == QLatin1String("reloadContinuationData")) {
+            if (st->continuation.isEmpty())
+                st->continuation = it.value().toObject()
+                                       .value(QStringLiteral("continuation")).toString();
+        }
+        if (key == QLatin1String("videoRenderer")) {
+            const QJsonObject vr = it.value().toObject();
+            HomeVideoRow row;
+            row.id = vr.value(QStringLiteral("videoId")).toString();
+            if (row.id.isEmpty())
+                row.id = vr.value(QStringLiteral("navigationEndpoint")).toObject()
+                             .value(QStringLiteral("watchEndpoint")).toObject()
+                             .value(QStringLiteral("videoId")).toString();
+            row.title = probeTextOf(vr.value(QStringLiteral("title")));
+            const QJsonArray owner =
+                vr.value(QStringLiteral("ownerText")).toObject()
+                    .value(QStringLiteral("runs")).toArray();
+            if (!owner.isEmpty())
+                row.channel = owner.first().toObject()
+                                  .value(QStringLiteral("text")).toString();
+            if (row.channel.isEmpty())
+                row.channel = probeTextOf(vr.value(QStringLiteral("longBylineText")));
+            row.duration = probeTextOf(vr.value(QStringLiteral("lengthText")));
+            const QStringList parts = row.duration.split(QLatin1Char(':'));
+            if (parts.size() == 2)
+                row.seconds = parts.at(0).toInt() * 60 + parts.at(1).toInt();
+            else if (parts.size() == 3)
+                row.seconds = parts.at(0).toInt() * 3600
+                              + parts.at(1).toInt() * 60 + parts.at(2).toInt();
+            st->videos.append(row);
+        }
+        walkHomeJson(it.value(), st);
+    }
+}
+
+} // namespace
+
+// Primera fase del sondeo usada por homeBrowseSelfTest (definida más abajo).
+namespace {
+void runHomeProbes(Ipv4Https *http, const QString &visitorData);
+}
+
+// Comprobación del camino de PRODUCCIÓN del Home: Innertube::fetchHome()
+// (sw.js_data → visitorData fresco → POST /browse FEwhat_to_watch VISIONOS →
+// parseHomeBrowse) y, si hay token, fetchHomeMore(). No toca el reproductor.
+// Si el feed llega vacío (500/fallo de red) el selftest NO falla: ese es el
+// comportamiento por diseño (la app usa el fallback yt-dlp). Sí falla si el
+// parser produce duplicados o pierde el id/continuación esperados.
+bool homeFeedLiveCheck()
+{
+    std::fprintf(stderr,
+                 "HOME-FEED LIVE CHECK start (producción: fetchHome VISIONOS)\n");
+    Innertube tube;
+    bool ok = true;
+    bool gotResponse = false;
+    bool requestedMore = false;
+    bool done = false;
+
+    auto *timeout = new QTimer;
+    timeout->setSingleShot(true);
+    QObject::connect(timeout, &QTimer::timeout, [&gotResponse, &ok, &done]() {
+        if (done)
+            return;
+        done = true;
+        if (!gotResponse) {
+            std::fprintf(stderr,
+                         "SELFTEST OK (fallback): home feed sin respuesta en 45s\n");
+            ok = true;
+        } else {
+            std::fprintf(stderr, "SELFTEST FAIL: home feed timeout tras respuesta\n");
+            ok = false;
+        }
+        QCoreApplication::exit(ok ? 0 : 1);
+    });
+    timeout->start(45000);
+
+    QObject::connect(&tube, &Innertube::homeReady,
+                     [&tube, &gotResponse, &ok, &done, &requestedMore](
+                         const QVector<VideoInfo> &videos) {
+                         if (done)
+                             return;
+                         gotResponse = true;
+                         if (videos.isEmpty()) {
+                             std::fprintf(stderr,
+                                          "HOME-FEED feed vacío: la app usa el "
+                                          "fallback yt-dlp (por diseño)\n");
+                             ok = true;
+                             done = true;
+                             QCoreApplication::exit(0);
+                             return;
+                         }
+                         int n11 = 0, emptyTitle = 0, emptyChannel = 0, dups = 0,
+                             withDur = 0;
+                         QSet<QString> seen;
+                         for (const VideoInfo &v : videos) {
+                             if (v.id.size() == 11)
+                                 ++n11;
+                             if (seen.contains(v.id))
+                                 ++dups;
+                             seen.insert(v.id);
+                             if (v.title.isEmpty())
+                                 ++emptyTitle;
+                             if (v.channel.isEmpty())
+                                 ++emptyChannel;
+                             if (v.durationSeconds > 0)
+                                 ++withDur;
+                         }
+                         std::fprintf(stderr,
+                                      "HOME-FEED videos=%d (id11=%d) dup=%d "
+                                      "emptyTitle=%d emptyChannel=%d conDur=%d\n",
+                                      videos.size(), n11, dups, emptyTitle,
+                                      emptyChannel, withDur);
+                         std::fprintf(stderr, "HOME-FEED 1º=%s chan=%s dur=%d\n",
+                                      videos.first().title.toUtf8().constData(),
+                                      videos.first().channel.toUtf8().constData(),
+                                      videos.first().durationSeconds);
+                         ok = (dups == 0 && n11 > 0);
+                         if (ok)
+                             std::fprintf(stderr, "HOME-FEED parse OK\n");
+                         else
+                             std::fprintf(stderr, "SELFTEST FAIL: parser home\n");
+                         if (ok && tube.hasHomeContinuation() && !requestedMore) {
+                             requestedMore = true;
+                             std::fprintf(stderr,
+                                          "HOME-FEED continuación detectada → "
+                                          "fetchHomeMore\n");
+                             tube.fetchHomeMore();
+                             return;
+                         }
+                         done = true;
+                         QCoreApplication::exit(ok ? 0 : 1);
+                     });
+    QObject::connect(&tube, &Innertube::homeMoreReady,
+                     [&ok, &done](const QVector<VideoInfo> &more) {
+                         if (done)
+                             return;
+                         QSet<QString> seen;
+                         for (const VideoInfo &v : more)
+                             seen.insert(v.id);
+                         std::fprintf(stderr,
+                                      "HOME-FEED more=%d (dupEnRespuesta=%s)\n",
+                                      more.size(),
+                                      seen.size() < more.size() ? "si" : "no");
+                         ok = true;
+                         done = true;
+                         QCoreApplication::exit(ok ? 0 : 1);
+                     });
+    tube.fetchHome();
+    QCoreApplication::exec();
+    return ok;
+}
+
+bool homeBrowseSelfTest()
+{
+    std::fprintf(stderr, "HOME-BROWSE SELFTEST start\n");
+    Ipv4Https http;
+
+    // Timeout global: no colgar el selftest si YouTube no responde.
+    QTimer watchdog;
+    watchdog.setSingleShot(true);
+    QObject::connect(&watchdog, &QTimer::timeout, []() {
+        std::fprintf(stderr, "SELFTEST FAIL: home browse (timeout global)\n");
+        QCoreApplication::exit(1);
+    });
+    watchdog.start(110000);
+
+    // 1) visitorData: el persistido si viene por env, si no uno freso.
+    const QByteArray envVisitor = qgetenv("NEVERTUBE_HOME_VISITOR").trimmed();
+    QString visitorData;
+    bool seeded = false;
+    if (!envVisitor.isEmpty()) {
+        visitorData = QString::fromUtf8(envVisitor);
+        seeded = true;
+        std::fprintf(stderr,
+                     "HOME-BROWSE visitor: persistido (seed) len=%d\n",
+                     visitorData.size());
+    }
+    if (seeded) {
+        runHomeProbes(&http, visitorData);
+        QCoreApplication::exec();
+        return homeFeedLiveCheck();
+    }
+    // visitorData freso via sw.js_data (flujo normal).
+    http.setTimeoutMs(kVisitorTimeoutMs);
+    http.setResult([&http](int status, const QByteArray &body) {
+        if (status != 200) {
+            std::fprintf(stderr, "HOME-BROWSE sw.js_data status=%d\n", status);
+            runHomeProbes(&http, QString());
+            return;
+        }
+        const QString vd = visitorDataFromSwJsData(body);
+        if (vd.isEmpty()) {
+            std::fprintf(stderr, "HOME-BROWSE sw.js_data sin visitorData\n");
+            runHomeProbes(&http, QString());
+            return;
+        }
+        std::fprintf(stderr, "HOME-BROWSE visitor fresho len=%d vd=%s\n",
+                     vd.size(), vd.toUtf8().constData());
+        runHomeProbes(&http, vd);
+    });
+    http.setError([&http](const QString &reason) {
+        std::fprintf(stderr, "HOME-BROWSE sw.js_data err: %s\n",
+                     reason.toUtf8().constData());
+        runHomeProbes(&http, QString());
+    });
+    http.get(kSwJsData, kChromeUA);
+
+    QCoreApplication::exec();
+    return homeFeedLiveCheck();
+}
+
+bool feedsProtocolSelfTest()
+{
+    std::fprintf(stderr, "FEEDS-PROTO SELFTEST start\n");
+    Ipv4Https http;
+    Innertube tube;
+    const QByteArray envChannel = qgetenv("NEVERTUBE_TEST_CHANNEL").trimmed();
+    const QString channel = envChannel.isEmpty()
+        ? QStringLiteral("UC36xmz34q02JYaZYKrMwXng")
+        : QString::fromUtf8(envChannel);
+    std::fprintf(stderr, "FEEDS-PROTO canal=%s\n", channel.toUtf8().constData());
+
+    // Timeout global: los endpoints pueden tardar o fallar, nunca colgar.
+    QTimer watchdog;
+    watchdog.setSingleShot(true);
+    QObject::connect(&watchdog, &QTimer::timeout, []() {
+        std::fprintf(stderr, "SELFTEST FAIL: feeds proto (timeout global)\n");
+        QCoreApplication::exit(1);
+    });
+    watchdog.start(120000);
+
+    struct State
+    {
+        Ipv4Https *http = nullptr;
+        Innertube *tube = nullptr;
+        QString channel;
+        QString visitor;
+        int phase = 0;
+        bool ok = true;
+        int chanStatus = 0;
+        int chanDiagSize = 0;
+        int trendStatus = 0;
+        int trendDiagSize = 0;
+        std::function<void()> next;
+    } st{&http, &tube, channel};
+
+    // Cuenta renderers de vídeo en una respuesta (sondeo de diagnóstico).
+    const auto countRenderers = [](const QJsonObject &root) {
+        QHash<QString, int> counts;
+        std::function<void(const QJsonValue &)> walk;
+        walk = [&](const QJsonValue &val) {
+            if (val.isArray()) {
+                const QJsonArray arr = val.toArray();
+                for (const QJsonValue &e : arr)
+                    walk(e);
+                return;
+            }
+            if (!val.isObject())
+                return;
+            const QJsonObject o = val.toObject();
+            for (auto it = o.begin(); it != o.end(); ++it) {
+                const QString k = it.key();
+                if (k.endsWith(QLatin1String("Renderer")))
+                    ++counts[k];
+                walk(it.value());
+            }
+        };
+        walk(QJsonValue(root));
+        QString list;
+        for (auto it = counts.begin(); it != counts.end(); ++it) {
+            if (!list.isEmpty())
+                list += QLatin1Char(' ');
+            list += QStringLiteral("%1=%2").arg(it.key()).arg(it.value());
+        }
+        return list;
+    };
+
+    const auto validIds = [](const QVector<VideoInfo> &videos) {
+        int n11 = 0;
+        for (const VideoInfo &v : videos)
+            if (v.id.size() == 11)
+                ++n11;
+        int dups = 0;
+        for (int i = 0; i < videos.size(); ++i)
+            for (int j = i + 1; j < videos.size(); ++j)
+                if (videos.at(i).id == videos.at(j).id)
+                    ++dups;
+        int withTitle = 0;
+        int withDur = 0;
+        for (const VideoInfo &v : videos) {
+            if (!v.title.isEmpty())
+                ++withTitle;
+            if (v.durationSeconds > 0)
+                ++withDur;
+        }
+        return QPair<QPair<int, int>, QPair<int, int>>(
+            {n11, dups}, {withTitle, withDur});
+    };
+
+    // fases: 0 visitor | 1 diag canal | 2 datos canal (tube) | 3 diag trending
+    // | 4 datos trending (tube) | 5 caso vacío (tube) | 6 fin
+    st.next = [&st, &countRenderers, &validIds]() {
+        switch (st.phase) {
+        case 0: {
+            st.phase = 1;
+            st.http->setTimeoutMs(kVisitorTimeoutMs);
+            st.http->setResult([&st](int status, const QByteArray &body) {
+                if (status == 200)
+                    st.visitor = visitorDataFromSwJsData(body);
+                std::fprintf(stderr, "FEEDS-PROTO visitor len=%d\n",
+                             st.visitor.size());
+                st.next();
+            });
+            st.http->setError([](const QString &) {});
+            st.http->get(kSwJsData, kChromeUA);
+            return;
+        }
+        case 1: {
+            st.phase = 2;
+            st.http->setTimeoutMs(kPlayerTimeoutMs);
+            st.http->setResult([&st, &countRenderers](int status,
+                                                      const QByteArray &body) {
+                st.chanStatus = status;
+                st.chanDiagSize = body.size();
+                QJsonParseError err;
+                QByteArray json = body.trimmed();
+                if (json.startsWith(")]}'"))
+                    json.remove(0, 4);
+                const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+                const QString renderers =
+                    (err.error == QJsonParseError::NoError && doc.isObject())
+                        ? countRenderers(doc.object())
+                        : QStringLiteral("(sin json)");
+                std::fprintf(stderr,
+                             "FEEDS-PROTO channel HTTP status=%d size=%d "
+                             "renderers=%s\n",
+                             status, body.size(),
+                             renderers.toUtf8().constData());
+                st.next();
+            });
+            st.http->setError([](const QString &) {});
+            st.http->setVisitorId(st.visitor);
+            const PlayerClient &pc = kPlayerClients[0];
+            const QJsonObject client = clientContext(pc, st.visitor);
+            const QJsonObject body{
+                {QStringLiteral("context"),
+                 QJsonObject{{QStringLiteral("client"), client}}},
+                {QStringLiteral("browseId"), st.channel},
+                {QStringLiteral("params"),
+                 QString::fromLatin1(kChannelVideosParams)},
+            };
+            const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+            st.http->post(kBrowseEndpoint, json, pc.ua, pc.clientId, pc.version,
+                          nullptr, nullptr, nullptr);
+            return;
+        }
+        case 2:
+            st.phase = 3;
+            st.tube->fetchChannelVideos(st.channel);
+            return;
+        case 3: {
+            st.phase = 4;
+            st.http->setTimeoutMs(kPlayerTimeoutMs);
+            st.http->setResult([&st, &countRenderers](int status,
+                                                      const QByteArray &body) {
+                st.trendStatus = status;
+                st.trendDiagSize = body.size();
+                QJsonParseError err;
+                QByteArray json = body.trimmed();
+                if (json.startsWith(")]}'"))
+                    json.remove(0, 4);
+                const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+                const QString renderers =
+                    (err.error == QJsonParseError::NoError && doc.isObject())
+                        ? countRenderers(doc.object())
+                        : QStringLiteral("(sin json)");
+                std::fprintf(stderr,
+                             "FEEDS-PROTO trending HTTP status=%d size=%d "
+                             "renderers=%s\n",
+                             status, body.size(),
+                             renderers.toUtf8().constData());
+                st.next();
+            });
+            st.http->setError([](const QString &) {});
+            st.http->setVisitorId(st.visitor);
+            const PlayerClient &pc = kPlayerClients[0];
+            const QJsonObject client = clientContext(pc, st.visitor);
+            const QJsonObject body{
+                {QStringLiteral("context"),
+                 QJsonObject{{QStringLiteral("client"), client}}},
+                {QStringLiteral("browseId"),
+                 QString::fromLatin1(kTrendingBrowseId)},
+            };
+            const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+            st.http->post(kBrowseEndpoint, json, pc.ua, pc.clientId, pc.version,
+                          nullptr, nullptr, nullptr);
+            return;
+        }
+        case 4:
+            st.phase = 5;
+            st.tube->fetchTrending();
+            return;
+        case 5:
+            st.phase = 6;
+            st.tube->fetchChannelVideos(QStringLiteral("UC00000000000000000000"));
+            return;
+        default:
+            std::fprintf(stderr, "FEEDS-PROTO RESUMEN canal status=%d size=%d "
+                                 "trending status=%d size=%d ok=%d\n",
+                         st.chanStatus, st.chanDiagSize, st.trendStatus,
+                         st.trendDiagSize, st.ok ? 1 : 0);
+            QCoreApplication::exit(st.ok ? 0 : 1);
+        }
+    };
+
+    // Resultados de la cadena real por Innertube.
+    QObject::connect(&tube, &Innertube::channelVideosReady,
+                     [&st, &validIds](const QString &channelId,
+                                      const QVector<VideoInfo> &videos) {
+                         if (channelId == st.channel) {
+                             const auto ids = validIds(videos);
+                             const QString first =
+                                 !videos.isEmpty()
+                                     ? QStringLiteral("%1 — %2")
+                                           .arg(videos.first().id,
+                                                videos.first().title.left(40))
+                                     : QStringLiteral("(vacío)");
+                             std::fprintf(stderr,
+                                          "FEEDS-PROTO channel videos=%d "
+                                          "id11=%d dup=%d conTitulo=%d "
+                                          "conDur=%d primero=%s\n",
+                                          videos.size(), ids.first.first,
+                                          ids.first.second, ids.second.first,
+                                          ids.second.second,
+                                          first.toUtf8().constData());
+                             if (videos.isEmpty()) {
+                                 st.ok = false; // hoy debe responder (layout roto = señal)
+                             } else {
+                                 st.ok = st.ok && ids.first.first == videos.size()
+                                         && ids.first.second == 0
+                                         && videos.size() <= kChannelTake
+                                         && ids.second.first == videos.size();
+                             }
+                             st.next();
+                         } else {
+                             const bool empty = videos.isEmpty();
+                             std::fprintf(stderr,
+                                          "FEEDS-PROTO caso vacío canal inválido "
+                                          "videos=%d\n",
+                                          videos.size());
+                             st.ok = st.ok && empty;
+                             st.next();
+                         }
+                     });
+    QObject::connect(&tube, &Innertube::trendingReady,
+                     [&st, &validIds](const QVector<VideoInfo> &videos) {
+                         const auto ids = validIds(videos);
+                         std::fprintf(stderr,
+                                      "FEEDS-PROTO trending videos=%d id11=%d "
+                                      "dup=%d conTitulo=%d conDur=%d\n",
+                                      videos.size(), ids.first.first,
+                                      ids.first.second, ids.second.first,
+                                      ids.second.second);
+                         if (!videos.isEmpty()) {
+                             st.ok = st.ok && ids.first.first == videos.size()
+                                     && ids.first.second == 0
+                                     && videos.size() <= kTrendingTake
+                                     && ids.second.first == videos.size();
+                         }
+                         st.next();
+                     });
+
+    st.next();
+    QCoreApplication::exec();
+    return st.ok;
+}
+
+namespace {
+
+// Lanza la secuencia de sondeos /browse por cliente. visitant puede estar
+// vacío (entonces cada POST lleva la cabecera de fallback que ya usa el player
+// LOGIN_REQUIRED; en la práctica el fallback fijo funciona).
+void runHomeProbes(Ipv4Https *http, const QString &visitorData)
+{
+    // Secuencia: VISIONOS primero; IOS/ANDROID_VR/WEB_EMBEDDED sólo como
+    // comparación (diagnóstico) y porque hay clientes ya definidos.
+    static const int kProbeClientOrder[] = {0, 1, 4, 2};
+
+    // Clientes de diagnóstico extra para /browse (SOLO este sondeo; NO se usa
+    // en la cascada de producción kPlayerClients). Valores de yt-dlp
+    // INNERTUBE_CLIENTS (client WEB real de navegador y ANDROID real de app).
+    static const PlayerClient kDiagClients[] = {
+        {"WEB", "2.20260708.00.00", 1, kChromeUA,
+         nullptr, nullptr, nullptr, nullptr, 0, false, nullptr},
+        {"ANDROID", "21.21.39", 3,
+         "com.google.android.youtube/21.21.39 (Linux; U; Android 13; Pixel 7 "
+         "Build/TQ3A.230805.001) gzip", // UA de yt-dlp INNERTUBE_CLIENTS
+         "Google", "Pixel 7", "Android", "13", 33, false, nullptr},
+    };
+
+    struct State
+    {
+        Ipv4Https *http = nullptr;
+        QString visitor;
+        int idx = 0;
+        int probeCount = 0;
+        bool usedFallbackVisitor = false;
+        int bestIdx = -1;
+        int bestVideos = 0;
+        QString bestContinuation;
+        bool contDone = false;
+        std::function<void()> next;             // fase 1: sondeo por cliente
+        std::function<void()> probeContinuation; // fase 2: continuación del mejor
+    };
+    auto *st = new State;
+    st->http = http;
+    st->visitor = visitorData;
+    st->probeCount = static_cast<int>(sizeof(kProbeClientOrder)
+                                          / sizeof(kProbeClientOrder[0]))
+                     + static_cast<int>(sizeof(kDiagClients)
+                                        / sizeof(kDiagClients[0]));
+
+    if (st->visitor.isEmpty()) {
+        // No hay visitorData (ni persistido ni freso): usar el fallback fijo
+        // que ya usa el proyecto (kFallbackVisitorData) para poder probar.
+        st->visitor = QString::fromLatin1(kFallbackVisitorData);
+        st->usedFallbackVisitor = true;
+        std::fprintf(stderr, "HOME-BROWSE visitor: fallback fijo len=%d\n",
+                     st->visitor.size());
+    }
+    http->setVisitorId(st->visitor);
+
+    st->probeContinuation = [st]() {
+        // Fase 2: una sola petición de continuación en el mejor cliente.
+        int bi = st->bestIdx;
+        if (bi < 0 || st->bestContinuation.isEmpty() || st->contDone) {
+            st->contDone = true;
+            st->next();
+            return;
+        }
+        st->contDone = true;
+        // Resolver el cliente que produjo la continuación (producción o
+        // diagnóstico), igual que en la fase 1.
+        const int prodCount = static_cast<int>(sizeof(kProbeClientOrder)
+                                               / sizeof(kProbeClientOrder[0]));
+        const PlayerClient *pc;
+        if (bi < prodCount)
+            pc = &kPlayerClients[kProbeClientOrder[bi]];
+        else
+            pc = &kDiagClients[bi - prodCount];
+        const QJsonObject client = clientContext(*pc, st->visitor);
+        QJsonObject context{{QStringLiteral("client"), client}};
+        if (pc->embed)
+            context.insert(QStringLiteral("thirdParty"),
+                           QJsonObject{{QStringLiteral("embedUrl"),
+                                        QString::fromLatin1(pc->embedUrl)}});
+        const QJsonObject body{
+            {QStringLiteral("context"), context},
+            {QStringLiteral("continuation"), st->bestContinuation},
+        };
+        const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+        const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
+        st->http->setTimeoutMs(kPlayerTimeoutMs);
+        st->http->setResult([st, pc, t0](int status, const QByteArray &body) {
+            const qint64 dt = QDateTime::currentMSecsSinceEpoch() - t0;
+            std::fprintf(stderr, "HOME-BROWSE cont client=%s status=%d size=%d (%lldms)\n",
+                         pc->name, status, body.size(), static_cast<long long>(dt));
+            if (status == 200) {
+                QByteArray json_ = body.trimmed();
+                if (json_.startsWith(")]}'"))
+                    json_.remove(0, 4);
+                HomeStats hs;
+                const QJsonDocument doc = QJsonDocument::fromJson(json_);
+                if (doc.isObject())
+                    walkHomeJson(doc.object(), &hs);
+                std::fprintf(stderr, "HOME-BROWSE cont videos=%d continuations=%s\n",
+                             hs.videos.size(),
+                             hs.continuation.isEmpty() ? "no" : "si");
+            }
+            // Reanudar la secuencia para imprimir el RESULTADO y salir: sin
+            // esto el sondeo se quedaba colgado hasta el watchdog global.
+            st->next();
+        });
+        st->http->setError([st](const QString &reason) {
+            std::fprintf(stderr, "HOME-BROWSE cont err: %s\n",
+                         reason.toUtf8().constData());
+            st->next();
+        });
+        st->http->post(kBrowseEndpoint, json, pc->ua, pc->clientId, pc->version,
+                       pc->embed ? pc->embedUrl : nullptr);
+    };
+
+    st->next = [st]() {
+        if (st->idx >= st->probeCount) {
+            // Fin de la fase 1: continuar con la continuación del mejor.
+            if (st->contDone) {
+                const int prodCount =
+                    static_cast<int>(sizeof(kProbeClientOrder)
+                                     / sizeof(kProbeClientOrder[0]));
+                const char *bestName = "-";
+                if (st->bestIdx >= 0) {
+                    if (st->bestIdx < prodCount)
+                        bestName = kPlayerClients
+                                       [kProbeClientOrder[st->bestIdx]].name;
+                    else
+                        bestName = kDiagClients[st->bestIdx - prodCount].name;
+                }
+                std::fprintf(stderr,
+                             "HOME-BROWSE RESULT usable=%s best=%s videos=%d\n",
+                             st->bestVideos > 0 ? "YES" : "NO", bestName,
+                             st->bestVideos);
+                delete st;
+                QCoreApplication::exit(0);
+                return;
+            }
+            st->probeContinuation();
+            return;
+        }
+        // Resolver el cliente: primero los de producción (kPlayerClients),
+        // después los de diagnóstico (WEB/ANDROID reales para /browse).
+        const int prodCount = static_cast<int>(sizeof(kProbeClientOrder)
+                                               / sizeof(kProbeClientOrder[0]));
+        const PlayerClient *pc;
+        if (st->idx < prodCount) {
+            pc = &kPlayerClients[kProbeClientOrder[st->idx]];
+        } else {
+            const int di = st->idx - prodCount;
+            pc = &kDiagClients[di];
+        }
+        st->idx++;
+        const QJsonObject client = clientContext(*pc, st->visitor);
+        QJsonObject context{{QStringLiteral("client"), client}};
+        if (pc->embed)
+            context.insert(QStringLiteral("thirdParty"),
+                           QJsonObject{{QStringLiteral("embedUrl"),
+                                        QString::fromLatin1(pc->embedUrl)}});
+        const QJsonObject body{
+            {QStringLiteral("context"), context},
+            {QStringLiteral("browseId"), QStringLiteral("FEwhat_to_watch")},
+        };
+        const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+        const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
+        st->http->setTimeoutMs(kPlayerTimeoutMs);
+        st->http->setResult([st, pc, t0](int status, const QByteArray &body) {
+            const qint64 dt = QDateTime::currentMSecsSinceEpoch() - t0;
+            std::fprintf(stderr,
+                         "HOME-BROWSE client=%s status=%d size=%d (%lldms)\n",
+                         pc->name, status, body.size(), static_cast<long long>(dt));
+            if (status == 200 && body.size() > 50000) {
+                // Guardar el cuerpo 200 grande para inspección offline (saber
+                // qué renderer lleva los vídeos del Home en cada cliente).
+                QFile out(QStringLiteral("/tmp/home_probe_%1.json").arg(pc->name));
+                if (out.open(QIODevice::WriteOnly))
+                    out.write(body);
+            }
+            HomeStats hs;
+            if (status == 200) {
+                QByteArray json_ = body.trimmed();
+                if (json_.startsWith(")]}'"))
+                    json_.remove(0, 4);
+                QJsonParseError perr;
+                const QJsonDocument doc = QJsonDocument::fromJson(json_, &perr);
+                if (perr.error != QJsonParseError::NoError || !doc.isObject()) {
+                    std::fprintf(stderr, "HOME-BROWSE client=%s json inválido\n",
+                                 pc->name);
+                } else {
+                    walkHomeJson(doc.object(), &hs);
+                }
+            }
+            // Renderers observados en la respuesta (sin filtrar).
+            QStringList rnds;
+            for (auto it2 = hs.renderers.constBegin(); it2 != hs.renderers.constEnd(); ++it2)
+                rnds << QStringLiteral("%1=%2").arg(it2.key()).arg(it2.value());
+            std::fprintf(stderr, "HOME-BROWSE client=%s renderers: %s\n",
+                         pc->name, rnds.join(QLatin1Char(' ')).toUtf8().constData());
+            std::fprintf(stderr, "HOME-BROWSE client=%s alerts=%s videos=%d continuations=%s\n",
+                         pc->name, hs.hasAlerts ? "si" : "no", hs.videos.size(),
+                         hs.continuation.isEmpty() ? "no" : "si");
+            const int showN = qMin(hs.videos.size(), 8);
+            for (int i = 0; i < showN; ++i) {
+                const HomeVideoRow &r = hs.videos.at(i);
+                std::fprintf(stderr,
+                             "  HOME id=%s dur=%s seg=%d chan=%s tit=%s\n",
+                             r.id.toUtf8().constData(),
+                             r.duration.toUtf8().constData(), r.seconds,
+                             r.channel.toUtf8().constData(),
+                             r.title.toUtf8().constData());
+            }
+            if (hs.videos.size() > st->bestVideos) {
+                st->bestVideos = hs.videos.size();
+                st->bestIdx = st->idx - 1;
+                st->bestContinuation = hs.continuation;
+            } else if (st->bestIdx < 0 && !hs.continuation.isEmpty()) {
+                // Sin vídeos directos en ningún cliente (esto es lo que ocurre
+                // con el Home de la app: solo llega la shell + token). Guardar
+                // la primera continuación para intentar pedir el feed real.
+                st->bestIdx = st->idx - 1;
+                st->bestContinuation = hs.continuation;
+            }
+            st->next();
+        });
+        st->http->setError([st, pc](const QString &reason) {
+            std::fprintf(stderr, "HOME-BROWSE client=%s err: %s\n",
+                         pc->name, reason.toUtf8().constData());
+            st->next();
+        });
+        st->http->post(kBrowseEndpoint, json, pc->ua, pc->clientId, pc->version,
+                       pc->embed ? pc->embedUrl : nullptr);
+    };
+
+    st->next();
+}
+
+} // namespace
 
 #include "yt_innertube.moc"

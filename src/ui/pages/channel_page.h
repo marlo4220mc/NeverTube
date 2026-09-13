@@ -7,6 +7,7 @@
 
 class QLabel;
 class PlayerController;
+class SubscriptionsRepo;
 class ThumbnailCache;
 class VideoListView;
 class Yt;
@@ -19,6 +20,7 @@ class ChannelPage : public QWidget
 
 public:
     explicit ChannelPage(Yt *yt, ThumbnailCache *thumbs,
+                         SubscriptionsRepo *subs,
                          QWidget *parent = nullptr);
 
     void openChannel(const QString &channelId);
@@ -29,13 +31,20 @@ signals:
 
 private slots:
     void onChannelInfo(const ChannelInfo &channel);
-    void onVideos(const QVector<VideoInfo> &videos);
-    void onTabVideos(const QString &tab, const QVector<VideoInfo> &videos);
+    void onTabVideos(const QString &channelId, const QString &tab,
+                     const QVector<VideoInfo> &videos);
+    void onAvatarReady(const QString &key);
 
 private:
+    void updateSubscribeButton(bool subscribed);
+
     Yt *m_yt;
     ThumbnailCache *m_thumbs;
+    SubscriptionsRepo *m_subs;
+    QLabel *m_avatar;
     QLabel *m_title;
+    QString m_avatarKey;
+    QPushButton *m_subscribeBtn;
     QLabel *m_meta;
     QLabel *m_description;
     QTabWidget *m_tabs;
