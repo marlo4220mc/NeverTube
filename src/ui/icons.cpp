@@ -68,6 +68,61 @@ static void paintArrow(QPainter &p, const QRectF &r, bool right)
     p.drawPath(path);
 }
 
+// Pulgar relleno (estilo YouTube): palma redondeada + barra del pulgar,
+// con una muesca que separa ambos y da la silueta clásica del fave.
+// Pulgar relleno (geometría Material "thumb_up" normalizada a 24px): la
+// silueta en dos piezas (pulgar + mano con muesca) es legible a 20px.
+static void paintThumb(QPainter &p, const QRectF &r, bool down)
+{
+    const qreal w = r.width();
+    const qreal h = r.height();
+    const QColor col = p.pen().color();
+    auto P = [&](qreal x, qreal y) {
+        if (down)
+            y = 24.0 - y;
+        return QPointF(r.left() + x / 24.0 * w, r.top() + y / 24.0 * h);
+    };
+
+    // Mano (pieza grande).
+    QPainterPath hand;
+    hand.setFillRule(Qt::WindingFill);
+    hand.moveTo(P(23, 10));
+    hand.cubicTo(P(23, 8.9), P(22.1, 8), P(21, 8));     // c0,-1.1 -.9,-2 -2,-2
+    hand.lineTo(P(14.69, 8));                            // h-6.31
+    hand.lineTo(P(15.64, 3.43));                         // l0.95 -4.57
+    hand.lineTo(P(15.67, 3.11));                         // l.03 -.32
+    hand.cubicTo(P(15.67, 2.70), P(15.50, 2.32),
+                 P(15.23, 2.05));                        // c0,-.41 -.17,-.79 -.44,-1.06
+    hand.lineTo(P(14.17, 1));                            // L14.17 1
+    hand.lineTo(P(7.59, 7.59));                          // L7.59 7.59
+    hand.cubicTo(P(7.22, 7.95), P(7, 8.45), P(7, 9));    // C...
+    hand.lineTo(P(7, 19));                               // v10
+    hand.cubicTo(P(7, 20.1), P(7.9, 21), P(9, 21));      // c0,1.1 .9,2 2,2
+    hand.lineTo(P(18, 21));                              // h9
+    hand.cubicTo(P(18.83, 21), P(19.54, 20.5),
+                 P(19.84, 19.78));                       // c.83,0 1.54,-.5 1.84,-1.22
+    hand.lineTo(P(22.86, 12.73));                        // l3.02 -7.05
+    hand.cubicTo(P(22.95, 12.50), P(23, 12.26), P(23, 12)); // c.09,-.23 .14,-.47 .14,-.73
+    hand.lineTo(P(23, 10));                              // v-2
+    hand.closeSubpath();
+
+    // Base del pulgar (pieza pequeña a la izquierda).
+    QPainterPath base;
+    base.setFillRule(Qt::WindingFill);
+    base.moveTo(P(1, 21));
+    base.lineTo(P(5, 21));
+    base.lineTo(P(5, 9));
+    base.lineTo(P(1, 9));
+    base.closeSubpath();
+
+    p.save();
+    p.setPen(Qt::NoPen);
+    p.setBrush(col);
+    p.drawPath(hand);
+    p.drawPath(base);
+    p.restore();
+}
+
 QIcon icon(Icon kind, const QColor &color, int size)
 {
     QPixmap pm(size, size);
@@ -270,20 +325,29 @@ QIcon icon(Icon kind, const QColor &color, int size)
         p.fillPath(star, color);
         break;
     }
-    case Icon::Thumb: {
+    case Icon::Thumb:
+        paintThumb(p, r, false);
+        break;
+    case Icon::ThumbDown:
+        paintThumb(p, r, true);
+        break;
+    case Icon::Share: {
+        // Nodo central con dos conexiones (estilo compartir): nodos más
+        // grandes y limpios para que coincidan con el grosor del resto del set.
+        const qreal rad = size * 0.10;
         p.setPen(QPen(color, size * 0.09, Qt::SolidLine, Qt::RoundCap,
                       Qt::RoundJoin));
-        QPainterPath thumb;
-        thumb.moveTo(r.right() - r.width() * 0.20, r.center().y() + r.height() * 0.12);
-        thumb.lineTo(r.center().x() + r.width() * 0.22, r.bottom() - r.height() * 0.18);
-        thumb.lineTo(r.center().x() + r.width() * 0.02, r.bottom() - r.height() * 0.22);
-        thumb.lineTo(r.left() + r.width() * 0.16, r.center().y() + r.height() * 0.02);
-        thumb.lineTo(r.left() + r.width() * 0.16, r.center().y() - r.height() * 0.26);
-        thumb.lineTo(r.center().x() - r.width() * 0.22, r.center().y() - r.height() * 0.26);
-        thumb.lineTo(r.center().x() - r.width() * 0.06, r.center().y() - r.height() * 0.44);
-        thumb.closeSubpath();
         p.setBrush(Qt::NoBrush);
-        p.drawPath(thumb);
+        const QPointF a(r.left() + r.width() * 0.24, r.center().y());
+        const QPointF b(r.right() - r.width() * 0.22, r.center().y() - r.height() * 0.26);
+        const QPointF c(r.right() - r.width() * 0.22, r.center().y() + r.height() * 0.26);
+        p.drawLine(a, b);
+        p.drawLine(a, c);
+        p.setBrush(color);
+        p.setPen(Qt::NoPen);
+        p.drawEllipse(a, rad, rad);
+        p.drawEllipse(b, rad, rad);
+        p.drawEllipse(c, rad, rad);
         break;
     }
     case Icon::QueueList: {
@@ -365,6 +429,20 @@ QIcon icon(Icon kind, const QColor &color, int size)
         p.drawEllipse(c, size * 0.13, size * 0.13);
         p.drawLine(c.x() - size * 0.09, c.y(), c.x() + size * 0.09, c.y());
         p.drawLine(c.x(), c.y() - size * 0.09, c.x(), c.y() + size * 0.09);
+        break;
+    }
+    case Icon::WatchLater: {
+        QPainterPath clock;
+        clock.addEllipse(r.adjusted(size * 0.06, size * 0.06, -size * 0.06,
+                                    -size * 0.06));
+        p.setPen(QPen(color, size * 0.07, Qt::SolidLine, Qt::RoundCap,
+                      Qt::RoundJoin));
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(clock);
+        p.drawLine(r.center().x(), r.center().y() - size * 0.06,
+                   r.center().x(), r.center().y() + size * 0.12);
+        p.drawLine(r.center().x(), r.center().y(),
+                   r.center().x() + size * 0.10, r.center().y());
         break;
     }
     case Icon::Back:

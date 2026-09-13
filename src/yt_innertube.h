@@ -56,6 +56,31 @@ public slots:
     void fetchRadio(const QString &videoId);
     void fetchRadioMore();
 
+    // Home real (POST /browse, browseId FEwhat_to_watch) con el cliente VISIONOS.
+    // Es el único endpoint probado que devuelve el feed (compactVideoRenderer/
+    // shelfRenderer/verticalListRenderer) con un visitorData fresco; un
+    // visitorData persistido antiguo devuelve HTTP 500. Por eso fetchHome()
+    // fuerza un sw.js_data fresco (una vez por sesión) antes del POST. Los
+    // resultados llegan por homeReady(); vacíos = hay que usar el fallback
+    // (el Home actual por yt-dlp se mantiene). fetchHomeMore() pide la
+    // continuación (homeMoreReady). Sin reintentos ni regeneraciones en bucle.
+    void fetchHome();
+    void fetchHomeMore();
+
+    // Vídeos del canal suscrito (POST /browse, browseId del canal + params de
+    // la pestaña "Vídeos") con el cliente VISIONOS. Reutiliza el mismo parser
+    // compactVideoRenderer del Home; llegan por channelVideosReady(). Vacíos =
+    // el feed cae al fallback yt-dlp (pestaña UU de uploads).
+    void fetchChannelVideos(const QString &channelId);
+    // Tendencias (POST /browse, browseId FEtrending) con VISIONOS. llegan por
+    // trendingReady(). Hoy YouTube retira/redirige las tendencias anónimas
+    // (400/redirección a la Home), así que esta fase suele quedar vacía y la
+    // app cae al fallback yt-dlp o a ocultar la sección.
+    void fetchTrending();
+
+    // True si la última respuesta de Home trajo un token de continuación.
+    bool hasHomeContinuation() const { return !m_homeContinuation.isEmpty(); }
+
     // Cliente Innertube que produjo el hlsReady más reciente, o -1 si aún
     // ninguno ganó (por ejemplo tras regenerar visitorData). Lo usa Yt para
     // recordar qué cliente logró reproducir y darle prioridad en cambios de
@@ -75,6 +100,16 @@ signals:
     // Cola del mix/radio del vídeo pedido con /next (RDAMVM). Videos vacíos si
     // el cliente no devolvió cola (entonces la app decide mezclar o seguir).
     void radioReady(const QString &videoId, const QVector<VideoInfo> &videos);
+    // Feed del Home (browse FEwhat_to_watch). Vacío = el endpoint no devolvió
+    // vídeos (500 con visitorData antiguo, cambio de layout, sin feed
+    // disponible); la app usa entonces el fallback yt-dlp.
+    void homeReady(const QVector<VideoInfo> &videos);
+    void homeMoreReady(const QVector<VideoInfo> &videos);
+    // Vídeos de un canal (browse "Vídeos" tab) y Tendencias (browse
+    // FEtrending). Vacíos = usar el fallback yt-dlp.
+    void channelVideosReady(const QString &channelId,
+                            const QVector<VideoInfo> &videos);
+    void trendingReady(const QVector<VideoInfo> &videos);
     // visitorData renovado o usado por primera vez; la app lo persiste para
     // evitar el GET sw.js_data en el siguiente arranque.
     void visitorDataReady(const QString &visitorData, qint64 expiresAt);
@@ -84,21 +119,50 @@ private:
     void requestPlayer();
     void requestNext();
     void requestRadio();
+    void requestHome(const QString &continuation);
+    void requestChannel();
+    void requestTrending();
+    void handleHome(bool ok, const QString &error, const QByteArray &body,
+                    bool more);
+    void handleChannel(bool ok, const QString &error, const QByteArray &body);
+    void handleTrending(bool ok, const QString &error, const QByteArray &body);
     void handleNext(const QString &videoId, bool ok, const QString &error,
                     const QByteArray &body);
     void handleRadio(const QString &videoId, bool ok, const QString &error,
                      const QByteArray &body);
     void useFallbackVisitorData();
+    // Retry único por fase de las secciones del Home: si el browse (Home,
+    // canal, tendencias) responde 500/vacío con el visitorData persistido
+    // vigente, se refresca visitorData UNA vez y se reencola la fase (el
+    // dispatcher lo relanza). Evita el refresh forzado de sw.js_data en cada
+    // arranque; un fallo real apenas añade un GET + reintento.
+    bool retryBrowseWithFreshVisitor(bool *retried, bool *pending);
     void dispatchPending();
     void handlePlayer(bool ok, const QString &error, const QByteArray &body);
     void handleMaster(bool ok, const QString &error, const QByteArray &body);
     void fail(const QString &reason);
     QVector<VideoInfo> parseRelated(const QJsonObject &root) const;
+    // Renderer compactVideoRenderer/videoRenderer → VideoInfo. Rellena
+    // publishedAt con una marca de tiempo aproximada si solo hay texto
+    // relativo (p. ej. "hace 3 días"). Se usa en Home, canales y tendencias.
+    VideoInfo videoFromHomeRenderer(const QJsonObject &item) const;
+    // Recorre el árbol buscando compactVideoRenderer/videoRenderer (sin
+    // duplicar ids) hasta maxCount, respetando el orden de la respuesta.
+    QVector<VideoInfo> collectVideoRenderers(const QJsonObject &root,
+                                             int maxCount) const;
     // Cola del mix de reproducción (playlistPanelVideoRenderer) + token de
     // continuación para pedir más batches. out vacío si el cliente no trae
     // panel de reproducción en el /next.
     void parseWatchQueue(const QJsonObject &root, QVector<VideoInfo> *out,
                          QString *continuation) const;
+    // Parseador del feed del Home (FEwhat_to_watch): recorre el layout
+    // verified singleColumnBrowseResultsRenderer → sectionListRenderer →
+    // shelfRenderer → verticalListRenderer → compactVideoRenderer, limitando
+    // a kHomeShelfCap shelves × kHomeShelfVideos vídeos. Si no encuentra
+    // estantes (layout distinto), recolecta hasta kHomeShelfVideos. Deja el
+    // primer token de continuación (si aparece) en *continuation.
+    QVector<VideoInfo> parseHomeBrowse(const QJsonObject &root,
+                                       QString *continuation) const;
     // Devuelve hlsReady/masterReady desde la caché (firma vigente) usando el
     // generador/esperador de petición única. Si no hay caché válida o hay una
     // petición en curso para ese videoId, no hace nada y la petición en curso
@@ -114,6 +178,12 @@ private:
     bool m_retryingVisitor = false;
     int m_clientIndex = 0;
     int m_lastWinClient = -1;
+    // True si el visitorData vigente se obtuvo fresco en esta sesión
+    // (sw.js_data). Las fases player/next/radio lo piden al arrancar; las
+    // secciones del Home (home/feed/tendencias) usan directamente el
+    // persistido vigente y solo refrescan si un browse responde 500/vacío
+    // (retry único mediante m_*VisitorRetried).
+    bool m_visitorDataFreshRun = false;
     // Pendiente tras refrescar visitorData: el dispatcher lanza las fases que
     // quedaron esperando (player primero). m_visitorInFlight evita lanzar dos
     // GET sw.js_data a la vez cuando player + next/radio piden visitorData
@@ -162,9 +232,48 @@ private:
     // Mezcla de recomendaciones del primer cliente sin panel RDAMVM (fallback).
     QVector<VideoInfo> m_radioFallback;
     int m_radioClientIndex = 0;
+
+    // Petición del Home real (/browse FEwhat_to_watch). Independiente del
+    // flujo player; usa visitorData fresco. m_homeContinuation guarda el
+    // token para fetchHomeMore(); m_homePending marca la espera del refresh
+    // de visitorData.
+    bool m_homePending = false;
+    bool m_homeInFlight = false;
+    bool m_homeMoreInFlight = false;
+    QString m_homeContinuation;
+    bool m_homeVisitorRetried = false;
+
+    // Petición de vídeos de un canal (browse "Vídeos" tab). Una a la vez
+    // (HomePage las encadena); usa visitorData fresco y el mismo transporte.
+    bool m_channelPending = false;
+    bool m_channelInFlight = false;
+    QString m_channelId;
+    QString m_channelContinuation;
+    bool m_channelVisitorRetried = false;
+
+    // Petición de Tendencias (browse FEtrending). Independiente; si falla/
+    // vacía, la app cae al fallback yt-dlp o a ocultar la sección.
+    bool m_trendPending = false;
+    bool m_trendInFlight = false;
+    bool m_trendVisitorRetried = false;
 };
 
 // Selftest aislado de la cadena sw.js_data → visitorData → player →
 // hlsManifestUrl → alturas adaptiveFormats. No toca el reproductor.
 // Devuelve true si la cadena completa responde con HLS y alturas.
 bool innertubeSelfTest();
+
+// Sondeo de diagnóstico del Home real (POST /browse, browseId FEwhat_to_watch).
+// NO es el Home de la app y NO toca HomePage ni el reproductor: solo investiga
+// si el endpoint de Home responde para los clientes existentes (VISIONOS
+// primero, luego IOS/WEB/ANDROID como fallback de diagnóstico), con o sin
+// visitorData persistido (NEVERTUBE_HOME_VISITOR). Imprime estado HTTP,
+// tiempos, tamaño, renderers, vídeos, continuations y desafíos anti-bot.
+bool homeBrowseSelfTest();
+
+// Selftest de los feeds del Home por Innertube: vídeos de un canal (browse
+// "Vídeos" tab + params, Yt-dlp como referencia del channelId por
+// NEVERTUBE_TEST_CHANNEL) y Tendencias (FEtrending). Verifica estado HTTP,
+// tamaño, renderers, vídeos reales (id, título, duración), orden, duplicados,
+// límite, y el comportamiento vacío/error. No toca el reproductor ni SQLite.
+bool feedsProtocolSelfTest();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QMetaObject>
 #include <QObject>
 #include <QVector>
@@ -8,6 +9,7 @@
 
 class HistoryRepo;
 class PlayerWidget;
+class QTimer;
 class Yt;
 struct StreamInfo;
 
@@ -24,7 +26,9 @@ public:
     void setMaxHeight(int height);
     int maxHeight() const;
 
-    void playQueue(const QVector<VideoInfo> &videos, int startIndex);
+    // startPositionMs>0 reanuda el primer vídeo desde esa posición.
+    void playQueue(const QVector<VideoInfo> &videos, int startIndex,
+                   qlonglong startPositionMs = 0);
     // Añade vídeos al final de la cola, omitiendo ids ya presentes (evita
     // repetir relacionados que ya estaban en la lista). Emite queueChanged()
     // si algo fue añadido. No toca el ítem en reproducción.
@@ -91,6 +95,13 @@ private:
     int m_maxHeight = 720;
     int m_resolveGen = 0;
     double m_seekBack = 0.0;
+    // Posición de reanudación asociada a UN índice concreto de la cola (el
+    // vídeo con el que se abrió con reanudación). Solo se aplica a ese índice
+    // y se consume una sola vez: al avanzar en la cola (fin de vídeo / next)
+    // los siguientes arrancan SIEMPRE desde el principio.
+    QHash<int, qlonglong> m_indexStartMs;
+    qlonglong m_pendingStartMs = 0;
+    QTimer *m_flushTimer = nullptr;
     QMetaObject::Connection m_resolveConn;
     QMetaObject::Connection m_resolveErrConn;
     QMetaObject::Connection m_stateConn;
