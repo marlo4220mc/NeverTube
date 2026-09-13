@@ -73,7 +73,9 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_db()
     , m_yt(new Yt(this))
-    , m_thumbs(new ThumbnailCache(this))
+    , m_homeThumbs(new ThumbnailCache(QStringLiteral("home"), 64 * 1024 * 1024, this))
+    , m_globalThumbs(new ThumbnailCache(QStringLiteral("global"), 32 * 1024 * 1024, this))
+    , m_libraryThumbs(new ThumbnailCache(QStringLiteral("library"), 32 * 1024 * 1024, this))
     , m_playerWidget(new PlayerWidget(this))
 {
     m_db.open();
@@ -107,17 +109,17 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_pages = new QStackedWidget(central);
     m_home = new HomePage(m_yt, &m_subs, &m_history, &m_discoverRadios,
-                          &m_videoCache, m_thumbs, &m_settings, this);
-    m_search = new SearchPage(m_yt, &m_settings, m_thumbs, this);
-    m_channel = new ChannelPage(m_yt, m_thumbs, &m_subs, this);
+                          &m_videoCache, m_homeThumbs, &m_settings, this);
+    m_search = new SearchPage(m_yt, &m_settings, m_globalThumbs, this);
+    m_channel = new ChannelPage(m_yt, m_globalThumbs, &m_subs, this);
     m_watch = new WatchPage(m_yt, &m_player, m_playerWidget, &m_videoCache,
                             &m_fav, &m_starred, &m_watchLater, &m_subs,
-                            &m_settings, m_thumbs, &m_playlists, this);
+                            &m_settings, m_globalThumbs, &m_playlists, this);
     m_library = new LibraryPage(m_yt, &m_fav, &m_starred, &m_watchLater,
-                                &m_history, &m_subs, &m_videoCache, m_thumbs,
+                                &m_history, &m_subs, &m_videoCache, m_libraryThumbs,
                                 &m_playlists, this);
-    m_playlist = new PlaylistPage(&m_playlists, &m_videoCache, m_thumbs, this);
-    m_historyPage = new HistoryPage(&m_history, &m_videoCache, m_thumbs, this);
+    m_playlist = new PlaylistPage(&m_playlists, &m_videoCache, m_libraryThumbs, this);
+    m_historyPage = new HistoryPage(&m_history, &m_videoCache, m_libraryThumbs, this);
     m_settingsPage = new PlaceholderPage(QStringLiteral("Ajustes"), this);
 
     m_pages->addWidget(m_home);
@@ -240,6 +242,7 @@ MainWindow::MainWindow(QWidget *parent)
             [this]() {
                 updateMiniPlayer();
                 m_home->setCurrentVideoId(m_player.current().id);
+                // Cuando cambia el video, copiar a cache del Home si es necesario
             });
     connect(&m_player, &PlayerController::metadataChanged, this,
             [this]() { updateMiniBar(); });
@@ -259,7 +262,12 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_pages, &QStackedWidget::currentChanged, this,
             [this](int) { updateMiniPlayer(); });
     connect(m_yt, &Yt::radioReady, this, &MainWindow::onRadioReadyDiscover);
-    connect(m_thumbs, &ThumbnailCache::ready, this, [this](const QString &key) {
+    connect(m_homeThumbs, &ThumbnailCache::ready, this, [this](const QString &key) {
+        const QString cur = QStringLiteral("v_%1").arg(m_player.current().id);
+        if (key.startsWith(QLatin1String("v_")) && key == cur)
+            setMiniThumb();
+    });
+    connect(m_globalThumbs, &ThumbnailCache::ready, this, [this](const QString &key) {
         const QString cur = QStringLiteral("v_%1").arg(m_player.current().id);
         if (key.startsWith(QLatin1String("v_")) && key == cur)
             setMiniThumb();
@@ -268,7 +276,6 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow() = default;
 
-// Atajos de teclado del reproductor. Devuelve true si consumió la tecla.
 bool MainWindow::handleShortcut(QKeyEvent *event)
 {
     // No robar teclas cuando se está escribiendo en un campo de texto.
@@ -409,7 +416,7 @@ void MainWindow::onNavButton(int index)
     switch (index) {
     case 0:
         m_currentTab = 0;
-        m_home->reload();
+        m_home->refreshDynamic();
         break;
     case 1:
         m_currentTab = 1;
@@ -564,7 +571,7 @@ void MainWindow::updateMiniBar()
     if (thumbUrl.isEmpty() && v.id.size() == 11)
         thumbUrl = QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg")
                        .arg(v.id);
-    m_thumbs->request(QStringLiteral("v_%1").arg(v.id), thumbUrl);
+    m_globalThumbs->request(QStringLiteral("v_%1").arg(v.id), thumbUrl);
     setMiniThumb();
     updateMiniIcons();
 }
@@ -573,8 +580,10 @@ void MainWindow::setMiniThumb()
 {
     if (!m_miniThumb)
         return;
-    const QPixmap pm = m_thumbs->pixmap(
-        QStringLiteral("v_%1").arg(m_player.current().id));
+    const QString key = QStringLiteral("v_%1").arg(m_player.current().id);
+    QPixmap pm = m_homeThumbs->pixmap(key);
+    if (pm.isNull())
+        pm = m_globalThumbs->pixmap(key);
     if (pm.isNull()) {
         m_miniThumb->setText(QStringLiteral("sin miniatura"));
         return;
@@ -658,7 +667,7 @@ void MainWindow::showPreviousTab()
     m_pages->setCurrentIndex(dest);
     m_currentTab = dest;
     if (dest == 0)
-        m_home->reload();
+        m_home->refreshDynamic();
     // Canal (2) y reproductor (3) no tienen botón de nav: no marcar ninguno.
     if (m_currentTab == 2 || m_currentTab == 3)
         return;
@@ -705,6 +714,8 @@ void MainWindow::onRadioReadyDiscover(const QString &videoId,
     NT_DEBUG("E2E discover radio guardada seed=%s n=%d total=%d\n",
              videoId.toUtf8().constData(), (int)valid.size(),
              m_discoverRadios.count());
+    if (m_home)
+        m_home->refreshDynamic();
 }
 
 void MainWindow::openWatchResume(const QVector<VideoInfo> &videos,
