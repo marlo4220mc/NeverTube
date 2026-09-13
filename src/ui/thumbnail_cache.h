@@ -13,14 +13,18 @@ class ThumbnailCache : public QObject
     Q_OBJECT
 
 public:
-    explicit ThumbnailCache(QObject *parent = nullptr);
+    explicit ThumbnailCache(const QString &name, int maxBytes,
+                            QObject *parent = nullptr);
     ~ThumbnailCache() override;
+    static constexpr int kMaxThumbW = 640;
 
     QPixmap pixmap(const QString &key) const;
     void request(const QString &key, const QString &url);
     void requestChannelAvatar(const QString &channelId, const QString &url);
+    void put(const QString &key, const QPixmap &pm);
     int clear();
     int sizeBytes() const;
+    int maxWidth() const;
 
 signals:
     void ready(const QString &key);
@@ -30,7 +34,9 @@ private slots:
 
 private:
     QString filePath(const QString &key) const;
+public:
     void store(const QString &key, const QImage &image);
+private:
 
     QNetworkAccessManager *m_nam = nullptr;
     QTimer *m_sweep = nullptr;
@@ -39,6 +45,5 @@ private:
     QSet<QString> m_inFlight;
     QString m_dir;
     int m_bytes = 0;
-
-    static constexpr int kMaxBytes = 32 * 1024 * 1024;
+    int m_maxBytes;
 };

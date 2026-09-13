@@ -12,12 +12,13 @@
 
 #include "../debug.h"
 
-ThumbnailCache::ThumbnailCache(QObject *parent)
+ThumbnailCache::ThumbnailCache(const QString &name, int maxBytes, QObject *parent)
     : QObject(parent)
+    , m_maxBytes(maxBytes)
 {
     m_nam = new QNetworkAccessManager(this);
     m_dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
-        + QStringLiteral("/thumbs");
+        + QStringLiteral("/thumbs_") + name;
     QDir().mkpath(m_dir);
 }
 
@@ -108,6 +109,25 @@ void ThumbnailCache::requestChannelAvatar(const QString &channelId,
     request(QStringLiteral("ch_%1").arg(channelId), url);
 }
 
+void ThumbnailCache::put(const QString &key, const QPixmap &pm)
+{
+    if (key.isEmpty() || pm.isNull() || m_cache.contains(key))
+        return;
+    m_cache.insert(key, pm);
+    m_lru.prepend(key);
+    m_bytes += pm.width() * pm.height() * 4;
+    while (m_bytes > m_maxBytes && m_lru.size() > 4) {
+        const QString victim = m_lru.takeLast();
+        auto it = m_cache.find(victim);
+        if (it != m_cache.end()) {
+            m_bytes -= it->width() * it->height() * 4;
+            m_cache.erase(it);
+        }
+    }
+    pm.save(filePath(key), "JPG", 85);
+    emit ready(key);
+}
+
 void ThumbnailCache::onFinished(QNetworkReply *reply)
 {
     const QString key = reply->property("nt_key").toString();
@@ -137,8 +157,8 @@ void ThumbnailCache::onFinished(QNetworkReply *reply)
     if (!image.loadFromData(data))
         return;
 
-    image = image.scaled(320, 180, Qt::KeepAspectRatio,
-                         Qt::SmoothTransformation);
+    image = image.scaled(kMaxThumbW, kMaxThumbW * 9 / 16,
+                         Qt::KeepAspectRatio, Qt::SmoothTransformation);
     store(key, image);
     emit ready(key);
 }
@@ -152,7 +172,7 @@ void ThumbnailCache::store(const QString &key, const QImage &image)
     m_lru.prepend(key);
     m_bytes += pm.width() * pm.height() * 4;
 
-    while (m_bytes > kMaxBytes && m_lru.size() > 4) {
+    while (m_bytes > m_maxBytes && m_lru.size() > 4) {
         const QString victim = m_lru.takeLast();
         auto it = m_cache.find(victim);
         if (it != m_cache.end()) {
@@ -173,6 +193,11 @@ int ThumbnailCache::clear()
     m_inFlight.clear();
     m_bytes = 0;
     return n;
+}
+
+int ThumbnailCache::maxWidth() const
+{
+    return kMaxThumbW;
 }
 
 int ThumbnailCache::sizeBytes() const
