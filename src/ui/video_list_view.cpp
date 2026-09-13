@@ -400,7 +400,12 @@ void VideoListView::applyGridGeometry()
     const int cols = gridColumns();
     const int avail = vw - (cols - 1) * spacing;
     const int cellW = qMax(1, avail / qMax(1, cols));
-    const int cellH = qRound(qreal(cellW) * kGridH / kGridW);
+    // La altura de la celda se deriva del contenido real: miniatura 16:9 +
+    // bloque de texto fijo (hueco + título + línea de canal), que no escala
+    // con el ancho de la celda. Con un ratio fijo, al estrechar la ventana el
+    // texto se sale de la celda y el vídeo siguiente tapa el nombre del canal.
+    const int cellH = qRound(qreal(cellW - 12 * m_scale) * 9.0 / 16.0)
+                      + qRound(6 * m_scale) + 8 + 34 + 14 + 20;
     setGridSize(QSize(cellW, cellH));
     static_cast<VideosDelegate *>(itemDelegate())->setCellSize(cellW, cellH);
     viewport()->update();

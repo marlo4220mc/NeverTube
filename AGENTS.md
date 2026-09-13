@@ -28,6 +28,16 @@ Contexto: el primer intento de separar los controles multimedia (overlay
 flotante sobre el video) rompió la app y fue revertido. Hacer cambios de UI
 que toquen el reproductor por incrementos pequeños y verificando cada uno.
 
+## Layout de rejilla (vídeos)
+
+La rejilla del Home mantiene **5 columnas fijas** en cualquier ancho de
+ventana. Cada celda se dimensiona según su contenido real
+(`VideoListView::applyGridGeometry`): `cellH = miniatura 16:9 + bloque de
+texto fijo` (hueco 8 + título 34 + línea de canal). NO usar un ratio fijo
+(`cellW * 258/320`) para la altura: al estrechar la ventana el texto no
+escala y un vídeo tapa el nombre del canal del siguiente. Ningún vídeo debe
+solaparse sobre otro, ni en vertical ni en horizontal.
+
 ## Pruebas de regresión
 
 ```sh
