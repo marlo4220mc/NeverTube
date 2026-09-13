@@ -44,6 +44,8 @@ public:
                       QWidget *parent = nullptr);
 
     void reload();
+    void refreshContinueWatching();
+    void refreshDynamic();
     void setYtAvailable(bool ok);
     // Id del vídeo en reproducción: el Descubre no lo muestra (para no
     // repetir en Home el vídeo que se está viendo en la página de reproducción).

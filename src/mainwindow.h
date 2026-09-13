@@ -76,7 +76,9 @@ private:
 
     AppDatabase m_db;
     Yt *m_yt = nullptr;
-    ThumbnailCache *m_thumbs = nullptr;
+    ThumbnailCache *m_homeThumbs = nullptr;
+    ThumbnailCache *m_globalThumbs = nullptr;
+    ThumbnailCache *m_libraryThumbs = nullptr;
     PlayerWidget *m_playerWidget = nullptr;
 
     VideoCacheRepo m_videoCache{m_db};

@@ -274,6 +274,17 @@ void HomePage::reload()
     loadSections();
 }
 
+void HomePage::refreshContinueWatching()
+{
+    loadContinueWatching();
+}
+
+void HomePage::refreshDynamic()
+{
+    loadContinueWatching();
+    buildDiscoverSelection();
+}
+
 // 1) ▶ Continuar viendo: historial local, sin red. Progreso entre 0 y 100%,
 //    con duración conocida, ordenados por última reproducción (máx 4).
 void HomePage::loadContinueWatching()
