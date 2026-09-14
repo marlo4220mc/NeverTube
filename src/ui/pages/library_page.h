@@ -10,6 +10,8 @@ class QLabel;
 class QPushButton;
 class QVBoxLayout;
 class QScrollArea;
+class QFrame;
+class QLineEdit;
 class FavoritesRepo;
 class HistoryRepo;
 class StarredRepo;
@@ -51,6 +53,13 @@ private:
     void rebuildHistory();
     void onChannelInfo(const ChannelInfo &channel);
     void createPlaylist();
+    void setupCreatePlaylistPopup();
+    void openCreatePlaylistPopup();
+    void closeCreatePlaylistPopup();
+    void submitCreatePlaylist();
+    void centerPopup();
+    bool eventFilter(QObject *watched, QEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
     Yt *m_yt;
     FavoritesRepo *m_favs;
@@ -84,4 +93,6 @@ private:
     QLabel *m_historyEmpty = nullptr;
     QPushButton *m_historyAllBtn = nullptr;
     QVector<VideoInfo> m_historyVideos;
+    QFrame *m_createPopup = nullptr;
+    QLineEdit *m_createName = nullptr;
 };

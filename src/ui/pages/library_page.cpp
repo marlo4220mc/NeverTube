@@ -1,9 +1,11 @@
 #include "library_page.h"
 
+#include <QFrame>
 #include <QHBoxLayout>
-#include <QInputDialog>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLayout>
+#include <QLineEdit>
 #include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
@@ -163,6 +165,8 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     bodyLayout->addStretch(1);
 
     outer->addWidget(m_scroll);
+
+    setupCreatePlaylistPopup();
 
     connect(m_yt, &Yt::channelInfoReady, this, &LibraryPage::onChannelInfo);
     connect(m_favList, &VideoListView::videoActivated, this,
@@ -459,13 +463,98 @@ void LibraryPage::rebuildPlaylists()
 
 void LibraryPage::createPlaylist()
 {
-    bool ok = false;
-    const QString title =
-        QInputDialog::getText(this, QStringLiteral("Nueva playlist"),
-                              QStringLiteral("Nombre:"), QLineEdit::Normal,
-                              QString(), &ok);
-    if (!ok || title.trimmed().isEmpty())
+    openCreatePlaylistPopup();
+}
+
+void LibraryPage::setupCreatePlaylistPopup()
+{
+    m_createPopup = new QFrame(this);
+    m_createPopup->setObjectName(QStringLiteral("popupDialog"));
+    m_createPopup->setFixedWidth(340);
+    m_createPopup->raise();
+    m_createPopup->hide();
+
+    auto *v = new QVBoxLayout(m_createPopup);
+    v->setContentsMargins(18, 16, 18, 14);
+    v->setSpacing(10);
+
+    auto *title = new QLabel(QStringLiteral("Nueva playlist"), m_createPopup);
+    title->setObjectName(QStringLiteral("popupTitle"));
+    v->addWidget(title);
+
+    m_createName = new QLineEdit(m_createPopup);
+    m_createName->setPlaceholderText(QStringLiteral("Nombre de la playlist"));
+    m_createName->setClearButtonEnabled(true);
+    m_createName->installEventFilter(this);
+    v->addWidget(m_createName);
+
+    auto *row = new QHBoxLayout;
+    row->addStretch(1);
+    auto *cancel = new QPushButton(QStringLiteral("Cancelar"), m_createPopup);
+    cancel->setObjectName(QStringLiteral("ghost"));
+    cancel->setCursor(Qt::PointingHandCursor);
+    connect(cancel, &QPushButton::clicked, this, &LibraryPage::closeCreatePlaylistPopup);
+    row->addWidget(cancel);
+    auto *create = new QPushButton(QStringLiteral("Crear"), m_createPopup);
+    create->setObjectName(QStringLiteral("primary"));
+    create->setCursor(Qt::PointingHandCursor);
+    connect(create, &QPushButton::clicked, this,
+            &LibraryPage::submitCreatePlaylist);
+    row->addWidget(create);
+    v->addLayout(row);
+
+    connect(m_createName, &QLineEdit::returnPressed, this,
+            &LibraryPage::submitCreatePlaylist);
+}
+
+void LibraryPage::openCreatePlaylistPopup()
+{
+    m_createName->clear();
+    m_createPopup->adjustSize();
+    centerPopup();
+    m_createPopup->raise();
+    m_createPopup->show();
+    m_createName->setFocus(Qt::OtherFocusReason);
+}
+
+void LibraryPage::closeCreatePlaylistPopup()
+{
+    m_createPopup->hide();
+}
+
+void LibraryPage::submitCreatePlaylist()
+{
+    const QString name = m_createName->text().trimmed();
+    if (name.isEmpty())
         return;
-    if (!m_playlists->create(title.trimmed()).isEmpty())
-        rebuildPlaylists();
+    if (m_playlists->create(name).isEmpty())
+        return;
+    closeCreatePlaylistPopup();
+    rebuildPlaylists();
+}
+
+void LibraryPage::centerPopup()
+{
+    m_createPopup->adjustSize();
+    const int x = (width() - m_createPopup->width()) / 2;
+    const int y = (height() - m_createPopup->height()) / 2;
+    m_createPopup->move(qMax(0, x), qMax(0, y));
+}
+
+bool LibraryPage::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_createName && event->type() == QEvent::KeyPress) {
+        if (static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape) {
+            closeCreatePlaylistPopup();
+            return true;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void LibraryPage::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    if (m_createPopup && m_createPopup->isVisible())
+        centerPopup();
 }

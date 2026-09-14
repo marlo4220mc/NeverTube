@@ -66,7 +66,7 @@ public:
             state = QStringLiteral("active");
         setIcon(QIcon(
             QStringLiteral(":/nav/%1_%2.png").arg(key, state)));
-        setIconSize(QSize(30, 30));
+        setIconSize(QSize(33, 33));
     }
 
 protected:
@@ -447,7 +447,7 @@ void MainWindow::setupNav()
     m_nav->setFixedHeight(66);
 
     auto *lay = new QHBoxLayout(m_nav);
-    lay->setContentsMargins(0, 4, 0, 4);
+    lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(0);
 
     auto *group = new QButtonGroup(m_nav);
@@ -459,10 +459,9 @@ void MainWindow::setupNav()
         b->setCheckable(true);
         b->setProperty("navKey", key);
         b->setText(text);
-        b->setToolTip(text);
         b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-        b->setFixedHeight(58);
-        b->setIconSize(QSize(30, 30));
+        b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        b->setIconSize(QSize(33, 33));
         b->updateIcon();
         group->addButton(b, index);
         lay->addWidget(b, 1);

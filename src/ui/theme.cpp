@@ -26,14 +26,13 @@ QToolButton#navBtn {
     border: none;
     border-radius: 8px;
     padding: 4px 0;
-    margin: 4px 4px;
-    color: #8F8F8F;
-    font-size: 11px;
+color: #8F8F8F;
+    font-size: 12px;
 }
-QToolButton#navBtn:hover { background-color: #1F1F1F; color: #ECECEC; }
+QToolButton#navBtn:hover { color: #ECECEC; }
 QToolButton#navBtn:pressed { color: #E0002E; }
 QToolButton#navBtn:checked { color: #FF0033; }
-QToolButton#navBtn:checked:hover { background-color: #1F1F1F; color: #FF0033; }
+QToolButton#navBtn:checked:hover { color: #FF0033; }
 QToolButton#navBtn:disabled { color: #6a6a6a; }
 
 QLabel { background: transparent; }
@@ -70,6 +69,15 @@ QLineEdit, QComboBox {
     color: #ECECEC;
 }
 QLineEdit:focus, QComboBox:focus { border-color: #FF0033; }
+
+/* Popover no modal (p. ej. crear playlist): panel flotante que no bloquea
+   el resto de la página. */
+QFrame#popupDialog {
+    background-color: #202020;
+    border: 1px solid #2A2A2A;
+    border-radius: 12px;
+}
+QLabel#popupTitle { font-size: 15px; font-weight: 600; color: #ECECEC; }
 QComboBox::drop-down { border: none; width: 24px; }
 QComboBox::down-arrow {
     image: none;
