@@ -21,7 +21,6 @@
 #include <QPainterPath>
 #include <QPixmap>
 #include <QPushButton>
-#include <QtMath>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QVBoxLayout>
@@ -30,6 +29,7 @@
 
 #include "../../db/repositories.h"
 #include "../../yt.h"
+#include "../channel_row.h"
 #include "../format.h"
 #include "../icons.h"
 #include "../theme.h"
@@ -40,27 +40,8 @@ namespace {
 constexpr int kVisibleRows = 3;  // filas por defecto antes de "Ver todo"
 constexpr int kThumbW = 236;
 constexpr int kThumbH = 133;
-constexpr int kAvatar = 36;
-constexpr int kSubCardW = 280;
-constexpr int kSubCardH = 140;
 constexpr int kCardMinW = 400;   // ancho mínimo de cada tarjeta (grid)
 constexpr int kMaxCardCols = 4;
-
-QString handleFor(const QString &title)
-{
-    QString h;
-    for (const QChar &c : title) {
-        if (c.isLetterOrNumber() && c.unicode() < 0x80)
-            h += c.toLower();
-        else if (c.isSpace() && !h.isEmpty() && !h.endsWith(QLatin1Char('.')))
-            h += QLatin1Char('.');
-    }
-    while (h.endsWith(QLatin1Char('.')))
-        h.chop(1);
-    if (h.isEmpty())
-        h = QStringLiteral("canal");
-    return QStringLiteral("@%1").arg(h);
-}
 
 QString metaLine(const VideoInfo &v)
 {
@@ -456,7 +437,7 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     // viewport: sin esto, veríamos ~37px de tarjetas de 54px y el logo del
     // canal quedará recortado por abajo. El mínimo debe incluir esa franja.
     m_subScroll->setMinimumHeight(
-        kSubCardH + m_subScroll->horizontalScrollBar()->sizeHint().height());
+        kChannelRowHeight + m_subScroll->horizontalScrollBar()->sizeHint().height());
     m_subScroll->setWidget(m_subHost);
     lay->addWidget(m_subScroll);
 
@@ -574,44 +555,22 @@ void LibraryPage::rebuildSubscriptions()
     m_channelHint->setVisible(channels.isEmpty());
 
     for (const SubscriptionInfo &s : channels) {
-        auto *row = new RowItem(m_body);
-        row->setFixedHeight(kSubCardH);
-        auto *avatar = new AsyncThumb(
-            m_thumbs, s.id, QStringLiteral("ch_%1").arg(s.id),
-            s.avatar.isEmpty() ? QString() : s.avatar, kAvatar, kAvatar,
-            kAvatar / 2, true, row);
-        row->setLeading(avatar);
+        auto *row = new ChannelRow(m_thumbs, s.id,
+                                   s.avatar.isEmpty() ? QString() : s.avatar,
+                                   m_body);
         row->setTitle(s.title);
         m_subTitles.insert(s.id, s.title);
         row->setTitleLines(1);
-        row->setTextSpacing(2);
         row->setMeta(subMetaFor(s.id));
-        m_subMeta.insert(s.id, row->metaLabel());
-
-        // Ancho de tarjeta ajustado al contenido real: el nombre (una línea,
-        // 14px bold) y la descripción (@handle/…suscriptores, 12px) miden lo
-        // que necesiten; la tarjeta nunca encoge ni recorta el texto.
-        // Layout de fila: márgenes 6+6 + avatar 36 + separación 14 +
-        //                texto + separación 14 + botón 28.
-        QFont titleFont;
-        titleFont.setPixelSize(14);
-        titleFont.setBold(true);
-        QFont metaFont;
-        metaFont.setPixelSize(12);
-        qreal textW = QFontMetricsF(titleFont).horizontalAdvance(s.title);
-        const QString meta = subMetaFor(s.id);
-        for (const QString &line : meta.split(QLatin1Char('\n')))
-            textW = qMax(textW,
-                         QFontMetricsF(metaFont).horizontalAdvance(line));
-        row->setFixedWidth(
-            qCeil(textW) + 6 + 36 + 14 + 14 + 28 + 6);
+        m_subMeta.insert(s.id, row);
 
         auto *x = makeIconBtn(QStringLiteral("Dejar de seguir"), false, row);
         connect(x, &QPushButton::clicked, this, [this, s]() {
             m_subs->remove(s.id);
             reload();
         });
-        row->setAction(x);
+        row->setActionWidget(x);
+        row->applyContentWidth();
         row->setActivate([this, s]() { emit channelRequested(s.id, s.title); });
         m_subRowLay->addWidget(row);
 
@@ -633,7 +592,7 @@ void LibraryPage::updateSubsRowGeometry()
 
 QString LibraryPage::subMetaFor(const QString &channelId) const
 {
-    const QString handle = handleFor(m_subTitles.value(channelId));
+    const QString handle = channelHandleFor(m_subTitles.value(channelId));
     const auto it = m_subCounts.constFind(channelId);
     if (it == m_subCounts.constEnd() || it.value() <= 0)
         return handle;
@@ -646,9 +605,13 @@ void LibraryPage::onChannelInfo(const ChannelInfo &channel)
     if (channel.subscriberCount <= 0)
         return;
     m_subCounts.insert(channel.id, channel.subscriberCount);
-    QLabel *meta = m_subMeta.value(channel.id);
-    if (meta)
-        meta->setText(subMetaFor(channel.id));
+    ChannelRow *row = m_subMeta.value(channel.id);
+    if (row) {
+        QLabel *meta = row->metaLabel();
+        if (meta)
+            meta->setText(subMetaFor(channel.id));
+        row->applyContentWidth();
+    }
     if (!channel.avatarUrl.isEmpty())
         m_thumbs->requestChannelAvatar(channel.id, channel.avatarUrl);
     QTimer::singleShot(0, this, &LibraryPage::updateSubsRowGeometry);
@@ -1053,7 +1016,7 @@ void LibraryPage::rebuildManageSubs()
             s.avatar.isEmpty() ? QString() : s.avatar, 40, 40, 20, true, row);
         row->setLeading(avatar);
         row->setTitle(s.title);
-        row->setMeta(handleFor(s.title));
+        row->setMeta(channelHandleFor(s.title));
         auto *x = makeIconBtn(QStringLiteral("Dejar de seguir"), false, row);
         connect(x, &QPushButton::clicked, this, [this, s]() {
             m_subs->remove(s.id);
