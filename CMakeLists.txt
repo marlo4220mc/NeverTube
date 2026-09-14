@@ -4,6 +4,7 @@ project(nevertube_qt2 VERSION 0.2.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 find_package(Qt5 REQUIRED COMPONENTS Core Gui Widgets Network Sql)
 find_package(OpenGL REQUIRED)
@@ -60,6 +61,7 @@ add_executable(nevertube_qt2
   src/ui/pages/settings_page.h
   src/ui/pages/placeholder_page.cpp
   src/ui/pages/placeholder_page.h
+  resources/resources.qrc
 )
 
 target_link_libraries(nevertube_qt2 PRIVATE

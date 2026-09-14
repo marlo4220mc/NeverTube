@@ -14,6 +14,7 @@
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QTextEdit>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <QMouseEvent>
 
@@ -37,6 +38,77 @@
 #include "yt.h"
 
 namespace {
+
+// Botón de la barra de navegación inferior. Usa los PNG adjuntos por estado
+// (inicio/buscar/biblioteca/ajustes × inactivo/activo/hover/presionado/
+// deshabilitado). El QSS no puede cambiar qproperty-icon dinámicamente, así
+// que el icono se elige aquí según el estado real del botón.
+class NavButton : public QToolButton
+{
+public:
+    using QToolButton::QToolButton;
+
+    // Estado visible (prioridad alta→baja): disabled > pressed > hover >
+    // checked > normal. El rojo NeverTube está en los propios PNG.
+    void updateIcon()
+    {
+        const QString key = property("navKey").toString();
+        if (key.isEmpty())
+            return;
+        QString state = QStringLiteral("inactive");
+        if (!isEnabled())
+            state = QStringLiteral("disabled");
+        else if (m_pressed)
+            state = QStringLiteral("pressed");
+        else if (underMouse())
+            state = QStringLiteral("hover");
+        else if (isChecked())
+            state = QStringLiteral("active");
+        setIcon(QIcon(
+            QStringLiteral(":/nav/%1_%2.png").arg(key, state)));
+        setIconSize(QSize(30, 30));
+    }
+
+protected:
+    void enterEvent(QEvent *event) override
+    {
+        QToolButton::enterEvent(event);
+        updateIcon();
+    }
+    void leaveEvent(QEvent *event) override
+    {
+        QToolButton::leaveEvent(event);
+        updateIcon();
+    }
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        QToolButton::mousePressEvent(event);
+        if (event->button() == Qt::LeftButton) {
+            m_pressed = true;
+            updateIcon();
+        }
+    }
+    void mouseReleaseEvent(QMouseEvent *event) override
+    {
+        QToolButton::mouseReleaseEvent(event);
+        m_pressed = false;
+        updateIcon();
+    }
+    void checkStateSet() override
+    {
+        QToolButton::checkStateSet();
+        updateIcon();
+    }
+    void changeEvent(QEvent *event) override
+    {
+        QToolButton::changeEvent(event);
+        if (event->type() == QEvent::EnabledChange)
+            updateIcon();
+    }
+
+private:
+    bool m_pressed = false;
+};
 
 // Barra del mini player: cualquier click en zona no-botón emite la vuelta a la
 // página Player. Los botones internos consumen su propio click y no llegan aquí
@@ -381,26 +453,25 @@ void MainWindow::setupNav()
     auto *group = new QButtonGroup(m_nav);
     group->setExclusive(true);
 
-    auto addBtn = [&](nt::Icon ic, const QString &text, int index) {
-        auto *b = new QToolButton(m_nav);
+    auto addBtn = [&](const QString &key, const QString &text, int index) {
+        auto *b = new NavButton(m_nav);
         b->setObjectName(QStringLiteral("navBtn"));
         b->setCheckable(true);
-        b->setProperty("navIcon", QVariant::fromValue(int(ic)));
-        b->setProperty("navText", text);
-        b->setIcon(nt::icon(ic, nt::kMuted, 22));
-        b->setIconSize(QSize(22, 22));
+        b->setProperty("navKey", key);
         b->setText(text);
         b->setToolTip(text);
         b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
         b->setFixedHeight(58);
+        b->setIconSize(QSize(30, 30));
+        b->updateIcon();
         group->addButton(b, index);
         lay->addWidget(b, 1);
         m_navButtons.append(b);
     };
-    addBtn(nt::Icon::Home, QStringLiteral("Inicio"), 0);
-    addBtn(nt::Icon::Search, QStringLiteral("Buscar"), 1);
-    addBtn(nt::Icon::Library, QStringLiteral("Biblioteca"), 2);
-    addBtn(nt::Icon::Settings, QStringLiteral("Ajustes"), 3);
+    addBtn(QStringLiteral("home"), QStringLiteral("Inicio"), 0);
+    addBtn(QStringLiteral("search"), QStringLiteral("Buscar"), 1);
+    addBtn(QStringLiteral("library"), QStringLiteral("Biblioteca"), 2);
+    addBtn(QStringLiteral("settings"), QStringLiteral("Ajustes"), 3);
 
     connect(group, QOverload<int>::of(&QButtonGroup::idClicked), this,
             &MainWindow::onNavButton);
