@@ -31,9 +31,13 @@ class Yt;
 //                                fuente persistente SQLite, TTL 60 min)
 //   5. 🔥 Tendencias           : ≤8, reutiliza el trending yt-dlp (TTL 2 h)
 // Caché en memoria con TTL: al entrar Home se muestra lo cached al momento y si
-// caducó se refresca UNA vez en segundo plano (single-flight, sin polling). En
-// fallo/500/vacío se oculta la sección y el resto (el fallback yt-dlp: feed de
-// suscripciones + tendencias) nunca desaparece.
+// caducó se refresca UNA vez en segundo plano (single-flight, sin polling). Si
+// la actualización falla o devuelve vacío se CONSERVA la sección cacheada
+// anterior (memoria y UI; no se oculta ni se reemplaza por vacío ni se refresca
+// fetched_at). El fallback yt-dlp (feed de suscripciones + tendencias) nunca
+// desaparece: si esas secciones se quedan vacías tras fallar todo, se mantiene
+// lo persistido en home_cache. Lo persistido en BD se reemplaza solo cuando
+// llega una respuesta de red VÁLIDA (nunca por un fallo).
 class HomePage : public QWidget
 {
     Q_OBJECT
@@ -151,6 +155,10 @@ private:
     QVector<VideoInfo> m_continueVideos;
     QVector<qlonglong> m_continuePositions; // alineado con m_continueVideos
     QVector<VideoInfo> m_feed;
+    // Copia del feed mostrado tomada al iniciar una actualización (loadFeed).
+    // Si la actualización acaba vacía/falla, onFeedDone la restaura en vez de
+    // ocultar la sección.
+    QVector<VideoInfo> m_prevFeed;
     qint64 m_feedFetchedAt = 0;
     QVector<VideoInfo> m_home;
     qint64 m_homeFetchedAt = 0;

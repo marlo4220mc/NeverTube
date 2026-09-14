@@ -321,6 +321,11 @@ void HomePage::saveSection(const QString &section,
 {
     if (!m_homeCache || videos.isEmpty())
         return;
+    // Los metadatos completos van a "videos" (VideoCacheRepo): home_cache solo
+    // guarda ids + timestamp, así al reabrir la app getMany(ids) reconstruye la
+    // sección aunque sea una instalación nueva y nunca se haya reproducido nada.
+    for (const VideoInfo &v : videos)
+        m_videoCache->upsert(v);
     QStringList ids;
     ids.reserve(videos.size());
     for (const VideoInfo &v : videos)
@@ -429,6 +434,9 @@ void HomePage::loadFeed()
 {
     const auto channels = m_subs->all();
     m_pendingChannels.clear();
+    // Se conserva la sección mostrada: si la actualización acaba vacía/falla,
+    // onFeedDone la restaura en vez de ocultarla o reemplazarla por vacío.
+    m_prevFeed = m_feed;
     m_feed.clear();
     m_feedBusy = true;
     if (channels.isEmpty()) {
@@ -499,9 +507,21 @@ void HomePage::onChannelVideos(const QVector<VideoInfo> &videos)
 
 void HomePage::onFeedDone()
 {
-    m_feed = sanitizeVideos(m_feed);
-    std::stable_sort(m_feed.begin(), m_feed.end(), [](const VideoInfo &a,
-                                                      const VideoInfo &b) {
+    m_feedBusy = false;
+    QVector<VideoInfo> fresh = sanitizeVideos(m_feed);
+    if (fresh.isEmpty()) {
+        // Actualización vacía/fallida: se conserva la sección cacheada anterior
+        // (memoria y UI), no se reemplaza por vacío ni se refresca fetched_at.
+        m_feed = m_prevFeed;
+        m_prevFeed.clear();
+        NT_DEBUG("E2E feed vacío: se conserva la sección anterior n=%d\n",
+                 (int)m_feed.size());
+        refreshBusy();
+        ensureDiscover();
+        return;
+    }
+    std::stable_sort(fresh.begin(), fresh.end(), [](const VideoInfo &a,
+                                                    const VideoInfo &b) {
         const QDateTime ad = QDateTime::fromString(a.publishedAt, Qt::ISODate);
         const QDateTime bd = QDateTime::fromString(b.publishedAt, Qt::ISODate);
         if (ad.isValid() && bd.isValid())
@@ -510,8 +530,10 @@ void HomePage::onFeedDone()
             return ad.isValid();
         return false;
     });
-    if (m_feed.size() > kFeedTargetVideos)
-        m_feed.resize(kFeedTargetVideos);
+    if (fresh.size() > kFeedTargetVideos)
+        fresh.resize(kFeedTargetVideos);
+    m_feed = fresh;
+    m_prevFeed.clear();
     m_feedFetchedAt = nowMs();
     saveSection(QLatin1String(kCacheSecFeed), m_feed);
     m_feedGrid->showVideos(m_feed, VideoListView::GridMode);
@@ -529,18 +551,26 @@ void HomePage::onFeedDone()
 void HomePage::onHomeReady(const QVector<VideoInfo> &videos)
 {
     NT_DEBUG("E2E home ready count=%d\n", (int)videos.size());
-    m_home = sanitizeVideos(videos);
-    m_homeFetchedAt = nowMs();
-    saveSection(QLatin1String(kCacheSecHome), m_home);
     m_homeBusy = false;
-    m_homeGrid->showVideos(m_home, VideoListView::GridMode);
-    adjustGridHeight(m_homeGrid);
-    const bool vis = !m_home.isEmpty();
-    m_homeTitle->setVisible(vis);
-    m_homeGrid->setVisible(vis);
-    NT_DEBUG("E2E home setVisible=%d height=%d visible=%d\n", vis, m_homeGrid->height(), m_homeGrid->isVisible());
-    // Recalcular alturas después de que el layout se estabilice
-    m_layoutTimer->start();
+    const QVector<VideoInfo> fresh = sanitizeVideos(videos);
+    if (!fresh.isEmpty()) {
+        m_home = fresh;
+        m_homeFetchedAt = nowMs();
+        saveSection(QLatin1String(kCacheSecHome), m_home);
+        m_homeGrid->showVideos(m_home, VideoListView::GridMode);
+        adjustGridHeight(m_homeGrid);
+        const bool vis = !m_home.isEmpty();
+        m_homeTitle->setVisible(vis);
+        m_homeGrid->setVisible(vis);
+        NT_DEBUG("E2E home setVisible=%d height=%d visible=%d\n", vis, m_homeGrid->height(), m_homeGrid->isVisible());
+        // Recalcular alturas después de que el layout se estabilice
+        m_layoutTimer->start();
+    } else {
+        // Actualización fallida/vacía: se conserva la sección cacheada anterior
+        // (memoria y UI), sin reemplazarla por vacío ni tocar fetched_at.
+        NT_DEBUG("E2E home vacío: se conserva la sección anterior n=%d\n",
+                 (int)m_home.size());
+    }
     refreshBusy();
     ensureDiscover();
 }
@@ -553,19 +583,28 @@ void HomePage::onTrending(const QVector<VideoInfo> &videos)
                  videos[0].id.toUtf8().constData(), videos[0].id.size(),
                  videos[0].title.left(40).toUtf8().constData());
     }
-    m_trending = sanitizeVideos(videos);
-    NT_DEBUG("E2E trending after sanitize=%d\n", (int)m_trending.size());
-    if (m_trending.size() > 8)
-        m_trending.resize(8);
-    m_trendFetchedAt = nowMs();
-    saveSection(QLatin1String(kCacheSecTrend), m_trending);
     m_trendBusy = false;
-    m_trendGrid->showVideos(m_trending, VideoListView::GridMode);
-    adjustGridHeight(m_trendGrid);
-    const bool vis = !m_trending.isEmpty();
-    m_trendTitle->setVisible(vis);
-    m_trendGrid->setVisible(vis);
-    NT_DEBUG("E2E trending setVisible=%d height=%d visible=%d\n", vis, m_trendGrid->height(), m_trendGrid->isVisible());
+    QVector<VideoInfo> fresh = sanitizeVideos(videos);
+    NT_DEBUG("E2E trending after sanitize=%d\n", (int)fresh.size());
+    if (!fresh.isEmpty()) {
+        if (fresh.size() > 8)
+            fresh.resize(8);
+        m_trending = fresh;
+        m_trendFetchedAt = nowMs();
+        saveSection(QLatin1String(kCacheSecTrend), m_trending);
+        m_trendGrid->showVideos(m_trending, VideoListView::GridMode);
+        adjustGridHeight(m_trendGrid);
+        const bool vis = !m_trending.isEmpty();
+        m_trendTitle->setVisible(vis);
+        m_trendGrid->setVisible(vis);
+        NT_DEBUG("E2E trending setVisible=%d height=%d visible=%d\n", vis, m_trendGrid->height(), m_trendGrid->isVisible());
+        m_layoutTimer->start();
+    } else {
+        // Actualización fallida/vacía: se conserva la sección cacheada anterior
+        // (memoria y UI), sin reemplazarla por vacío ni tocar fetched_at.
+        NT_DEBUG("E2E trending vacío: se conserva la sección anterior n=%d\n",
+                 (int)m_trending.size());
+    }
     refreshBusy();
     ensureDiscover();
 }

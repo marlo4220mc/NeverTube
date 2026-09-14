@@ -260,6 +260,56 @@ bool databaseSelfTest(const QString &dbPath)
                   && homeCache.sectionVideoIds(QStringLiteral("trending")).isEmpty(),
               "home cache clear section");
 
+    // Reconstrucción del Home tras reiniciar (instalación nueva incluida):
+    // HomePage.saveSection persiste los metadatos en "videos" y solo los ids en
+    // home_cache; getMany(ids) debe materializar la sección completa de nuevo.
+    VideoInfo h1;
+    h1.id = QStringLiteral("homeVid1");
+    h1.title = QStringLiteral("Home 1");
+    h1.channel = QStringLiteral("Canal H");
+    h1.durationSeconds = 60;
+    h1.viewCount = 111;
+    h1.thumbnailUrl = QStringLiteral("/tmp/h1.jpg");
+    VideoInfo h2;
+    h2.id = QStringLiteral("homeVid2");
+    h2.title = QStringLiteral("Home 2");
+    h2.channel = QStringLiteral("Canal H");
+    h2.durationSeconds = 90;
+    h2.viewCount = 222;
+    h2.thumbnailUrl = QStringLiteral("/tmp/h2.jpg");
+    ok &= yes(videoCache.upsert(h1) && videoCache.upsert(h2),
+              "home cache metadata upsert");
+    ok &= yes(homeCache.saveSection(
+                  QStringLiteral("recommended"),
+                  QStringList{QStringLiteral("homeVid1"),
+                              QStringLiteral("homeVid2")},
+                  4444),
+              "home cache save with metadata");
+    const QVector<VideoInfo> reconstructed = videoCache.getMany(
+        homeCache.sectionVideoIds(QStringLiteral("recommended")));
+    ok &= yes(reconstructed.size() == 2
+                  && reconstructed[0].id == QLatin1String("homeVid1")
+                  && reconstructed[0].title == QLatin1String("Home 1")
+                  && reconstructed[0].durationSeconds == 60
+                  && reconstructed[0].thumbnailUrl == QLatin1String("/tmp/h1.jpg")
+                  && reconstructed[1].id == QLatin1String("homeVid2")
+                  && reconstructed[1].title == QLatin1String("Home 2")
+                  && reconstructed[1].viewCount == 222,
+              "home cache reconstruction (ids + metadata)");
+
+    // Actualización fallida/vacía: guardar vacío se RECHAZA y no pisa la
+    // sección guardada ni su fetched_at.
+    const qint64 savedAt = homeCache.sectionFetchedAt(QStringLiteral("recommended"));
+    ok &= yes(!homeCache.saveSection(QStringLiteral("recommended"),
+                                     QStringList(), 9999),
+              "home cache empty save rejected");
+    ok &= yes(homeCache.sectionVideoIds(QStringLiteral("recommended"))
+                      == QStringList({QLatin1String("homeVid1"),
+                                      QLatin1String("homeVid2")})
+                  && homeCache.sectionFetchedAt(QStringLiteral("recommended"))
+                         == savedAt,
+              "home cache empty save keeps ids and fetchedAt");
+
     db.close();
     if (ok)
         fprintf(stderr, "SELFTEST OK\n");
@@ -817,6 +867,10 @@ HomeCacheRepo::HomeCacheRepo(AppDatabase &db)
 bool HomeCacheRepo::saveSection(const QString &section,
                                 const QStringList &videoIds, qint64 fetchedAt)
 {
+    // Vacío = actualización fallida/vacía: no debe reemplazar la caché previa
+    // ni marcar un fetched_at nuevo (es un fallo, no un estado nuevo).
+    if (section.isEmpty() || videoIds.isEmpty())
+        return false;
     QSqlQuery q(m_db.db());
     q.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO home_cache (section, video_ids, fetched_at) "
