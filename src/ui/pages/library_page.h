@@ -28,6 +28,7 @@ class SubscriptionsRepo;
 class ThumbnailCache;
 class VideoCacheRepo;
 class Yt;
+class ChannelRow;
 
 struct PlaylistItem;
 
@@ -114,7 +115,7 @@ private:
     QWidget *m_subHost = nullptr;
     QHBoxLayout *m_subRowLay = nullptr;
     QHash<QString, QString> m_subTitles;   // channelId → título del canal
-    QHash<QString, QLabel *> m_subMeta;    // channelId → etiqueta @handle/suscriptores
+    QHash<QString, ChannelRow *> m_subMeta;    // channelId → tarjeta de suscripción
     QHash<QString, long long> m_subCounts; // channelId → suscriptores (caché)
 
     QLabel *m_playlistEmpty = nullptr;

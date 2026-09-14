@@ -11,6 +11,7 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSignalBlocker>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -22,6 +23,7 @@
 #include "../../db/repositories.h"
 #include "../../models.h"
 #include "../../yt.h"
+#include "../channel_row.h"
 #include "../format.h"
 #include "../icons.h"
 #include "../theme.h"
@@ -277,77 +279,69 @@ void SearchPage::buildChannelButtons()
     title->setObjectName(QStringLiteral("sectionTitle"));
     m_channelBox->layout()->addWidget(title);
     auto *scroll = new QScrollArea(m_channelBox);
-    scroll->setWidgetResizable(true);
+    scroll->setWidgetResizable(false);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scroll->setFrameShape(QFrame::NoFrame);
-    scroll->setFixedHeight(150);
+    // El scrollbar horizontal está dentro del área y consume altura del
+    // viewport: el mínimo debe incluir esa franja (igual que en la
+    // Biblioteca), o la tarjeta quedará recortada por abajo.
+    scroll->setMinimumHeight(
+        kChannelRowHeight + scroll->horizontalScrollBar()->sizeHint().height());
     auto *strip = new QWidget(scroll);
-    auto *row = new QHBoxLayout;
-    row->setContentsMargins(0, 0, 0, 0);
-    row->setSpacing(8);
+    m_channelStrip = strip;
+    strip->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    auto *row = new QHBoxLayout(strip);
+    row->setContentsMargins(0, 4, 0, 0);
+    row->setSpacing(14);
+    row->setAlignment(Qt::AlignVCenter);
     strip->setLayout(row);
     scroll->setWidget(strip);
     for (const ChannelInfo &channel : std::as_const(m_channels)) {
-        auto *button = new QPushButton(m_channelBox);
-        button->setObjectName(QStringLiteral("cardPanel"));
-        button->setCursor(Qt::PointingHandCursor);
-        button->setToolTip(channel.name);
-        button->setMinimumSize(120, 132);
-        auto *vbox = new QVBoxLayout(button);
-        vbox->setContentsMargins(10, 12, 10, 10);
-        vbox->setSpacing(6);
-        auto *avatar = new QLabel(button);
-        avatar->setObjectName(QStringLiteral("chAvatar"));
-        avatar->setFixedSize(64, 64);
-        avatar->setAlignment(Qt::AlignCenter);
-        avatar->setPixmap(nt::icon(nt::Icon::User, nt::kMuted, 32).pixmap(48, 48));
-        auto *name = new QLabel(channel.name, button);
-        name->setObjectName(QStringLiteral("chName"));
-        name->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
-        name->setWordWrap(true);
-        name->setFixedHeight(40);
-        vbox->addWidget(avatar, 0, Qt::AlignHCenter);
-        vbox->addWidget(name, 0, Qt::AlignHCenter);
-        connect(button, &QPushButton::clicked, this,
-                [this, channel]() { emit channelRequested(channel.id); });
-        row->addWidget(button);
-        m_channelButtons.insert(channel.id, button);
+        auto *card = new ChannelRow(m_thumbs, channel.id, QString(), strip);
+        card->setTitle(channel.name);
+        card->setTitleLines(1);
+        card->setMeta(channelHandleFor(channel.name));
+        card->applyContentWidth();
+        card->setActivate(
+            [this, channel]() { emit channelRequested(channel.id); });
+        row->addWidget(card);
+        m_channelButtons.insert(channel.id, card);
         m_yt->channelInfo(channel.id);
     }
     row->addStretch(1);
     m_channelBox->layout()->addWidget(scroll);
     m_channelBox->show();
+    // El QScrollArea (widgetResizable=false) dimensiona el anfitrión a partir
+    // de su layout; sin activarlo/adjustSize la franja colapsa a ancho 0
+    // (igual que hace la Biblioteca con updateSubsRowGeometry).
+    QTimer::singleShot(0, this, [strip]() {
+        if (auto *lay = strip->layout()) {
+            lay->invalidate();
+            lay->activate();
+        }
+        strip->adjustSize();
+    });
 }
 
 void SearchPage::onChannelInfo(const ChannelInfo &channel)
 {
-    QPushButton *button = m_channelButtons.value(channel.id, nullptr);
-    if (!button)
+    ChannelRow *card = m_channelButtons.value(channel.id, nullptr);
+    if (!card)
         return;
-    if (QLabel *name = button->findChild<QLabel *>(QStringLiteral("chName")))
-        name->setText(channel.name);
-    if (!channel.avatarUrl.isEmpty()) {
-        const QString key = QStringLiteral("ch_%1").arg(channel.id);
-        if (QLabel *avatar = button->findChild<QLabel *>(QStringLiteral("chAvatar"))) {
-            const QPixmap pm = m_thumbs->pixmap(key);
-            if (!pm.isNull()) {
-                avatar->setPixmap(pm.scaled(64, 64, Qt::KeepAspectRatioByExpanding,
-                                            Qt::SmoothTransformation));
-            } else {
-                connect(m_thumbs, &ThumbnailCache::ready, button,
-                        [this, button, key](const QString &readyKey) {
-                            if (readyKey == key) {
-                                if (QLabel *a = button->findChild<QLabel *>(
-                                        QStringLiteral("chAvatar")))
-a->setPixmap(m_thumbs->pixmap(key).scaled(
-                                    64, 64, Qt::KeepAspectRatioByExpanding,
-                                    Qt::SmoothTransformation));
-                            }
-                        });
-            }
-        }
-        m_thumbs->requestChannelAvatar(channel.id, channel.avatarUrl);
+    card->setTitle(channel.name);
+    if (!channel.avatarUrl.isEmpty())
+        card->setAvatarUrl(channel.avatarUrl);
+    QString meta = channelHandleFor(channel.name);
+    if (channel.subscriberCount > 0)
+        meta = QStringLiteral("%1\n%2 suscriptores")
+                   .arg(meta, compactCount(channel.subscriberCount));
+    card->setMeta(meta);
+    card->applyContentWidth();
+    if (m_channelStrip && m_channelStrip->layout()) {
+        m_channelStrip->layout()->invalidate();
+        m_channelStrip->layout()->activate();
+        m_channelStrip->adjustSize();
     }
 }
 
