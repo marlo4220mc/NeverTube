@@ -3,6 +3,7 @@
 #include <QVector>
 #include <QHash>
 #include <QWidget>
+#include <QSpacerItem>
 
 #include "../../models.h"
 
@@ -35,9 +36,11 @@ private slots:
     void onChannelInfo(const ChannelInfo &channel);
     void onHistoryClear();
     void onHistoryQuery(const QString &query);
+    void onHistoryRemove(const QString &query);
 
 private:
     void showHistory();
+    void setResultsMode(bool active);
     void buildChannelButtons();
     QStringList history() const;
     void setHistory(const QStringList &queries);
@@ -47,10 +50,12 @@ private:
     ThumbnailCache *m_thumbs;
 
     QLineEdit *m_field;
+    QPushButton *m_clearBtn = nullptr;
     QTimer *m_debounce;
     QWidget *m_historyBox;
     QWidget *m_resultBox;
     QWidget *m_channelBox;
+    QSpacerItem *m_bottomStretch = nullptr;
     VideoListView *m_list;
     QPushButton *m_moreButton;
 

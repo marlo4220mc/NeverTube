@@ -1,7 +1,9 @@
 #include "search_page.h"
 
+#include <QBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
@@ -40,27 +42,57 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
 
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(16, 16, 16, 16);
-    outer->setSpacing(10);
+    outer->setSpacing(6);
 
-    auto *row = new QHBoxLayout;
-    row->setSpacing(8);
-    m_field = new QLineEdit(this);
+    auto *title = new QLabel(QStringLiteral("Buscar"), this);
+    title->setObjectName(QStringLiteral("sectionTitle"));
+    title->setFixedHeight(20);
+    outer->addWidget(title);
+
+    auto *searchCard = new QFrame(this);
+    searchCard->setObjectName(QStringLiteral("cardPanel"));
+    searchCard->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    auto *searchRow = new QHBoxLayout(searchCard);
+    searchRow->setContentsMargins(10, 3, 10, 3);
+    searchRow->setSpacing(8);
+    auto *searchIcon = new QLabel(searchCard);
+    searchIcon->setPixmap(nt::icon(nt::Icon::Search, nt::kMuted, 18).pixmap(20, 20));
+    m_field = new QLineEdit(searchCard);
     m_field->setPlaceholderText(QStringLiteral("Buscar en YouTube…"));
-    m_field->setClearButtonEnabled(true);
-    m_field->setObjectName(QStringLiteral("search"));
-    auto *searchBtn = new QPushButton(this);
-    searchBtn->setIcon(nt::icon(nt::Icon::Search, nt::kText, 18));
-    row->addWidget(m_field, 1);
-    row->addWidget(searchBtn);
-    outer->addLayout(row);
+    m_field->setFixedHeight(32);
+    m_clearBtn = new QPushButton(QStringLiteral("✕"), searchCard);
+    m_clearBtn->setObjectName(QStringLiteral("ghost"));
+    m_clearBtn->setCursor(Qt::PointingHandCursor);
+    m_clearBtn->setFixedSize(26, 26);
+    m_clearBtn->setFocusPolicy(Qt::NoFocus);
+    m_clearBtn->hide();
+    auto *searchBtn = new QPushButton(QStringLiteral("Buscar"), searchCard);
+    searchBtn->setObjectName(QStringLiteral("primary"));
+    searchBtn->setCursor(Qt::PointingHandCursor);
+    searchBtn->setFixedHeight(32);
+    searchRow->addWidget(searchIcon);
+    searchRow->addWidget(m_field, 1);
+    searchRow->addWidget(m_clearBtn);
+    searchRow->addWidget(searchBtn);
+    outer->addWidget(searchCard);
+
+    auto syncClear = [this](const QString &text) {
+        m_clearBtn->setVisible(!text.isEmpty());
+    };
+    connect(m_field, &QLineEdit::textChanged, this, syncClear);
+    connect(m_clearBtn, &QPushButton::clicked, this, [this]() {
+        m_field->clear();
+        m_field->setFocus();
+    });
 
     m_historyBox = new QWidget(this);
     auto *hBox = new QVBoxLayout(m_historyBox);
-    hBox->setContentsMargins(0, 8, 0, 0);
+    hBox->setContentsMargins(0, 4, 0, 0);
     hBox->setSpacing(2);
     outer->addWidget(m_historyBox);
 
     m_resultBox = new QWidget(this);
+    m_resultBox->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     auto *rBox = new QVBoxLayout(m_resultBox);
     rBox->setContentsMargins(0, 0, 0, 0);
     rBox->setSpacing(8);
@@ -82,9 +114,10 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     m_list = new VideoListView(m_thumbs, this);
     m_list->showVideos(QVector<VideoInfo>(), VideoListView::ListMode);
     m_moreButton = new QPushButton(QStringLiteral("Mostrar más"), this);
-    m_moreButton->setObjectName(QStringLiteral("ghost"));
+    m_moreButton->setObjectName(QStringLiteral("primary"));
     m_moreButton->setCursor(Qt::PointingHandCursor);
     m_moreButton->hide();
+    m_moreButton->setFixedWidth(180);
     connect(m_moreButton, &QPushButton::clicked, this, [this]() {
         m_moreButton->setEnabled(false);
         m_yt->search(m_activeQuery, 20, m_results.size());
@@ -94,9 +127,10 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     rBox->addWidget(m_channelBox);
     rBox->addWidget(m_list, 1);
     rBox->addWidget(m_moreButton, 0, Qt::AlignHCenter);
-    outer->addWidget(m_resultBox);
-    outer->setStretch(2, 1);
+    outer->addWidget(m_resultBox, 1);
     m_resultBox->hide();
+    m_bottomStretch = new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Expanding);
+    outer->addSpacerItem(m_bottomStretch);
 
     connect(m_field, &QLineEdit::textChanged, this,
             [this](const QString &) { m_debounce->start(); });
@@ -117,7 +151,24 @@ void SearchPage::startSearch(const QString &query)
 {
     const QSignalBlocker blocker(m_field);
     m_field->setText(query);
+    m_clearBtn->setVisible(!query.trimmed().isEmpty());
     doSearch();
+}
+
+void SearchPage::setResultsMode(bool active)
+{
+    if (m_resultBox->isVisible() == active)
+        return;
+    m_resultBox->setVisible(active);
+    m_historyBox->setVisible(!active);
+    if (m_bottomStretch) {
+        m_bottomStretch->changeSize(0, 0, QSizePolicy::Minimum,
+                                    active ? QSizePolicy::Fixed
+                                           : QSizePolicy::Expanding);
+        if (auto *lay = qobject_cast<QBoxLayout *>(layout()))
+            lay->invalidate();
+    }
+    updateGeometry();
 }
 
 void SearchPage::doSearch()
@@ -125,10 +176,11 @@ void SearchPage::doSearch()
     m_debounce->stop();
     const QString q = m_field->text().trimmed();
     if (q.isEmpty()) {
-        m_resultBox->hide();
+        setResultsMode(false);
         showHistory();
         return;
     }
+    setResultsMode(true);
     m_searching = true;
     m_activeQuery = q;
     m_results.clear();
@@ -141,8 +193,6 @@ void SearchPage::doSearch()
     m_channelButtons.clear();
     m_channels.clear();
     m_channelBox->hide();
-    m_historyBox->hide();
-    m_resultBox->show();
     m_list->showVideos(QVector<VideoInfo>(), VideoListView::ListMode);
     for (auto *child : m_resultBox->findChildren<QLabel *>()) {
         if (child->objectName() == QLatin1String("sectionSub")) {
@@ -223,28 +273,29 @@ void SearchPage::buildChannelButtons()
         m_channelBox->hide();
         return;
     }
-    auto *title = new QLabel(QStringLiteral("Canales en los resultados"), this);
-    title->setObjectName(QStringLiteral("sectionSub"));
+    auto *title = new QLabel(QStringLiteral("Canales"), this);
+    title->setObjectName(QStringLiteral("sectionTitle"));
     m_channelBox->layout()->addWidget(title);
     auto *scroll = new QScrollArea(m_channelBox);
     scroll->setWidgetResizable(true);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scroll->setFrameShape(QFrame::NoFrame);
-    scroll->setFixedHeight(148);
+    scroll->setFixedHeight(150);
     auto *strip = new QWidget(scroll);
     auto *row = new QHBoxLayout;
     row->setContentsMargins(0, 0, 0, 0);
-    row->setSpacing(6);
+    row->setSpacing(8);
     strip->setLayout(row);
     scroll->setWidget(strip);
     for (const ChannelInfo &channel : std::as_const(m_channels)) {
         auto *button = new QPushButton(m_channelBox);
-        button->setFixedSize(120, 132);
+        button->setObjectName(QStringLiteral("cardPanel"));
         button->setCursor(Qt::PointingHandCursor);
         button->setToolTip(channel.name);
+        button->setMinimumSize(120, 132);
         auto *vbox = new QVBoxLayout(button);
-        vbox->setContentsMargins(8, 10, 8, 8);
+        vbox->setContentsMargins(10, 12, 10, 10);
         vbox->setSpacing(6);
         auto *avatar = new QLabel(button);
         avatar->setObjectName(QStringLiteral("chAvatar"));
@@ -310,6 +361,12 @@ void SearchPage::showHistory()
     const QStringList hist = history();
     if (hist.isEmpty()) {
         m_historyBox->hide();
+        if (m_bottomStretch) {
+            m_bottomStretch->changeSize(0, 0, QSizePolicy::Minimum,
+                                        QSizePolicy::Expanding);
+            if (auto *lay = qobject_cast<QBoxLayout *>(layout()))
+                lay->invalidate();
+        }
         return;
     }
     m_historyBox->show();
@@ -318,30 +375,51 @@ void SearchPage::showHistory()
     m_historyBox->layout()->addWidget(hTitle);
 
     for (const QString &q : hist) {
-        auto *btn = new QPushButton(QStringLiteral("  %1").arg(q), this);
+        auto *row = new QWidget(m_historyBox);
+        auto *rowLay = new QHBoxLayout(row);
+        rowLay->setContentsMargins(0, 0, 0, 0);
+        rowLay->setSpacing(4);
+        auto *btn = new QPushButton(QStringLiteral("  %1").arg(q), row);
         btn->setIcon(nt::icon(nt::Icon::Search, nt::kMuted, 14));
         btn->setStyleSheet(
             QStringLiteral("QPushButton { text-align:left; background:transparent; "
-                           "border:none; color:#D6D6D6; padding:9px 4px; }"
+                           "border:none; color:#D6D6D6; padding:7px 4px; }"
                            "QPushButton:hover { background:#1F1F1F; border-radius:6px; }"));
         connect(btn, &QPushButton::clicked, this,
                 [this, q]() { onHistoryQuery(q); });
-        m_historyBox->layout()->addWidget(btn);
+        auto *del = new QPushButton(row);
+        del->setObjectName(QStringLiteral("iconBtn"));
+        del->setIcon(nt::icon(nt::Icon::Clear, nt::kMuted, 14));
+        del->setToolTip(QStringLiteral("Borrar esta búsqueda"));
+        del->setFixedSize(28, 28);
+        del->setCursor(Qt::PointingHandCursor);
+        connect(del, &QPushButton::clicked, this,
+                [this, q]() { onHistoryRemove(q); });
+        rowLay->addWidget(btn, 1);
+        rowLay->addWidget(del);
+        m_historyBox->layout()->addWidget(row);
     }
-    auto *clear = new QPushButton(QStringLiteral("  Borrar historial"), this);
-    clear->setIcon(nt::icon(nt::Icon::Clear, nt::kMuted, 14));
-    clear->setStyleSheet(
-        QStringLiteral("QPushButton { text-align:left; background:transparent; "
-                       "border:none; color:#8F8F8F; padding:9px 4px; font-size:12px; }"
-                       "QPushButton:hover { color:#ECECEC; background:#1F1F1F; "
-                       "border-radius:6px; }"));
+    auto *clear = new QPushButton(QStringLiteral("Borrar historial"), this);
+    clear->setObjectName(QStringLiteral("ghost"));
+    clear->setStyleSheet(QStringLiteral("QPushButton#ghost { margin-top:2px; }"));
+    clear->setCursor(Qt::PointingHandCursor);
     connect(clear, &QPushButton::clicked, this, &SearchPage::onHistoryClear);
     m_historyBox->layout()->addWidget(clear);
+    if (auto *box = qobject_cast<QBoxLayout *>(m_historyBox->layout()))
+        box->addStretch(1);
 }
 
 void SearchPage::onHistoryClear()
 {
     setHistory(QStringList());
+    showHistory();
+}
+
+void SearchPage::onHistoryRemove(const QString &query)
+{
+    QStringList hist = history();
+    hist.removeAll(query);
+    setHistory(hist);
     showHistory();
 }
 
