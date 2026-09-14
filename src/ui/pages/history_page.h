@@ -9,6 +9,8 @@ class HistoryRepo;
 class VideoCacheRepo;
 class VideoListView;
 class ThumbnailCache;
+class WatchLaterRepo;
+class PlaylistsRepo;
 
 class QLabel;
 class QPushButton;
@@ -19,7 +21,8 @@ class HistoryPage : public QWidget
 
 public:
     explicit HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
-                         ThumbnailCache *thumbs, QWidget *parent = nullptr);
+                         ThumbnailCache *thumbs, WatchLaterRepo *watchLater,
+                         PlaylistsRepo *playlists, QWidget *parent = nullptr);
 
     void reload();
 
@@ -28,15 +31,17 @@ signals:
     void historyChanged();
     void resumeRequested(const QVector<VideoInfo> &videos, int startIndex,
                          qlonglong startPositionMs);
+    void channelRequested(const QString &channelId);
 
 private:
-    // Pinta la barrita de progreso (position_ms) sobre las miniaturas de los
-    // vídeos a medio ver, igual que en "Continuar viendo".
+    void showMoreMenu(const VideoInfo &v, const QPoint &globalPos);
     void applyProgress();
 
     HistoryRepo *m_history;
     VideoCacheRepo *m_cache;
     ThumbnailCache *m_thumbs;
+    WatchLaterRepo *m_watchLater;
+    PlaylistsRepo *m_playlists;
     QLabel *m_title = nullptr;
     QLabel *m_meta = nullptr;
     VideoListView *m_list = nullptr;
