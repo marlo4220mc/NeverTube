@@ -159,12 +159,16 @@ private:
 // Guarda solo ids ordenados + fetched_at; los metadatos viven en "videos"
 // (VideoCacheRepo). saveSection REEMPLAZA la sección completa: cada respuesta
 // de red es la lista vigente de esa sección, nunca se agrega contenido a una
-// lista vieja (evita duplicados y contenido obsoleto).
+// lista vieja (evita duplicados y contenido obsoleto). Una lista vacía se
+// RECHAZA (una actualización fallida/vacía no debe pisotear la caché previa
+// ni marcar un fetched_at nuevo).
 class HomeCacheRepo
 {
 public:
     explicit HomeCacheRepo(AppDatabase &db);
 
+    // Guarda/reemplaza la sección. Devuelve false (y no escribe nada) si
+    // videoIds está vacío o no es una sección válida.
     bool saveSection(const QString &section, const QStringList &videoIds,
                      qint64 fetchedAt);
     QStringList sectionVideoIds(const QString &section) const;
