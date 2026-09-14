@@ -13,6 +13,7 @@ class QTimer;
 class VideoListView;
 class ThumbnailCache;
 class SettingsRepo;
+class ChannelRow;
 class Yt;
 class QPushButton;
 
@@ -61,7 +62,8 @@ private:
 
     QVector<VideoInfo> m_results;
     QVector<ChannelInfo> m_channels;
-    QHash<QString, QPushButton *> m_channelButtons;
+    QHash<QString, ChannelRow *> m_channelButtons;
+    QWidget *m_channelStrip = nullptr;
     QString m_error;
     bool m_searching = false;
     QString m_activeQuery;

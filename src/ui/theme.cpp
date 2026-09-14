@@ -39,8 +39,6 @@ QLabel { background: transparent; }
 QLabel#sectionTitle { font-size: 16px; font-weight: 600; color: #ECECEC; }
 QLabel#sectionSub { font-size: 12px; color: #8F8F8F; }
 QLabel#muted { color: #8F8F8F; }
-QLabel#chName { font-size: 12px; color: #ECECEC; line-height: 1.2; }
-QLabel#chAvatar { background: transparent; }
 
 QPushButton {
     background-color: #1F1F1F;
