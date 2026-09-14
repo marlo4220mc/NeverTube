@@ -155,6 +155,26 @@ private:
     AppDatabase &m_db;
 };
 
+// Caché persistente del Home por sección de red (Recomendado/Feed/Tendencias).
+// Guarda solo ids ordenados + fetched_at; los metadatos viven en "videos"
+// (VideoCacheRepo). saveSection REEMPLAZA la sección completa: cada respuesta
+// de red es la lista vigente de esa sección, nunca se agrega contenido a una
+// lista vieja (evita duplicados y contenido obsoleto).
+class HomeCacheRepo
+{
+public:
+    explicit HomeCacheRepo(AppDatabase &db);
+
+    bool saveSection(const QString &section, const QStringList &videoIds,
+                     qint64 fetchedAt);
+    QStringList sectionVideoIds(const QString &section) const;
+    qint64 sectionFetchedAt(const QString &section) const;
+    bool clearSection(const QString &section);
+
+private:
+    AppDatabase &m_db;
+};
+
 struct DiscoverRadio
 {
     qlonglong id = 0;

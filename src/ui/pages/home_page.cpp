@@ -49,6 +49,13 @@ const qint64 kDiscoverRetryMs = 10 * 60 * 1000;
 // inicialización (excepción: solo ocurre si no hay ninguna radio útil).
 const int kDiscoverMinRadios = 3;
 
+// Claves de las secciones de RED en el home_cache (HomeCacheRepo). Continuar
+// viendo y Descubre NO se guardan ahí: derivan de historial/radios, que ya son
+// persistentes, y Descubre re-selecciona siempre al arrancar.
+const char kCacheSecHome[] = "recommended";
+const char kCacheSecFeed[] = "feed";
+const char kCacheSecTrend[] = "trending";
+
 qint64 nowMs()
 {
     return QDateTime::currentMSecsSinceEpoch();
@@ -74,7 +81,7 @@ QVector<VideoInfo> sanitizeVideos(const QVector<VideoInfo> &in)
 HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
                    DiscoverRepo *discover, VideoCacheRepo *videoCache,
                    ThumbnailCache *thumbs, SettingsRepo *settings,
-                   QWidget *parent)
+                   HomeCacheRepo *homeCache, QWidget *parent)
     : QWidget(parent)
     , m_yt(yt)
     , m_subs(subs)
@@ -83,6 +90,7 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     , m_videoCache(videoCache)
     , m_thumbs(thumbs)
     , m_settings(settings)
+    , m_homeCache(homeCache)
 {
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
@@ -250,11 +258,74 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     m_trendGrid->hide();
     m_banner->hide();
     m_busy->show();
+
+    loadPersistedSections();
 }
 
 bool HomePage::cachedFresh(qint64 at, qint64 ttlMs) const
 {
     return at > 0 && (nowMs() - at) < ttlMs;
+}
+
+// Al arrancar se recupera el Home persistido para mostrarlo al instante:
+// Recomendado/Feed/Tendencias vienen del home_cache (metadatos resueltos con el
+// caché "videos"); su fetched_at cargado decide después, en loadSections(), si
+// la sección necesita refresco (solo la que caducó se vuelve a pedir).
+void HomePage::loadPersistedSections()
+{
+    if (!m_homeCache)
+        return;
+    auto load = [this](const char *section, QVector<VideoInfo> &out,
+                       qint64 &fetchedAt) {
+        const QStringList ids = m_homeCache->sectionVideoIds(
+            QLatin1String(section));
+        if (ids.isEmpty())
+            return;
+        const QVector<VideoInfo> videos = m_videoCache->getMany(ids);
+        if (videos.isEmpty())
+            return;
+        const qint64 at = m_homeCache->sectionFetchedAt(
+            QLatin1String(section));
+        if (at <= 0)
+            return;
+        out = videos;
+        fetchedAt = at;
+    };
+    load(kCacheSecHome, m_home, m_homeFetchedAt);
+    load(kCacheSecFeed, m_feed, m_feedFetchedAt);
+    load(kCacheSecTrend, m_trending, m_trendFetchedAt);
+    if (!m_home.isEmpty()) {
+        m_homeGrid->showVideos(m_home, VideoListView::GridMode);
+        adjustGridHeight(m_homeGrid);
+        m_homeTitle->setVisible(true);
+        m_homeGrid->setVisible(true);
+    }
+    if (!m_feed.isEmpty()) {
+        m_feedGrid->showVideos(m_feed, VideoListView::GridMode);
+        adjustGridHeight(m_feedGrid);
+        m_feedTitle->setVisible(true);
+        m_feedGrid->setVisible(true);
+    }
+    if (!m_trending.isEmpty()) {
+        m_trendGrid->showVideos(m_trending, VideoListView::GridMode);
+        adjustGridHeight(m_trendGrid);
+        m_trendTitle->setVisible(true);
+        m_trendGrid->setVisible(true);
+    }
+    if (!m_home.isEmpty() || !m_feed.isEmpty() || !m_trending.isEmpty())
+        m_layoutTimer->start();
+}
+
+void HomePage::saveSection(const QString &section,
+                           const QVector<VideoInfo> &videos)
+{
+    if (!m_homeCache || videos.isEmpty())
+        return;
+    QStringList ids;
+    ids.reserve(videos.size());
+    for (const VideoInfo &v : videos)
+        ids << v.id;
+    m_homeCache->saveSection(section, ids, nowMs());
 }
 
 void HomePage::setYtAvailable(bool ok)
@@ -442,6 +513,7 @@ void HomePage::onFeedDone()
     if (m_feed.size() > kFeedTargetVideos)
         m_feed.resize(kFeedTargetVideos);
     m_feedFetchedAt = nowMs();
+    saveSection(QLatin1String(kCacheSecFeed), m_feed);
     m_feedGrid->showVideos(m_feed, VideoListView::GridMode);
     adjustGridHeight(m_feedGrid);
     const bool vis = !m_feed.isEmpty();
@@ -459,6 +531,7 @@ void HomePage::onHomeReady(const QVector<VideoInfo> &videos)
     NT_DEBUG("E2E home ready count=%d\n", (int)videos.size());
     m_home = sanitizeVideos(videos);
     m_homeFetchedAt = nowMs();
+    saveSection(QLatin1String(kCacheSecHome), m_home);
     m_homeBusy = false;
     m_homeGrid->showVideos(m_home, VideoListView::GridMode);
     adjustGridHeight(m_homeGrid);
@@ -485,6 +558,7 @@ void HomePage::onTrending(const QVector<VideoInfo> &videos)
     if (m_trending.size() > 8)
         m_trending.resize(8);
     m_trendFetchedAt = nowMs();
+    saveSection(QLatin1String(kCacheSecTrend), m_trending);
     m_trendBusy = false;
     m_trendGrid->showVideos(m_trending, VideoListView::GridMode);
     adjustGridHeight(m_trendGrid);
