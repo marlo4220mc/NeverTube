@@ -400,11 +400,12 @@ void SearchPage::showHistory()
         m_historyBox->layout()->addWidget(row);
     }
     auto *clear = new QPushButton(QStringLiteral("Borrar historial"), this);
-    clear->setObjectName(QStringLiteral("ghost"));
-    clear->setStyleSheet(QStringLiteral("QPushButton#ghost { margin-top:2px; }"));
+    clear->setObjectName(QStringLiteral("primary"));
     clear->setCursor(Qt::PointingHandCursor);
+    clear->setFixedWidth(180);
     connect(clear, &QPushButton::clicked, this, &SearchPage::onHistoryClear);
-    m_historyBox->layout()->addWidget(clear);
+    if (auto *box = qobject_cast<QBoxLayout *>(m_historyBox->layout()))
+        box->addWidget(clear, 0, Qt::AlignHCenter);
     if (auto *box = qobject_cast<QBoxLayout *>(m_historyBox->layout()))
         box->addStretch(1);
 }

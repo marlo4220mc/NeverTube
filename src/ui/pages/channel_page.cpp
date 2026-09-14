@@ -77,7 +77,9 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     for (int i = 0; i < names.size(); ++i) {
         auto *tabWrap = new QWidget(m_tabs);
         auto *tabLayout = new QVBoxLayout(tabWrap);
-        tabLayout->setContentsMargins(0, 0, 0, 0);
+        // Margen inferior: eleva el botón "Mostrar más" para que no quede
+        // recortado/pegado al borde inferior del cuadro de vídeos.
+        tabLayout->setContentsMargins(0, 0, 0, 8);
         tabLayout->setSpacing(6);
         auto *list = new VideoListView(m_thumbs, tabWrap);
         list->showVideos(QVector<VideoInfo>(), VideoListView::ListMode);
@@ -86,8 +88,9 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
         m_tabKeys.append(keys.at(i));
         tabLayout->addWidget(list, 1);
         auto *more = new QPushButton(QStringLiteral("Mostrar más"), tabWrap);
-        more->setObjectName(QStringLiteral("ghost"));
+        more->setObjectName(QStringLiteral("primary"));
         more->setCursor(Qt::PointingHandCursor);
+        more->setFixedWidth(180);
         more->hide();
         tabLayout->addWidget(more, 0, Qt::AlignHCenter);
         m_moreButtons.append(more);
