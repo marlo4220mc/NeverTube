@@ -49,6 +49,14 @@ QRectF removeButtonRect(const QRect &cell, qreal scale)
                   side, side);
 }
 
+// Rectángulo del botón de opciones "⋯", justo a la izquierda de la X.
+QRectF moreButtonRect(const QRect &cell, qreal scale)
+{
+    const qreal side = 26 * scale;
+    const QRectF rem = removeButtonRect(cell, scale);
+    return QRectF(rem.left() - 8 * scale - side, rem.top(), side, side);
+}
+
 class VideosDelegate : public QStyledItemDelegate
 {
 public:
@@ -84,6 +92,11 @@ public:
     void setShowRemove(bool show)
     {
         m_showRemove = show;
+    }
+
+    void setShowMore(bool show)
+    {
+        m_showMore = show;
     }
 
     // Mapa (opcional) de fracciones de progreso por videoId que el delegado
@@ -327,6 +340,21 @@ private:
                           pm);
             p->restore();
         }
+
+        if (m_showMore) {
+            p->save();
+            p->setRenderHint(QPainter::Antialiasing);
+            const QRectF mr = moreButtonRect(r, m_scale);
+            const QColor col((opt.state & QStyle::State_MouseOver)
+                                 ? nt::kText : nt::kMuted);
+            p->setPen(Qt::NoPen);
+            p->setBrush(col);
+            const qreal cx = mr.center().x();
+            const qreal top = mr.center().y() - 5;
+            for (int i = 0; i < 3; ++i)
+                p->drawEllipse(QPointF(cx, top + i * 5), 2, 2);
+            p->restore();
+        }
     }
 
     ThumbnailCache *m_thumbs;
@@ -334,6 +362,7 @@ private:
     int m_mode = VideoListView::ListMode;
     int m_currentRow = -1;
     bool m_showRemove = false;
+    bool m_showMore = false;
     int m_cellW = 0;
     int m_cellH = 0;
     qreal m_scale = 1.0;
@@ -477,6 +506,15 @@ void VideoListView::setRowRemoveVisible(bool visible)
     viewport()->update();
 }
 
+void VideoListView::setRowMoreVisible(bool visible)
+{
+    if (m_rowMore == visible)
+        return;
+    m_rowMore = visible;
+    static_cast<VideosDelegate *>(itemDelegate())->setShowMore(visible);
+    viewport()->update();
+}
+
 void VideoListView::setProgress(const QString &videoId, double fraction)
 {
     m_progress.insert(videoId, fraction);
@@ -543,6 +581,13 @@ void VideoListView::mouseReleaseEvent(QMouseEvent *event)
         if (idx.isValid() && idx.row() >= 0 && idx.row() < m_videos.size()) {
             // En modo lista con la X activa, el click sobre ella borra en vez
             // de reproducir.
+            if (m_rowMore && m_mode == ListMode) {
+                const QRect cell = visualRect(idx);
+                if (moreButtonRect(cell, m_scale).contains(event->pos())) {
+                    emit moreRequested(idx.row(), m_videos.at(idx.row()));
+                    return;
+                }
+            }
             if (m_rowRemove && m_mode == ListMode) {
                 const QRect cell = visualRect(idx);
                 if (removeButtonRect(cell, m_scale).contains(event->pos())) {

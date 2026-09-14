@@ -192,7 +192,8 @@ MainWindow::MainWindow(QWidget *parent)
                                 &m_history, &m_subs, &m_videoCache, m_libraryThumbs,
                                 &m_playlists, this);
     m_playlist = new PlaylistPage(&m_playlists, &m_videoCache, m_libraryThumbs, this);
-    m_historyPage = new HistoryPage(&m_history, &m_videoCache, m_libraryThumbs, this);
+    m_historyPage = new HistoryPage(&m_history, &m_videoCache, m_libraryThumbs,
+                                   &m_watchLater, &m_playlists, this);
     m_settingsPage = new SettingsPage(&m_settings, this);
 
     m_pages->addWidget(m_home);
@@ -270,6 +271,13 @@ MainWindow::MainWindow(QWidget *parent)
         if (m_home)
             m_home->invalidateDiscover();
     });
+    connect(m_historyPage, &HistoryPage::channelRequested, this,
+            [this](const QString &channelId) {
+                m_lastTab = m_currentTab;
+                m_currentTab = 2;
+                m_channel->openChannel(channelId);
+                m_pages->setCurrentWidget(m_channel);
+            });
 
     root->addWidget(m_pages, 1);
     setupMiniBar();
