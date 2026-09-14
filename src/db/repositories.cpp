@@ -232,6 +232,34 @@ bool databaseSelfTest(const QString &dbPath)
                   == QLatin1String("x"),
               "settings string default");
 
+    HomeCacheRepo homeCache(db);
+    const QStringList secIds{QLatin1String("vidA"), QLatin1String("vidB")};
+    ok &= yes(homeCache.saveSection(QStringLiteral("recommended"), secIds, 1111),
+              "home cache save");
+    ok &= yes(homeCache.sectionVideoIds(QStringLiteral("recommended")) == secIds,
+              "home cache ids order");
+    ok &= yes(homeCache.sectionFetchedAt(QStringLiteral("recommended")) == 1111,
+              "home cache fetchedAt");
+    // Refresco inteligente: reemplaza la sección completa, nunca agrega.
+    const QStringList secIds2{QLatin1String("vidB")};
+    ok &= yes(homeCache.saveSection(QStringLiteral("recommended"), secIds2, 2222),
+              "home cache replace section");
+    ok &= yes(homeCache.sectionVideoIds(QStringLiteral("recommended")) == secIds2
+                  && homeCache.sectionVideoIds(QStringLiteral("trending")).isEmpty(),
+              "home cache replaced (no merge, no leak to other sections)");
+    ok &= yes(homeCache.sectionFetchedAt(QStringLiteral("recommended")) == 2222,
+              "home cache replaced fetchedAt");
+    // Secciones independientes entre sí.
+    ok &= yes(homeCache.saveSection(QStringLiteral("trending"),
+                                    QStringList{QLatin1String("vidX")}, 3333),
+              "home cache second section");
+    ok &= yes(homeCache.sectionVideoIds(QStringLiteral("recommended")) == secIds2
+                  && homeCache.sectionFetchedAt(QStringLiteral("trending")) == 3333,
+              "home cache sections independent");
+    ok &= yes(homeCache.clearSection(QStringLiteral("trending"))
+                  && homeCache.sectionVideoIds(QStringLiteral("trending")).isEmpty(),
+              "home cache clear section");
+
     db.close();
     if (ok)
         fprintf(stderr, "SELFTEST OK\n");
@@ -779,6 +807,59 @@ QString SettingsRepo::getString(const QString &key, const QString &def) const
     if (!get(key, v))
         return def;
     return v;
+}
+
+HomeCacheRepo::HomeCacheRepo(AppDatabase &db)
+    : m_db(db)
+{
+}
+
+bool HomeCacheRepo::saveSection(const QString &section,
+                                const QStringList &videoIds, qint64 fetchedAt)
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "INSERT OR REPLACE INTO home_cache (section, video_ids, fetched_at) "
+        "VALUES (:section, :ids, :at)"));
+    q.bindValue(QStringLiteral(":section"), section);
+    q.bindValue(QStringLiteral(":ids"), videoIds.join(QLatin1Char(',')));
+    q.bindValue(QStringLiteral(":at"), fetchedAt);
+    return q.exec();
+}
+
+QStringList HomeCacheRepo::sectionVideoIds(const QString &section) const
+{
+    QStringList out;
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "SELECT video_ids FROM home_cache WHERE section = :section"));
+    q.bindValue(QStringLiteral(":section"), section);
+    if (!q.exec() || !q.next())
+        return out;
+    const QString ids = q.value(0).toString();
+    if (!ids.isEmpty())
+        out = ids.split(QLatin1Char(','), Qt::SkipEmptyParts);
+    return out;
+}
+
+qint64 HomeCacheRepo::sectionFetchedAt(const QString &section) const
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "SELECT fetched_at FROM home_cache WHERE section = :section"));
+    q.bindValue(QStringLiteral(":section"), section);
+    if (!q.exec() || !q.next())
+        return 0;
+    return q.value(0).toLongLong();
+}
+
+bool HomeCacheRepo::clearSection(const QString &section)
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "DELETE FROM home_cache WHERE section = :section"));
+    q.bindValue(QStringLiteral(":section"), section);
+    return q.exec();
 }
 
 DiscoverRepo::DiscoverRepo(AppDatabase &db)

@@ -98,6 +98,25 @@ void AppDatabase::createSchema(QSqlDatabase &db)
         return q.exec(sql);
     };
 
+    // Migración de una home_cache antigua (fila por vídeo, sin fetched_at)
+    // descartada por el nuevo esquema por-sección. Es caché reconstruible:
+    // si existe sin la columna fetched_at se sustituye (una sola vez; con el
+    // esquema nuevo el CREATE IF NOT EXISTS no la tocaría nunca más).
+    if (tableExists(db, QStringLiteral("home_cache"))) {
+        bool hasFetchedAt = false;
+        QSqlQuery p(db);
+        if (p.exec(QStringLiteral("PRAGMA table_info(home_cache)"))) {
+            while (p.next()) {
+                if (p.value(1).toString() == QLatin1String("fetched_at")) {
+                    hasFetchedAt = true;
+                    break;
+                }
+            }
+        }
+        if (!hasFetchedAt)
+            exec(QStringLiteral("DROP TABLE home_cache"));
+    }
+
     exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS videos ("
         "  id TEXT PRIMARY KEY,"
@@ -187,5 +206,17 @@ void AppDatabase::createSchema(QSqlDatabase &db)
         "CREATE TABLE IF NOT EXISTS settings ("
         "  key TEXT PRIMARY KEY,"
         "  value TEXT NOT NULL"
+        ")"));
+    // Caché persistente del Home por sección (refresco inteligente): solo se
+    // guardan secciones de RED (recomendado/feed/tendencias). Los metadatos de
+    // los vídeos reutilizan la tabla "videos" (VideoCacheRepo): aquí solo ids
+    // ordenados + momento en que se guardaron (para decidir el refresco tras
+    // reiniciar). Continuar viendo se deriva del historial y Descubre de las
+    // radios guardadas, así que ninguna de las dos se duplica aquí.
+    exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS home_cache ("
+        "  section TEXT PRIMARY KEY,"
+        "  video_ids TEXT NOT NULL,"
+        "  fetched_at INTEGER NOT NULL"
         ")"));
 }

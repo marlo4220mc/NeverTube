@@ -92,6 +92,7 @@ private:
     SubscriptionsRepo m_subs{m_db};
     PlaylistsRepo m_playlists{m_db};
     SettingsRepo m_settings{m_db};
+    HomeCacheRepo m_homeCache{m_db};
 
     // Semillas de vídeo reproduciéndose para las que ya se pidió su radio (y
     // aún no llegó) desde el hook de reproducción confirmada: evita re-pedir la
