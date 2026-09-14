@@ -16,21 +16,11 @@ QWidget#contentHost { background-color: #0F0F0F; }
 
 QWidget#navBottom {
     background-color: #101010;
-    border-top: 1px solid #262626;
 }
-QPushButton#navBtn {
-    background: transparent;
-    border: none;
-    border-radius: 8px;
-    padding: 6px 0;
-    margin: 4px 4px;
-    color: #8F8F8F;
-    font-size: 11px;
-}
-QPushButton#navBtn:hover { background-color: #1F1F1F; color: #ECECEC; }
-QPushButton#navBtn:checked { color: #FF0033; }
-QPushButton#navBtn:checked:hover { background-color: #1F1F1F; color: #FF0033; }
 
+/* Botones de la barra de navegación inferior. Los iconos (PNG) los gestiona
+   NavButton por estado; aquí solo se colorean texto y fondo. El rojo
+   NeverTube aparece únicamente en estados activos o de interacción. */
 QToolButton#navBtn {
     background: transparent;
     border: none;
@@ -41,8 +31,10 @@ QToolButton#navBtn {
     font-size: 11px;
 }
 QToolButton#navBtn:hover { background-color: #1F1F1F; color: #ECECEC; }
+QToolButton#navBtn:pressed { color: #E0002E; }
 QToolButton#navBtn:checked { color: #FF0033; }
 QToolButton#navBtn:checked:hover { background-color: #1F1F1F; color: #FF0033; }
+QToolButton#navBtn:disabled { color: #6a6a6a; }
 
 QLabel { background: transparent; }
 QLabel#sectionTitle { font-size: 16px; font-weight: 600; color: #ECECEC; }
