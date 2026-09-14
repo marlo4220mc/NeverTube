@@ -28,7 +28,7 @@
 #include "ui/pages/channel_page.h"
 #include "ui/pages/library_page.h"
 #include "ui/pages/playlist_page.h"
-#include "ui/pages/placeholder_page.h"
+#include "ui/pages/settings_page.h"
 #include "ui/pages/history_page.h"
 #include "ui/pages/search_page.h"
 #include "ui/pages/watch_page.h"
@@ -120,7 +120,7 @@ MainWindow::MainWindow(QWidget *parent)
                                 &m_playlists, this);
     m_playlist = new PlaylistPage(&m_playlists, &m_videoCache, m_libraryThumbs, this);
     m_historyPage = new HistoryPage(&m_history, &m_videoCache, m_libraryThumbs, this);
-    m_settingsPage = new PlaceholderPage(QStringLiteral("Ajustes"), this);
+    m_settingsPage = new SettingsPage(&m_settings, this);
 
     m_pages->addWidget(m_home);
     m_pages->addWidget(m_search);
@@ -371,17 +371,27 @@ void MainWindow::setupNav()
 {
     m_nav = new QWidget(this);
     m_nav->setObjectName(QStringLiteral("navBottom"));
-    m_nav->setFixedHeight(64);
+    m_nav->setFixedHeight(66);
 
     auto *lay = new QHBoxLayout(m_nav);
-    lay->setContentsMargins(0, 0, 0, 0);
+    lay->setContentsMargins(0, 4, 0, 4);
     lay->setSpacing(0);
 
     auto *group = new QButtonGroup(m_nav);
     group->setExclusive(true);
 
     auto addBtn = [&](nt::Icon ic, const QString &text, int index) {
-        QPushButton *b = makeNavButton(ic, text, index);
+        auto *b = new QToolButton(m_nav);
+        b->setObjectName(QStringLiteral("navBtn"));
+        b->setCheckable(true);
+        b->setProperty("navIcon", QVariant::fromValue(int(ic)));
+        b->setProperty("navText", text);
+        b->setIcon(nt::icon(ic, nt::kMuted, 22));
+        b->setIconSize(QSize(22, 22));
+        b->setText(text);
+        b->setToolTip(text);
+        b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        b->setFixedHeight(58);
         group->addButton(b, index);
         lay->addWidget(b, 1);
         m_navButtons.append(b);
@@ -393,21 +403,6 @@ void MainWindow::setupNav()
 
     connect(group, QOverload<int>::of(&QButtonGroup::idClicked), this,
             &MainWindow::onNavButton);
-}
-
-QPushButton *MainWindow::makeNavButton(nt::Icon icon, const QString &text,
-                                       int index)
-{
-    auto *b = new QPushButton(m_nav);
-    b->setObjectName(QStringLiteral("navBtn"));
-    b->setCheckable(true);
-    b->setProperty("navIcon", QVariant::fromValue(int(icon)));
-    b->setProperty("navText", text);
-    b->setIcon(nt::icon(icon, nt::kMuted, 20));
-    b->setIconSize(QSize(20, 20));
-    b->setText(text);
-    b->setToolTip(text);
-    return b;
 }
 
 void MainWindow::onNavButton(int index)
@@ -433,8 +428,9 @@ void MainWindow::onNavButton(int index)
     m_pages->setCurrentIndex(m_currentTab);
     if (m_currentTab == 4)
         m_library->reload();
-    else if (m_currentTab == 5)
-        statusBar()->showMessage(QStringLiteral("Ajustes: próximamente"), 2000);
+    else if (m_currentTab == 5) {
+        m_settingsPage->setVisible(true);
+    }
 }
 
 void MainWindow::setupMiniBar()

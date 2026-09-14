@@ -56,6 +56,8 @@ add_executable(nevertube_qt2
   src/ui/pages/playlist_page.h
   src/ui/pages/history_page.cpp
   src/ui/pages/history_page.h
+  src/ui/pages/settings_page.cpp
+  src/ui/pages/settings_page.h
   src/ui/pages/placeholder_page.cpp
   src/ui/pages/placeholder_page.h
 )
