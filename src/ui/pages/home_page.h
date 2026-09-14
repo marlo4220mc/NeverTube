@@ -15,6 +15,7 @@ class QTimer;
 class QVBoxLayout;
 class DiscoverRepo;
 class HistoryRepo;
+class HomeCacheRepo;
 class SettingsRepo;
 class SubscriptionsRepo;
 class ThumbnailCache;
@@ -41,7 +42,7 @@ public:
     explicit HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
                       DiscoverRepo *discover, VideoCacheRepo *videoCache,
                       ThumbnailCache *thumbs, SettingsRepo *settings,
-                      QWidget *parent = nullptr);
+                      HomeCacheRepo *homeCache, QWidget *parent = nullptr);
 
     void reload();
     void refreshContinueWatching();
@@ -86,6 +87,15 @@ private:
     void loadSections();
     void loadFeed();
     void requestNextChannel();
+    // Carga del home_cache (HomeCacheRepo) las secciones de RED persistidas en
+    // el último arranque: Home muestra contenido al instante y cada sección se
+    // refresca sola cuando caduca su TTL (lo persiste todo el Home menos lo que
+    // ya es local: Continuar viendo deriva del historial y Descubre de las
+    // radios guardadas).
+    void loadPersistedSections();
+    // Guarda (reemplaza, no agrega) una sección de red en el home_cache tras
+    // recibir datos frescos. Los ids se deducen de la lista en orden mostrado.
+    void saveSection(const QString &section, const QVector<VideoInfo> &videos);
     void ensureDiscover();
     // Construye la selección de Descubre SOLO desde radios guardadas (sin red)
     // y la muestra. Si no hay radios útiles, dispara la generación de
@@ -112,6 +122,7 @@ private:
     DiscoverRepo *m_discover;
     ThumbnailCache *m_thumbs;
     SettingsRepo *m_settings;
+    HomeCacheRepo *m_homeCache;
 
     // Auto-siembra de radios de inicialización: solo la primera vez. Si el
     // sistema ya generó alguna radio alguna vez (discover_seeded), un Descubre

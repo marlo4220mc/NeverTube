@@ -109,7 +109,8 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_pages = new QStackedWidget(central);
     m_home = new HomePage(m_yt, &m_subs, &m_history, &m_discoverRadios,
-                          &m_videoCache, m_homeThumbs, &m_settings, this);
+                          &m_videoCache, m_homeThumbs, &m_settings,
+                          &m_homeCache, this);
     m_search = new SearchPage(m_yt, &m_settings, m_globalThumbs, this);
     m_channel = new ChannelPage(m_yt, m_globalThumbs, &m_subs, this);
     m_watch = new WatchPage(m_yt, &m_player, m_playerWidget, &m_videoCache,
