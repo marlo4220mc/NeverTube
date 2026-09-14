@@ -1,0 +1,28 @@
+<RCC>
+    <qresource prefix="/">
+        <file>nav/home_active.png</file>
+        <file>nav/home_circular.png</file>
+        <file>nav/home_disabled.png</file>
+        <file>nav/home_hover.png</file>
+        <file>nav/home_inactive.png</file>
+        <file>nav/home_pressed.png</file>
+        <file>nav/library_active.png</file>
+        <file>nav/library_circular.png</file>
+        <file>nav/library_disabled.png</file>
+        <file>nav/library_hover.png</file>
+        <file>nav/library_inactive.png</file>
+        <file>nav/library_pressed.png</file>
+        <file>nav/search_active.png</file>
+        <file>nav/search_circular.png</file>
+        <file>nav/search_disabled.png</file>
+        <file>nav/search_hover.png</file>
+        <file>nav/search_inactive.png</file>
+        <file>nav/search_pressed.png</file>
+        <file>nav/settings_active.png</file>
+        <file>nav/settings_circular.png</file>
+        <file>nav/settings_disabled.png</file>
+        <file>nav/settings_hover.png</file>
+        <file>nav/settings_inactive.png</file>
+        <file>nav/settings_pressed.png</file>
+    </qresource>
+</RCC>

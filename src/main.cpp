@@ -15,6 +15,7 @@
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
+    Q_INIT_RESOURCE(resources);
     app.setApplicationName(QStringLiteral("nevertube"));
     app.setOrganizationName(QStringLiteral("nevertube"));
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
