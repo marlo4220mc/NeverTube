@@ -31,6 +31,19 @@ QPushButton#navBtn:hover { background-color: #1F1F1F; color: #ECECEC; }
 QPushButton#navBtn:checked { color: #FF0033; }
 QPushButton#navBtn:checked:hover { background-color: #1F1F1F; color: #FF0033; }
 
+QToolButton#navBtn {
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 4px 0;
+    margin: 4px 4px;
+    color: #8F8F8F;
+    font-size: 11px;
+}
+QToolButton#navBtn:hover { background-color: #1F1F1F; color: #ECECEC; }
+QToolButton#navBtn:checked { color: #FF0033; }
+QToolButton#navBtn:checked:hover { background-color: #1F1F1F; color: #FF0033; }
+
 QLabel { background: transparent; }
 QLabel#sectionTitle { font-size: 16px; font-weight: 600; color: #ECECEC; }
 QLabel#sectionSub { font-size: 12px; color: #8F8F8F; }
@@ -50,7 +63,7 @@ QPushButton:pressed { background-color: #232323; }
 QPushButton:disabled { color: #6a6a6a; }
 QPushButton#primary { background-color: #FF0033; border-color: #FF0033; color: #FFFFFF; font-weight: 600; }
 QPushButton#primary:hover { background-color: #E0002E; }
-QPushButton#ghost { background: transparent; border: 1px solid #2A2A2A; }
+QPushButton#ghost { background: transparent; border: 1px solid #2A2A2A; border-radius: 6px; }
 QPushButton#ghost:hover { background: #1F1F1F; }
 QPushButton#iconBtn { background: transparent; border: none; border-radius: 6px; padding: 6px; }
 QPushButton#iconBtn:hover { background: #232323; }

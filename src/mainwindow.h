@@ -5,6 +5,7 @@
 #include <QMainWindow>
 #include <QProgressBar>
 #include <QSet>
+#include <QToolButton>
 
 #include "db/app_database.h"
 #include "db/repositories.h"
@@ -18,7 +19,7 @@ class WatchPage;
 class LibraryPage;
 class PlaylistPage;
 class HistoryPage;
-class PlaceholderPage;
+class SettingsPage;
 class PlayerWidget;
 class ThumbnailCache;
 class Yt;
@@ -70,7 +71,6 @@ private:
     void setMiniThumb();
     void goToPlayerPage();
     bool handleShortcut(QKeyEvent *event);
-    QPushButton *makeNavButton(nt::Icon icon, const QString &text, int index);
     void openWatchAt(const QVector<VideoInfo> &videos, int startIndex,
                      qlonglong startPositionMs);
 
@@ -106,10 +106,10 @@ private:
     LibraryPage *m_library = nullptr;
     PlaylistPage *m_playlist = nullptr;
     HistoryPage *m_historyPage = nullptr;
-    PlaceholderPage *m_settingsPage = nullptr;
+    SettingsPage *m_settingsPage = nullptr;
 
     QWidget *m_nav = nullptr;
-    QList<QPushButton *> m_navButtons;
+    QList<QToolButton *> m_navButtons;
     QStackedWidget *m_pages = nullptr;
 
     QWidget *m_miniBar = nullptr;
