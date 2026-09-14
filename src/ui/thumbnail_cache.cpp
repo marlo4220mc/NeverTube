@@ -54,6 +54,27 @@ static QString stripWebpParam(const QString &url)
     return q.toString(QUrl::FullyEncoded);
 }
 
+// YouTube sirve miniaturas webp bajo i.ytimg.com/vi_webp/<id>/<nombre>.webp.
+// Qt sin plugin webp (ojo: los plugins no son dependencia necesaria) no las
+// decodifica, así que se reescribe a la variante .jpg equivalente (existe para
+// los mismos tamaños: maxresdefault, hq720, hqdefault...). Así se hace UNA
+// sola descarga y siempre jpeg: menos latencia y memoria en máquinas modestas.
+static QString jpegEquivalent(const QString &url)
+{
+    QUrl q{url};
+    if (q.host() != QLatin1String("i.ytimg.com"))
+        return url;
+    const QString path = q.path();
+    if (!path.startsWith(QLatin1String("/vi_webp/")))
+        return url;
+    QString rest = path.mid(9); // "/vi_webp/" -> "…/<nombre>.webp"
+    if (!rest.endsWith(QLatin1String(".webp")))
+        return url;
+    rest.chop(5);
+    q.setPath(QStringLiteral("/vi/") + rest + QLatin1String(".jpg"));
+    return q.toString(QUrl::FullyEncoded);
+}
+
 // Miniatura estándar por id de vídeo. Se usa como fallback cuando la URL que
 // trae el panel/radio (p. ej. hq720_custom_1.jpg) responde 404.
 static QString standardThumbFor(const QString &key)
@@ -70,7 +91,7 @@ void ThumbnailCache::request(const QString &key, const QString &url)
 {
     if (key.isEmpty() || url.isEmpty())
         return;
-    const QString jpegUrl = stripWebpParam(url);
+    const QString jpegUrl = jpegEquivalent(stripWebpParam(url));
     NT_DEBUG("thumbnail request key=%s url=%s\n", key.toUtf8().constData(),
              jpegUrl.toUtf8().constData());
     if (m_cache.contains(key) || m_inFlight.contains(key))
@@ -132,31 +153,42 @@ void ThumbnailCache::onFinished(QNetworkReply *reply)
 {
     const QString key = reply->property("nt_key").toString();
     m_inFlight.remove(key);
+    const QNetworkReply::NetworkError err = reply->error();
+    const QString requestedUrl = reply->url().toString();
+    const QByteArray data = reply->readAll();
+    QString decodeInfo;
+    QImage image;
+    if (err == QNetworkReply::NoError && !data.isEmpty()) {
+        image.loadFromData(data);
+        if (image.isNull())
+            decodeInfo = QStringLiteral(" (no se pudo decodificar)");
+    }
     reply->deleteLater();
 
-    if (reply->error() != QNetworkReply::NoError) {
-        NT_DEBUG("thumbnail failed key=%s error=%s url=%s\n",
-                 key.toUtf8().constData(), reply->errorString().toUtf8().constData(),
-                 reply->url().toString().toUtf8().constData());
-        // Fallback: si la URL del panel/radio (variante custom_1, etc.) ya no
-        // existe, pedir la miniatura estándar por id y reintentar una vez.
+    // Descarga rota o que no puede decodificarse (p. ej. webp en un Qt sin
+    // plugin webp): reintentar UNA vez con la miniatura estándar por id
+    // (hqdefault.jpg). Sin bucle: si la estándar tampoco sirve, no se vuelve
+    // a llamar (QUrl(stdUrl) == url pedida).
+    const bool bad = err != QNetworkReply::NoError || data.isEmpty()
+        || image.isNull();
+    if (bad) {
         const QString stdUrl = standardThumbFor(key);
-        if (!stdUrl.isEmpty()
-            && QUrl(stdUrl) != reply->request().url()) {
-            NT_DEBUG("thumbnail fallback standard key=%s url=%s\n",
-                     key.toUtf8().constData(), stdUrl.toUtf8().constData());
+        if (!stdUrl.isEmpty() && QUrl(stdUrl) != reply->request().url()) {
+            NT_DEBUG("thumbnail fallback standard key=%s url=%s%s\n",
+                     key.toUtf8().constData(), requestedUrl.toUtf8().constData(),
+                     decodeInfo.toUtf8().constData());
+            if (err != QNetworkReply::NoError)
+                NT_DEBUG("thumbnail failed key=%s error=%s url=%s\n",
+                         key.toUtf8().constData(),
+                         reply->errorString().toUtf8().constData(),
+                         requestedUrl.toUtf8().constData());
             request(key, stdUrl);
         }
         return;
     }
 
-    const QByteArray data = reply->readAll();
     NT_DEBUG("thumbnail response key=%s bytes=%d\n", key.toUtf8().constData(),
              data.size());
-    QImage image;
-    if (!image.loadFromData(data))
-        return;
-
     image = image.scaled(kMaxThumbW, kMaxThumbW * 9 / 16,
                          Qt::KeepAspectRatio, Qt::SmoothTransformation);
     store(key, image);
