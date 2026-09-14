@@ -39,6 +39,11 @@ public:
     // de videoActivated(). Por defecto está desactivado: no afecta a otras
     // páginas que reutilizan la lista.
     void setRowRemoveVisible(bool visible);
+    // Similar a setRowRemoveVisible pero con el botón de opciones "⋯" (modo
+    // lista): el click sobre él emite moreRequested() en lugar de
+    // videoActivated(). Puede combinarse con la X; el botón de opciones queda
+    // a la izquierda de la X.
+    void setRowMoreVisible(bool visible);
     // Hace que las celdas del modo rejilla se estiren para llenar todo el ancho
     // disponible (0 desactiva: se usa el tamaño base fijo). El ancho mínimo de
     // celda fija cuántas columnas entran; el sobrante se reparte entre ellas.
@@ -52,6 +57,9 @@ signals:
     void videoActivated(int index, const VideoInfo &video);
     // Click sobre el botón "X" de una fila (solo si setRowRemoveVisible(true)).
     void removeRequested(int index, const VideoInfo &video);
+    // Click sobre el botón de opciones "⋯" de una fila
+    // (solo si setRowMoreVisible(true)).
+    void moreRequested(int index, const VideoInfo &video);
 
 protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
@@ -72,6 +80,7 @@ private:
     int m_currentRow = -1;
     qreal m_scale = 1.0;
     bool m_rowRemove = false;
+    bool m_rowMore = false;
     int m_gridMinCellW = 0;
     int m_gridColumns = 0;
     QHash<QString, double> m_progress;
