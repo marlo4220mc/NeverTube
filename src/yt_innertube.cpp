@@ -111,7 +111,7 @@ constexpr int kPlayerClientCount =
 const char kFieldMask[] =
     "playabilityStatus.status,playabilityStatus.reason,"
     "streamingData.hlsManifestUrl,streamingData.adaptiveFormats,"
-    "videoDetails.videoId";
+    "videoDetails.videoId,videoDetails.lengthSeconds";
 
 // Alturas de vídeo únicas y ascendentes extraídas de streamingData.
 // Solo se tienen en cuenta entradas de vídeo (con width/height > 0);
@@ -2407,20 +2407,33 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
         return;
     }
     const QVector<int> heights = videoHeights(streamingData);
+    const QJsonArray adaptiveFormats =
+        streamingData.value(QStringLiteral("adaptiveFormats")).toArray();
+    const int durationSeconds = root.value(QStringLiteral("videoDetails"))
+                                    .toObject()
+                                    .value(QStringLiteral("lengthSeconds"))
+                                    .toInt();
     m_lastWinClient = m_clientIndex;
     const qint64 elapsed =
         QDateTime::currentMSecsSinceEpoch() - m_hlsStartMs;
     NT_DEBUG("E2E innertube hls ok len=%d alturas=%d client=%s (%lldms)\n",
              hls.size(), heights.size(), kPlayerClients[m_clientIndex].name,
              static_cast<long long>(elapsed));
-    // Caché de sesión: guarda hlsManifestUrl firmada y su expiración para
-    // no repetir el POST player en cambios de resolución del mismo vídeo.
+    // Caché de sesión: guarda hlsManifestUrl firmada, su expiración y los
+    // adaptiveFormats (con url directa) + duración, para no repetir el POST
+    // player en cambios de resolución del mismo vídeo.
     const qint64 exp = expireFromUrl(hls);
-    m_hlsCache.insert(m_videoId, HlsCacheEntry{hls, QByteArray(), heights, exp,
-                                               m_clientIndex});
+    m_hlsCache.insert(m_videoId,
+                      HlsCacheEntry{hls, QByteArray(), heights, exp,
+                                    m_clientIndex, adaptiveFormats,
+                                    durationSeconds});
     saveHlsCacheToDisk();
     m_hlsInFlight = false;
     mMasterInFlight = false;
+    // Los adaptiveFormats (con url por formato) primero: Yt construye el
+    // master edge (1 vídeo + 1 audio) sin tocar el master de YouTube. Si el
+    // edge no es posible, el flujo clásico hlsReady → fetchMaster lo cubre.
+    emit formatsReady(m_videoId, adaptiveFormats, durationSeconds);
     emit hlsReady(m_videoId, hls, heights);
 }
 
@@ -2483,6 +2496,11 @@ bool Innertube::serveCachedHls(const QString &videoId)
     }
     m_lastWinClient = it->clientIndex;
     m_videoId = videoId;
+    // Emitir primero los adaptiveFormats cacheados: Yt puede reconstruir el
+    // master edge sin repetir el POST player; si no procede, hlsReady cubre
+    // el camino clásico (fetchMaster).
+    if (!it->adaptiveFormats.isEmpty())
+        emit formatsReady(videoId, it->adaptiveFormats, it->durationSeconds);
     emit hlsReady(videoId, it->hlsUrl, it->heights);
     return true;
 }
@@ -2556,6 +2574,8 @@ void Innertube::saveHlsCacheToDisk() const
         o.insert(QStringLiteral("heights"), hs);
         o.insert(QStringLiteral("expiresAt"), e.expiresAt);
         o.insert(QStringLiteral("clientIndex"), e.clientIndex);
+        o.insert(QStringLiteral("adaptiveFormats"), e.adaptiveFormats);
+        o.insert(QStringLiteral("durationSeconds"), e.durationSeconds);
         arr.append(o);
     }
     const QByteArray json = QJsonDocument(arr).toJson(QJsonDocument::Compact);
@@ -2600,6 +2620,10 @@ void Innertube::loadHlsCacheFromDisk()
             e.heights.append(h.toInt());
         e.expiresAt = expiresAt;
         e.clientIndex = o.value(QStringLiteral("clientIndex")).toInt(-1);
+        e.adaptiveFormats =
+            o.value(QStringLiteral("adaptiveFormats")).toArray();
+        e.durationSeconds =
+            o.value(QStringLiteral("durationSeconds")).toInt();
         m_hlsCache.insert(videoId, e);
     }
 }
