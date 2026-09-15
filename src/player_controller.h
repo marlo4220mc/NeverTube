@@ -49,6 +49,9 @@ public:
     // Aplica los metadatos (título, canal, miniatura…) del detalle al ítem
     // actual si el id coincide. Emite metadataChanged() si algo fue actualizado.
     void applyCurrentDetail(const VideoInfo &detail);
+    // Sobrescribe el título del ítem actual (si el id coincide) con el
+    // traducido del /next. Emite metadataChanged() para refrescar la UI.
+    void renameCurrent(const QString &videoId, const QString &title);
     bool hasNext() const { return m_index >= 0 && m_index < m_queue.size() - 1; }
     bool hasPrevious() const { return m_index > 0; }
     bool isActive() const { return m_index >= 0; }

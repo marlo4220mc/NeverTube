@@ -22,6 +22,7 @@ enum class NextMode
     Radio
 };
 NextMode nextMode();
+void setNextMode(NextMode m);
 
 class SettingsRepo;
 
@@ -49,6 +50,9 @@ public:
     // Dispara la carga de los relacionados ("A continuación") del vídeo por
     // Innertube /next. Los resultados llegan por relatedReady().
     void relatedVideos(const QString &videoId);
+    // Detalle traducido del vídeo actual (/next normal): título y descripción
+    // en el idioma "hl" solicitado, para mostrar en el watch sin tocar la cola.
+    void currentDetail(const QString &videoId);
     // Modo radio (modelo 3): pide la cola del mix RDAMVM del vídeo y, si el
     // mix tiene más batches, radioMore() encadena el siguiente cuando se
     // agota. Llegan por radioReady().
@@ -90,6 +94,11 @@ signals:
     void resolveError(const QString &message);
     void relatedReady(const QString &videoId, const QVector<VideoInfo> &videos);
     void radioReady(const QString &videoId, const QVector<VideoInfo> &videos);
+    // Detalle traducido del vídeo actual (título y descripción) del /next
+    // normal, en el idioma "hl" solicitado. WatchPage lo usa para sobrescribir
+    // el título/desc en inglés que trae getDetail (yt-dlp, no traduce).
+    void currentDetailReady(const QString &videoId, const QString &title,
+                            const QString &description);
     void homeReady(const QVector<VideoInfo> &videos);
     void homeMoreReady(const QVector<VideoInfo> &videos);
 

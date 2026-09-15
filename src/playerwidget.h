@@ -34,6 +34,7 @@ public slots:
     void seek(double seconds);
     void setVolume(double volume);
     void setSubVisibility(bool visible);
+    void setAudioLanguage(const QString &lang);
 
 signals:
     void positionChanged();
@@ -67,6 +68,7 @@ private:
     int64_t m_videoW = 0;
     int64_t m_videoH = 0;
     double m_aspect = 0.0;
+    QString m_audioLang;
     bool m_redrawTimerActive = false;
 };
 

@@ -57,12 +57,17 @@ bool isOriginalAudio(const QString &line)
         || line.contains(QLatin1String("acont%3Doriginal"));
 }
 
-// Elige qué pistas de audio conservar del master, priorizando la preferencia
-// de idioma (m_audioLang). Con preferencia vacía (por defecto) solo se
-// conserva la pista original: YouTube incluye además doblajes de IA
-// ("dubbed-auto") que, sin DEFAULT=YES, mpv elegiría (usa la primera pista de
-// cada grupo). Para una preferencia concreta se emite la pista que encaja
-// antes que la original, que queda como respaldo.
+namespace {
+NextMode initNextMode() {
+    const QByteArray raw = qgetenv("NEVERTUBE_NEXT_MODE").trimmed().toLower();
+    if (raw == "none")
+        return NextMode::None;
+    if (raw == "suggestions")
+        return NextMode::Suggestions;
+    return NextMode::Radio;
+}
+NextMode g_nextMode = initNextMode();
+}
 QStringList selectAudioTracks(const QStringList &audioLines,
                               const QString &prefLang)
 {
@@ -97,12 +102,10 @@ QStringList selectAudioTracks(const QStringList &audioLines,
             }
         }
         if (!prefLang.isEmpty() && !preflight.isEmpty()) {
-            // Preferencia encontrada: ese doblaje primero, el resto atrás.
+            // Preferencia encontrada: ese doblaje primero (mpv lo elige con
+            // alang). El resto de doblajes del grupo se descartan para no
+            // inflar el master (ralentiza el arranque del vídeo).
             out.append(preflight);
-            for (const QString &t : std::as_const(dubbed)) {
-                if (t != preflight)
-                    out.append(t);
-            }
         }
         if (!original.isEmpty() && !out.contains(original)) {
             out.append(original);
@@ -131,6 +134,8 @@ Yt::Yt(QObject *parent)
             &Yt::relatedReady);
     connect(&m_innertube, &Innertube::radioReady, this,
             &Yt::radioReady);
+    connect(&m_innertube, &Innertube::currentDetailReady, this,
+            &Yt::currentDetailReady);
     connect(&m_innertube, &Innertube::homeReady, this,
             &Yt::homeReady);
     connect(&m_innertube, &Innertube::homeMoreReady, this,
@@ -182,20 +187,22 @@ void Yt::setVisitorStorage(SettingsRepo *settings)
 
 NextMode nextMode()
 {
-    static const NextMode mode = []() {
-        const QByteArray raw = qgetenv("NEVERTUBE_NEXT_MODE").trimmed().toLower();
-        if (raw == "none")
-            return NextMode::None;
-        if (raw == "suggestions")
-            return NextMode::Suggestions;
-        return NextMode::Radio; // por defecto: modelo 3 (mix RDAMVM + continuación)
-    }();
-    return mode;
+    return g_nextMode;
+}
+
+void setNextMode(NextMode m)
+{
+    g_nextMode = m;
 }
 
 void Yt::relatedVideos(const QString &videoId)
 {
     m_innertube.fetchNext(videoId);
+}
+
+void Yt::currentDetail(const QString &videoId)
+{
+    m_innertube.fetchCurrentDetail(videoId);
 }
 
 void Yt::radioVideos(const QString &videoId)
@@ -247,6 +254,12 @@ void Yt::setAudioLanguage(const QString &lang)
                                 Qt::CaseInsensitive) == 0
             ? QString()
             : clean;
+    // Propagar el idioma al Innertube para que /next y /player entreguen
+    // títulos y descripciones traducidos (hl). original mantiene "es" por
+    // defecto (evita auto-traducción automática al inglés).
+    const QString hl = m_audioLang.isEmpty() ? QStringLiteral("es")
+                                             : m_audioLang;
+    m_innertube.setHl(hl);
 }
 
 QString Yt::audioLanguage() const
