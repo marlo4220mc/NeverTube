@@ -136,6 +136,11 @@ void PlayerWidget::playUrl(const QString &url, double startAt)
         return;
     m_position = 0.0;
     m_duration = 0.0;
+    // Preferencia de idioma de audio ("alang"): solo con preferencia explícita
+    // mpv elige un doblaje (aunque tenga DEFAULT=NO) en lugar de la pista
+    // marcada DEFAULT=YES por YouTube (normalmente el audio original).
+    const QByteArray lang = m_audioLang.toUtf8();
+    mpv_set_option_string(m_mpv, "alang", lang.constData());
     const QByteArray u = url.toUtf8();
     // "start" SIEMPRE con valor concreto: mpv ignora/reserva el valor anterior si
     // se le pasa una cadena vacía, y un vídeo reanudado (start=X) dejaría ese X
@@ -146,6 +151,11 @@ void PlayerWidget::playUrl(const QString &url, double startAt)
     if (startAt > 0.0)
         NT_DEBUG("E2E playUrl start=%s\n", opt.constData());
     const char *cmd[] = { "loadfile", u.constData(), nullptr };
+    // Cada vídeo nuevo arranca reproduciendo: mpv conserva el estado de pausa
+    // entre loadfile, y un vídeo anterior dejado en pausa dejaba el siguiente
+    // en pausa ("vídeo que clickeo empieza pausado").
+    int paused = 0;
+    mpv_set_property(m_mpv, "pause", MPV_FORMAT_FLAG, &paused);
     NT_DEBUG("E2E playUrl len=%d http=%d\n", int(u.size()),
              url.startsWith(QLatin1String("http")) ? 1 : 0);
     mpv_command_async(m_mpv, 0, cmd);
@@ -200,6 +210,15 @@ void PlayerWidget::setSubVisibility(bool visible)
         return;
     int flag = visible ? 1 : 0;
     mpv_set_property(m_mpv, "sub-visibility", MPV_FORMAT_FLAG, &flag);
+}
+
+void PlayerWidget::setAudioLanguage(const QString &lang)
+{
+    m_audioLang = lang;
+    if (!m_mpv)
+        return;
+    const QByteArray b = m_audioLang.toUtf8();
+    mpv_set_option_string(m_mpv, "alang", b.constData());
 }
 
 void PlayerWidget::mpvWakeup(void *ctx)
