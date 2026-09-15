@@ -488,13 +488,22 @@ void VideoListView::clearVideos()
 
 void VideoListView::setScale(qreal scale)
 {
-    m_scale = scale;
-    static_cast<VideosDelegate *>(itemDelegate())->setScale(scale);
+    m_baseScale = scale;
+    m_scale = m_baseScale * m_density;
+    static_cast<VideosDelegate *>(itemDelegate())->setScale(m_scale);
     if (m_mode == GridMode)
-        setGridSize(QSize(qRound(kGridW * scale), qRound(kGridH * scale)));
+        setGridSize(QSize(qRound(kGridW * m_scale), qRound(kGridH * m_scale)));
     applyGridGeometry();
     updateGeometry();
     viewport()->update();
+}
+
+void VideoListView::setDensity(qreal density)
+{
+    if (density <= 0.0)
+        return;
+    m_density = density;
+    setScale(m_baseScale);
 }
 
 void VideoListView::setRowRemoveVisible(bool visible)

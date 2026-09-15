@@ -18,6 +18,10 @@
 #include <QVBoxLayout>
 #include <QMouseEvent>
 
+#include <QDir>
+#include <QFile>
+#include <QProcess>
+#include <QTimer>
 #include <functional>
 
 #include "models.h"
@@ -35,6 +39,7 @@
 #include "ui/pages/watch_page.h"
 #include "ui/theme.h"
 #include "ui/thumbnail_cache.h"
+#include "ui/video_list_view.h"
 #include "yt.h"
 
 namespace {
@@ -158,10 +163,35 @@ MainWindow::MainWindow(QWidget *parent)
     // esté en un widget profundo (QScrollArea, listas…), no solo en MainWindow.
     QCoreApplication::instance()->installEventFilter(this);
 
-    const int qh = m_settings.getInt(QStringLiteral("quality"));
-    if (qh > 0)
-        m_player.setMaxHeight(qh);
+    const QString savedQ = m_settings.getString(
+        QStringLiteral("quality"), QStringLiteral("auto"));
+    if (savedQ == QStringLiteral("auto")) {
+        int autoDef = m_settings.getInt(QStringLiteral("quality_auto"), 360);
+        m_player.setMaxHeight(autoDef);
+    } else {
+        int qh = savedQ.toInt();
+        if (qh > 0)
+            m_player.setMaxHeight(qh);
+        else
+            m_player.setMaxHeight(720);
+    }
     m_player.setMaxHeight(m_player.maxHeight());
+
+    // Preferencia de idioma de audio
+    const QString savedAL = m_settings.getString(
+        QStringLiteral("audio_language"), QStringLiteral("original"));
+    if (m_yt)
+        m_yt->setAudioLanguage(savedAL);
+
+    // Modo de generación de cola
+    const QString savedNext = m_settings.getString(
+        QStringLiteral("next_mode"), QStringLiteral("radio"));
+    if (savedNext == QStringLiteral("none"))
+        setNextMode(NextMode::None);
+    else if (savedNext == QStringLiteral("suggestions"))
+        setNextMode(NextMode::Suggestions);
+    else
+        setNextMode(NextMode::Radio);
 
     setWindowTitle(QStringLiteral("NeverTube"));
     resize(1280, 800);
@@ -195,6 +225,60 @@ MainWindow::MainWindow(QWidget *parent)
     m_historyPage = new HistoryPage(&m_history, &m_videoCache, m_libraryThumbs,
                                    &m_watchLater, &m_playlists, this);
     m_settingsPage = new SettingsPage(&m_settings, this);
+    connect(m_settingsPage, &SettingsPage::qualityChanged,
+            this, [this](const QString &val) {
+                if (val == QStringLiteral("auto")) {
+                    int def = m_settings.getInt(
+                        QStringLiteral("quality_auto"), 360);
+                    m_player.setMaxHeight(def);
+                } else {
+                    int h = val.toInt();
+                    if (h > 0)
+                        m_player.setMaxHeight(h);
+                    else
+                        m_player.setMaxHeight(360);
+                }
+                // El cambio de calidad aplicada al reproductor se refleja en
+                // el siguiente vídeo; el botón de calidad del overlay se
+                // actualizará al cargar el siguiente vídeo (WatchPage lee
+                // settings al abrir).
+            });
+    connect(m_settingsPage, &SettingsPage::nextModeChanged,
+            this, [this](const QString &val) {
+                if (m_yt) {
+                    if (val == QStringLiteral("none"))
+                        setNextMode(NextMode::None);
+                    else if (val == QStringLiteral("suggestions"))
+                        setNextMode(NextMode::Suggestions);
+                    else
+                        setNextMode(NextMode::Radio);
+                }
+            });
+    connect(m_settingsPage, &SettingsPage::audioLanguageChanged,
+            this, [this](const QString &val) {
+                if (m_yt)
+                    m_yt->setAudioLanguage(val);
+            });
+    connect(m_settingsPage, &SettingsPage::gridDensityChanged,
+            this, [this](const QString &val) {
+                const qreal density =
+                    (val == QStringLiteral("compact")) ? 0.88 : 1.0;
+                const auto lists = m_pages->findChildren<VideoListView *>();
+                for (VideoListView *l : lists)
+                    if (l)
+                        l->setDensity(density);
+            });
+    connect(m_settingsPage, &SettingsPage::clearThumbsRequested,
+            this, [this]() {
+                for (ThumbnailCache *t : {m_homeThumbs, m_globalThumbs,
+                                            m_libraryThumbs})
+                    if (t)
+                        t->clear();
+            });
+    // El popup custom de Ajustes ya pide confirmación; sin QMessageBox
+    // nativo (secuestraba el puntero con un segundo diálogo).
+    connect(m_settingsPage, &SettingsPage::resetRequested,
+            this, [this]() { resetAppData(); });
 
     m_pages->addWidget(m_home);
     m_pages->addWidget(m_search);
@@ -290,6 +374,18 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->setStyleSheet(
         QStringLiteral("background:#181818; color:#8F8F8F; "
                        "border-top:1px solid #262626; font-size:11px;"));
+
+    // Densidad de cuadrícula guardada (Cómoda/Compacta)
+    {
+        const QString savedD = m_settings.getString(
+            QStringLiteral("grid_density"), QStringLiteral("cozy"));
+        const qreal density =
+            (savedD == QStringLiteral("compact")) ? 0.88 : 1.0;
+        const auto lists = m_pages->findChildren<VideoListView *>();
+        for (VideoListView *l : lists)
+            if (l)
+                l->setDensity(density);
+    }
 
     goHome();
     m_home->reload();
@@ -732,6 +828,36 @@ void MainWindow::goSettings()
 {
     if (m_navButtons.value(3))
         m_navButtons[3]->setChecked(true);
+}
+
+void MainWindow::resetAppData()
+{
+    // 1. Quiescer reproductor (evita escritura de posición al cerrar)
+    m_player.stop();
+    // 2. Cerrar SQLite y permitir borrado en Windows
+    m_db.close();
+    // 3. Borrar datos propios de la aplicación (no archivos personales)
+    const QString dbPath = m_db.path();
+    if (!dbPath.isEmpty()) {
+        QFile::remove(dbPath);
+        QFile::remove(dbPath + QStringLiteral("-wal"));
+        QFile::remove(dbPath + QStringLiteral("-shm"));
+    }
+    // 4. Limpiar cachés de miniaturas (solo directorios propios)
+    for (ThumbnailCache *t : {m_homeThumbs, m_globalThumbs,
+                                m_libraryThumbs}) {
+        if (t)
+            t->clear();
+    }
+    // 5. Reiniciar la aplicación con defaults; la BD se recreará al abrir
+    QProcess::startDetached(
+        QCoreApplication::applicationFilePath(),
+        QCoreApplication::arguments(),
+        QDir::currentPath());
+    // El proceso actual sale; la nueva instancia arranca limpia.
+    QTimer::singleShot(200, this, [this]() {
+        qApp->quit();
+    });
 }
 
 void MainWindow::showPreviousTab()
