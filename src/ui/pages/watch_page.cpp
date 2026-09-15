@@ -34,6 +34,7 @@
 #include "../../yt.h"
 #include "../format.h"
 #include "../icons.h"
+#include "../flow_layout.h"
 #include "../theme.h"
 #include "../thumbnail_cache.h"
 #include "../video_list_view.h"
@@ -240,6 +241,22 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     , m_thumbs(thumbs)
     , m_playlists(playlists)
 {
+    // Modo Auto: leer preferencia de calidad guardada (default auto a 360p)
+    const QString savedQ = m_settings
+                               ? m_settings->getString(QStringLiteral("quality"),
+                                                       QStringLiteral("auto"))
+                               : QStringLiteral("auto");
+    if (savedQ == QStringLiteral("auto")) {
+        m_autoQuality = true;
+        m_autoHeight = m_settings
+                           ? m_settings->getInt(QStringLiteral("quality_auto"), 360)
+                           : 360;
+    } else {
+        m_autoQuality = false;
+        int h = savedQ.toInt();
+        m_autoHeight = (h > 0) ? h : 360;
+    }
+
     auto *splitOuter = new QVBoxLayout(this);
     splitOuter->setContentsMargins(0, 0, 0, 0);
     splitOuter->setSpacing(0);
@@ -420,6 +437,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     auto *topScroll = new QScrollArea(this);
     topScroll->setWidgetResizable(true);
     topScroll->setFrameShape(QFrame::NoFrame);
+    topScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_topScroll = topScroll;
     auto *topWidget = new QWidget;
     auto *top = new QVBoxLayout(topWidget);
@@ -480,8 +498,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     channelRow->addWidget(m_subscribeBtn, 0, Qt::AlignVCenter);
     infoLay->addLayout(channelRow);
 
-    auto *actionsRow = new QHBoxLayout;
-    actionsRow->setSpacing(8);
+    auto *actionsRow = new FlowLayout(0, 8, 8);
     auto makeAction = [this](nt::Icon icon, const QString &text,
                              QPushButton **out, nt::Icon *iconOut)
         -> QPushButton * {
@@ -495,25 +512,24 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         return b;
     };
     actionsRow->addWidget(makeAction(nt::Icon::Thumb, QStringLiteral("Me gusta"),
-                                     &m_likeBtn, &m_likeIcon));
+                                   &m_likeBtn, &m_likeIcon));
     actionsRow->addWidget(makeAction(nt::Icon::ThumbDown,
-                                     QStringLiteral("No me gusta"),
-                                     &m_dislikeBtn, &m_dislikeIcon));
-actionsRow->addWidget(makeAction(nt::Icon::Share,
-                                      QStringLiteral("Compartir"),
-                                      &m_shareBtn, &m_shareIcon));
+                                   QStringLiteral("No me gusta"),
+                                   &m_dislikeBtn, &m_dislikeIcon));
+    actionsRow->addWidget(makeAction(nt::Icon::Share,
+                                   QStringLiteral("Compartir"),
+                                   &m_shareBtn, &m_shareIcon));
     actionsRow->addWidget(makeAction(nt::Icon::Star,
-                                      QStringLiteral("Favorito"),
-                                      &m_starBtn, &m_starIcon));
+                                   QStringLiteral("Favorito"),
+                                   &m_starBtn, &m_starIcon));
     actionsRow->addWidget(makeAction(nt::Icon::WatchLater,
-                                      QStringLiteral("Ver más tarde"),
-                                      &m_watchLaterBtn, &m_watchLaterIcon));
+                                   QStringLiteral("Ver más tarde"),
+                                   &m_watchLaterBtn, &m_watchLaterIcon));
     actionsRow->addWidget(makeAction(nt::Icon::ListAdd,
-                                      QStringLiteral("Agregar a playlist"),
-                                      &m_playlistBtn, &m_playlistIcon));
+                                   QStringLiteral("Agregar a playlist"),
+                                   &m_playlistBtn, &m_playlistIcon));
     connect(m_playlistBtn, &QPushButton::clicked, this,
             &WatchPage::showPlaylistMenu);
-    actionsRow->addStretch(1);
     infoLay->addLayout(actionsRow);
 
     m_descLabel = new QLabel(this);
@@ -524,7 +540,24 @@ actionsRow->addWidget(makeAction(nt::Icon::Share,
     m_descLabel->setOpenExternalLinks(true);
     m_descLabel->setStyleSheet(
         QStringLiteral("color:#9aa2ad; font-size:12px; background:transparent;"));
-    infoLay->addWidget(m_descLabel);
+    m_descLabel->setMaximumHeight(60);
+    m_descToggle = new QPushButton(this);
+    m_descToggle->setObjectName(QStringLiteral("ghost"));
+    m_descToggle->setFixedWidth(100);
+    m_descToggle->setCursor(Qt::PointingHandCursor);
+    m_descToggle->hide();
+    auto *descRow = new QHBoxLayout;
+    descRow->setSpacing(8);
+    descRow->addWidget(m_descLabel, 1);
+    descRow->addWidget(m_descToggle, 0, Qt::AlignTop);
+    connect(m_descToggle, &QPushButton::clicked, this, [this]() {
+        m_descExpanded = !m_descExpanded;
+        m_descLabel->setMaximumHeight(m_descExpanded ? 16777215 : 60);
+        m_descToggle->setText(m_descExpanded
+                                  ? QStringLiteral("Ver menos")
+                                  : QStringLiteral("Ver más"));
+    });
+    infoLay->addLayout(descRow);
     top->addWidget(infoWidget);
     top->addStretch(1);
 
@@ -629,6 +662,8 @@ actionsRow->addWidget(makeAction(nt::Icon::Share,
     connect(m_yt, &Yt::detailFailed, this, &WatchPage::onDetailFailed);
     connect(m_yt, &Yt::relatedReady, this, &WatchPage::onRelatedReady);
     connect(m_yt, &Yt::radioReady, this, &WatchPage::onRadioReady);
+    connect(m_yt, &Yt::currentDetailReady, this,
+            &WatchPage::onCurrentDetailReady);
     connect(m_yt, &Yt::channelInfoReady, this,
             &WatchPage::onChannelInfo);
     connect(m_thumbs, &ThumbnailCache::ready, this,
@@ -642,6 +677,7 @@ actionsRow->addWidget(makeAction(nt::Icon::Share,
     m_meta->clear();
     m_channelBtn->setText(QStringLiteral("Canal"));
     m_descLabel->hide();
+    m_descToggle->hide();
     updateActionButtons();
 }
 
@@ -679,8 +715,16 @@ void WatchPage::onCurrentChanged()
     updateInfo();
     updateQueue();
     m_yt->getDetail(m_player->current().id);
+    // Detalle traducido (/next normal): solo cuando el idioma del ajuste es
+    // explícito (es/en/pt); en "original" el /next no aporta y se ahorra la
+    // petición.
+    if (!m_yt->audioLanguage().isEmpty())
+        m_yt->currentDetail(m_player->current().id);
     m_fetchingDetail = true;
     m_description.clear();
+    m_descExpanded = false;
+    m_descLabel->setMaximumHeight(60);
+    m_descToggle->hide();
     m_meta->setText(QStringLiteral("Cargando detalles…"));
 }
 
@@ -928,6 +972,7 @@ void WatchPage::onDetailFailed(const QString &videoId)
     m_fetchingDetail = false;
     m_description.clear();
     m_descLabel->hide();
+    m_descToggle->hide();
     updateInfo();
 }
 
@@ -952,9 +997,14 @@ void WatchPage::onDetailReady(const VideoInfo &video, const QString &desc,
             "<a href=\"\\1\" style=\"color:#FF0033;\">\\1</a>"));
         m_descLabel->setText(QStringLiteral(
             "<style>a { text-decoration:none; }</style>") + rich);
+        m_descLabel->setMaximumHeight(60);
+        m_descExpanded = false;
+        m_descToggle->setText(QStringLiteral("Ver más"));
         m_descLabel->show();
+        m_descToggle->show();
     } else {
         m_descLabel->hide();
+        m_descToggle->hide();
     }
     QStringList meta;
     if (video.viewCount > 0)
@@ -967,6 +1017,46 @@ void WatchPage::onDetailReady(const VideoInfo &video, const QString &desc,
     meta << QStringLiteral("%1 me gusta").arg(likes);
     m_meta->setText(meta.join(QStringLiteral("  •  ")));
     m_cache->upsert(video);
+}
+
+// Detalle traducido del vídeo actual (/next): título y descripción en el
+// idioma "hl" solicitado. Se aplica si coincide el vídeo y el idioma no es
+// "original" (cuando es original, el detail yt-dlp ya muestra lo que YouTube
+// entrega por defecto y no queremos sobrescribir).
+void WatchPage::onCurrentDetailReady(const QString &videoId,
+                                     const QString &title,
+                                     const QString &description)
+{
+    NT_DEBUG("E2E currentDetail app id=%s title=%d desc=%d\n",
+             videoId.toUtf8().constData(), title.size(), description.size());
+    if (!m_player->isActive() || videoId != m_player->current().id)
+        return;
+    const QString audioLang = m_yt->audioLanguage();
+    // Si el usuario pidió "original", no sobrescribir la descripción
+    // (youtube entrega en idioma del canal; el fix hl=es ya preserva
+    // hispanohablantes). Solo aplicar para idiomas explícitos.
+    if (audioLang.isEmpty())
+        return;
+    if (!title.isEmpty()) {
+        m_player->renameCurrent(videoId, title);
+        m_title->setText(title);
+    }
+    if (!description.isEmpty()) {
+        m_description = description;
+        QString rich = description.toHtmlEscaped();
+        rich.replace(QLatin1Char('\n'), QStringLiteral("<br>"));
+        const QRegularExpression urlRe(QStringLiteral(
+            R"((https?://[^\s<]+))"));
+        rich.replace(urlRe, QStringLiteral(
+            "<a href=\"\\1\" style=\"color:#FF0033;\">\\1</a>"));
+        m_descLabel->setText(QStringLiteral(
+            "<style>a { text-decoration:none; }</style>") + rich);
+        m_descLabel->setMaximumHeight(60);
+        m_descExpanded = false;
+        m_descToggle->setText(QStringLiteral("Ver más"));
+        m_descLabel->show();
+        m_descToggle->show();
+    }
 }
 
 void WatchPage::onPhaseChanged(const QString &phase)
@@ -988,8 +1078,16 @@ void WatchPage::onPhaseChanged(const QString &phase)
         showOverlayControls();
     else
         hideOverlayControls();
+    // Auto v1: recordar última resolución usada sin cambiar en caliente
+    if (m_autoQuality && phase == QLatin1String("ended")) {
+        // No se modifica setMaxHeight; solo se guarda el valor efectivo
+        // ya registrado por applyAutoFromVideoSize.
+    }
     NT_DEBUG("E2E overlay visible=%d idx=%d\n", m_overlay->isVisible(),
              m_overlay->currentIndex());
+    if (phase == QLatin1String("ended") && m_autoQuality) {
+        stepAutoUpIfPlaying();
+    }
     const QPoint qp = m_quality->mapToGlobal(QPoint(0, 0));
     NT_DEBUG("E2E combo geo global=(%d,%d) %dx%d\n", qp.x(), qp.y(),
              m_quality->width(), m_quality->height());
@@ -1023,6 +1121,25 @@ void WatchPage::onQualityChanged(int index)
         m_player->reloadCurrent();
 }
 
+bool WatchPage::applyAutoFromVideoSize(int height)
+{
+    if (height <= 0)
+        return false;
+    // Auto v1: recordar la última resolución realmente usada sin
+    // cambiar resolución en caliente (no tocar reproductor).
+    m_autoHeight = height;
+    if (m_settings)
+        m_settings->set(QStringLiteral("quality_auto"),
+                        QString::number(m_autoHeight));
+    return true;
+}
+
+void WatchPage::stepAutoUpIfPlaying()
+{
+    // Auto v1: sin subida activa durante reproducción; solo recordar.
+    Q_UNUSED(this);
+}
+
 int WatchPage::qualityIndexForHeight(int height) const
 {
     static const int qualities[] = {360, 480, 720, 1080, 1440, 2160};
@@ -1041,6 +1158,10 @@ void WatchPage::onVideoSizeChanged(int width, int height)
 {
     if (height <= 0 || !m_player->isActive())
         return;
+    if (m_autoQuality) {
+        applyAutoFromVideoSize(height);
+        return; // en auto no sincronizamos botón con índice fijo (sigue Auto)
+    }
     const int idx = qualityIndexForHeight(height);
     m_qualityIndex = idx;
     m_quality->setText(QStringLiteral("%1p").arg(idxToQuality(idx)));
