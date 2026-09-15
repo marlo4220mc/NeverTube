@@ -717,9 +717,17 @@ void WatchPage::onCurrentChanged()
     m_yt->getDetail(m_player->current().id);
     // Detalle traducido (/next normal): solo cuando el idioma del ajuste es
     // explícito (es/en/pt); en "original" el /next no aporta y se ahorra la
-    // petición.
-    if (!m_yt->audioLanguage().isEmpty())
-        m_yt->currentDetail(m_player->current().id);
+    // petición. Se difiere una iteración del event loop para que el POST
+    // /player (camino crítico de reproducción) pase por delante: Ipv4Https
+    // es FIFO de un solo socket, y si este /next entra antes, el vídeo
+    // espera a que termine la traducción antes de pedir el stream.
+    if (!m_yt->audioLanguage().isEmpty()) {
+        const QString id = m_player->current().id;
+        QTimer::singleShot(0, this, [this, id]() {
+            if (!m_yt->audioLanguage().isEmpty())
+                m_yt->currentDetail(id);
+        });
+    }
     m_fetchingDetail = true;
     m_description.clear();
     m_descExpanded = false;
