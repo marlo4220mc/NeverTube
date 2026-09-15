@@ -34,6 +34,9 @@ public:
     void refreshThumbnails();
     // Escala de tamaño de las celdas (1.0 = tamaño base).
     void setScale(qreal scale);
+    // Densidad de cuadrícula aplicada sobre la escala base (1.0 = densidad
+    // normal, <1 compacta, >1 cómoda). No pisa la escala base de la página.
+    void setDensity(qreal density);
     // Muestra un botón "X" a la derecha de cada fila (modo lista) que permite
     // eliminar el ítem. El click sobre la X emite removeRequested() en lugar
     // de videoActivated(). Por defecto está desactivado: no afecta a otras
@@ -79,6 +82,8 @@ private:
     Mode m_mode = ListMode;
     int m_currentRow = -1;
     qreal m_scale = 1.0;
+    qreal m_baseScale = 1.0;
+    qreal m_density = 1.0;
     bool m_rowRemove = false;
     bool m_rowMore = false;
     int m_gridMinCellW = 0;

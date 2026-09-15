@@ -58,6 +58,7 @@ private slots:
     void goSettings();
     void showPreviousTab();
     void openHistory();
+    void resetAppData();
     void onNavButton(int index);
     void onRadioReadyDiscover(const QString &videoId,
                               const QVector<VideoInfo> &videos);
