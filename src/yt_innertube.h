@@ -40,6 +40,13 @@ public:
     // el valor guardado en settings; si caducó, se ignora y se refresca solo.
     void seedVisitorData(const QString &visitorData, qint64 expiresAt);
 
+    // Idioma "hl" para las peticiones Innertube (traducción de títulos,
+    // descripciones y vistas). La app lo fija según audio_language: es/en/pt
+    // traducen a ese idioma; "original" deja el hl por defecto (es, como
+    // estaba antes: evita la auto-traducción automática al inglés).
+    void setHl(const QString &hl);
+    QString hl() const { return m_hl; }
+
 public slots:
     void fetchHls(const QString &videoId, int preferredClient = -1);
     void fetchMaster(const QString &videoId, const QString &masterUrl);
@@ -55,6 +62,11 @@ public slots:
     // el token de continuación. Cada vídeo responde por radioReady().
     void fetchRadio(const QString &videoId);
     void fetchRadioMore();
+
+    // Detalle traducido del vídeo actual solicitado explícitamente para el
+    // watch (cuando /next no se pide para sembrar la cola, p. ej. Radio):
+    // una variante de fetchNext que solo emite currentDetailReady.
+    void fetchCurrentDetail(const QString &videoId);
 
     // Home real (POST /browse, browseId FEwhat_to_watch) con el cliente VISIONOS.
     // Es el único endpoint probado que devuelve el feed (compactVideoRenderer/
@@ -100,6 +112,11 @@ signals:
     // Cola del mix/radio del vídeo pedido con /next (RDAMVM). Videos vacíos si
     // el cliente no devolvió cola (entonces la app decide mezclar o seguir).
     void radioReady(const QString &videoId, const QVector<VideoInfo> &videos);
+    // Detalle del vídeo actual devuelto por /next: título y descripción en el
+    // idioma "hl" solicitado (traducción de YouTube). Vacío de descripción =
+    // el cliente no incluyó el metadata renderer del vídeo en reproducción.
+    void currentDetailReady(const QString &videoId, const QString &title,
+                            const QString &description);
     // Feed del Home (browse FEwhat_to_watch). Vacío = el endpoint no devolvió
     // vídeos (500 con visitorData antiguo, cambio de layout, sin feed
     // disponible); la app usa entonces el fallback yt-dlp.
@@ -171,9 +188,30 @@ private:
     bool serveCachedMaster(const QString &videoId);
     qint64 expireFromUrl(const QString &url) const;
 
+    // Detalle traducido del vídeo actual: POST /next normal y emite
+    // currentDetailReady con el videoMetadataRenderer (título y descripción
+    // en el "hl" activo). Sin cascada de clientes (VISIONOS primario).
+    void requestCurrentDetail();
+    // Título y descripción del videoMetadataRenderer del /next, en el idioma
+    // "hl" solicitado. Salida vacía si el cliente no incluyó el renderer.
+    static void parseCurrentDetail(const QJsonObject &root, QString *title,
+                                   QString *description);
+
+    // Persistencia de la caché de resolución (hls+master) a disco, para
+    // reabrir vídeos ya resueltos sin repetir POST player + GET master
+    // mientras la firma de la URL siga vigente. Mismo patrón que el
+    // visitorData persistido (SettingsRepo), pero en JSON.
+    void saveHlsCacheToDisk() const;
+    void loadHlsCacheFromDisk();
+    static QString hlsCacheFilePath();
+
     Ipv4Https *m_http = nullptr;
     QString m_videoId;
     QString m_visitorData;
+    // Idioma "hl" de las peticiones (traducción de títulos/descripciones por
+    // la app según audio_language). "es" es el default histórico (fix de
+    // títulos originales frente a la auto-traducción al inglés).
+    QString m_hl = QStringLiteral("es");
     qint64 m_visitorExpiresAt = 0;
     bool m_retryingVisitor = false;
     int m_clientIndex = 0;
@@ -232,6 +270,14 @@ private:
     // Mezcla de recomendaciones del primer cliente sin panel RDAMVM (fallback).
     QVector<VideoInfo> m_radioFallback;
     int m_radioClientIndex = 0;
+
+    // Detalle traducido del vídeo actual (/next normal): título y descripción
+    // en el "hl" solicitado. Independiente de la cola: nunca emite
+    // relatedReady ni toca la siembra. m_currentDetailPending marca la espera
+    // del refresh de visitorData.
+    bool m_currentDetailPending = false;
+    bool m_currentDetailInFlight = false;
+    QString m_currentDetailVideoId;
 
     // Petición del Home real (/browse FEwhat_to_watch). Independiente del
     // flujo player; usa visitorData fresco. m_homeContinuation guarda el

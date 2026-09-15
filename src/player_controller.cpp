@@ -156,6 +156,10 @@ void PlayerController::onStreamResolved(const StreamInfo &stream)
     // Consumida: el mismo índice no vuelve a arrancar desde esa posición en
     // futuras visitas (p. ej. previous() tras terminar).
     m_indexStartMs.remove(m_index);
+    // La preferencia de idioma de audio se aplica justo antes de cargar la
+    // fuente: sin "alang" mpv elegiría la pista con DEFAULT=YES (el original)
+    // aunque el master venga reordenado con el doblaje primero.
+    m_player->setAudioLanguage(m_yt->audioLanguage());
     NT_DEBUG("E2E playIndex=%d from=%.1f resumeMs=0\n", m_index, from);
     m_player->playUrl(stream.url, from);
     m_seekBack = 0.0;
@@ -258,6 +262,24 @@ void PlayerController::applyCurrentDetail(const VideoInfo &detail)
     }
     if (changed)
         emit metadataChanged();
+}
+
+// Sobrescribe el título del ítem actual con la traducción del /next
+// (solo si el id coincide). Actualiza también las instantáneas si el ítem
+// está guardado en ellas, para que la UI de la cola/overlay muestre el título
+// traducido sin reconstruir la lista.
+void PlayerController::renameCurrent(const QString &videoId,
+                                     const QString &title)
+{
+    if (m_index < 0 || m_index >= m_queue.size())
+        return;
+    if (title.isEmpty())
+        return;
+    VideoInfo &cur = m_queue[m_index];
+    if (cur.id != videoId || cur.title == title)
+        return;
+    cur.title = title;
+    emit metadataChanged();
 }
 
 void PlayerController::next()
