@@ -2,6 +2,7 @@
 
 #include <QHash>
 #include <QJsonObject>
+#include <QSet>
 #include <QObject>
 #include <QVector>
 
@@ -118,9 +119,21 @@ private:
                            const QString &audioUrl);
     QString buildFilteredMaster(const QString &videoId,
                                 const QByteArray &masterBody, int maxHeight);
+    // Construye el master "edge" desde los adaptiveFormats del /player:
+    // elige un único vídeo (altura <= maxHeight, h264 preferido) y un único
+    // audio (idioma preferido), y escribe dos media playlists de segmento
+    // único (vídeo y audio) + el master que las referencia. Devuelve la ruta
+    // del master o vacío si no hay combo aprovechable (entonces el flujo
+    // clásico hlsManifestUrl → fetchMaster se usa como fallback).
+    QString buildEdgeMaster(const QString &videoId,
+                            const QJsonArray &adaptiveFormats, int maxHeight,
+                            const QString &audioLang, int durationSeconds);
 
     static QString qualityName(int height);
     static int closestHeight(int requested, const QVector<int> &heights);
+    // Altura del vídeo que elegiría buildEdgeMaster (mayor altura <= maxHeight
+    // con url directa, h264 preferido). -1 si no hay vídeo aprovechable.
+    static int edgeHeight(const QJsonArray &formats, int maxHeight);
     static QString formatSelector(int maxHeight);
     static QVector<VideoInfo> parseVideos(const QJsonObject &root);
     static VideoInfo videoFromJson(const QJsonObject &j);
@@ -141,6 +154,10 @@ private:
     // cliente Innertube (>= 0) o kResolveYtDlp. Se usa para dar prioridad
     // al cambiar de resolución (re-resolver el mismo vídeo).
     QHash<QString, int> m_winningClient;
+    // Registro de vídeoIds para los que el master edge ya emitió streamReady;
+    // el handler de hlsReady lo consulta para no duplicar la resolución
+    // (emit streamReady doble). Se limpia al inicio de cada resolveViaInnertube.
+    QSet<QString> m_edgeServed;
 };
 
 // Selftest de la cadena real del feed en Yt: relay Innertube → fallback
