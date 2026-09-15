@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QJsonArray>
 #include <QObject>
 #include <QString>
 #include <QVector>
@@ -105,6 +106,12 @@ signals:
     void hlsReady(const QString &videoId, const QString &hlsUrl,
                   const QVector<int> &videoHeights);
     void masterReady(const QString &videoId, const QByteArray &masterBody);
+    // adaptiveFormats completos (con url directa por formato) de la respuesta
+    // del /player. Lo consume Yt para construir el master "edge" de un solo
+    // vídeo + audio desde Innertube; si está vacío (o sus entradas no traen
+    // url), Yt cae al modo clásico hlsManifestUrl → fetchMaster.
+    void formatsReady(const QString &videoId, const QJsonArray &adaptiveFormats,
+                      int durationSeconds);
     void failed(const QString &videoId, const QString &reason);
     // Relacionados del vídeo pedido con /next. Lista vacía si no se pudo
     // extraer o la respuesta no los trae.
@@ -239,6 +246,10 @@ private:
         QVector<int> heights; // alturas adaptiveFormats (para filtrar master)
         qint64 expiresAt = 0; // momento Unix tras el cual la firma caduca
         int clientIndex = -1;
+        // adaptiveFormats del /player (con url directa) + duración del vídeo:
+        // permiten reconstruir el master edge sin repetir el POST player.
+        QJsonArray adaptiveFormats;
+        int durationSeconds = 0;
     };
     QHash<QString, HlsCacheEntry> m_hlsCache;
     // Single-flight por fase: si ya hay una petición HLS o master en curso
