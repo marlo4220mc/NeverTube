@@ -70,6 +70,8 @@ private slots:
     void onNextUpActivated(int index, const VideoInfo &video);
     void onRelatedReady(const QString &videoId, const QVector<VideoInfo> &videos);
     void onRadioReady(const QString &videoId, const QVector<VideoInfo> &videos);
+    void onCurrentDetailReady(const QString &videoId, const QString &title,
+                              const QString &description);
 
 public slots:
     void toggleFullscreen();
@@ -83,6 +85,8 @@ private:
     void updateActionButtons();
     void enterFullscreen();
     void leaveFullscreen();
+    bool applyAutoFromVideoSize(int height);
+    void stepAutoUpIfPlaying();
     int qualityIndexForHeight(int height) const;
     int idxToQuality(int idx) const;
     void setQualityIndex(int index);
@@ -141,7 +145,11 @@ private:
     QWidget *m_qualityMenuAnchor;
     int m_qualityIndex = 2;
     bool m_qualityMenuActive = false;
+    bool m_autoQuality = false;
+    int m_autoHeight = 360;
     QLabel *m_descLabel;
+    QPushButton *m_descToggle = nullptr;
+    bool m_descExpanded = false;
     VideoListView *m_nextUpList;
 
     // Controles flotantes sobre el video (overlay).
