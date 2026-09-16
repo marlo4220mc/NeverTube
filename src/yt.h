@@ -75,6 +75,17 @@ public:
     // respaldo. Ajustes aún no lo configura; queda preparado.
     void setAudioLanguage(const QString &lang);
     QString audioLanguage() const;
+    // Perfil de códec del master edge. Detectado en la primera reproducción
+    // (hwdec-current per-códec) y persistido en codec_profile:
+    //   Modern = AV1 + VP9 (hardware con decodificador AV1; AV1 se prefiere y
+    //            VP9 es el respaldo a igual altura).
+    //   Vp9    = solo VP9 (hardware sin AV1 pero con decodificador VP9).
+    //   Legacy = solo h264 (sin hardware moderno; si además el h264 decodifica
+    //            en software, MainWindow marca el modo "nohw": tope 1080p y
+    //            espera de buffer inicial por porcentaje para 1080p).
+    enum class CodecProfile { Modern, Vp9, Legacy };
+    void setCodecProfile(CodecProfile profile);
+    CodecProfile codecProfile() const { return m_codecProfile; }
 
 signals:
     void searchFinished(const QString &query, const QVector<VideoInfo> &videos);
@@ -119,22 +130,31 @@ private:
                            const QString &audioUrl);
     QString buildFilteredMaster(const QString &videoId,
                                 const QByteArray &masterBody, int maxHeight);
-    // Construye el master "edge" desde los adaptiveFormats del /player:
+    // Construye el modo "edge" desde los adaptiveFormats del /player:
     // elige un único vídeo (altura <= maxHeight, h264 preferido) y un único
-    // audio (idioma preferido), y escribe dos media playlists de segmento
-    // único (vídeo y audio) + el master que las referencia. Devuelve la ruta
-    // del master o vacío si no hay combo aprovechable (entonces el flujo
-    // clásico hlsManifestUrl → fetchMaster se usa como fallback).
+    // audio (idioma preferido), y devuelve la URL directa del vídeo (mp4/fMP4).
+    // Escribe audioUrlOut con la URL de la pista de audio directa (para
+    // PlayerWidget::setAudioFile). Devuelve URL vacía si no hay combo
+    // aprovechable (entonces el flujo clásico hlsManifestUrl → fetchMaster se
+    // usa como fallback). Reproducir por URL directa (no HLS de un segmento)
+    // da a mpv duración exacta y seek fiable — el HLS de segmento único perdía
+    // ambos (barra de progreso saltando). 3 perfiles: modern (AV1), vp9-mid
+    // (VP9 webm direct), legacy (h264). audioLang vacío == original.
     QString buildEdgeMaster(const QString &videoId,
                             const QJsonArray &adaptiveFormats, int maxHeight,
-                            const QString &audioLang, int durationSeconds);
+                            const QString &audioLang, int durationSeconds,
+                            QString *audioUrlOut);
+    // Bonus de puntaje por perfil de códec: qué códec se prefiere según el
+    // perfil de hardware detectado (Modern: AV1>VP9; Vp9: solo VP9; Legacy: h264).
+    int profileBonus(const QString &mime) const;
 
     static QString qualityName(int height);
     static int closestHeight(int requested, const QVector<int> &heights);
     // Altura del vídeo que elegiría buildEdgeMaster (mayor altura <= maxHeight
     // con url directa, h264 preferido). -1 si no hay vídeo aprovechable.
-    static int edgeHeight(const QJsonArray &formats, int maxHeight);
+    int edgeHeight(const QJsonArray &formats, int maxHeight);
     static QString formatSelector(int maxHeight);
+    QString audioSelector() const;
     static QVector<VideoInfo> parseVideos(const QJsonObject &root);
     static VideoInfo videoFromJson(const QJsonObject &j);
     static ChannelInfo channelFromJson(const QString &id, const QJsonObject &j);
@@ -150,6 +170,7 @@ private:
     SettingsRepo *m_visitorStore = nullptr;
     int m_resolveGen = 0;
     QString m_audioLang;
+    CodecProfile m_codecProfile = CodecProfile::Legacy;
     // Método de resolución que logró reproducir cada vídeo: índice del
     // cliente Innertube (>= 0) o kResolveYtDlp. Se usa para dar prioridad
     // al cambiar de resolución (re-resolver el mismo vídeo).

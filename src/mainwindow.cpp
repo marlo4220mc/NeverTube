@@ -41,6 +41,7 @@
 #include "ui/thumbnail_cache.h"
 #include "ui/video_list_view.h"
 #include "yt.h"
+#include "yt_innertube.h"
 
 namespace {
 
@@ -157,6 +158,124 @@ MainWindow::MainWindow(QWidget *parent)
 {
     m_db.open();
     m_yt->setVisitorStorage(&m_settings);
+    // Detección del perfil de códec del master edge basada en lo que mpv
+    // decodifica de verdad (hwdec-current) durante la reproducción real:
+    //   - Sin perfil previo: la primera sesión establece "modern" si hay
+    //     decodificación por hardware, "vp9" si el códec decodificado es
+    //     VP9 webm sin AV1, "legacy" si todo es software (h264).
+    //   - Auto-corrección (cadena reactiva por códec, se persiste cada paso):
+    //       modern + AV1 a software -> vp9  (GPU sin decodificador AV1)
+    //       vp9    + VP9 a software -> legacy (GPU sin VP9 tampoco)
+    //     El flujo normal de un PC con HW para todo queda en "modern".
+    const QString savedProfile = m_settings.getString(
+        QStringLiteral("codec_profile"), QString());
+    if (!savedProfile.isEmpty()) {
+        if (savedProfile == QLatin1String("modern")) {
+            m_yt->setCodecProfile(Yt::CodecProfile::Modern);
+            // AV1/VP9 van con margen bajo el throttle: espera corta (1 s) al
+            // arrancar 1080p+ para cubrir el cierre del fast-start.
+            m_playerWidget->setInitialBufferSecs(1.0);
+        } else if (savedProfile == QLatin1String("vp9")) {
+            m_yt->setCodecProfile(Yt::CodecProfile::Vp9);
+            m_playerWidget->setInitialBufferSecs(1.0);
+        } else if (savedProfile == QLatin1String("nohw")) {
+            // PC sin decodificación por hardware: espera más agresiva (8 s) y
+            // tope 1080p.
+            m_yt->setCodecProfile(Yt::CodecProfile::Legacy);
+            m_noHw = true;
+            m_playerWidget->setInitialBufferSecs(8.0);
+        } else {
+            // Legacy/h264 sin confirmar nohw: h264 va al límite del throttle,
+            // espera más agresiva (3 s).
+            m_yt->setCodecProfile(Yt::CodecProfile::Legacy);
+            m_playerWidget->setInitialBufferSecs(3.0);
+        }
+    } else {
+        // Sin perfil guardado (primera sesión): espera corta por defecto; la
+        // cadena reactiva la ajustará según lo que decodifique la GPU.
+        m_playerWidget->setInitialBufferSecs(1.0);
+    }
+    connect(m_playerWidget, &PlayerWidget::streamDecodeInfoReady, this,
+            [this](const QString &codec, const QString &hwdecBackend) {
+                // hwdec-current llega "vacío" en el primer video-params (mpv
+                // aún no decidió/activó el decodificador) y "no" cuando el
+                // decoder se sabe en software. Solo "no" es software real:
+                // vacío = todavía indeterminado, no cuenta como fallo.
+                const bool hwConfirmed =
+                    hwdecBackend == QLatin1String("no");
+                const bool hwOk =
+                    !hwdecBackend.isEmpty() && hwdecBackend != QLatin1String("no");
+                const QString profile = m_settings.getString(
+                    QStringLiteral("codec_profile"), QString());
+                const bool av1 = codec.contains(QLatin1String("AV1"),
+                                                Qt::CaseInsensitive);
+                const bool vp9 = codec.contains(QLatin1String("VP9"),
+                                               Qt::CaseInsensitive);
+                const auto setProfile = [this, &codec, &hwdecBackend](
+                                            const QString &name,
+                                            Yt::CodecProfile prof,
+                                            double waitSecs) {
+                    m_settings.set(QStringLiteral("codec_profile"), name);
+                    m_yt->setCodecProfile(prof);
+                    m_playerWidget->setInitialBufferSecs(waitSecs);
+                    NT_DEBUG("E2E codec_profile=%s wait=%gs (cod=%s hw=%s)\n",
+                             name.toUtf8().constData(), waitSecs,
+                             codec.toUtf8().constData(),
+                             hwdecBackend.toUtf8().constData());
+                };
+                if (profile.isEmpty()) {
+                    // Primera sesión: fijar el perfil según lo primero que
+                    // decodifique de verdad. Backend vacío = indeterminado:
+                    // esperar al siguiente reporte en vez de fijar un perfil
+                    // equivocado (modern sin AV1 rome la cadena).
+                    if (hwdecBackend.isEmpty())
+                        return;
+                    if (hwOk && av1)
+                        setProfile(QStringLiteral("modern"),
+                                   Yt::CodecProfile::Modern, 1.0);
+                    else if (hwOk && vp9)
+                        setProfile(QStringLiteral("vp9"),
+                                   Yt::CodecProfile::Vp9, 1.0);
+                    else if (hwOk)
+                        // HW que por ahora solo decodificó h264: asumir
+                        // modern (la cadena de degradación lo corrige si no).
+                        setProfile(QStringLiteral("modern"),
+                                   Yt::CodecProfile::Modern, 1.0);
+                    else
+                        setProfile(QStringLiteral("legacy"),
+                                   Yt::CodecProfile::Legacy, 3.0);
+                } else if (profile == QLatin1String("modern")
+                           && hwConfirmed && av1) {
+                    // GPU sin decodificador AV1: AV1 cae a software en esta
+                    // sesión. Degradar a vp9 (hardware con VP9 sí o sí en la
+                    // mayoría de GPUs sin AV1).
+                    setProfile(QStringLiteral("vp9"),
+                               Yt::CodecProfile::Vp9, 1.0);
+                } else if (profile == QLatin1String("vp9")
+                           && hwConfirmed && vp9) {
+                    // GPU sin decodificador VP9: degradar a legacy (h264).
+                    setProfile(QStringLiteral("legacy"),
+                               Yt::CodecProfile::Legacy, 3.0);
+                }
+                // Modo sin HW en absoluto: el perfil quedó en legacy y lo que
+                // se decodifica (h264 u otro) también es software. En ese PC
+                // solo 1080p máximo y es espera agresiva de buffer al arrancar.
+                // No disparar en cada stream repetido: solo la primera vez.
+                if (profile != QLatin1String("nohw") && hwConfirmed
+                    && profile == QLatin1String("legacy")) {
+                    m_settings.set(QStringLiteral("codec_profile"),
+                                   QStringLiteral("nohw"));
+                    m_noHw = true;
+                    // El h264 a 1080p va pegado al throttle: espera agresiva
+                    // (8 s de contenido) antes de arrancar. 720p no espera.
+                    m_playerWidget->setInitialBufferSecs(8.0);
+                    if (m_player.maxHeight() > 1080)
+                        m_player.setMaxHeight(1080);
+                    NT_DEBUG("E2E nohw=1 profile=nohw (cod=%s hw=%s)\n",
+                             codec.toUtf8().constData(),
+                             hwdecBackend.toUtf8().constData());
+                }
+            });
     m_elapsed.start();
     m_player.setPlayer(m_playerWidget);
     // Filtro a nivel de aplicación: recibe todos los KeyPress aunque el foco
@@ -175,6 +294,9 @@ MainWindow::MainWindow(QWidget *parent)
         else
             m_player.setMaxHeight(720);
     }
+    // Sin HW: nunca pedir más de 1080p (a un CPU puro un 1440p+ le revienta).
+    if (m_noHw && m_player.maxHeight() > 1080)
+        m_player.setMaxHeight(1080);
     m_player.setMaxHeight(m_player.maxHeight());
 
     // Preferencia de idioma de audio
@@ -233,9 +355,11 @@ MainWindow::MainWindow(QWidget *parent)
                     m_player.setMaxHeight(def);
                 } else {
                     int h = val.toInt();
-                    if (h > 0)
+                    if (h > 0) {
+                        if (m_noHw && h > 1080)
+                            h = 1080;
                         m_player.setMaxHeight(h);
-                    else
+                    } else
                         m_player.setMaxHeight(360);
                 }
                 // El cambio de calidad aplicada al reproductor se refleja en
@@ -843,6 +967,9 @@ void MainWindow::resetAppData()
         QFile::remove(dbPath + QStringLiteral("-wal"));
         QFile::remove(dbPath + QStringLiteral("-shm"));
     }
+    // 3b. Borrar el caché de resoluciones HLS en disco (evita reusar URLs
+    // caducadas/estranguladas; la BD ya no guarda nada de esto).
+    QFile::remove(Innertube::hlsCacheFilePath());
     // 4. Limpiar cachés de miniaturas (solo directorios propios)
     for (ThumbnailCache *t : {m_homeThumbs, m_globalThumbs,
                                 m_libraryThumbs}) {

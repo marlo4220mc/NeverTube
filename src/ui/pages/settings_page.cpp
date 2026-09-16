@@ -18,8 +18,12 @@ static const char *kNextModeKey = "next_mode";
 static const char *kAudioLangKey = "audio_language";
 static const char *kGridDensityKey = "grid_density";
 
-static QStringList qualityOptions()
+static QStringList qualityOptions(bool noHw = false)
 {
+    if (noHw)
+        return {QStringLiteral("Auto"), QStringLiteral("360p"),
+                QStringLiteral("480p"), QStringLiteral("720p"),
+                QStringLiteral("1080p")};
     return {QStringLiteral("Auto"), QStringLiteral("360p"),
             QStringLiteral("480p"), QStringLiteral("720p"),
             QStringLiteral("1080p"), QStringLiteral("1440p"),
@@ -218,7 +222,10 @@ void SettingsPage::buildUI()
     // Auto usa el último valor efectivo guardado (por defecto 360p) y la
     // propia reproducción lo re-memoriza sin cambiar en caliente.
     addOptionRow(
-        QStringLiteral("Calidad de reproducción"), qualityOptions(),
+        QStringLiteral("Calidad de reproducción"),
+        qualityOptions(m_settings->getString(
+                           QStringLiteral("codec_profile"),
+                           QStringLiteral("")) == QLatin1String("nohw")),
         m_settings->getString(QStringLiteral("quality"),
                               QStringLiteral("auto")),
         QStringLiteral("auto"), qualityFromValue,

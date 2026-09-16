@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include <QByteArray>
+#include <QDateTime>
 
 namespace nt {
 
@@ -20,12 +21,22 @@ inline bool debugEnabled()
     return enabled;
 }
 
+// Timestamp monotónico en ms desde el primer NT_DEBUG de la sesión. Se imprime
+// delante de cada línea (p. ej. "+1234 ms") para medir tiempos de arranque,
+// buffering y micro-pausas sin depender de relojes externos.
+inline long long debugMs()
+{
+    static const qint64 start = QDateTime::currentMSecsSinceEpoch();
+    return QDateTime::currentMSecsSinceEpoch() - start;
+}
+
 } // namespace nt
 
 #define NT_DEBUG(...)                                            \
     do {                                                         \
         if (::nt::debugEnabled())                                \
-            std::fprintf(stderr, __VA_ARGS__);                   \
+            std::fprintf(stderr, "+%lld ms ", ::nt::debugMs()),  \
+                std::fprintf(stderr, __VA_ARGS__);               \
     } while (0)
 
 #endif

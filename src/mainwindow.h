@@ -125,5 +125,9 @@ private:
 
     int m_lastTab = 0;
     int m_currentTab = 0;
+    // Sin decodificación por hardware en absoluto (perfil legacy + h264
+    // también en software). Dispara el tope 1080p en settings/reproductor y
+    // la espera inicial de buffer por % para 1080p.
+    bool m_noHw = false;
     QElapsedTimer m_elapsed;
 };

@@ -160,7 +160,12 @@ void PlayerController::onStreamResolved(const StreamInfo &stream)
     // fuente: sin "alang" mpv elegiría la pista con DEFAULT=YES (el original)
     // aunque el master venga reordenado con el doblaje primero.
     m_player->setAudioLanguage(m_yt->audioLanguage());
-    NT_DEBUG("E2E playIndex=%d from=%.1f resumeMs=0\n", m_index, from);
+    // Reproducción directa (edge): la pista de audio es un flujo aparte que
+    // mpv fusiona con --audio-file (duración exacta + seek fiable, sin el HLS
+    // de segmento único). Vacío limpia la opción para el flujo clásico/yt-dlp.
+    m_player->setAudioFile(stream.audioUrl);
+    NT_DEBUG("E2E playIndex=%d from=%.1f resumeMs=0 audioUrl=%d\n", m_index,
+             from, int(!stream.audioUrl.isEmpty()));
     m_player->playUrl(stream.url, from);
     m_seekBack = 0.0;
 }
