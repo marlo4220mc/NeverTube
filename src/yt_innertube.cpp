@@ -17,6 +17,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QList>
+#include <QtMath>
 
 #include <cstdio>
 #include <algorithm>
@@ -1258,6 +1259,19 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
         // primera mezcla vista y se sigue cascadeando por si otro cliente
         // trae el panel real; si ninguno lo trae, se emite la mezcla.
         const QVector<VideoInfo> fb = parseRelated(doc.object());
+        // Cliente principal (VISIONOS): si ya responde mezcla de
+        // recomendaciones, es la misma que emitiría el final de la cascada,
+        // así que se entrega de inmediato. Ahorra hasta 4 peticiones secuenciales
+        // (~12-15 s) por cada vídeo normal con "A continuación". La cascada
+        // solo continúa si VISIONOS va vacío (música: el panel real solo lo
+        // traen IOS/otros clientes).
+        if (m_radioClientIndex == 0 && !fb.isEmpty()) {
+            NT_DEBUG("E2E innertube radio final recomendaciones id=%s n=%d\n",
+                     videoId.toUtf8().constData(), fb.size());
+            emit radioReady(videoId, fb);
+            m_radioFallback.clear();
+            return;
+        }
         if (!fb.isEmpty() && m_radioFallback.isEmpty()) {
             m_radioFallback = fb;
             NT_DEBUG("E2E innertube radio guarda mezcla id=%s n=%d\n",
@@ -2409,10 +2423,34 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
     const QVector<int> heights = videoHeights(streamingData);
     const QJsonArray adaptiveFormats =
         streamingData.value(QStringLiteral("adaptiveFormats")).toArray();
-    const int durationSeconds = root.value(QStringLiteral("videoDetails"))
-                                    .toObject()
-                                    .value(QStringLiteral("lengthSeconds"))
-                                    .toInt();
+    int durationSeconds = root.value(QStringLiteral("videoDetails"))
+                              .toObject()
+                              .value(QStringLiteral("lengthSeconds"))
+                              .toInt();
+    // Algunos contextos (p.ej. VISIONOS) no incluyen lengthSeconds; la URL
+    // firmada de cada formato trae "dur=<segundos>" con la duración real.
+    // Usarla evita que el master edge declare EXTINF falsos (~1h) que rompen
+    // la barra de progreso y el tiempo final del reproductor.
+    if (durationSeconds <= 0) {
+        const QString u =
+            !adaptiveFormats.isEmpty()
+                    ? adaptiveFormats.first()
+                          .toObject()
+                          .value(QStringLiteral("url"))
+                          .toString()
+                    : QString();
+        if (!u.isEmpty()) {
+            const int pos = u.indexOf(QLatin1String("dur="));
+            if (pos >= 0) {
+                const QString tail = u.mid(pos + 4);
+                bool ok = false;
+                const double d = tail.left(tail.indexOf(QLatin1Char('&')))
+                                     .toDouble(&ok);
+                if (ok && d > 0)
+                    durationSeconds = int(qFloor(d));
+            }
+        }
+    }
     m_lastWinClient = m_clientIndex;
     const qint64 elapsed =
         QDateTime::currentMSecsSinceEpoch() - m_hlsStartMs;

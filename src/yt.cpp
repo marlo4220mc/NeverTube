@@ -1,6 +1,7 @@
 #include "yt.h"
 
 #include <QDateTime>
+#include <QtMath>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -95,8 +96,7 @@ QStringList selectAudioTracks(const QStringList &audioLines,
                 dubbed.append(t);
                 if (preflight.isEmpty() && !prefLang.isEmpty()) {
                     const QString lang = mediaAttr(t, QLatin1String("LANGUAGE"));
-                    if (lang == prefLang
-                        || lang.startsWith(prefLang + QLatin1Char('-')))
+                    if (lang.startsWith(prefLang, Qt::CaseInsensitive))
                         preflight = t;
                 }
             }
@@ -265,6 +265,11 @@ void Yt::setAudioLanguage(const QString &lang)
 QString Yt::audioLanguage() const
 {
     return m_audioLang;
+}
+
+void Yt::setCodecProfile(CodecProfile profile)
+{
+    m_codecProfile = profile;
 }
 
 void Yt::search(const QString &query, int limit, int offset)
@@ -533,18 +538,19 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                 const QString &vid, const QJsonArray &formats, int dur) {
                 if (vid != videoId || gen != m_resolveGen)
                     return;
-                const QString abs = buildEdgeMaster(videoId, formats,
-                                                    maxHeight, m_audioLang, dur);
-                if (abs.isEmpty())
+                QString audioUrl;
+                const QString videoUrl =
+                    buildEdgeMaster(videoId, formats, maxHeight, m_audioLang,
+                                    dur, &audioUrl);
+                if (videoUrl.isEmpty())
                     return; // el flujo clásico (hlsReady → fetchMaster) cubre
                 m_edgeServed.insert(videoId);
                 disconnect(guardFail);
                 guard->deleteLater();
-                const QString origin = m_hls.start();
-                StreamInfo s;
                 const int height = edgeHeight(formats, maxHeight);
-                s.url = origin + QLatin1Char('/') + videoId
-                        + QLatin1String(".m3u8");
+                StreamInfo s;
+                s.url = videoUrl;
+                s.audioUrl = audioUrl;
                 s.label = QString::number(height) + QLatin1Char('p');
                 s.height = height;
                 s.multipleUrls = false;
@@ -686,7 +692,7 @@ void Yt::resolveWithYtDlp(const QString &videoId, int maxHeight,
                                 return;
                             }
                             getUrls(videoId,
-                                    QStringLiteral("bestaudio[protocol=m3u8_native]/bestaudio"),
+                                    audioSelector(),
                                     [this, videoId, maxHeight, videoUrl, onFail](
                                         const QStringList &audioUrls) {
                                         if (audioUrls.isEmpty()) {
@@ -758,8 +764,40 @@ int Yt::closestHeight(int requested, const QVector<int> &heights)
     return upper == std::numeric_limits<int>::max() ? requested : upper;
 }
 
+// Bonus de código para el perfil edge: qué códec se prefiere según el perfil
+// de hardware detectado. Reno: AV1/VP9/h264.
+//   Modern (HW con AV1): AV1 +50, VP9 +40, h264 0.
+//   Vp9 (HW sin AV1):    VP9 +50, h264 0, AV1 nunca (penaliza -50).
+//   Legacy (sin HW moderno): h264 +50, VP9/AV1 0.
+int Yt::profileBonus(const QString &mime) const
+{
+    const bool isH264 = mime.contains(QLatin1String("avc1"))
+                        || mime.contains(QLatin1String("avc3"));
+    const bool isAV1 = mime.contains(QLatin1String("av01"));
+    // Formato del codec en adaptiveFormats: webm VP9 puede venir como
+    // codecs="vp9" o codecs="vp09.00.10.08". Contener "vp09" cubre el
+    // último; "vp9" con comilla/espacio/';' cubre el abreviado sin
+    // colisionar con vp09 (vp9 no es prefijo de vp09).
+    const bool isVP9 = mime.contains(QLatin1String("vp09"))
+                       || mime.contains(QLatin1String("\"vp9\""));
+    switch (m_codecProfile) {
+    case CodecProfile::Modern:
+        if (isAV1) return 50; // AV1: mejor ratio calidad/bitrate
+        if (isVP9) return 40; // VP9 como respaldo
+        return 0;
+    case CodecProfile::Vp9:
+        if (isVP9) return 50; // solo VP9
+        if (isAV1) return -50; // AV1 sin hwdec = software caro, evitarlo
+        return 0;
+    case CodecProfile::Legacy:
+    default:
+        return isH264 ? 50 : 0;
+    }
+}
+
 // La mayor altura <= maxHeight de los adaptiveFormats con url directa,
-// prefiriendo h264 (misma regla que buildEdgeMaster). -1 si no hay vídeo.
+// según el perfil de códec preferido (misma regla que buildEdgeMaster).
+// -1 si no hay vídeo.
 int Yt::edgeHeight(const QJsonArray &formats, int maxHeight)
 {
     int best = -1;
@@ -770,14 +808,13 @@ int Yt::edgeHeight(const QJsonArray &formats, int maxHeight)
             continue;
         const QString mime = f.value(QStringLiteral("mimeType")).toString();
         const int h = f.value(QStringLiteral("height")).toInt();
-        if (!mime.startsWith(QLatin1String("video/mp4")) || h <= 0)
+        if (!mime.startsWith(QLatin1String("video/")) || h <= 0)
             continue;
         if (h > maxHeight)
             continue;
         int score = h * 100;
-        if (mime.contains(QLatin1String("avc1"))
-            || mime.contains(QLatin1String("avc3")))
-            score += 50;
+        if (profileBonus(mime) > 0)
+            score += profileBonus(mime);
         if (score > bestScore) {
             bestScore = score;
             best = h;
@@ -785,20 +822,24 @@ int Yt::edgeHeight(const QJsonArray &formats, int maxHeight)
     }
     return best;
 }
-
-// Construye el master "edge" desde los adaptiveFormats del /player.
 // Elige un único vídeo (la mayor altura <= maxHeight, prefiriendo h264 por
 // decodificación ligera en equipos modestos) y un único audio (el que mejor
-// coincide con audioLang; si audioLang está vacío, la pista original). Escribe
-// dos media playlists de segmento único (vídeo y audio) más el master que las
-// referencia, en el directorio del HlsServer. Devuelve la ruta del master, o
-// vacío si no hay combinación aprovechable (sin url en los formats, o sin
-// audio/vídeo). Con esto mpv abre SOLO 2 sub-playlists en vez de las 22 del
-// master de YouTube → primer frame ~2-3s en lugar de ~20s.
+// coincide con audioLang; audioLang vacío == original). Devuelve la URL
+// directa del vídeo y escribe audioUrlOut con la del audio (mpv los fusiona
+// vía --audio-file). mp4/fMP4 y webm/VP9 funcionan por URL directa (webm no
+// soporta HLS de segmento único). Reproducir por URL directa da a mpv
+// duración exacta y seek fiable: el HLS de segmento único perdía ambos y
+// hacía saltar la barra de progreso. Devuelve vacío si no hay combinación
+// aprovechable (sin url en los formats, o sin audio/vídeo).
 QString Yt::buildEdgeMaster(const QString &videoId,
                             const QJsonArray &adaptiveFormats, int maxHeight,
-                            const QString &audioLang, int durationSeconds)
+                            const QString &audioLang, int durationSeconds,
+                            QString *audioUrlOut)
 {
+    Q_UNUSED(videoId);
+    Q_UNUSED(durationSeconds);
+    if (audioUrlOut)
+        audioUrlOut->clear();
     if (adaptiveFormats.isEmpty())
         return QString();
 
@@ -806,6 +847,8 @@ QString Yt::buildEdgeMaster(const QString &videoId,
     int bestVideoH = 0;
     int bestScore = -1;
     int bestAudioScore = -1;
+    const bool wantOriginal = audioLang.isEmpty()
+                              || audioLang == QLatin1String("original");
 
     for (const QJsonValue &val : adaptiveFormats) {
         const QJsonObject f = val.toObject();
@@ -813,38 +856,80 @@ QString Yt::buildEdgeMaster(const QString &videoId,
             continue; // entradas firmadas (signatureCipher) sin descifrar
         const QString mime = f.value(QStringLiteral("mimeType")).toString();
         const int h = f.value(QStringLiteral("height")).toInt();
-        // Solo mp4/fMP4: WebM/VP9 no soporta single-segment en HLS y
-        // AV1 puede fallar en equipos viejos sin aceleración dedicada.
-        if (mime.startsWith(QLatin1String("video/mp4")) && h > 0) {
+        if (mime.startsWith(QLatin1String("video/")) && h > 0) {
             if (h > maxHeight)
                 continue;
             int score = h * 100;
-            if (mime.contains(QLatin1String("avc1"))
-                || mime.contains(QLatin1String("avc3")))
-                score += 50; // h264: decodificación por hardware en cualquier GPU
+            const bool isH264 = mime.contains(QLatin1String("avc1"))
+                                || mime.contains(QLatin1String("avc3"));
+            const bool isAV1 = mime.contains(QLatin1String("av01"));
+            const bool isVP9 = mime.contains(QLatin1String("vp09"))
+                               || mime.contains(QLatin1String("\"vp9\""));
+            switch (m_codecProfile) {
+            case CodecProfile::Modern:
+                if (isAV1) score += 50; // AV1: mejor calidad a igual altura
+                else if (isVP9) score += 40; // VP9 de respaldo
+                break;
+            case CodecProfile::Vp9:
+                if (isVP9) score += 50; // solo VP9
+                else if (isAV1) score -= 50; // AV1 sin hwdec = software caro
+                break;
+            case CodecProfile::Legacy:
+            default:
+                if (isH264) score += 50; // h264: HW en cualquier GPU
+                break;
+            }
             if (score > bestScore) {
                 bestScore = score;
                 bestVideo = f;
                 bestVideoH = h;
             }
-        } else if (mime.startsWith(QLatin1String("audio/mp4"))) {
+        } else if (mime.startsWith(QLatin1String("audio/"))) {
             const QJsonObject track =
                 f.value(QStringLiteral("audioTrack")).toObject();
             const QString lang =
                 track.value(QStringLiteral("languageCode")).toString();
+            const QString trackId =
+                track.value(QStringLiteral("id")).toString();
+            const QString displayName =
+                track.value(QStringLiteral("displayName")).toString();
             const bool isDefault =
                 track.value(QStringLiteral("audioIsDefault")).toBool();
+            // El prefijo del id es el idioma ("en.4" → "en", "zh-Hant.3").
+            QString idLang = trackId;
+            const int dot = idLang.indexOf(QLatin1Char('.'));
+            if (dot > 0)
+                idLang.truncate(dot);
             bool match = false;
-            if (audioLang.isEmpty() || audioLang == QLatin1String("original")) {
-                match = isDefault;
-                if (!match && lang.isEmpty())
+            if (wantOriginal) {
+                // "original": el displayName lo marca ("Inglés original"),
+                // y acont=original distingue la pista base del doblaje.
+                if (displayName.contains(QLatin1String("original"),
+                                         Qt::CaseInsensitive))
                     match = true;
+                else if (isDefault && lang.isEmpty()
+                         && !displayName.isEmpty())
+                    match = true; // única pista real de audio del vídeo
+                else if (lang.isEmpty() && trackId.isEmpty()
+                         && displayName.isEmpty()) {
+                    // Sin audioTrack (player sin multiaudio): asumir original
+                    // solo si es la única pista de audio del grupo.
+                    match = true;
+                }
             } else {
-                match = lang.startsWith(audioLang, Qt::CaseInsensitive);
+                const QString pref = audioLang.trimmed().toLower();
+                match = (!lang.isEmpty()
+                         && lang.startsWith(pref, Qt::CaseInsensitive))
+                        || (!idLang.isEmpty()
+                            && idLang.startsWith(pref, Qt::CaseInsensitive));
             }
             if (!match)
                 continue;
             int score = 100;
+            if (wantOriginal && displayName.contains(
+                                    QLatin1String("original"),
+                                    Qt::CaseInsensitive))
+                score += 10; // el original explícito manda sobre el default
             const int abr = f.value(QStringLiteral("bitrate")).toInt();
             if (abr > 0)
                 score += qMin(abr / 1000, 200);
@@ -855,96 +940,59 @@ QString Yt::buildEdgeMaster(const QString &videoId,
         }
     }
 
+    // Fallback por si el combo principal no dio audio: el idioma pedido no
+    // existe en este vídeo (audioLang con audioTrack distinto) o el original
+    // no está marcado. Contrato del settings: "si no existe el idioma, se usa
+    // el audio original" — NUNCA un doblaje cualquiera. Orden: pista marcada
+    // "original" > pista isDefault > pista sin audioTrack (vídeo mono-pista)
+    // > primera pista de audio (último recurso, p. ej. doblaje regional sin
+    // marcador). Sin este paso el vídeo quedaría mudo.
+    if (bestAudio.isEmpty()) {
+        for (int pass = 0; pass < 4 && bestAudio.isEmpty(); ++pass) {
+            for (const QJsonValue &val : adaptiveFormats) {
+                const QJsonObject f = val.toObject();
+                if (f.value(QStringLiteral("url")).toString().isEmpty())
+                    continue;
+                if (!f.value(QStringLiteral("mimeType"))
+                          .toString()
+                          .startsWith(QLatin1String("audio/")))
+                    continue;
+                const QJsonObject track =
+                    f.value(QStringLiteral("audioTrack")).toObject();
+                const QString displayName =
+                    track.value(QStringLiteral("displayName")).toString();
+                const bool isDefault =
+                    track.value(QStringLiteral("audioIsDefault")).toBool();
+                const bool noTrack = displayName.isEmpty()
+                                     && track.value(QStringLiteral("languageCode"))
+                                                  .toString()
+                                                  .isEmpty()
+                                     && track.value(QStringLiteral("id"))
+                                                  .toString()
+                                                  .isEmpty();
+                const bool take = pass == 0
+                        ? displayName.contains(QLatin1String("original"),
+                                               Qt::CaseInsensitive)
+                        : pass == 1 ? isDefault : pass == 2 ? noTrack : true;
+                if (take) {
+                    bestAudio = f;
+                    break;
+                }
+            }
+        }
+    }
+
     if (bestVideo.isEmpty() || bestAudio.isEmpty())
         return QString();
 
     const QString videoUrl = bestVideo.value(QStringLiteral("url")).toString();
-    const QString audioUrl = bestAudio.value(QStringLiteral("url")).toString();
+    QString audioUrl = bestAudio.value(QStringLiteral("url")).toString();
     if (videoUrl.isEmpty() || audioUrl.isEmpty())
         return QString();
 
-    const int dur = durationSeconds > 0 ? durationSeconds : 3600;
-    const QString target = QString::number(dur + 3);
-    const QString bw =
-        QString::number(bestVideo.value(QStringLiteral("bitrate")).toInt(2500000));
-    const QString codecs = [](const QJsonObject &f) {
-        // "video/mp4; codecs=\"avc1.640028\"" → avc1.640028
-        const QString mime = f.value(QStringLiteral("mimeType")).toString();
-        const int q = mime.indexOf(QLatin1Char('"'));
-        const int q2 = mime.indexOf(QLatin1Char('"'), q + 1);
-        return (q >= 0 && q2 > q) ? mime.mid(q + 1, q2 - q - 1) : QString();
-    }(bestVideo);
-    const int vw = bestVideo.value(QStringLiteral("width")).toInt(1280);
-    const QString resolution =
-        QStringLiteral("%1x%2").arg(vw).arg(bestVideoH);
-    const QString audioLangTag =
-        audioLang.isEmpty() || audioLang == QLatin1String("original")
-            ? QString()
-            : audioLang.toUpper();
-
-    const QString dir = HlsServer::masterDirPath();
-
-    // Media playlist del vídeo: un único segmento (el fMP4 completo).
-    QString vPlaylist;
-    vPlaylist += QStringLiteral("#EXTM3U\n");
-    vPlaylist += QStringLiteral("#EXT-X-VERSION:4\n");
-    vPlaylist += QStringLiteral("#EXT-X-PLAYLIST-TYPE:VOD\n");
-    vPlaylist += QStringLiteral("#EXT-X-TARGETDURATION:%1\n").arg(target);
-    vPlaylist += QStringLiteral("#EXT-X-MEDIA-SEQUENCE:0\n");
-    vPlaylist += QStringLiteral("#EXTINF:%1.0,\n").arg(dur);
-    vPlaylist += videoUrl + QLatin1Char('\n');
-
-    // Media playlist del audio: idem.
-    QString aPlaylist;
-    aPlaylist += QStringLiteral("#EXTM3U\n");
-    aPlaylist += QStringLiteral("#EXT-X-VERSION:4\n");
-    aPlaylist += QStringLiteral("#EXT-X-PLAYLIST-TYPE:VOD\n");
-    aPlaylist += QStringLiteral("#EXT-X-TARGETDURATION:%1\n").arg(target);
-    aPlaylist += QStringLiteral("#EXT-X-MEDIA-SEQUENCE:0\n");
-    aPlaylist += QStringLiteral("#EXTINF:%1.0,\n").arg(dur);
-    aPlaylist += audioUrl + QLatin1Char('\n');
-
-    // Master edge: referencia las media playlists locales (nombres relativos:
-    // mpv los resuelve contra la URL del master servida por el HlsServer).
-    QString master;
-    master += QStringLiteral("#EXTM3U\n");
-    master += QStringLiteral("#EXT-X-VERSION:4\n");
-    master += QStringLiteral(
-                  "#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"a1\",NAME=\"Audio%1\","
-                  "DEFAULT=YES,AUTOSELECT=YES,URI=\"%2_a.m3u8\"\n")
-                  .arg(audioLangTag, videoId);
-    master += QStringLiteral(
-                  "#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=%1,CODECS=\"%2\","
-                  "RESOLUTION=%3,AUDIO=\"a1\"\n")
-                  .arg(bw,
-                       codecs.isEmpty() ? QStringLiteral("avc1,mp4a") : codecs,
-                       resolution);
-    master += videoId + QStringLiteral("_v.m3u8\n");
-
-    const QString vPath = dir + QLatin1Char('/') + videoId + QLatin1String("_v.m3u8");
-    const QString aPath = dir + QLatin1Char('/') + videoId + QLatin1String("_a.m3u8");
-    const QString masterPath =
-        dir + QLatin1Char('/') + videoId + QLatin1String(".m3u8");
-
-    const auto writeFile = [](const QString &path, const QString &content) {
-        QFile file(path);
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
-            return false;
-        file.write(content.toUtf8());
-        file.close();
-        return true;
-    };
-
-    if (!writeFile(vPath, vPlaylist) || !writeFile(aPath, aPlaylist)
-        || !writeFile(masterPath, master))
-        return QString();
-
-    NT_DEBUG("E2E edge master %dp v=%dx%d audio-lang=%s\n", bestVideoH, vw,
-             bestVideoH,
-             audioLang.isEmpty() || audioLang == QLatin1String("original")
-                 ? "orig"
-                 : audioLang.toUtf8().constData());
-    return masterPath;
+    if (audioUrlOut)
+        *audioUrlOut = audioUrl;
+    return videoUrl;
 }
 
 // Filtra el master HLS de YouTube dejando únicamente las variantes con
@@ -1039,6 +1087,18 @@ QString Yt::formatSelector(int maxHeight)
     return QStringLiteral("best[height<=%1][ext=mp4][protocol=https][acodec^=mp4a]/"
                           "best[height<=%1][ext=mp4][protocol^=http][acodec^=mp4a]")
         .arg(maxHeight);
+}
+
+// Selector de audio para la vía de respaldo yt-dlp: si hay idioma pedido,
+// que yt-dlp elija una pista con ese idioma (cq "es", "es-ES") antes de caer
+// al mejor audio a secas. Consistente con el resto de la app (audioLang).
+QString Yt::audioSelector() const
+{
+    if (m_audioLang.isEmpty())
+        return QStringLiteral("bestaudio[protocol=m3u8_native]/bestaudio");
+    return QStringLiteral("bestaudio[language^=%1]/"
+                          "bestaudio[protocol=m3u8_native]/bestaudio")
+        .arg(m_audioLang);
 }
 
 QString Yt::buildHlsMaster(const QString &videoId, const QString &videoUrl,

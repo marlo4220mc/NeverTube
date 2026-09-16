@@ -36,6 +36,7 @@ struct FormatInfo
 struct StreamInfo
 {
     QString url;
+    QString audioUrl;
     QString label;
     int height = 0;
     bool multipleUrls = false;
