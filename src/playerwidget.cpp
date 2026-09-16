@@ -32,9 +32,15 @@ PlayerWidget::PlayerWidget(QWidget *parent)
     mpv_set_option_string(m_mpv, "hwdec", "auto");
     mpv_set_option_string(m_mpv, "keep-open", "no");
     mpv_set_option_string(m_mpv, "terminal", "no");
-    mpv_set_option_string(m_mpv, "message-level", "all=warn,vo=info,vd=info");
+    mpv_set_option_string(m_mpv, "message-level",
+                          "all=warn,vo=info,vd=info,cache=info,stream=info,network=info");
     mpv_set_option_string(m_mpv, "cache", "yes");
     mpv_set_option_string(m_mpv, "demuxer-max-bytes", "64MiB");
+    // Amortiguación al arranque: sin esto, con el throttle de YouTube la primera
+    // decena de segundos reproduce "en seco" y mpv hace micro-pausas a los ~6 y
+    // ~10 s hasta que la descarga paralela (http_multiple) se estabiliza.
+    mpv_set_option_string(m_mpv, "cache-initial", "3MiB");
+    mpv_set_option_string(m_mpv, "demuxer-readahead-secs", "20");
     mpv_set_option_string(m_mpv, "vd-lavc-threads", "2");
     mpv_set_option_string(m_mpv, "audio-buffer", "0.5");
     mpv_set_option_string(m_mpv, "video-sync", "audio");
@@ -54,6 +60,9 @@ PlayerWidget::PlayerWidget(QWidget *parent)
     mpv_observe_property(m_mpv, 0, "duration", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, 0, "video-params/w", MPV_FORMAT_INT64);
     mpv_observe_property(m_mpv, 0, "video-params/h", MPV_FORMAT_INT64);
+    mpv_observe_property(m_mpv, 0, "paused-for-cache", MPV_FORMAT_FLAG);
+    mpv_observe_property(m_mpv, 0, "demuxer-cache-time", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, 0, "network-bytes-per-second", MPV_FORMAT_INT64);
     mpv_request_log_messages(m_mpv, "info");
     mpv_set_wakeup_callback(m_mpv, PlayerWidget::mpvWakeup, this);
 }
@@ -79,6 +88,30 @@ double PlayerWidget::speed() const
     if (m_mpv)
         mpv_get_property(m_mpv, "speed", MPV_FORMAT_DOUBLE, &value);
     return value;
+}
+
+QString PlayerWidget::hwdecCurrent() const
+{
+    if (!m_mpv)
+        return QString();
+    char *value = nullptr;
+    if (mpv_get_property(m_mpv, "hwdec-current", MPV_FORMAT_STRING, &value) < 0)
+        return QString();
+    QString out = QString::fromUtf8(value ? value : "");
+    mpv_free(value);
+    return out;
+}
+
+QString PlayerWidget::videoCodec() const
+{
+    if (!m_mpv)
+        return QString();
+    char *value = nullptr;
+    if (mpv_get_property(m_mpv, "video-codec", MPV_FORMAT_STRING, &value) < 0)
+        return QString();
+    QString out = QString::fromUtf8(value ? value : "");
+    mpv_free(value);
+    return out;
 }
 
 void PlayerWidget::initializeGL()
@@ -141,6 +174,16 @@ void PlayerWidget::playUrl(const QString &url, double startAt)
     // marcada DEFAULT=YES por YouTube (normalmente el audio original).
     const QByteArray lang = m_audioLang.toUtf8();
     mpv_set_option_string(m_mpv, "alang", lang.constData());
+    // YouTube estrangula la descarga continua de la URL directa a ~initcwndbps
+    // (~1,4 Mbps), insuficiente para 1080p: pausas de buffering a los 6-10 s.
+    // ffmpeg descarga por rangos en paralelo ("http_multiple") y los Range
+    // cortos no están estrangulados (35 MB/s) -> acaba con el throttle.
+    // Solo para URLs externas: el master HLS local no soporta Range requests.
+    if (url.startsWith(QLatin1String("http://127.0.0.1"))
+        || url.startsWith(QLatin1String("http://localhost")))
+        mpv_set_option_string(m_mpv, "stream-lavf-o", "");
+    else
+        mpv_set_option_string(m_mpv, "stream-lavf-o", "http_multiple=1");
     const QByteArray u = url.toUtf8();
     // "start" SIEMPRE con valor concreto: mpv ignora/reserva el valor anterior si
     // se le pasa una cadena vacía, y un vídeo reanudado (start=X) dejaría ese X
@@ -212,6 +255,42 @@ void PlayerWidget::setSubVisibility(bool visible)
     mpv_set_property(m_mpv, "sub-visibility", MPV_FORMAT_FLAG, &flag);
 }
 
+void PlayerWidget::setAudioFile(const QString &url)
+{
+    m_pendingAudioFile = url;
+    if (!m_mpv)
+        return;
+    // Flujo clásico/yt-dlp: nada que añadir; además limpia la pista externa
+    // de un vídeo anterior con audio-file merodeando en mpv.
+    if (url.isEmpty()) {
+        const char *drop[] = { "audio-file-remove", "auto", nullptr };
+        if (mpv_command(m_mpv, drop) < 0 && !m_audioAdded) {
+            // Sin pista externa previa no hay nada que quitar.
+        }
+        m_audioAdded = false;
+        return;
+    }
+    // Si el archivo todavía no está cargado, el comando se aplicará en
+    // MPV_EVENT_FILE_LOADED para garantizar que el owner está listo.
+    if (m_state.isEmpty())
+        return;
+    addAudioFileNow();
+}
+
+void PlayerWidget::addAudioFileNow()
+{
+    if (m_pendingAudioFile.isEmpty() || !m_mpv)
+        return;
+    const QByteArray u = m_pendingAudioFile.toUtf8();
+    // audio-add select: añade la pista y la selecciona como audio actual.
+    const char *cmd[] = { "audio-add", u.constData(), "select", nullptr };
+    const int r = mpv_command(m_mpv, cmd);
+    m_audioAdded = r >= 0;
+    // La pista vieja (oído de un vídeo anterior) que mpv conserve se descarta
+    // si hubo reemplazo: cada loadfile solo debe tener su audio propio.
+    NT_DEBUG("E2E audio-add res=%d len=%d\n", r, int(u.size()));
+}
+
 void PlayerWidget::setAudioLanguage(const QString &lang)
 {
     m_audioLang = lang;
@@ -219,6 +298,57 @@ void PlayerWidget::setAudioLanguage(const QString &lang)
         return;
     const QByteArray b = m_audioLang.toUtf8();
     mpv_set_option_string(m_mpv, "alang", b.constData());
+}
+
+void PlayerWidget::setInitialBufferSecs(double secs)
+{
+    m_initialBufferSecs = secs;
+    if (m_bufferTimer) {
+        m_bufferTimer->stop();
+        m_bufferTimer->deleteLater();
+        m_bufferTimer = nullptr;
+    }
+}
+
+void PlayerWidget::checkInitialBuffer()
+{
+    if (!m_mpv || !m_bufferTimer) {
+        if (m_bufferTimer)
+            m_bufferTimer->stop();
+        return;
+    }
+    // Tope de espera razonable: no dejar al usuario mirando un spinner eterno
+    // si la red no da para llenar el objetivo. 25 s de espera máxima.
+    if (m_bufferStart.elapsed() > 25000) {
+        NT_DEBUG("E2E buffer wait timeout (secs=%.1f)\n", m_initialBufferSecs);
+        setPaused(false);
+        m_bufferTimer->stop();
+        return;
+    }
+    double cacheDur = 0.0;
+    mpv_get_property(m_mpv, "demuxer-cache-duration", MPV_FORMAT_DOUBLE,
+                     &cacheDur);
+    // cache-idle: el download ya terminó (todo lo descargable lo está): se
+    // puede empezar ya aunque cacheDur sea bajo (desde URL local, p.ej.).
+    int cacheIdle = 0;
+    mpv_get_property(m_mpv, "demuxer-cache-idle", MPV_FORMAT_FLAG, &cacheIdle);
+    if (m_initialBufferSecs <= 0.0) {
+        setPaused(false);
+        m_bufferTimer->stop();
+        return;
+    }
+    // Más resolución = más margen necesario: 1080p pide `secs`, las alturas
+    // superiores escalan proporcionalmente (p.ej. 2160p pide el doble).
+    const double target = m_initialBufferSecs
+                          * qMax(1.0, double(m_videoH) / 1080.0);
+    NT_DEBUG("E2E buffer wait cache=%.1f target=%.1f idle=%d\n", cacheDur,
+             target, cacheIdle);
+    if (cacheDur >= target || cacheIdle) {
+        NT_DEBUG("E2E buffer wait done (cache=%.1f target=%.1f)\n", cacheDur,
+                 target);
+        setPaused(false);
+        m_bufferTimer->stop();
+    }
 }
 
 void PlayerWidget::mpvWakeup(void *ctx)
@@ -248,8 +378,16 @@ void PlayerWidget::poll()
 void PlayerWidget::handleEvent(mpv_event *event)
 {
     switch (event->event_id) {
+    case MPV_EVENT_FILE_LOADED:
+        // El archivo principal terminó de cargar: ahora sí se puede adjuntar
+        // el audio externo (audio-add) sin "no file loaded".
+        addAudioFileNow();
+        break;
     case MPV_EVENT_PLAYBACK_RESTART:
     case MPV_EVENT_START_FILE:
+        // Cada stream nuevo vuelve a dar oportunidad de reportar códec/hwdec
+        // (para la auto-corrección del perfil del master edge).
+        m_hwdecProbed = false;
         if (m_state != QLatin1String("playing")) {
             m_state = QStringLiteral("playing");
             emit stateChanged();
@@ -313,16 +451,49 @@ void PlayerWidget::handleEvent(mpv_event *event)
         } else if (std::strcmp(prop->name, "video-params/h") == 0 && prop->data) {
             m_videoH = *static_cast<int64_t *>(prop->data);
             if (m_videoW > 0)
-                NT_DEBUG("E2E mpv video-params %lldx%lld\n",
-                         static_cast<long long>(m_videoW),
-                         static_cast<long long>(m_videoH));
+NT_DEBUG("E2E mpv video-params %lldx%lld\n",
+                     static_cast<long long>(m_videoW),
+                     static_cast<long long>(m_videoH));
             emitAspectIfReady();
             if (m_videoW > 0 && m_videoH > 0)
                 emit videoSizeChanged(int(m_videoW), int(m_videoH));
+            if (!m_hwdecProbed && m_videoW > 0) {
+                m_hwdecProbed = true;
+                emit streamDecodeInfoReady(videoCodec(), hwdecCurrent());
+            }
+            // Espera inicial de buffer en alta resolución (>=1080p): aquí ya
+            // conocemos la altura real del stream (en FILE_LOADED aún es 0).
+            // Arrancar con unos segundos de contenido cacheado elimina las
+            // micro-pausas de los primeros segundos (cierre del fast-start de
+            // YouTube tras el ramp de http_multiple).
+            if (m_initialBufferSecs > 0.0 && m_videoH >= 1000
+                && !(m_bufferTimer && m_bufferTimer->isActive())) {
+                if (!m_bufferTimer) {
+                    m_bufferTimer = new QTimer(this);
+                    m_bufferTimer->setInterval(250);
+                    connect(m_bufferTimer, &QTimer::timeout, this,
+                            &PlayerWidget::checkInitialBuffer);
+                }
+                m_bufferStart.start();
+                setPaused(true);
+                m_bufferTimer->start();
+                NT_DEBUG("E2E buffer wait start secs=%.1f h=%lld\n",
+                         m_initialBufferSecs,
+                         static_cast<long long>(m_videoH));
+            }
         } else if (std::strcmp(prop->name, "pause") == 0) {
             // Consume el cambio para no dejar eventos pendientes.
         } else if (std::strcmp(prop->name, "volume") == 0) {
             // Consume el cambio para no dejar eventos pendientes.
+        } else if (std::strcmp(prop->name, "paused-for-cache") == 0 && prop->data) {
+            const int v = *static_cast<int *>(prop->data);
+            NT_DEBUG("E2E mpv paused-for-cache=%d\n", v);
+        } else if (std::strcmp(prop->name, "demuxer-cache-time") == 0 && prop->data) {
+            const double v = *static_cast<double *>(prop->data);
+            NT_DEBUG("E2E mpv cache-time=%.2f\n", v);
+        } else if (std::strcmp(prop->name, "network-bytes-per-second") == 0 && prop->data) {
+            const qint64 v = *static_cast<qint64 *>(prop->data);
+            NT_DEBUG("E2E mpv bps=%lld\n", static_cast<long long>(v));
         }
         break;
     }

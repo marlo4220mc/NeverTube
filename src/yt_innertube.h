@@ -100,6 +100,11 @@ public slots:
     // resolución.
     int lastWinClient() const { return m_lastWinClient; }
 
+    // Ruta del archivo JSON de la caché de resolución (hls+master) en disco.
+    // Público para que el reseteo de la aplicación pueda borrarlo con la
+    // misma ruta que usa la persistencia.
+    static QString hlsCacheFilePath();
+
 signals:
     // videoHeights: alturas de vídeo (únicas, ascendentes) presentes en
     // adaptiveFormats de la respuesta player. Vacío si no se pudo extraer.
@@ -210,7 +215,6 @@ private:
     // visitorData persistido (SettingsRepo), pero en JSON.
     void saveHlsCacheToDisk() const;
     void loadHlsCacheFromDisk();
-    static QString hlsCacheFilePath();
 
     Ipv4Https *m_http = nullptr;
     QString m_videoId;

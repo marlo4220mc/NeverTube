@@ -791,15 +791,24 @@ void WatchPage::onRelatedReady(const QString &videoId,
 void WatchPage::onRadioReady(const QString &videoId,
                              const QVector<VideoInfo> &videos)
 {
-    if (videos.isEmpty() || videoId != m_relatedVideoId)
+    if (videoId != m_relatedVideoId)
         return;
     const VideoInfo cur = m_player->current();
     if (cur.id != m_relatedVideoId)
         return;
-    NT_DEBUG("E2E nextUp radio append id=%s count=%d 1º=%s\n",
-             videoId.toUtf8().constData(), (int)videos.size(),
-             videos.first().title.toUtf8().constData());
-    m_player->appendVideos(videos);
+    if (!videos.isEmpty()) {
+        NT_DEBUG("E2E nextUp radio append id=%s count=%d 1º=%s\n",
+                 videoId.toUtf8().constData(), (int)videos.size(),
+                 videos.first().title.toUtf8().constData());
+        m_player->appendVideos(videos);
+        return;
+    }
+    // Radio RDAMVM vacía (ni panel ni mezcla en ningún cliente): último
+    // recurso con el /next plano de recomendaciones para no dejar "A
+    // continuación" vacío. La guarda de onRelatedReady valida m_relatedVideoId.
+    NT_DEBUG("E2E nextUp radio vacia -> fallback /next id=%s\n",
+             videoId.toUtf8().constData());
+    m_yt->relatedVideos(videoId);
 }
 
 void WatchPage::updateInfo()
