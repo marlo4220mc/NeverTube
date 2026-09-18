@@ -115,6 +115,10 @@ private:
     QStackedWidget *m_pages = nullptr;
 
     QWidget *m_miniBar = nullptr;
+    // Hueco del mini bar donde se incrusta el PlayerWidget en vivo (reparent),
+    // con la miniatura estática como respaldo cuando no hay vídeo.
+    QWidget *m_miniVideoHost = nullptr;
+    bool m_miniDetached = false;
     QLabel *m_miniThumb = nullptr;
     QLabel *m_miniTitle = nullptr;
     QLabel *m_miniTime = nullptr;

@@ -29,6 +29,7 @@ class QEvent;
 class SeekSlider;
 class QSlider;
 class VideoListView;
+class PlayerContainer;
 
 class WatchPage : public QWidget
 {
@@ -47,6 +48,15 @@ public:
     // Genera la cola del mix RDAMVM para el vídeo dado (click explícito desde
     // fuera de "A continuación": search, home, channel). No se auto-genera.
     void triggerRadio(const QString &videoId);
+
+    // Mini player con vídeo en vivo: mueve el PlayerWidget (y su overlay) al
+    // widget `host` del mini bar manteniéndolo visible/renderizando, para que
+    // mpv no acumule frames ni se reconfigure el decodificador. attachPlayer()
+    // lo devuelve al área de vídeo de la página. Reparentar dentro de la misma
+    // ventana conserva el contexto GL y el mpv_render_context.
+    void detachPlayerTo(QWidget *host);
+    void attachPlayer();
+    bool playerDetached() const { return m_playerDetached; }
 
 signals:
     void backRequested();
@@ -102,6 +112,8 @@ private:
     Yt *m_yt;
     PlayerController *m_player;
     PlayerWidget *m_playerWidget = nullptr;
+    PlayerContainer *m_playerContainer = nullptr;
+    bool m_playerDetached = false;
     VideoCacheRepo *m_cache;
     FavoritesRepo *m_favs;
     StarredRepo *m_starred;
