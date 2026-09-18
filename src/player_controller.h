@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QMetaObject>
 #include <QObject>
@@ -74,9 +75,12 @@ private slots:
     void onPlayerState();
     void onPlayerPosition();
     void onPlayerError(const QString &message);
+    // Atasco de reproducción (sin avance de posición) durante la reproducción:
+    // re-resuelve con URLs firmadas frescas y reanuda en la posición actual.
+    void onStreamStalled();
 
 private:
-    void startResolve();
+    void startResolve(bool forceRefresh);
     void setPhase(const QString &phase);
     void ensurePlayerConnections();
     void onStreamResolved(const StreamInfo &stream);
@@ -105,6 +109,12 @@ private:
     QHash<int, qlonglong> m_indexStartMs;
     qlonglong m_pendingStartMs = 0;
     QTimer *m_flushTimer = nullptr;
+    // Recuperación por atasco: evita bucles (pocos intentos, espaciados) y se
+    // reinicia cuando la reproducción se mantiene estable un rato.
+    int m_recoverAttempts = 0;
+    qint64 m_lastRecoverMs = 0;
+    QElapsedTimer m_stableSince;
+    QMetaObject::Connection m_stallConn;
     QMetaObject::Connection m_resolveConn;
     QMetaObject::Connection m_resolveErrConn;
     QMetaObject::Connection m_stateConn;

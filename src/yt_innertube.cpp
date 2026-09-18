@@ -649,8 +649,18 @@ void Innertube::setHl(const QString &hl)
     m_hl = clean;
 }
 
-void Innertube::fetchHls(const QString &videoId, int preferredClient)
+void Innertube::fetchHls(const QString &videoId, int preferredClient,
+                         bool forceRefresh)
 {
+    // Frescura forzada: descartar la entrada cacheada (hlsUrl + adaptiveFormats
+    // con sus URLs firmadas) para que el POST /player devuelva URLs nuevas. Si
+    // no, una segunda reproducción reusa la URL de videoplayback ya agotada
+    // (presupuesto por petición) y YouTube responde 403 → vídeo congelado.
+    if (forceRefresh && m_hlsCache.remove(videoId) > 0) {
+        saveHlsCacheToDisk();
+        NT_DEBUG("E2E innertube hls cache invalidada id=%s\n",
+                 videoId.toUtf8().constData());
+    }
     // Caché de sesión: si ya hay una hlsManifestUrl firmada y vigente, se
     // entrega al instante sin repetir el POST player.
     if (serveCachedHls(videoId)) {

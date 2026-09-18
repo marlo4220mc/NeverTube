@@ -51,6 +51,10 @@ int main(int argc, char *argv[])
         return innertubeSelfTest() ? 0 : 1;
     }
 
+    if (args.contains(QLatin1String("--selftest-av1hls"))) {
+        return av1HlsSelfTest() ? 0 : 1;
+    }
+
     if (args.contains(QLatin1String("--selftest-home"))) {
         return homeBrowseSelfTest() ? 0 : 1;
     }

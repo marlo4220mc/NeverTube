@@ -49,7 +49,11 @@ public:
     QString hl() const { return m_hl; }
 
 public slots:
-    void fetchHls(const QString &videoId, int preferredClient = -1);
+    // forceRefresh=true ignora y descarta la caché de sesión del vídeo y repite
+    // el POST /player: las URLs firmadas de videoplayback traen un presupuesto
+    // por petición y una segunda reproducción con la misma URL da 403.
+    void fetchHls(const QString &videoId, int preferredClient = -1,
+                  bool forceRefresh = false);
     void fetchMaster(const QString &videoId, const QString &masterUrl);
 
     // Descarga los relacionados ("A continuación" / recommendations) del vídeo
