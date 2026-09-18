@@ -31,15 +31,51 @@ QString ThumbnailCache::filePath(const QString &key) const
     return m_dir + QLatin1Char('/') + key + QStringLiteral(".jpg");
 }
 
+void ThumbnailCache::touch(const QString &key) const
+{
+    m_lru.removeOne(key);
+    m_lru.prepend(key);
+}
+
+void ThumbnailCache::insertLocked(const QString &key, const QPixmap &pm) const
+{
+    auto it = m_cache.find(key);
+    if (it != m_cache.end()) {
+        m_bytes -= it->width() * it->height() * 4;
+        m_cache.erase(it);
+    }
+    m_cache.insert(key, pm);
+    m_bytes += pm.width() * pm.height() * 4;
+    touch(key);
+    while (m_bytes > m_maxBytes && m_lru.size() > 4) {
+        const QString victim = m_lru.takeLast();
+        auto vit = m_cache.find(victim);
+        if (vit != m_cache.end()) {
+            m_bytes -= vit->width() * vit->height() * 4;
+            m_cache.erase(vit);
+        }
+    }
+}
+
 QPixmap ThumbnailCache::pixmap(const QString &key) const
 {
     const auto it = m_cache.constFind(key);
     if (it != m_cache.constEnd()) {
-        m_lru.removeOne(key);
-        m_lru.prepend(key);
+        touch(key);
         return it.value();
     }
-    return QPixmap();
+    // Fallback a disco: el LRU pudo desalojar la imagen de memoria (p. ej. al
+    // compartir presupuesto search+canal), pero el archivo sigue en m_dir. Sin
+    // esto, el delegate pinta vacío y la miniatura "desaparece" para siempre,
+    // porque nadie vuelve a hacer request() de un ítem ya mostrado.
+    const QString path = filePath(key);
+    if (!QFile::exists(path))
+        return QPixmap();
+    QPixmap pm(path);
+    if (pm.isNull())
+        return QPixmap();
+    insertLocked(key, pm);
+    return pm;
 }
 
 static QString stripWebpParam(const QString &url)
@@ -101,9 +137,7 @@ void ThumbnailCache::request(const QString &key, const QString &url)
     if (QFile::exists(path)) {
         QPixmap pm(path);
         if (!pm.isNull()) {
-            m_cache.insert(key, pm);
-            m_bytes += pm.width() * pm.height() * 4;
-            m_lru.prepend(key);
+            insertLocked(key, pm);
             emit ready(key);
             return;
         }
@@ -132,19 +166,9 @@ void ThumbnailCache::requestChannelAvatar(const QString &channelId,
 
 void ThumbnailCache::put(const QString &key, const QPixmap &pm)
 {
-    if (key.isEmpty() || pm.isNull() || m_cache.contains(key))
+    if (key.isEmpty() || pm.isNull())
         return;
-    m_cache.insert(key, pm);
-    m_lru.prepend(key);
-    m_bytes += pm.width() * pm.height() * 4;
-    while (m_bytes > m_maxBytes && m_lru.size() > 4) {
-        const QString victim = m_lru.takeLast();
-        auto it = m_cache.find(victim);
-        if (it != m_cache.end()) {
-            m_bytes -= it->width() * it->height() * 4;
-            m_cache.erase(it);
-        }
-    }
+    insertLocked(key, pm);
     pm.save(filePath(key), "JPG", 85);
     emit ready(key);
 }
@@ -199,19 +223,7 @@ void ThumbnailCache::store(const QString &key, const QImage &image)
 {
     if (image.isNull())
         return;
-    const QPixmap pm = QPixmap::fromImage(image);
-    m_cache.insert(key, pm);
-    m_lru.prepend(key);
-    m_bytes += pm.width() * pm.height() * 4;
-
-    while (m_bytes > m_maxBytes && m_lru.size() > 4) {
-        const QString victim = m_lru.takeLast();
-        auto it = m_cache.find(victim);
-        if (it != m_cache.end()) {
-            m_bytes -= it->width() * it->height() * 4;
-            m_cache.erase(it);
-        }
-    }
+    insertLocked(key, QPixmap::fromImage(image));
     image.save(filePath(key), "JPG", 85);
 }
 

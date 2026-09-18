@@ -120,7 +120,7 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
         if (subscribed) {
             m_subs->remove(m_channelId);
         } else {
-            m_subs->add(m_channelId, m_channelName, QString());
+            m_subs->add(m_channelId, m_channelName, m_avatarUrl);
         }
         updateSubscribeButton(!subscribed);
     });
@@ -131,6 +131,7 @@ void ChannelPage::openChannel(const QString &channelId)
     m_channelId = channelId;
     m_channelName.clear();
     m_avatarKey.clear();
+    m_avatarUrl.clear();
     m_title->setText(QStringLiteral("Cargando canal…"));
     m_meta->clear();
     m_description->clear();
@@ -162,6 +163,8 @@ void ChannelPage::onChannelInfo(const ChannelInfo &channel)
                         : QString());
     m_description->setText(channel.description);
     m_avatarKey = QStringLiteral("ch_%1").arg(channel.id);
+    if (!channel.avatarUrl.isEmpty())
+        m_avatarUrl = channel.avatarUrl;
     const QPixmap cached = m_thumbs->pixmap(m_avatarKey);
     if (!cached.isNull()) {
         m_avatar->setPixmap(cached);

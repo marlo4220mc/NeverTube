@@ -44,6 +44,7 @@ private:
     QLabel *m_avatar;
     QLabel *m_title;
     QString m_avatarKey;
+    QString m_avatarUrl;
     QPushButton *m_subscribeBtn;
     QLabel *m_meta;
     QLabel *m_description;

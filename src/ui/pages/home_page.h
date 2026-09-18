@@ -91,6 +91,12 @@ private:
     void loadSections();
     void loadFeed();
     void requestNextChannel();
+    // Firma del conjunto de suscripciones (ids ordenados). Se persiste tras
+    // construir el feed; si al entrar a Home difiere, el feed cacheado quedó
+    // obsoleto (se suscribió/dejó de seguir) y se fuerza su reconstrucción
+    // aunque su TTL siga vigente.
+    QString currentSubsSignature() const;
+    void maybeInvalidateFeed();
     // Carga del home_cache (HomeCacheRepo) las secciones de RED persistidas en
     // el último arranque: Home muestra contenido al instante y cada sección se
     // refresca sola cuando caduca su TTL (lo persiste todo el Home menos lo que
@@ -160,6 +166,7 @@ private:
     // ocultar la sección.
     QVector<VideoInfo> m_prevFeed;
     qint64 m_feedFetchedAt = 0;
+    QString m_feedSubsSig;
     QVector<VideoInfo> m_home;
     qint64 m_homeFetchedAt = 0;
     // 4) 🎲 Descubre. Fuente PERSISTENTE (SQLite): las radios se generan al
