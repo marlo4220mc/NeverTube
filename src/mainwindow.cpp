@@ -335,6 +335,10 @@ MainWindow::MainWindow(QWidget *parent)
     m_home = new HomePage(m_yt, &m_subs, &m_history, &m_discoverRadios,
                           &m_videoCache, m_homeThumbs, &m_settings,
                           &m_homeCache, this);
+    // Alta/baja de suscripción: refresca el feed "Nuevos de tus suscripciones"
+    // al momento, sin esperar a re-entrar a Home.
+    connect(&m_subs, &SubscriptionsRepo::changed,
+            m_home, &HomePage::refreshDynamic);
     m_search = new SearchPage(m_yt, &m_settings, m_globalThumbs, this);
     m_channel = new ChannelPage(m_yt, m_globalThumbs, &m_subs, this);
     m_watch = new WatchPage(m_yt, &m_player, m_playerWidget, &m_videoCache,
