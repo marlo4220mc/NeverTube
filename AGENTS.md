@@ -164,3 +164,32 @@ reproductor.
 - Overlay de los controles NO es un widget separado: vive dentro de
   `WatchPage::m_overlay`/`PlayerContainer` (src/ui/pages/watch_page.cpp).
   Cualquier cambio ahí que afecte el área de video requiere el selftest.
+
+## Mini player con vídeo en vivo (reparent del PlayerWidget)
+
+Al salir de la página Player con reproducción activa, el mini player muestra
+**la miniatura estática** y, debajo de ella, el `PlayerWidget` sigue
+renderizando de verdad. Motivo: si el widget se oculta, mpv deja de dibujar
+y acumula frames que, al volver, reproduce en ráfaga para igualar el audio
+(el "salto al volver", peor cuanto más tiempo en mini). `vid=no`/`framedrop`
+fuerzan reconfig o descartes que se ven como parpadeo. En cambio, reparentar
+el `PlayerWidget` al hueco del mini y dejarlo visible (aunque tapado por la
+miniatura) mantiene el pipeline caliente SIN reconf del decodificador y SIN
+frames acumulados.
+
+- `WatchPage::detachPlayerTo(host)` reparenta el `PlayerWidget` al host del
+  mini bar y oculta el overlay de controles; `attachPlayer()` lo devuelve al
+  `PlayerContainer` (que lo reintegra en su layout y recalcula el overlay).
+  El overlay es hijo del player y se mueve con él (no se re-parenta).
+- Reparentar **dentro de la misma ventana top-level conserva el contexto GL y
+  el `mpv_render_context`** (verificado: `initializeGL` solo 1 vez en todo el
+  ciclo mini→volver). NO reparentar a otra ventana: destruiría el contexto.
+- `MainWindow::updateMiniPlayer` gestiona las transiciones en los cambios de
+  estado (guard `m_miniDetached`); la miniatura va POR ENCIMA (`raise()`), el
+  vídeo renderiza invisible debajo a 112x63.
+- Orden importante: `MainWindow::openWatchAt` cambia a la página Player ANTES
+  de activar la cola; si se activa primero, `updateMiniPlayer` ve "reprodu-
+  ciendo fuera de Player" y engancha/suelta el mini un frame (parpadeo al
+  abrir un vídeo).
+- `PlayerContainer` (antes en anónima) vive en `watch_page.cpp` a nivel global
+  solo para poder referenciarlo desde `WatchPage` (miembro `m_playerContainer`).
