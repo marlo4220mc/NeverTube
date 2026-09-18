@@ -1,5 +1,6 @@
 #include "playerwidget.h"
 
+#include <QDateTime>
 #include <QMetaObject>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
@@ -61,10 +62,18 @@ PlayerWidget::PlayerWidget(QWidget *parent)
     mpv_observe_property(m_mpv, 0, "video-params/w", MPV_FORMAT_INT64);
     mpv_observe_property(m_mpv, 0, "video-params/h", MPV_FORMAT_INT64);
     mpv_observe_property(m_mpv, 0, "paused-for-cache", MPV_FORMAT_FLAG);
+    mpv_observe_property(m_mpv, 0, "pause", MPV_FORMAT_FLAG);
     mpv_observe_property(m_mpv, 0, "demuxer-cache-time", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, 0, "network-bytes-per-second", MPV_FORMAT_INT64);
     mpv_request_log_messages(m_mpv, "info");
     mpv_set_wakeup_callback(m_mpv, PlayerWidget::mpvWakeup, this);
+
+    // Vigila que la posición avance durante la reproducción: si se congela
+    // > 5 s emite streamStalled para que el controlador re-resuelva.
+    m_stallTimer = new QTimer(this);
+    m_stallTimer->setInterval(1000);
+    connect(m_stallTimer, &QTimer::timeout, this, &PlayerWidget::checkStall);
+    m_stallTimer->start();
 }
 
 PlayerWidget::~PlayerWidget()
@@ -199,9 +208,14 @@ void PlayerWidget::playUrl(const QString &url, double startAt)
     // en pausa ("vídeo que clickeo empieza pausado").
     int paused = 0;
     mpv_set_property(m_mpv, "pause", MPV_FORMAT_FLAG, &paused);
+    m_paused = false;
     NT_DEBUG("E2E playUrl len=%d http=%d\n", int(u.size()),
              url.startsWith(QLatin1String("http")) ? 1 : 0);
     mpv_command_async(m_mpv, 0, cmd);
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    m_lastProgressMs = nowMs;
+    m_videoLoadMs = nowMs;
+    m_cacheOk = false;
     emit positionChanged();
     emit durationChanged();
 }
@@ -231,12 +245,18 @@ void PlayerWidget::setPaused(bool paused)
         return;
     int flag = paused ? 1 : 0;
     mpv_set_property(m_mpv, "pause", MPV_FORMAT_FLAG, &flag);
+    if (!paused)
+        m_lastProgressMs = QDateTime::currentMSecsSinceEpoch();
+    m_paused = paused;
 }
 
 void PlayerWidget::seek(double seconds)
 {
     if (!m_mpv)
         return;
+    // Gracia para el nuevo seek: la posición no avanza hasta que llega el
+    // nuevo fragmento; no debe contar como atasco.
+    m_lastProgressMs = QDateTime::currentMSecsSinceEpoch();
     mpv_set_property(m_mpv, "time-pos", MPV_FORMAT_DOUBLE, &seconds);
 }
 
@@ -351,6 +371,36 @@ void PlayerWidget::checkInitialBuffer()
     }
 }
 
+void PlayerWidget::checkStall()
+{
+    if (!m_mpv || m_state != QLatin1String("playing"))
+        return;
+    if (m_paused)
+        return;
+    if (m_bufferTimer && m_bufferTimer->isActive())
+        return; // espera inicial de buffer en curso: no es un atasco
+    if (m_duration <= 0.0 || m_position >= m_duration - 2.0)
+        return; // sin duración fiable o casi en el final (EOF inminente)
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    // (a) La pista de vídeo no carga: el demuxer no cachea nada. Como el audio
+    // va por archivo externo, la posición avanza igual y la vigilancia por
+    // posición no lo ve; el usuario ve congelado el último frame anterior.
+    if (!m_cacheOk && m_videoLoadMs > 0 && now - m_videoLoadMs > 8000) {
+        m_videoLoadMs = now; // no disparar en bucle mientras el controlador recupera
+        NT_DEBUG("E2E streamStalled sin-video pos=%.2f dur=%.2f\n", m_position,
+                 m_duration);
+        emit streamStalled();
+        return;
+    }
+    // (b) Posición congelada reproduciendo.
+    if (m_lastProgressMs <= 0 || now - m_lastProgressMs < 5000)
+        return;
+    // Refresca para no disparar en bucle mientras el controlador re-resuelve.
+    m_lastProgressMs = now;
+    NT_DEBUG("E2E streamStalled pos=%.2f dur=%.2f\n", m_position, m_duration);
+    emit streamStalled();
+}
+
 void PlayerWidget::mpvWakeup(void *ctx)
 {
     PlayerWidget *self = static_cast<PlayerWidget *>(ctx);
@@ -388,6 +438,7 @@ void PlayerWidget::handleEvent(mpv_event *event)
         // Cada stream nuevo vuelve a dar oportunidad de reportar códec/hwdec
         // (para la auto-corrección del perfil del master edge).
         m_hwdecProbed = false;
+        m_lastProgressMs = QDateTime::currentMSecsSinceEpoch();
         if (m_state != QLatin1String("playing")) {
             m_state = QStringLiteral("playing");
             emit stateChanged();
@@ -440,6 +491,7 @@ void PlayerWidget::handleEvent(mpv_event *event)
             double v = *static_cast<double *>(prop->data);
             if (std::abs(v - m_position) > 0.05) {
                 m_position = v;
+                m_lastProgressMs = QDateTime::currentMSecsSinceEpoch();
                 emit positionChanged();
             }
         } else if (std::strcmp(prop->name, "duration") == 0 && prop->data) {
@@ -481,8 +533,13 @@ NT_DEBUG("E2E mpv video-params %lldx%lld\n",
                          m_initialBufferSecs,
                          static_cast<long long>(m_videoH));
             }
-        } else if (std::strcmp(prop->name, "pause") == 0) {
-            // Consume el cambio para no dejar eventos pendientes.
+        } else if (std::strcmp(prop->name, "pause") == 0 && prop->data) {
+            // Se sigue para saber si el usuario pausó: en pausa la posición no
+            // avanza y no debe interpretarse como atasco.
+            const bool paused = (*static_cast<int *>(prop->data) != 0);
+            if (!paused && m_paused)
+                m_lastProgressMs = QDateTime::currentMSecsSinceEpoch();
+            m_paused = paused;
         } else if (std::strcmp(prop->name, "volume") == 0) {
             // Consume el cambio para no dejar eventos pendientes.
         } else if (std::strcmp(prop->name, "paused-for-cache") == 0 && prop->data) {
@@ -490,6 +547,8 @@ NT_DEBUG("E2E mpv video-params %lldx%lld\n",
             NT_DEBUG("E2E mpv paused-for-cache=%d\n", v);
         } else if (std::strcmp(prop->name, "demuxer-cache-time") == 0 && prop->data) {
             const double v = *static_cast<double *>(prop->data);
+            if (v > 0.2)
+                m_cacheOk = true; // hay datos: la pista de vídeo sí carga
             NT_DEBUG("E2E mpv cache-time=%.2f\n", v);
         } else if (std::strcmp(prop->name, "network-bytes-per-second") == 0 && prop->data) {
             const qint64 v = *static_cast<qint64 *>(prop->data);

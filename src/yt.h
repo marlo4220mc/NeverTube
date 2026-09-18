@@ -47,7 +47,10 @@ public:
     void channelInfo(const QString &channelId);
     void getDetail(const QString &videoId);
     void playlistDetail(const QString &playlistId, int limit = 50);
-    void resolveStream(const QString &videoId, int maxHeight);
+    // forceRefresh=true re-resuelve con el POST /player aunque haya caché de
+    // sesión del vídeo (URLs firmadas frescas; ver Innertube::fetchHls).
+    void resolveStream(const QString &videoId, int maxHeight,
+                       bool forceRefresh = false);
     // Dispara la carga de los relacionados ("A continuación") del vídeo por
     // Innertube /next. Los resultados llegan por relatedReady().
     void relatedVideos(const QString &videoId);
@@ -68,6 +71,32 @@ public:
 
     QString downloadVideoSelector(int maxHeight) const;
     static QString videoIdFromUrl(const QString &url);
+
+    // Un fragmento (subsegmento) del fMP4 según la caja sidx del indexRange.
+    struct Av1Fragment
+    {
+        qint64 size = 0;
+        double duration = 0.0; // segundos
+    };
+
+    // Texto de la media playlist HLS sintética para un adaptiveFormat AV1
+    // (sin red ni ficheros): #EXT-X-MAP + segmentos #EXT-X-BYTERANGE con
+    // sufijo /seg.mp4 y &nt distinto por segmento. Vacío si no hay AV1
+    // <= maxHeight con url/initRange. heightOut recibe la altura elegida.
+    // Si `fragments` viene informado, cada segmento equivale a un fragmento
+    // real del fMP4 (fronteras exactas del sidx): imprescindible para que el
+    // seek funcione. Sin él se cae a trozos fijos de ~2 MB (válido solo para
+    // reproducción secuencial desde el inicio). Expuesto para el selftest.
+    static QString av1HlsPlaylist(const QJsonArray &adaptiveFormats,
+                                  int maxHeight, int *heightOut,
+                                  const QVector<Av1Fragment> &fragments = {},
+                                  qint64 fragmentsStart = -1);
+
+    // Parsea la caja sidx (bytes del indexRange) y devuelve los fragmentos.
+    // firstOffsetOut recibe el offset (relativo al final del indexRange) del
+    // primer subsegmento. Vacío si no hay sidx válido.
+    static QVector<Av1Fragment> av1ParseSidx(const QByteArray &indexBox,
+                                             qint64 *firstOffsetOut);
 
     // Preferencia de idioma de audio para el master filtrado. Vacío (o
     // "original") = pista original. Un código de idioma (p. ej. "en-US" o
@@ -118,7 +147,7 @@ private:
     void resolveWithYtDlp(const QString &videoId, int maxHeight,
                           bool fallbackToInnertube = false);
     void resolveViaInnertube(const QString &videoId, int maxHeight,
-                             int preferredClient);
+                             int preferredClient, bool forceRefresh = false);
     void channelVideosYtDlp(const QString &channelId);
     void trendingYtDlp();
     void execJson(QStringList args, std::function<void(const QJsonObject &)> done);
@@ -130,6 +159,15 @@ private:
                            const QString &audioUrl);
     QString buildFilteredMaster(const QString &videoId,
                                 const QByteArray &masterBody, int maxHeight);
+    // HLS sintético local para reproducir AV1 por la vía HLS (YouTube no
+    // publica AV1 en su master: solo VP9/h264). Cada segmento es una petición
+    // Range corta (~2 MB) sobre la URL adaptativa AV1; el throttle por-request
+    // de YouTube no aplica a ráfagas cortas, así que segmentar equivale a la
+    // velocidad del HLS real. Devuelve la ruta del .m3u8 local o vacío si no
+    // hay AV1 <= maxHeight con initRange/url; escribe heightOut con la altura.
+    QString buildAv1Hls(const QString &videoId,
+                        const QJsonArray &adaptiveFormats, int maxHeight,
+                        int *heightOut);
     // Construye el modo "edge" desde los adaptiveFormats del /player:
     // elige un único vídeo (altura <= maxHeight, h264 preferido) y un único
     // audio (idioma preferido), y devuelve la URL directa del vídeo (mp4/fMP4).
@@ -175,10 +213,6 @@ private:
     // cliente Innertube (>= 0) o kResolveYtDlp. Se usa para dar prioridad
     // al cambiar de resolución (re-resolver el mismo vídeo).
     QHash<QString, int> m_winningClient;
-    // Registro de vídeoIds para los que el master edge ya emitió streamReady;
-    // el handler de hlsReady lo consulta para no duplicar la resolución
-    // (emit streamReady doble). Se limpia al inicio de cada resolveViaInnertube.
-    QSet<QString> m_edgeServed;
 };
 
 // Selftest de la cadena real del feed en Yt: relay Innertube → fallback
@@ -186,3 +220,9 @@ private:
 // resultado dentro de un plazo (Innertube o fallback) sin cuelgues, y registra
 // qué fuente respondió. No toca el reproductor ni SQLite.
 bool feedsChainSelfTest();
+
+// Selftest offline del HLS sintético de AV1: valida la playlist generada
+// (EXT-X-MAP/BYTERANGE, sufijo /seg.mp4, &nt distinto y consecutivo por
+// segmento, elección de la mayor altura <= maxHeight y descarte correcto sin
+// AV1). Sin red, sin ficheros y sin reproductor.
+bool av1HlsSelfTest();
