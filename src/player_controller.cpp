@@ -1,6 +1,7 @@
 #include "player_controller.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QTimer>
 
 #include "db/repositories.h"
@@ -37,6 +38,9 @@ void PlayerController::ensurePlayerConnections()
     disconnect(m_posConn);
     disconnect(m_durConn);
     disconnect(m_errConn);
+    disconnect(m_stallConn);
+    m_stallConn = connect(m_player, &PlayerWidget::streamStalled, this,
+                          &PlayerController::onStreamStalled);
     m_stateConn = connect(m_player, &PlayerWidget::stateChanged, this,
                           &PlayerController::onPlayerState);
     m_posConn = connect(m_player, &PlayerWidget::positionChanged, this,
@@ -107,6 +111,8 @@ void PlayerController::playIndex(int index)
     m_seekBack = 0.0;
     m_errorMessage.clear();
     m_pendingStartMs = m_indexStartMs.value(index, 0);
+    m_recoverAttempts = 0;
+    m_lastRecoverMs = 0;
     setPhase(QStringLiteral("loading"));
     emit currentChanged();
 
@@ -118,10 +124,10 @@ void PlayerController::playIndex(int index)
         setPhase(QStringLiteral("error"));
         return;
     }
-    startResolve();
+    startResolve(/*forceRefresh*/ true);
 }
 
-void PlayerController::startResolve()
+void PlayerController::startResolve(bool forceRefresh)
 {
     disconnect(m_resolveConn);
     disconnect(m_resolveErrConn);
@@ -136,7 +142,7 @@ void PlayerController::startResolve()
                                    if (gen == m_resolveGen)
                                        resolveFailed(message);
                                });
-    m_yt->resolveStream(m_queue[m_index].id, m_maxHeight);
+    m_yt->resolveStream(m_queue[m_index].id, m_maxHeight, forceRefresh);
 }
 
 void PlayerController::onStreamResolved(const StreamInfo &stream)
@@ -168,6 +174,7 @@ void PlayerController::onStreamResolved(const StreamInfo &stream)
              from, int(!stream.audioUrl.isEmpty()));
     m_player->playUrl(stream.url, from);
     m_seekBack = 0.0;
+    m_stableSince.start();
 }
 
 void PlayerController::resolveFailed(const QString &message)
@@ -352,7 +359,32 @@ void PlayerController::reloadCurrent()
     NT_DEBUG("E2E reloadCurrent target=%.1f seekBack=%.1f\n", target, m_seekBack);
     m_player->stop();
     setPhase(QStringLiteral("loading"));
-    startResolve();
+    startResolve(/*forceRefresh*/ true);
+}
+
+void PlayerController::onStreamStalled()
+{
+    if (m_index < 0)
+        return;
+    // Un atasco con la reproducción estabilizada el rato suficiente no cuenta
+    // contra el límite de intentos (caso normal: presupuesto de URL agotado
+    // tras un tramo largo).
+    if (m_stableSince.isValid() && m_stableSince.elapsed() > 60000)
+        m_recoverAttempts = 0;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (m_recoverAttempts >= 3 || (m_lastRecoverMs > 0
+                                   && now - m_lastRecoverMs < 8000)) {
+        setPhase(QStringLiteral("error"));
+        m_errorMessage = QStringLiteral(
+            "La reproducción se interrumpió y no se pudo recuperar.");
+        return;
+    }
+    ++m_recoverAttempts;
+    m_lastRecoverMs = now;
+    NT_DEBUG("E2E streamStalled recuperar intento=%d pos=%.1f\n",
+             m_recoverAttempts, m_player->position());
+    // Re-resuelve con URLs frescas y reanuda en la posición actual.
+    reloadCurrent();
 }
 
 void PlayerController::stop()

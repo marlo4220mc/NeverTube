@@ -45,6 +45,7 @@ solaparse sobre otro, ni en vertical ni en horizontal.
 ./build/nevertube_qt2 --selftest-player    # hwdec=auto + timer=33ms + render ok
 ./build/nevertube_qt2 --selftest-innertube # sw.js_data→visitorData→player→hlsManifestUrl
 ./build/nevertube_qt2 --selftest-discover  # radios guardadas: guardar/recuperar/re-seleccionar/persistencia/descarte
+./build/nevertube_qt2 --selftest-av1hls    # HLS sintético AV1 (offline): MAP/BYTERANGE, /seg.mp4, &nt único
 ```
 
 El selftest del player verifica invariantes del núcleo protegido sin
@@ -89,13 +90,70 @@ para "A continuación" (`MainWindow` con `DiscoverRepo::radioVideoIdsForSeed` +
 `WatchPage::triggerRadio` cuando no hay radio guardada (o sus metadatos no
 están en la caché). Para Descubre, `hasRadio` ya evitaba re-pedir.
 
+## AV1 por HLS (sintético)
+
+YouTube **no publica AV1 en su master HLS** (`hlsManifestUrl`): solo VP9/h264
+(verificado con `yt-dlp -F`: todo `av01` es `https`/DASH). Además, la URL
+adaptativa AV1 directa (modo "edge") se **estrangula** (~150 KB/s) porque el
+throttle es **por petición** y una descarga continua agota su presupuesto. En
+cambio, cada petición `Range` corta (~2 MB) no está estrangulada, incluso por
+la misma conexión keep-alive (≈14 MB/s).
+
+`Yt::buildAv1Hls` (perfil `Modern`) sintetiza un HLS local sobre el
+`adaptiveFormat` AV1: media playlist fMP4 con `#EXT-X-MAP` (de `initRange`) y
+un segmento `#EXT-X-BYTERANGE` **por fragmento real del fMP4**. Claves para
+que funcione:
+
+- **la frontera de cada segmento sale del `sidx`** (caja del `indexRange`, ~4
+  KB): `buildAv1Hls` baja esos bytes con `fetchRangeBlocking` y
+  `av1ParseSidx` da tamaño+duración exactos por subsegmento. Es
+  imprescindible: con trozos fijos (el respaldo antiguo de ~2 MB) la
+  reproducción secuencial funciona, pero **el seek cae a mitad de fragmento y
+  mpv no carga vídeo** (`Cache: 0.0s` + `Errors when loading file`, sin
+  `VO:`). Verificar con `mpv --no-config --vo=null --ao=null --frames=2
+  --start=<t> <m3u8>` para varios `t`;
+- sufijo de ruta `/seg.mp4` tras `/videoplayback` (YouTube lo ignora) para que
+  el demuxer HLS acepte la extensión sin `extension_picky`/whitelist;
+- `&nt=<n>` distinto por segmento: sin él ffmpeg **fusiona** los rangos
+  contiguos del mismo recurso en una sola petición y vuelve el throttle;
+- la escritura del `.m3u8` es atómica (`.tmp` + `rename`): la recuperación
+  reescribe la misma ruta mientras mpv puede estar leyéndola;
+- audio aparte (`PlayerWidget::setAudioFile`, como el modo edge).
+
+Se sirve desde `HlsServer` (`http://127.0.0.1:<port>/<videoId>.m3u8`) y gana en
+`hlsReady` antes de `fetchMaster`; si no hay AV1 (u otro perfil), se mantiene el
+HLS de YouTube (VP9/h264). Verificado en logs de mpv: `● Video (av1 …)`,
+`Using hardware decoding (vulkan-copy)`, `paused-for-cache=0` y `cache-time`
+= duración completa en pocos segundos. El selftest offline `--selftest-av1hls`
+valida la playlist generada (`EXT-X-MAP`/`BYTERANGE`, sufijo `/seg.mp4`, `&nt`
+distinto por segmento, selección de altura y el parseo del `sidx`) sin red ni
+reproductor.
+
 ## Puntos de entrada CLI
 
 - `./build/nevertube_qt2` → app normal
 - `./build/nevertube_qt2 --search <consulta>` → buscar al arrancar
 - `./build/nevertube_qt2 --channel <channelId>` → abrir canal al arrancar
 - `./build/nevertube_qt2 http://...` → reproducir una URL al arrancar
-- `./build/nevertube_qt2 --selftest-db` / `--selftest-player` / `--selftest-innertube` → pruebas
+- `./build/nevertube_qt2 --selftest-db` / `--selftest-player` /
+  `--selftest-innertube` / `--selftest-discover` / `--selftest-home` /
+  `--selftest-feeds` → pruebas
+
+## Caché de miniaturas y suscripciones
+
+- `ThumbnailCache::pixmap()` **cae a disco** si el LRU desalojó la imagen de
+  memoria. NO quitar ese fallback: el delegate de `VideoListView` pinta leyendo
+  de `pixmap()` en cada paint y nadie vuelve a pedir un ítem ya mostrado, así
+  que sin él las miniaturas "desaparecen" (search/canal/home) al compartir
+  presupuesto entre páginas.
+- Al suscribirse se persiste el avatar URL (`SubscriptionsRepo::add(..., avatar)`),
+  y `SubscriptionsRepo::setAvatar` lo actualiza cuando llega `ChannelInfo`.
+  `LibraryPage` pide `channelInfo` también cuando `s.avatar` está vacío (aunque
+  ya tenga el conteo), para rellenar avatares de suscripciones antiguas.
+- El feed "Nuevos de tus suscripciones" se invalida al entrar a Home comparando
+  la firma de ids de suscripciones guardada en `settings.feed_subs_sig`. Sin esa
+  comprobación el feed cacheado (TTL 30 min) seguiría mostrando solo las
+  suscripciones previas tras suscribirse.
 
 ## Convenciones
 

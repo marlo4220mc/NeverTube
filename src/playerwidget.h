@@ -71,6 +71,9 @@ signals:
     // si el perfil es "modern" y al reproducir AV1 mpv cae a software, degrada
     // a "legacy" (esa GPU no tiene decodificador AV1).
     void streamDecodeInfoReady(const QString &codec, const QString &hcdecBackend);
+    // La posición se estancó > 5 s reproduciendo (sin pausa de usuario ni
+    // buffer inicial). El controlador re-resuelve con URLs frescas y reanuda.
+    void streamStalled();
 
 protected:
     void initializeGL() override;
@@ -80,6 +83,7 @@ private slots:
     void poll();
     void onFrameReady();
     void checkInitialBuffer();
+    void checkStall();
 
 private:
     static void mpvWakeup(void *ctx);
@@ -107,6 +111,15 @@ private:
     double m_initialBufferSecs = 0.0;
     QTimer *m_bufferTimer = nullptr;
     QElapsedTimer m_bufferStart;
+    // Detección de atasco: posición congelada reproduciendo (ver streamStalled).
+    QTimer *m_stallTimer = nullptr;
+    qint64 m_lastProgressMs = 0;
+    bool m_paused = false;
+    // Detección de "vídeo sin datos": con audio externo la posición avanza
+    // aunque la pista de vídeo no cargue (queda el último frame del vídeo
+    // anterior). m_cacheOk pasa a true cuando el demuxer cachea contenido.
+    qint64 m_videoLoadMs = 0;
+    bool m_cacheOk = false;
 };
 
 #endif
