@@ -358,7 +358,32 @@ void HomePage::refreshContinueWatching()
 void HomePage::refreshDynamic()
 {
     loadContinueWatching();
+    maybeInvalidateFeed();
     buildDiscoverSelection();
+}
+
+QString HomePage::currentSubsSignature() const
+{
+    const auto channels = m_subs->all();
+    QStringList ids;
+    ids.reserve(channels.size());
+    for (const SubscriptionInfo &s : channels)
+        ids << s.id;
+    ids.sort();
+    return ids.join(QLatin1Char(','));
+}
+
+void HomePage::maybeInvalidateFeed()
+{
+    if (!m_settings)
+        return;
+    const QString sig = currentSubsSignature();
+    if (sig == m_settings->getString(QStringLiteral("feed_subs_sig")))
+        return;
+    NT_DEBUG("E2E feed subs cambiaron: invalidando caché\n");
+    m_feedFetchedAt = 0;
+    if (!m_feedBusy)
+        loadFeed();
 }
 
 // 1) ▶ Continuar viendo: historial local, sin red. Progreso entre 0 y 100%,
@@ -408,6 +433,7 @@ void HomePage::loadContinueWatching()
 void HomePage::loadSections()
 {
     // 2) 🔔 suscripciones
+    maybeInvalidateFeed();
     if (!cachedFresh(m_feedFetchedAt, kFeedTtlMs) && !m_feedBusy)
         loadFeed();
 
@@ -433,6 +459,7 @@ void HomePage::loadSections()
 void HomePage::loadFeed()
 {
     const auto channels = m_subs->all();
+    m_feedSubsSig = currentSubsSignature();
     m_pendingChannels.clear();
     // Se conserva la sección mostrada: si la actualización acaba vacía/falla,
     // onFeedDone la restaura en vez de ocultarla o reemplazarla por vacío.
@@ -444,6 +471,8 @@ void HomePage::loadFeed()
         m_feedTitle->hide();
         m_feedGrid->hide();
         m_feedFetchedAt = nowMs();
+        if (m_settings)
+            m_settings->set(QStringLiteral("feed_subs_sig"), m_feedSubsSig);
         refreshBusy();
         return;
     }
@@ -536,6 +565,8 @@ void HomePage::onFeedDone()
     m_prevFeed.clear();
     m_feedFetchedAt = nowMs();
     saveSection(QLatin1String(kCacheSecFeed), m_feed);
+    if (m_settings)
+        m_settings->set(QStringLiteral("feed_subs_sig"), m_feedSubsSig);
     m_feedGrid->showVideos(m_feed, VideoListView::GridMode);
     adjustGridHeight(m_feedGrid);
     const bool vis = !m_feed.isEmpty();

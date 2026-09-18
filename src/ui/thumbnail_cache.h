@@ -34,6 +34,10 @@ private slots:
 
 private:
     QString filePath(const QString &key) const;
+    // Inserta/actualiza en memoria respetando el presupuesto LRU. Const porque
+    // solo toca miembros mutables: se usa también desde pixmap() (paint).
+    void touch(const QString &key) const;
+    void insertLocked(const QString &key, const QPixmap &pm) const;
 public:
     void store(const QString &key, const QImage &image);
 private:
@@ -44,6 +48,6 @@ private:
     mutable QStringList m_lru;
     QSet<QString> m_inFlight;
     QString m_dir;
-    int m_bytes = 0;
+    mutable int m_bytes = 0;
     int m_maxBytes;
 };

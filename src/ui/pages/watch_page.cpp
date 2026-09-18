@@ -836,6 +836,7 @@ void WatchPage::updateChannelRow()
     m_channelBtn->setText(v.channel.isEmpty() ? QStringLiteral("Canal")
                                               : v.channel);
     m_channelAvatarKey.clear();
+    m_channelAvatarUrl.clear();
     const QIcon placeholder = nt::icon(nt::Icon::User, nt::kMuted, 20);
     if (!v.channelId.isEmpty()) {
         m_channelAvatarKey = QStringLiteral("ch_%1").arg(v.channelId);
@@ -880,7 +881,7 @@ void WatchPage::updateSubscription(const VideoInfo &v, bool subscribe)
     if (!subscribe) {
         m_subs->remove(v.channelId);
     } else {
-        m_subs->add(v.channelId, v.channel, QString());
+        m_subs->add(v.channelId, v.channel, m_channelAvatarUrl);
     }
     updateSubscribeButton(subscribe);
 }
@@ -965,6 +966,7 @@ void WatchPage::onChannelInfo(const ChannelInfo &channel)
         m_channelBtn->setText(channel.name);
     m_channelAvatarKey = QStringLiteral("ch_%1").arg(channel.id);
     if (!channel.avatarUrl.isEmpty()) {
+        m_channelAvatarUrl = channel.avatarUrl;
         m_thumbs->requestChannelAvatar(channel.id, channel.avatarUrl);
         if (m_subs->isSubscribed(channel.id))
             m_subs->setAvatar(channel.id, channel.avatarUrl);
