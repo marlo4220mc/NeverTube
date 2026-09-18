@@ -888,7 +888,7 @@ void MainWindow::applyMiniVideoMode()
     if (!m_miniDetached || !m_miniThumb)
         return;
     const bool live = m_settings.getString(QStringLiteral("mini_video"),
-                                           QStringLiteral("video")) ==
+                                           QStringLiteral("thumb")) ==
                       QLatin1String("video");
     if (live) {
         m_miniThumb->hide();
