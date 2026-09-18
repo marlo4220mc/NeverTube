@@ -1318,6 +1318,13 @@ void WatchPage::leaveFullscreen()
 // scroll) sobre el área de vídeo muestra los controles y reinicia el temporizador.
 bool WatchPage::eventFilter(QObject *watched, QEvent *event)
 {
+    // En el mini player el PlayerWidget está reparentado al hueco del mini bar
+    // (el filtro sigue instalado en él). Los eventos sobre el vídeo del mini no
+    // deben alternar play/pausa ni mostrar el overlay: el mini bar gestiona el
+    // click (expandir al Player completo). Sin esta guarda, en modo "Ver vídeo"
+    // (miniatura oculta) el click en el vídeo pausaba al expandir.
+    if (m_playerDetached)
+        return QWidget::eventFilter(watched, event);
     if (event->type() == QEvent::KeyPress) {
         const auto *ke = static_cast<const QKeyEvent *>(event);
         if (ke->key() == Qt::Key_Escape && m_inFullscreen) {

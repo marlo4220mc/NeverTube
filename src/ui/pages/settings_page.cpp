@@ -280,8 +280,8 @@ void SettingsPage::buildUI()
     addOptionRow(
         QStringLiteral("Vídeo en mini player"), miniVideoOptions(),
         m_settings->getString(QStringLiteral("mini_video"),
-                              QStringLiteral("video")),
-        QStringLiteral("video"), miniVideoFromValue,
+                              QStringLiteral("thumb")),
+        QStringLiteral("thumb"), miniVideoFromValue,
         [this](const QString &text) {
             const QString val = valueFromMiniVideo(text);
             m_settings->set(QStringLiteral("mini_video"), val);
