@@ -387,6 +387,13 @@ MainWindow::MainWindow(QWidget *parent)
                 if (m_yt)
                     m_yt->setAudioLanguage(val);
             });
+    connect(m_settingsPage, &SettingsPage::miniVideoModeChanged,
+            this, [this]() {
+                // Si se cambia estando ya en el mini (Ajustes es visible con el
+                // mini bar), re-aplica el modo en caliente: vídeo vivo o
+                // miniatura encima.
+                applyMiniVideoMode();
+            });
     connect(m_settingsPage, &SettingsPage::gridDensityChanged,
             this, [this](const QString &val) {
                 const qreal density =
@@ -849,16 +856,15 @@ void MainWindow::updateMiniPlayer()
     // vídeo. Solo en los cambios de estado, no en cada llamada.
     if (show && !m_miniDetached && m_watch && m_miniVideoHost) {
         m_watch->detachPlayerTo(m_miniVideoHost);
-        // La miniatura va POR ENCIMA del PlayerWidget: el vídeo sigue
-        // renderizando "invisible" bajo ella (pipeline caliente, sin reconf
-        // del decodificador ni backlog de frames al volver) mientras se ve
-        // la miniatura estética.
-        if (m_miniThumb)
-            m_miniThumb->raise();
+        // El modo de la miniatura: "video" muestra el vídeo en vivo; "thumb"
+        // pone la miniatura estática POR ENCIMA del PlayerWidget (el vídeo
+        // sigue renderizando detrás: pipeline caliente, sin reconf ni backlog).
+        m_miniDetached = true;
+        applyMiniVideoMode();
     } else if (!show && m_miniDetached && m_watch) {
         m_watch->attachPlayer();
+        m_miniDetached = false;
     }
-    m_miniDetached = show;
     if (show)
         updateMiniBar();
 }
@@ -871,6 +877,25 @@ void MainWindow::goToPlayerPage()
     m_lastTab = m_currentTab;
     m_currentTab = 3;
     m_pages->setCurrentIndex(3);
+}
+
+// Aplica el modo del mini player mientras hay vídeo incrustado (detached):
+// "video" → el PlayerWidget queda a la vista (miniatura oculta);
+// "thumb"  → la miniatura estática va por encima y el vídeo renderiza detrás.
+// En ningún caso mpv deja de dibujar, por eso no hay salto al volver.
+void MainWindow::applyMiniVideoMode()
+{
+    if (!m_miniDetached || !m_miniThumb)
+        return;
+    const bool live = m_settings.getString(QStringLiteral("mini_video"),
+                                           QStringLiteral("video")) ==
+                      QLatin1String("video");
+    if (live) {
+        m_miniThumb->hide();
+    } else {
+        m_miniThumb->show();
+        m_miniThumb->raise();
+    }
 }
 
 void MainWindow::updateMiniBar()

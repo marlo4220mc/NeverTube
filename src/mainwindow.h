@@ -67,6 +67,7 @@ private:
     void setupNav();
     void setupMiniBar();
     void updateMiniPlayer();
+    void applyMiniVideoMode();
     void updateMiniBar();
     void updateMiniIcons();
     void setMiniThumb();
