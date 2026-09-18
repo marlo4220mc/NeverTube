@@ -752,14 +752,23 @@ void MainWindow::setupMiniBar()
     auto *row = new QHBoxLayout;
     row->setSpacing(10);
 
-    m_miniThumb = new QLabel(m_miniBar);
-    m_miniThumb->setFixedSize(112, 63);
+    // Hueco fijo donde se incrusta el PlayerWidget en vivo cuando el mini está
+    // activo; si no, muestra la miniatura estática.
+    m_miniVideoHost = new QWidget(m_miniBar);
+    m_miniVideoHost->setObjectName(QStringLiteral("miniVideoHost"));
+    m_miniVideoHost->setFixedSize(112, 63);
+    m_miniVideoHost->setCursor(Qt::PointingHandCursor);
+    auto *hostLay = new QVBoxLayout(m_miniVideoHost);
+    hostLay->setContentsMargins(0, 0, 0, 0);
+    hostLay->setSpacing(0);
+    m_miniThumb = new QLabel(m_miniVideoHost);
     m_miniThumb->setAlignment(Qt::AlignCenter);
     m_miniThumb->setStyleSheet(
         QStringLiteral("background:#262626; border-radius:6px; color:#8F8F8F; "
                        "font-size:10px;"));
     m_miniThumb->setTextInteractionFlags(Qt::NoTextInteraction);
-    row->addWidget(m_miniThumb);
+    hostLay->addWidget(m_miniThumb);
+    row->addWidget(m_miniVideoHost);
 
     auto *textBox = new QVBoxLayout;
     textBox->setSpacing(1);
@@ -834,6 +843,22 @@ void MainWindow::updateMiniPlayer()
         m_miniBar->setVisible(show);
     if (m_home)
         m_home->setMiniPlayerVisible(show);
+    // Vídeo en vivo en el mini: al mostrarlo, el PlayerWidget se reparenta al
+    // hueco del mini bar y sigue renderizando (sin reconf del decodificador ni
+    // frames acumulados). Al volver a la página Player se reintegra al área de
+    // vídeo. Solo en los cambios de estado, no en cada llamada.
+    if (show && !m_miniDetached && m_watch && m_miniVideoHost) {
+        m_watch->detachPlayerTo(m_miniVideoHost);
+        // La miniatura va POR ENCIMA del PlayerWidget: el vídeo sigue
+        // renderizando "invisible" bajo ella (pipeline caliente, sin reconf
+        // del decodificador ni backlog de frames al volver) mientras se ve
+        // la miniatura estética.
+        if (m_miniThumb)
+            m_miniThumb->raise();
+    } else if (!show && m_miniDetached && m_watch) {
+        m_watch->attachPlayer();
+    }
+    m_miniDetached = show;
     if (show)
         updateMiniBar();
 }
@@ -1064,6 +1089,12 @@ void MainWindow::openWatchAt(const QVector<VideoInfo> &videos, int startIndex,
     // (single-flight en Innertube).
     if (m_home)
         m_home->interruptDiscover();
+    // Ir a la página Player ANTES de activar la cola: si se activa primero,
+    // updateMiniPlayer ve "reproduciendo fuera de Player" y engancha el mini
+    // un frame, para desengancharlo al cambiar de página (parpadeo al abrir).
+    m_lastTab = m_currentTab;
+    m_currentTab = 3;
+    m_pages->setCurrentIndex(3);
     const NextMode mode = nextMode();
     if (mode == NextMode::Radio) {
         // Modo radio: abrir solo con el vídeo clicado y generar la cola del
@@ -1094,9 +1125,6 @@ void MainWindow::openWatchAt(const QVector<VideoInfo> &videos, int startIndex,
         m_player.playQueue(videos, startIndex, startPositionMs);
         m_watch->setWatchData(m_player.queue(), m_player.index());
     }
-    m_lastTab = m_currentTab;
-    m_currentTab = 3;
-    m_pages->setCurrentIndex(3);
 }
 
 void MainWindow::searchFor(const QString &query)

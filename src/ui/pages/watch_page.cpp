@@ -39,8 +39,6 @@
 #include "../thumbnail_cache.h"
 #include "../video_list_view.h"
 
-namespace {
-
 class PlayerContainer : public QWidget
 {
 public:
@@ -56,13 +54,27 @@ public:
         overlay->raise();
         overlay->show();
 
-        auto *lay = new QVBoxLayout(this);
-        lay->setContentsMargins(0, 0, 0, 0);
-        lay->setSpacing(0);
-        lay->addWidget(player);
+        m_lay = new QVBoxLayout(this);
+        m_lay->setContentsMargins(0, 0, 0, 0);
+        m_lay->setSpacing(0);
+        m_lay->addWidget(player);
 
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         setMinimumHeight(0);
+        updateMaxHeight();
+    }
+
+    // Devuelve el PlayerWidget a esta área tras el mini player (lo reparenta y
+    // lo reintegra en el layout; el contexto GL se conserva por ser la misma
+    // ventana). El overlay permanece hijo del player.
+    void givePlayerBack()
+    {
+        m_player->setParent(this);
+        if (m_lay->indexOf(m_player) < 0)
+            m_lay->addWidget(m_player);
+        m_player->show();
+        m_overlay->setGeometry(m_player->rect());
+        m_overlay->raise();
         updateMaxHeight();
     }
 
@@ -106,10 +118,9 @@ private:
 
     QWidget *m_overlay;
     PlayerWidget *m_player;
+    QVBoxLayout *m_lay = nullptr;
     double m_aspect = 0.0;
 };
-
-}  // namespace
 
 // Deslizador de búsqueda: click en cualquier punto del track busca ahí y el
 // arrastre no pelea con las actualizaciones de posición mientras se mantiene
@@ -423,6 +434,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             &WatchPage::hideOverlayControls);
 
     auto *pc = new PlayerContainer(playerWidget, m_overlay, this);
+    m_playerContainer = pc;
     pc->setObjectName(QStringLiteral("playerArea"));
     splitOuter->addWidget(pc, 3);
     enableOverlayTracking(this, pc);
@@ -698,6 +710,31 @@ void WatchPage::triggerRadio(const QString &videoId)
     NT_DEBUG("E2E nextUp triggerRadio id=%s\n",
              videoId.toUtf8().constData());
     m_yt->radioVideos(videoId);
+}
+
+void WatchPage::detachPlayerTo(QWidget *host)
+{
+    if (!m_playerWidget || !host || m_playerDetached)
+        return;
+    // El overlay (controles) es hijo del player: se oculta, no se mueve. El
+    // player se reparenta visible para que mpv siga renderizando en el mini.
+    m_overlay->hide();
+    m_playerWidget->setParent(host);
+    m_playerWidget->setGeometry(host->rect());
+    m_playerWidget->show();
+    m_playerDetached = true;
+    NT_DEBUG("E2E player detach host=%p\n", static_cast<void *>(host));
+}
+
+void WatchPage::attachPlayer()
+{
+    if (!m_playerWidget || !m_playerContainer || !m_playerDetached)
+        return;
+    m_playerContainer->givePlayerBack();
+    m_overlay->setGeometry(m_playerWidget->rect());
+    m_overlay->show();
+    m_playerDetached = false;
+    NT_DEBUG("E2E player attach\n");
 }
 
 void WatchPage::onCurrentChanged()
