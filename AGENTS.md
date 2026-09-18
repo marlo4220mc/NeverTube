@@ -185,8 +185,11 @@ frames acumulados.
   el `mpv_render_context`** (verificado: `initializeGL` solo 1 vez en todo el
   ciclo mini→volver). NO reparentar a otra ventana: destruiría el contexto.
 - `MainWindow::updateMiniPlayer` gestiona las transiciones en los cambios de
-  estado (guard `m_miniDetached`); la miniatura va POR ENCIMA (`raise()`), el
-  vídeo renderiza invisible debajo a 112x63.
+  estado (guard `m_miniDetached`); `applyMiniVideoMode()` aplica el setting
+  `mini_video` (`video` → el vídeo en vivo llena el hueco y la miniatura se
+  oculta; `thumb` → la miniatura va POR ENCIMA con `raise()` y el vídeo
+  renderiza invisible debajo a 112x63). En ambos modos el `PlayerWidget` sigue
+  visible y renderizando: solo cambia qué tapa qué.
 - Orden importante: `MainWindow::openWatchAt` cambia a la página Player ANTES
   de activar la cola; si se activa primero, `updateMiniPlayer` ve "reprodu-
   ciendo fuera de Player" y engancha/suelta el mini un frame (parpadeo al

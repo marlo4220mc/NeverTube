@@ -21,6 +21,7 @@ public:
 signals:
     void qualityChanged(const QString &value);
     void nextModeChanged(const QString &mode);
+    void miniVideoModeChanged(const QString &mode);
     void audioLanguageChanged(const QString &code);
     void gridDensityChanged(const QString &density);
     void clearThumbsRequested();

@@ -17,6 +17,7 @@ static const char *kQualityAutoKey = "quality_auto";
 static const char *kNextModeKey = "next_mode";
 static const char *kAudioLangKey = "audio_language";
 static const char *kGridDensityKey = "grid_density";
+static const char *kMiniVideoKey = "mini_video";
 
 static QStringList qualityOptions(bool noHw = false)
 {
@@ -67,6 +68,23 @@ static QString nextModeFromValue(const QString &val)
     if (val == QStringLiteral("suggestions"))
         return QStringLiteral("Sugerencias");
     return QStringLiteral("Radio");
+}
+
+static QStringList miniVideoOptions()
+{
+    return {QStringLiteral("Ver vídeo"), QStringLiteral("Solo miniatura")};
+}
+
+static QString valueFromMiniVideo(const QString &text)
+{
+    return text == QStringLiteral("Solo miniatura") ? QStringLiteral("thumb")
+                                                    : QStringLiteral("video");
+}
+
+static QString miniVideoFromValue(const QString &val)
+{
+    return val == QStringLiteral("thumb") ? QStringLiteral("Solo miniatura")
+                                          : QStringLiteral("Ver vídeo");
 }
 
 static QStringList audioLangOptions()
@@ -253,6 +271,21 @@ void SettingsPage::buildUI()
             const QString val = valueFromNextMode(text);
             m_settings->set(QStringLiteral("next_mode"), val);
             emit nextModeChanged(val);
+        });
+
+    // Vídeo en el mini player: si el vídeo en vivo ocupa el hueco del mini bar
+    // cuando se sale de la página Player, o si se prefiere ver solo la
+    // miniatura estática (en ambos casos el vídeo sigue renderizando en
+    // segundo plano para que no haya salto al volver).
+    addOptionRow(
+        QStringLiteral("Vídeo en mini player"), miniVideoOptions(),
+        m_settings->getString(QStringLiteral("mini_video"),
+                              QStringLiteral("video")),
+        QStringLiteral("video"), miniVideoFromValue,
+        [this](const QString &text) {
+            const QString val = valueFromMiniVideo(text);
+            m_settings->set(QStringLiteral("mini_video"), val);
+            emit miniVideoModeChanged(val);
         });
 
     // Idioma de audio: pista preferida cuando el vídeo la ofrece (incluye
