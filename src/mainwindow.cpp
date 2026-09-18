@@ -152,8 +152,8 @@ MainWindow::MainWindow(QWidget *parent)
     , m_db()
     , m_yt(new Yt(this))
     , m_homeThumbs(new ThumbnailCache(QStringLiteral("home"), 64 * 1024 * 1024, this))
-    , m_globalThumbs(new ThumbnailCache(QStringLiteral("global"), 32 * 1024 * 1024, this))
-    , m_libraryThumbs(new ThumbnailCache(QStringLiteral("library"), 32 * 1024 * 1024, this))
+    , m_globalThumbs(new ThumbnailCache(QStringLiteral("global"), 64 * 1024 * 1024, this))
+    , m_libraryThumbs(new ThumbnailCache(QStringLiteral("library"), 48 * 1024 * 1024, this))
     , m_playerWidget(new PlayerWidget(this))
 {
     m_db.open();

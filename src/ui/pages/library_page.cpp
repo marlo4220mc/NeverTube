@@ -574,7 +574,7 @@ void LibraryPage::rebuildSubscriptions()
         row->setActivate([this, s]() { emit channelRequested(s.id, s.title); });
         m_subRowLay->addWidget(row);
 
-        if (!m_subCounts.contains(s.id))
+        if (!m_subCounts.contains(s.id) || s.avatar.isEmpty())
             m_yt->channelInfo(s.id);
     }
     m_subRowLay->addStretch(1);
@@ -602,18 +602,23 @@ QString LibraryPage::subMetaFor(const QString &channelId) const
 
 void LibraryPage::onChannelInfo(const ChannelInfo &channel)
 {
-    if (channel.subscriberCount <= 0)
-        return;
-    m_subCounts.insert(channel.id, channel.subscriberCount);
-    ChannelRow *row = m_subMeta.value(channel.id);
-    if (row) {
-        QLabel *meta = row->metaLabel();
-        if (meta)
-            meta->setText(subMetaFor(channel.id));
-        row->applyContentWidth();
+    if (channel.subscriberCount > 0) {
+        m_subCounts.insert(channel.id, channel.subscriberCount);
+        ChannelRow *row = m_subMeta.value(channel.id);
+        if (row) {
+            QLabel *meta = row->metaLabel();
+            if (meta)
+                meta->setText(subMetaFor(channel.id));
+            row->applyContentWidth();
+        }
     }
-    if (!channel.avatarUrl.isEmpty())
+    if (!channel.avatarUrl.isEmpty()) {
         m_thumbs->requestChannelAvatar(channel.id, channel.avatarUrl);
+        // Persistir el avatar para que la suscripción no vuelva a nacer sin él
+        // (p. ej. al suscribirse desde el reproductor sin tener aún los datos).
+        if (m_subs->isSubscribed(channel.id))
+            m_subs->setAvatar(channel.id, channel.avatarUrl);
+    }
     QTimer::singleShot(0, this, &LibraryPage::updateSubsRowGeometry);
 }
 

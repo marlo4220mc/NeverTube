@@ -126,6 +126,7 @@ private:
     QLabel *m_meta;
     QPushButton *m_channelBtn;
     QString m_channelAvatarKey;
+    QString m_channelAvatarUrl;
     QPushButton *m_subscribeBtn;
     QPushButton *m_likeBtn;
     QPushButton *m_dislikeBtn;
