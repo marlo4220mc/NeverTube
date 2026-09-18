@@ -633,8 +633,8 @@ bool WatchLaterRepo::remove(const QString &videoId)
     return q.exec();
 }
 
-SubscriptionsRepo::SubscriptionsRepo(AppDatabase &db)
-    : m_db(db)
+SubscriptionsRepo::SubscriptionsRepo(AppDatabase &db, QObject *parent)
+    : QObject(parent), m_db(db)
 {
 }
 
@@ -649,7 +649,10 @@ bool SubscriptionsRepo::add(const QString &channelId, const QString &title,
     q.addBindValue(title);
     q.addBindValue(avatarUrl);
     q.addBindValue(nowMs());
-    return q.exec();
+    const bool ok = q.exec();
+    if (ok)
+        emit changed();
+    return ok;
 }
 
 bool SubscriptionsRepo::remove(const QString &channelId)
@@ -657,7 +660,10 @@ bool SubscriptionsRepo::remove(const QString &channelId)
     QSqlQuery q(m_db.db());
     q.prepare(QStringLiteral("DELETE FROM subscriptions WHERE channel_id=?"));
     q.addBindValue(channelId);
-    return q.exec();
+    const bool ok = q.exec();
+    if (ok)
+        emit changed();
+    return ok;
 }
 
 bool SubscriptionsRepo::setAvatar(const QString &channelId,
