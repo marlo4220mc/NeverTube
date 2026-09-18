@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QObject>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -107,10 +108,12 @@ private:
     AppDatabase &m_db;
 };
 
-class SubscriptionsRepo
+class SubscriptionsRepo : public QObject
 {
+    Q_OBJECT
+
 public:
-    explicit SubscriptionsRepo(AppDatabase &db);
+    explicit SubscriptionsRepo(AppDatabase &db, QObject *parent = nullptr);
 
     bool add(const QString &channelId, const QString &title,
              const QString &avatarUrl = QString());
@@ -118,6 +121,13 @@ public:
     bool remove(const QString &channelId);
     bool isSubscribed(const QString &channelId) const;
     QVector<SubscriptionInfo> all() const;
+
+    // Cambió el conjunto de suscripciones (alta/baja): quien muestre feeds
+    // derivados (p.ej. "Nuevos de tus suscripciones" en Home) debe refrescar.
+    // No se emite en setAvatar: el avatar no altera la lista de canales.
+
+signals:
+    void changed();
 
 private:
     AppDatabase &m_db;
