@@ -22,28 +22,28 @@ jobs:
           target: 'desktop'
           arch: 'win32_msvc2019'
 
-      - name: bajar mpv-dev (shinchiro/mpv-winbuild-cmake, asset mpv-dev-i686-*.7z)
-        # gh api autenticado con GITHUB_TOKEN: la llamada anónima a la API
-        # de GitHub se topa con rate limit (60/h por IP de runner compartida).
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # libmpv-2.dll desde media-kit/libmpv-win32-video-cmake (i686, release
+      # 20241021, git-0f78584) — NO desde shinchiro/mpv-winbuild-cmake.
+      # Por qué: los builds de shinchiro de mayo 2026 en adelante incrustan un
+      # OpenSSL 3 de master con el commit roto 1e1ea715 (PR #32633 de openssl,
+      # "lock != NULL") que mata la app con
+      #   :0: OpenSSL internal error: assertion failed: lock != NULL
+      # ya sea al inicializar mpv (ago-sep 2026) o al reproducir de verdad
+      # (may-jun 2026). El build de media-kit es de oct 2024 (OpenSSL anterior
+      # al bug): verificado localmente con reproducción real en x86
+      # (--selftest-hwprobe → vp9-hw; paintGL frames; sin assert). Además es
+      # una URL pinada de release, no "latest": no depende del pruneo de
+      # releases ni de rate limit de la API. Mismo formato mpv-dev
+      # (include/ + libmpv-2.dll) que usaba shinchiro.
+      - name: bajar mpv-dev i686 (media-kit/libmpv-win32-video-cmake 20241021)
         shell: pwsh
         run: |
-          $rel = gh api repos/shinchiro/mpv-winbuild-cmake/releases/latest |
-            ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $asset = $rel.assets | Where-Object {
-            $_.name -like 'mpv-dev-i686-*' } | Select-Object -First 1
-          if (-not $asset) {
-            Write-Host "asset mpv-dev-i686-* no encontrado; assets:"
-            $rel.assets | ForEach-Object { $_.name }
-            exit 1 }
-          Write-Host "bajando $($asset.name) desde $($asset.browser_download_url)"
-          curl.exe -sL -o mpv-dev.7z $asset.browser_download_url
+          $url = 'https://github.com/media-kit/libmpv-win32-video-cmake/releases/download/20241021/mpv-dev-i686-20241021-git-0f78584.7z'
+          curl.exe -sL -o mpv-dev.7z $url
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "$env:ProgramFiles/7-Zip/7z.exe" x -y -ompv-dev mpv-dev.7z
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Get-ChildItem mpv-dev -Recurse -Filter *.lib | Select-Object FullName
+          Get-ChildItem mpv-dev -Recurse -Filter *.dll | Select-Object FullName
 
       - name: bajar ytdlp.exe (build x86 para la máquina de pruebas de 32 bits)
         shell: pwsh
@@ -149,10 +149,11 @@ jobs:
           choco install innosetup --yes --no-progress
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      # libmpv-2.dll (build de shinchiro, también el i686) importa vulkan-1.dll
-      # ESTÁTICAMENTE. En máquinas sin runtime Vulkan (el equipo de pruebas) la app no
-      # arranca: "no se encontró vulkan-1.dll". Embeber el loader oficial x86
-      # en el paquete (un exe de 32 bits SOLO carga el loader de 32 bits).
+      # libmpv-2.dll (el i686 de media-kit, como el de shinchiro) importa
+      # vulkan-1.dll ESTÁTICAMENTE. En máquinas sin runtime Vulkan (el equipo de pruebas)
+      # la app no arranca: "no se encontró vulkan-1.dll". Embeber el loader
+      # oficial x86 en el paquete (un exe de 32 bits SOLO carga el loader de
+      # 32 bits).
       - name: instalar Vulkan Runtime SOLO (vulkan-1.dll x86, sin el SDK de 0.75 GB)
         uses: jakoch/install-vulkan-sdk-action@v1
         with:
@@ -215,7 +216,13 @@ jobs:
       # ("OpenSSL internal error, assertion failed: lock != NULL", visto en
       # Windows de 32 bits) pasaba de verde en CI y reventaba solo en la
       # máquina de pruebas al arrancar (primera petición HTTPS del feed).
-      - name: smoke test del paquete dist (arranca sin DLLs faltantes + handshake TLS real)
+      # --selftest-hwprobe es el gate del libmpv: inicializa mpv en headless
+      # (vo=null) y decodifica los micro-clips AV1/VP9/h264. Con los builds de
+      # shinchiro que llevan el OpenSSL roto, aborta con lock != NULL al hacer
+      # mpv_initialize; la fuente (media-kit) está pinada precisamente para
+      # evitar ese combo. La reproducción REAL ya se verifica aparte (la DLL
+      # pinada está validada en máquina con paintGL+frames).
+      - name: smoke test del paquete dist (arranca sin DLLs faltantes + handshake TLS real + mpv init)
         shell: pwsh
         run: |
           # windeployqt solo despliega qwindows.dll; el offscreen se inyecta
@@ -235,6 +242,14 @@ jobs:
           $rc = $LASTEXITCODE
           Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
           Write-Host "smoke selftest-db exit=$rc"
+          if ($rc -ne 0) { exit $rc }
+          # Gate del libmpv (headless): inicializa mpv + decodifica micro-clips
+          # (AV1/VP9/h264). Un libmpv con el OpenSSL roto (shinchiro may-2026+)
+          # aborta aquí con lock != NULL.
+          & .\dist\nevertube_qt2.exe --selftest-hwprobe
+          $rc = $LASTEXITCODE
+          Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
+          Write-Host "smoke selftest-hwprobe exit=$rc"
           if ($rc -ne 0) { exit $rc }
 
       - uses: actions/upload-artifact@v4
