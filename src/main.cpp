@@ -14,6 +14,7 @@
 #include "yt_innertube.h"
 
 #ifdef Q_OS_WIN
+#include <windows.h>
 namespace {
 // La app está marcada WIN32_EXECUTABLE_TARGET (sin consola propia). Para que
 // los selftests imptiman y el CI/la máquina de pruebas vean los logs, nos pegamos a la
