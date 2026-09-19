@@ -205,6 +205,7 @@ tarda (>300 ms, PC básico) o si el usuario intenta reproducir mientras sondea.
 - Repos SQLite en `src/db/`; infraestructura reutilizable en `src/ui/`.
 - Resolución de streams: Innertube (cliente VISIONOS, `src/yt_innertube.*`) primero y yt-dlp como fallback (`Yt::resolveWithYtDlp`).
 - Carga de canales: CARRERA en paralelo (`Yt::startChannelRace`/`channelRaceLeg`): se lanzan Innertube (`fetchChannelVideos`) y yt-dlp (playlist UU) a la vez y se emite `channelVideosFinished` con el primer resultado que traiga vídeos con id no vacío (si ambos fallan, una vez, vacío). Evita que en redes donde /browse responde 400 (la máquina de pruebas) cada apertura espere las 2 rondas Innertube fallidas antes del fallback (~segundos de más vs Linux). Un leg con 0 vídeos de id no vacío no cuenta como datos (parseVideos({}) fabrica 1 vídeo falso "Sin título").
+- Empaquetado Windows (Win7 x86): la UCRT NO se copia app-local desde la Windows SDK — esa versión importa `GetSystemTimePreciseAsFileTime` (W8+) y ucrtbase no carga en Win7. En su lugar el setup empaqueta `VC_redist.x86.exe` (descargado en CI) y lo instala con `AfterInstall`/`Exec` (`/install /quiet /norestart`, códigos 0/1638/3010 aceptados) con `PrivilegesRequired=admin`. El CRT (msvcp140/vcruntime140) sí va junto al exe (`windeployqt --compiler-runtime` + copia de `Microsoft.VC*.CRT`).
 - Overlay de los controles NO es un widget separado: vive dentro de
   `WatchPage::m_overlay`/`PlayerContainer` (src/ui/pages/watch_page.cpp).
   Cualquier cambio ahí que afecte el área de video requiere el selftest.
