@@ -23,7 +23,9 @@ OutputDir=setup-out
 OutputBaseFilename=nevertube-setup
 Compression=lzma2
 SolidCompression=yes
-ArchitecturesInstallIn64BitMode=x64compatible
+; El equipo objetivo es Windows x86: el payload es de 32 bits y el instalador
+; se instala como 32 bits siempre ({autopf}=Program Files en x86 / Program
+; Files (x86) en una máquina de 64 bits). Sin ArchitecturesInstallIn64BitMode.
 PrivilegesRequired=lowest
 
 [Files]

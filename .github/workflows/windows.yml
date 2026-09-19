@@ -13,25 +13,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Qt 5.15.2 MSVC2019 x64 — la misma config de BUILD_WINDOWS.md
+      # Qt 5.15.2 MSVC2019 x86 — la máquina de pruebas es de 32 bits (Windows x86 no
+      # ejecuta exe/x64). La misma config de BUILD_WINDOWS.md.
       - uses: jurplel/install-qt-action@v4
         with:
           version: '5.15.2'
           host: 'windows'
           target: 'desktop'
-          arch: 'win64_msvc2019_64'
+          arch: 'win32_msvc2019'
 
-      - name: bajar mpv-dev (shinchiro/mpv-winbuild-cmake, asset mpv-dev-x86_64-*.7z)
+      - name: bajar mpv-dev (shinchiro/mpv-winbuild-cmake, asset mpv-dev-i686-*.7z)
+        # gh api autenticado con GITHUB_TOKEN: la llamada anónima a la API
+        # de GitHub se topa con rate limit (60/h por IP de runner compartida).
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          $headers = @{ 'User-Agent' = 'nevertube-ci' }
-          $rel = Invoke-RestMethod `
-            -Uri 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest' `
-            -Headers $headers
+          $rel = gh api repos/shinchiro/mpv-winbuild-cmake/releases/latest |
+            ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $asset = $rel.assets | Where-Object {
-            $_.name -like 'mpv-dev-x86_64-*' } | Select-Object -First 1
+            $_.name -like 'mpv-dev-i686-*' } | Select-Object -First 1
           if (-not $asset) {
-            Write-Host "asset mpv-dev-x86_64-* no encontrado; assets:"
+            Write-Host "asset mpv-dev-i686-* no encontrado; assets:"
             $rel.assets | ForEach-Object { $_.name }
             exit 1 }
           Write-Host "bajando $($asset.name) desde $($asset.browser_download_url)"
@@ -41,22 +45,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem mpv-dev -Recurse -Filter *.lib | Select-Object FullName
 
-      - name: bajar ytdlp.exe
+      - name: bajar ytdlp.exe (build x86 para la máquina de pruebas de 32 bits)
         shell: pwsh
         run: |
+          # yt-dlp.exe oficial ya es x64 y no arranca en Windows de 32 bits.
+          # yt-dlp_x86.exe es el build de 32 bits; la app lo lanza como
+          # "yt-dlp" (QProcess::start("yt-dlp")) y Windows lo halla junto al
+          # exe en la carpetita {app}\ del instalador.
           curl.exe -sL -o ytdlp.exe `
-            https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
+            https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_x86.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      # Qt 5.15.2 (msvc2019_64) carga su backend TLS por LoadLibrary de las DLLs
-      # de OpenSSL 1.1 (libssl-1_1-x64.dll / libcrypto-1_1-x64.dll) DESDE la
+      # Qt 5.15.2 (msvc2019 x86) carga su backend TLS por LoadLibrary de las DLLs
+      # de OpenSSL 1.1 (libssl-1_1.dll / libcrypto-1_1.dll) DESDE la
       # carpeta del exe. windeployqt NO las despliega: sin ellas, cualquier
       # HTTPS falla en la máquina objetivo con "qt.network.ssl ... TLS
       # initialization failed" (innertube/YouTube no cargan). Se extraen los
       # binarios oficiales de OpenSSL 1.1.1w (Shining Light Productions) del
       # instalador Inno SIN ejecutarlo (innoextract): no hay elevación/UAC en
       # el runner ni toca C:\ ni el registro.
-      - name: extraer OpenSSL 1.1.1w (DLLs TLS que carga Qt5Network)
+      - name: extraer OpenSSL 1.1.1w (DLLs TLS que carga Qt5Network, build Win32)
         shell: pwsh
         run: |
           curl.exe -sL -o innoextract.zip `
@@ -64,24 +72,25 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Expand-Archive innoextract.zip innoextract-tool -Force
           curl.exe -sL -o openssl-111.exe `
-            https://slproweb.com/download/Win64OpenSSL_Light-1_1_1w.exe
+            https://slproweb.com/download/Win32OpenSSL_Light-1_1_1w.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\innoextract-tool\innoextract.exe openssl-111.exe | Out-Null
-          if (-not (Test-Path 'app\bin\libssl-1_1-x64.dll') -or `
-              -not (Test-Path 'app\bin\libcrypto-1_1-x64.dll')) {
+          if (-not (Test-Path 'app\bin\libssl-1_1.dll') -or `
+              -not (Test-Path 'app\bin\libcrypto-1_1.dll')) {
             Write-Host 'extracción OpenSSL falló (app\bin\*.dll)'
             exit 1 }
-          Get-Item 'app\bin\libssl-1_1-x64.dll', `
-            'app\bin\libcrypto-1_1-x64.dll' | Select-Object Name, Length
+          Get-Item 'app\bin\libssl-1_1.dll', `
+            'app\bin\libcrypto-1_1.dll' | Select-Object Name, Length
 
       # ── CONFIGURE: libmpv-2.lib de IMPORTACIÓN MSVC (dumpbin + lib vía vswhere) ──
       # mpv-dev NO trae libmpv-2.lib: trae `libmpv.dll.a` (MinGW), que MSVC NO
       # puede enlazar (LNK1107: invalid or corrupt file — el error original).
       # La receta oficial (la de mpv-2.lib de QtAV / mpv-dev):
-      #   1. vswhere → raíz de VS → bin\Hostx64\x64\dumpbin.exe
-      #   2. dumpbin /exports libmpv-2.dll → fichero .def   (la DLL de mpv-dev
-      #      usa stdcall/x64 → el .def listo para MSVC)
-      #   3. bin\Hostx64\x64\lib.exe /def → libmpv-2.lib (import lib MSVC)
+      #   1. vswhere → raíz de VS → bin\Hostx64\x64\dumpbin.exe  (host x64,
+      #      analiza igual la DLL i686 del mpv-dev)
+      #   2. dumpbin /exports libmpv-2.dll → fichero .def
+      #   3. bin\Hostx64\x64\lib.exe /machine:x86 /def → libmpv-2.lib
+      #      (import lib MSVC que enlaza el x86 final)
       # Todo vía vswhere (robusto en CI sin hardcodear rutas).
       - name: configure (WIN32 + MPV_DEV_DIR + generar libmpv-2.lib de importación MSVC)
         shell: pwsh
@@ -115,12 +124,13 @@ jobs:
             }
           }
           $lib = Join-Path (Split-Path $dll) 'libmpv-2.lib'
-          & $libexe /machine:x64 /def:$def "/out:$lib" *> libmpv-lib.log
+          & $libexe /machine:x86 /def:$def "/out:$lib" *> libmpv-lib.log
           if ($LASTEXITCODE -ne 0) { Write-Host "lib falló:"; Get-Content libmpv-lib.log; exit $LASTEXITCODE }
           $dir = (Resolve-Path mpv-dev).Path
           Write-Host "libmpv-2.lib generado en $lib; MPV_DEV_DIR=$dir"
           cmake -S . -B build-win `
             -DCMAKE_BUILD_TYPE=Release `
+            -A Win32 `
             -DCMAKE_PREFIX_PATH="$env:Qt5_DIR" `
             "-DMPV_DEV_DIR=$dir"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -139,10 +149,11 @@ jobs:
           choco install innosetup --yes --no-progress
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      # libmpv-2.dll (build de shinchiro) importa vulkan-1.dll ESTÁTICAMENTE. En
-      # máquinas sin runtime Vulkan (el equipo de pruebas) la app no arranca:
-      # "no se encontró vulkan-1.dll". Embeber el loader oficial en el paquete.
-      - name: instalar Vulkan Runtime SOLO (vulkan-1.dll, sin el SDK de 0.75 GB)
+      # libmpv-2.dll (build de shinchiro, también el i686) importa vulkan-1.dll
+      # ESTÁTICAMENTE. En máquinas sin runtime Vulkan (el equipo de pruebas) la app no
+      # arranca: "no se encontró vulkan-1.dll". Embeber el loader oficial x86
+      # en el paquete (un exe de 32 bits SOLO carga el loader de 32 bits).
+      - name: instalar Vulkan Runtime SOLO (vulkan-1.dll x86, sin el SDK de 0.75 GB)
         uses: jakoch/install-vulkan-sdk-action@v1
         with:
           install_runtime_only: true
@@ -162,22 +173,23 @@ jobs:
             ForEach-Object { Copy-Item $_.FullName dist\ }
           Copy-Item ytdlp.exe dist\ -ErrorAction SilentlyContinue
           Copy-Item $exe dist\nevertube_qt2.exe
-          # Embeber el loader oficial de Vulkan: sin él, en la máquina de pruebas falla el
-          # arranque (libmpv-2.dll lo importa estáticamente, "falta vulkan-1.dll").
-          $vk = Get-ChildItem 'C:\VulkanSDK\*\runtime\x64\vulkan-1.dll' `
+          # Embeber el loader oficial de Vulkan x86: sin él, en la máquina de pruebas falla
+          # el arranque (libmpv-2.dll i686 lo importa estáticamente, "falta
+          # vulkan-1.dll"). jakoch deja runtime\x86 y runtime\x64.
+          $vk = Get-ChildItem 'C:\VulkanSDK\*\runtime\x86\vulkan-1.dll' `
             -ErrorAction SilentlyContinue |
             Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $vk) {
-            Write-Host "vulkan-1.dll no hallada en C:\VulkanSDK\*\runtime\x64"
+            Write-Host "vulkan-1.dll x86 no hallada en C:\VulkanSDK\*\runtime\x86"
             exit 1 }
           Copy-Item $vk.FullName dist\
           # OpenSSL 1.1.1 = backend TLS de Qt5Network. windeployqt NO la despliega:
           # sin estas DLLs al lado del exe, todo HTTPS falla en la máquina de pruebas con
           # "TLS initialization failed" (no cargan innertube/YouTube).
-          Copy-Item app\bin\libssl-1_1-x64.dll dist\
-          Copy-Item app\bin\libcrypto-1_1-x64.dll dist\
-          $missing = @('libmpv-2.dll','vulkan-1.dll','libssl-1_1-x64.dll',
-            'libcrypto-1_1-x64.dll') |
+          Copy-Item app\bin\libssl-1_1.dll dist\
+          Copy-Item app\bin\libcrypto-1_1.dll dist\
+          $missing = @('libmpv-2.dll','vulkan-1.dll','libssl-1_1.dll',
+            'libcrypto-1_1.dll') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
           if ($missing) {
             Write-Host "dist incompleto: faltan $missing"
