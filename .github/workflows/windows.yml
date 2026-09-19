@@ -45,16 +45,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem mpv-dev -Recurse -Filter *.dll | Select-Object FullName
 
-      - name: bajar ytdlp.exe (build x86 para la máquina de pruebas de 32 bits)
+      - name: bajar yt-dlp x86 (build 32 bits, empaquetado como yt-dlp.exe)
         shell: pwsh
         run: |
-          # yt-dlp.exe oficial ya es x64 y no arranca en Windows de 32 bits.
-          # yt-dlp_x86.exe es el build de 32 bits; la app lo lanza como
-          # "yt-dlp" (QProcess::start("yt-dlp")) y Windows lo halla junto al
-          # exe en la carpetita {app}\ del instalador.
-          curl.exe -sL -o ytdlp.exe `
+          # yt-dlp.exe oficial ya es x64 y no arranca en Windows de 32 bits;
+          # yt-dlp_x86.exe es el build de 32 bits. Se guarda SIEMPRE como
+          # "yt-dlp.exe" para que la app lo encuentre junto a su exe
+          # (Yt::ytDlpBinary: appdir/yt-dlp.exe -> appdir/ytdlp.exe -> PATH).
+          # Empaquetarlo con OTRo nombre (el antiguo ytdlp.exe) rompía
+          # búsquedas/canales: QProcess lanza "yt-dlp" y Windows solo lo halla
+          # si el archivo se llama así.
+          curl.exe -sL -o yt-dlp.exe `
             https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_x86.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\yt-dlp.exe --version
+          if ($LASTEXITCODE -ne 0) { Write-Host "yt-dlp x86 roto"; exit $LASTEXITCODE }
 
       # Qt 5.15.2 (msvc2019 x86) carga su backend TLS por LoadLibrary de las DLLs
       # de OpenSSL 1.1 (libssl-1_1.dll / libcrypto-1_1.dll) DESDE la
@@ -160,7 +165,7 @@ jobs:
           install_runtime_only: true
           cache: true
 
-      - name: empaquetar setup.exe instalable (windeployqt + DLLs mpv-dev + ytdlp + iscc)
+      - name: empaquetar setup.exe instalable (windeployqt + DLLs mpv-dev + yt-dlp + iscc)
         shell: pwsh
         run: |
           $exe = "build-win\Release\nevertube_qt2.exe"
@@ -172,7 +177,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem mpv-dev -Recurse -Filter *.dll |
             ForEach-Object { Copy-Item $_.FullName dist\ }
-          Copy-Item ytdlp.exe dist\ -ErrorAction SilentlyContinue
+          Copy-Item yt-dlp.exe dist\ -ErrorAction SilentlyContinue
           Copy-Item $exe dist\nevertube_qt2.exe
           # Embeber el loader oficial de Vulkan x86: sin él, en la máquina de pruebas falla
           # el arranque (libmpv-2.dll i686 lo importa estáticamente, "falta
@@ -190,7 +195,7 @@ jobs:
           Copy-Item app\bin\libssl-1_1.dll dist\
           Copy-Item app\bin\libcrypto-1_1.dll dist\
           $missing = @('libmpv-2.dll','vulkan-1.dll','libssl-1_1.dll',
-            'libcrypto-1_1.dll') |
+            'libcrypto-1_1.dll','yt-dlp.exe') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
           if ($missing) {
             Write-Host "dist incompleto: faltan $missing"
@@ -255,9 +260,28 @@ jobs:
             exit $rc }
           # Gate del libmpv (headless): inicializa mpv + decodifica micro-clips
           # (AV1/VP9/h264). Un libmpv con el OpenSSL roto (shinchiro may-2026+)
-          # aborta aquí con lock != NULL. qoffscreen se quita solo al final
-          # (los tres selftests lo necesitan).
+          # aborta aquí con lock != NULL.
           $rc = Invoke-Selftest '--selftest-hwprobe'
+          if ($rc -ne 0) { exit $rc }
+          # Gate de yt-dlp (búsquedas/canales/fallbacks): el binario debe ir
+          # empaquetado como yt-dlp.exe junto al exe y arrancar; y la ruta de
+          # búsqueda de la app debe devolver vídeos con id real
+          # (--selftest-search). Caza la regresión "yt-dlp no llega al paquete
+          # o la app no lo encuentra": en ese caso execJson responde done({}) y
+          # parseVideos({}) fabrica 1 vídeo falso 'Sin título'.
+          if (-not (Test-Path '.\dist\yt-dlp.exe')) {
+            Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
+            Write-Host "FALTA dist\yt-dlp.exe (búsquedas/canales/fallbacks rotos)"
+            exit 1 }
+          # yt-dlp.exe es de subsistema CONSOLA; Start-Process -Wait -PassThru
+          # da .ExitCode fiable igual que los selftests.
+          $p = Start-Process -FilePath '.\dist\yt-dlp.exe' -ArgumentList '--version' -Wait -PassThru -NoNewWindow
+          Write-Host "smoke yt-dlp --version exit=$($p.ExitCode)"
+          if ($p.ExitCode -ne 0) {
+            Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
+            exit $p.ExitCode }
+          # qoffscreen se quita solo al final (todos los selftests lo necesitan).
+          $rc = Invoke-Selftest '--selftest-search'
           Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
           if ($rc -ne 0) { exit $rc }
 

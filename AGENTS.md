@@ -49,6 +49,7 @@ solaparse sobre otro, ni en vertical ni en horizontal.
 ./build/nevertube_qt2 --selftest-hwprobe   # sondeo HW offline (micro-clips): av1-hw|vp9-hw|h264-hw|soft-all
 ./build/nevertube_qt2 --selftest-ssl       # backend TLS (OpenSSL 1.1 junto al exe) cargado
 ./build/nevertube_qt2 --selftest-tls       # handshake TLS REAL contra hosts públicos (no solo carga)
+./build/nevertube_qt2 --selftest-search    # búsqueda yt-dlp REAL: vídeos con id no vacío (caza "yt-dlp no inicia")
 ```
 
 El selftest del player verifica invariantes del núcleo protegido sin
@@ -179,7 +180,7 @@ tarda (>300 ms, PC básico) o si el usuario intenta reproducir mientras sondea.
 - `./build/nevertube_qt2 http://...` → reproducir una URL al arrancar
 - `./build/nevertube_qt2 --selftest-db` / `--selftest-player` /
   `--selftest-innertube` / `--selftest-discover` / `--selftest-home` /
-  `--selftest-feeds` / `--selftest-av1hls` / `--selftest-hwprobe` → pruebas
+  `--selftest-feeds` / `--selftest-av1hls` / `--selftest-hwprobe` / `--selftest-search` → pruebas
 
 ## Caché de miniaturas y suscripciones
 
