@@ -9,16 +9,22 @@ set(CMAKE_AUTORCC ON)
 find_package(Qt5 REQUIRED COMPONENTS Core Gui Widgets Network Sql)
 find_package(OpenGL REQUIRED)
 find_package(PkgConfig REQUIRED)
-# mpv: el "cliente oficial" para Windows (mpv.io/mpv-dev) instala un paquete
-# CONFIG llamado `unofficial-mpv` (target `mpv`) que encuentra mpv-2.dll desde
-# mpv-dev-x86_64-*.7z + windeployqt. En Unix en cambio no existe ese paquete
-# CONFIG: mpv se detecta vía pkg-config (mpv.pc con libmpv). Esta máquina
-# (Linux) compila/verifica la rama else(); la if(WIN32) es build-config y el
-# build final de Windows corre en el equipo del usuario.
+# mpv: en Linux se halla con pkg-config (mpv.pc, target PkgConfig::MPV). En
+# Windows a través de vcpkg → paquete CONFIG `unofficial-mpv` (target
+# `unofficial::mpv`) que entrega import-lib + mpv-2.dll + headers. Se unifica
+# en MPV::MPV para que target_link_libraries no dependa de la plataforma.
+# Esta máquina (Linux) compila/verifica la rama else(); la if(WIN32) es
+# build-config y el build final de Windows corre en el equipo del usuario.
 if(WIN32)
   find_package(unofficial-mpv CONFIG REQUIRED)
+  add_library(MPV::MPV INTERFACE IMPORTED)
+  set_target_properties(MPV::MPV PROPERTIES
+    INTERFACE_LINK_LIBRARIES unofficial::mpv)
 else()
   pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
+  add_library(MPV::MPV INTERFACE IMPORTED)
+  set_target_properties(MPV::MPV PROPERTIES
+    INTERFACE_LINK_LIBRARIES PkgConfig::MPV)
 endif()
 
 add_executable(nevertube_qt2
@@ -87,7 +93,7 @@ target_link_libraries(nevertube_qt2 PRIVATE
   Qt5::Network
   Qt5::Sql
   OpenGL::GL
-  PkgConfig::MPV
+  MPV::MPV
 )
 
 if(WIN32)
