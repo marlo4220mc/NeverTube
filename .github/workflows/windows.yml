@@ -222,34 +222,43 @@ jobs:
       # mpv_initialize; la fuente (media-kit) está pinada precisamente para
       # evitar ese combo. La reproducción REAL ya se verifica aparte (la DLL
       # pinada está validada en máquina con paintGL+frames).
+      #
+      # ¡OJO con el exit code! nevertube_qt2.exe es de SUBSISTEMA GUI: al
+      # lanzarlo con `&` PowerShell NO espera a que termine NI fija
+      # $LASTEXITCODE (queda vacío). El patrón `& exe; $rc=$LASTEXITCODE`
+      # producía `if ($null -ne 0) { exit $null }` → código 0 y el step se
+      # daba por verde tras el PRIMER selftest, saltándose los demás. Por eso
+      # cada selftest va con Start-Process -Wait -PassThru y se lee .ExitCode.
       - name: smoke test del paquete dist (arranca sin DLLs faltantes + handshake TLS real + mpv init)
         shell: pwsh
         run: |
           # windeployqt solo despliega qwindows.dll; el offscreen se inyecta
-          # solo para el smoke y se quita después (no va al instalador).
+          # solo para el smoke y se quita al final (no va al instalador).
           $qtsrc = Split-Path (Split-Path $env:Qt5_DIR)
           Copy-Item "$qtsrc\plugins\platforms\qoffscreen.dll" dist\platforms\ -Force
           $env:QT_QPA_PLATFORM = 'offscreen'
+          function Invoke-Selftest([string]$flag) {
+            $p = Start-Process -FilePath '.\dist\nevertube_qt2.exe' -ArgumentList $flag -Wait -PassThru -NoNewWindow
+            $code = $p.ExitCode
+            Write-Host "smoke $flag exit=$code"
+            return $code
+          }
           # TLS: handshake real. Si OpenSSL aborta (lock != NULL) el proceso
           # muere con abort() y el step falla con el assert en el log.
-          & .\dist\nevertube_qt2.exe --selftest-tls
-          $rc = $LASTEXITCODE
-          Write-Host "smoke selftest-tls exit=$rc"
+          $rc = Invoke-Selftest '--selftest-tls'
           if ($rc -ne 0) {
             Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
             exit $rc }
-          & .\dist\nevertube_qt2.exe --selftest-db
-          $rc = $LASTEXITCODE
-          Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
-          Write-Host "smoke selftest-db exit=$rc"
-          if ($rc -ne 0) { exit $rc }
+          $rc = Invoke-Selftest '--selftest-db'
+          if ($rc -ne 0) {
+            Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
+            exit $rc }
           # Gate del libmpv (headless): inicializa mpv + decodifica micro-clips
           # (AV1/VP9/h264). Un libmpv con el OpenSSL roto (shinchiro may-2026+)
-          # aborta aquí con lock != NULL.
-          & .\dist\nevertube_qt2.exe --selftest-hwprobe
-          $rc = $LASTEXITCODE
+          # aborta aquí con lock != NULL. qoffscreen se quita solo al final
+          # (los tres selftests lo necesitan).
+          $rc = Invoke-Selftest '--selftest-hwprobe'
           Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
-          Write-Host "smoke selftest-hwprobe exit=$rc"
           if ($rc -ne 0) { exit $rc }
 
       - uses: actions/upload-artifact@v4
