@@ -12,8 +12,8 @@ resto sigue igual (Qt5, OpenGL, SQLite). Esta sección solo se ejecuta si
 ## Requisitos
 
 1. **Qt 5.15.x** (MSVC 2019 o MinGW) → al final `windeployqt` se encarga de las DLLs de Qt.
-2. **mpv dev para Windows** (descarga de `https://mpv.io/installation/` → mpv-dev-i686; el equipo objetivo es Windows x86 de 32 bits, así que TODO el build es Win32):
-   - `mpv.lib` / `mpv-2.dll` (libmpv)
+2. **mpv dev para Windows** (el equipo objetivo es Windows x86 de 32 bits, así que TODO el build es Win32). **Fuente: `media-kit/libmpv-win32-video-cmake`** (release `20241021`, `mpv-dev-i686-20241021-git-0f78584.7z`), NO los builds de `shinchiro/mpv-winbuild-cmake` de mayo 2026 en adelante: incrustan un OpenSSL 3 de master con el commit roto `1e1ea715` que aborta con `lock != NULL` al inicializar mpv (ago-sep 2026) o al reproducir (may-jun 2026). El build de media-kit es de oct 2024 (OpenSSL anterior al bug) y está validado con reproducción real en x86:
+   - `libmpv-2.dll` (libmpv)
    - cabeceras `mpv/client.h` etc.
    - La rama `find_package(unofficial-mpv CONFIG)` del CMake detecta esto.
 3. **yt-dlp.exe** en el directorio de salida (junto al `.exe`).
