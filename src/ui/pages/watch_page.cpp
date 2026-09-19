@@ -343,6 +343,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_ovVolume->setCursor(Qt::PointingHandCursor);
     connect(m_ovVolume, &QSlider::valueChanged, this, [this](int v) {
         m_player->setVolume(v);
+        if (m_settings)
+            m_settings->set(QStringLiteral("volume"), QString::number(v));
     });
     btnRow->addWidget(m_ovVolume);
 
@@ -391,11 +393,20 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     auto *menuLay = new QVBoxLayout(m_qualityMenu);
     menuLay->setContentsMargins(4, 4, 4, 4);
     menuLay->setSpacing(1);
+    // En perfil soft-all (decodificación por CPU, sin HW) no tiene sentido
+    // ofrecer 1440p/2160p: el menú los oculta para que el usuario no elija una
+    // resolución que un CPU puro no puede mover. Los índices se mantienen
+    // alineados con idxToQuality(): solo se ocultan, no se quitan.
     static const int kQualities[] = {360, 480, 720, 1080, 1440, 2160};
+    const bool softAll = m_settings
+        && m_settings->getString(QStringLiteral("codec_profile"),
+                                 QStringLiteral("av1-hw"))
+               == QStringLiteral("soft-all");
     for (int i = 0; i < 6; ++i) {
         auto *item = new QPushButton(
             QStringLiteral("%1p").arg(kQualities[i]), m_qualityMenu);
         item->setFixedWidth(90);
+        item->setVisible(!(softAll && (i == 4 || i == 5)));
         const int idx = i;
         connect(item, &QPushButton::clicked, this, [this, idx]() {
             setQualityIndex(idx);
@@ -1271,6 +1282,15 @@ void WatchPage::onPlayPause()
 void WatchPage::onToggleMute()
 {
     m_player->toggleMute();
+    // Persistir silencio actual (y volumen por si el overlay lo cambió
+    // sin pasar por el slider de la mini bar).
+    if (m_settings) {
+        m_settings->set(QStringLiteral("volume"),
+                        QString::number(int(m_player->volume())));
+        m_settings->set(QStringLiteral("volume_muted"),
+                        m_player->muted() ? QStringLiteral("1")
+                                          : QStringLiteral("0"));
+    }
     updateOverlayIcons();
 }
 

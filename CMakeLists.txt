@@ -9,7 +9,17 @@ set(CMAKE_AUTORCC ON)
 find_package(Qt5 REQUIRED COMPONENTS Core Gui Widgets Network Sql)
 find_package(OpenGL REQUIRED)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
+# mpv: el "cliente oficial" para Windows (mpv.io/mpv-dev) instala un paquete
+# CONFIG llamado `unofficial-mpv` (target `mpv`) que encuentra mpv-2.dll desde
+# mpv-dev-x86_64-*.7z + windeployqt. En Unix en cambio no existe ese paquete
+# CONFIG: mpv se detecta vía pkg-config (mpv.pc con libmpv). Esta máquina
+# (Linux) compila/verifica la rama else(); la if(WIN32) es build-config y el
+# build final de Windows corre en el equipo del usuario.
+if(WIN32)
+  find_package(unofficial-mpv CONFIG REQUIRED)
+else()
+  pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
+endif()
 
 add_executable(nevertube_qt2
   src/main.cpp
@@ -20,6 +30,8 @@ add_executable(nevertube_qt2
   src/db/repositories.h
   src/hls_server.cpp
   src/hls_server.h
+  src/hwprobe.cpp
+  src/hwprobe.h
   src/playerwidget.cpp
   src/playerwidget.h
   src/player_controller.cpp

@@ -46,6 +46,7 @@ solaparse sobre otro, ni en vertical ni en horizontal.
 ./build/nevertube_qt2 --selftest-innertube # sw.js_data→visitorData→player→hlsManifestUrl
 ./build/nevertube_qt2 --selftest-discover  # radios guardadas: guardar/recuperar/re-seleccionar/persistencia/descarte
 ./build/nevertube_qt2 --selftest-av1hls    # HLS sintético AV1 (offline): MAP/BYTERANGE, /seg.mp4, &nt único
+./build/nevertube_qt2 --selftest-hwprobe   # sondeo HW offline (micro-clips): av1-hw|vp9-hw|h264-hw|soft-all
 ```
 
 El selftest del player verifica invariantes del núcleo protegido sin
@@ -129,6 +130,40 @@ valida la playlist generada (`EXT-X-MAP`/`BYTERANGE`, sufijo `/seg.mp4`, `&nt`
 distinto por segmento, selección de altura y el parseo del `sidx`) sin red ni
 reproductor.
 
+## Perfil de códec por hardware (HwProbe)
+
+El perfil que decide qué códec se pide a YouTube (`settings.codec_profile`)
+**no** se adivina durante la reproducción: se sondea **al arranque** con
+`HwProbe` (`src/hwprobe.*`), que reproduce en headless (`vo=null`,
+`hwdec=auto-copy`, sin audio ni config) tres micro-clips embebidos en
+`resources/clips/` (AV1, VP9, H.264) en ese orden y lee `hwdec-current` tras el
+primer frame decodificado. Perfiles: `av1-hw` > `vp9-hw` > `h264-hw` >
+`soft-all` (los tres caen a software). `MainWindow::applyCodecProfile` traduce el
+perfil a `Yt::CodecProfile` (Modern/Vp9/Legacy), espera inicial de buffer y, en
+`soft-all`, `m_noHw` + tope 1080p. Mientras se sondea se usa `h264-hw` sin
+persistir y **no se reproduce**: la petición se encola (`m_hasPendingWatch`) y se
+lanza al terminar. El cartel "Detectando hardware" solo aparece si el sondeo
+tarda (>300 ms, PC básico) o si el usuario intenta reproducir mientras sondea.
+
+- Un `END_FILE` por error o un timeout **no** significa "software": es
+  indeterminado y se conserva el default sin persistir (se reintenta al
+  arrancar). Solo `decoded && hwdec-current != vacío` concluye.
+- Nombres antiguos migrados al arrancar: `modern→av1-hw`, `vp9→vp9-hw`,
+  `legacy→h264-hw`, `nohw→soft-all`.
+- Red de seguridad reactiva (`PlayerWidget::streamDecodeInfoReady`): si el
+  códec que el perfil da por HW se decodifica con `hwdec-current=no`, degrada la
+  escalera (`av1-hw→vp9-hw→h264-hw→soft-all`) y persiste. `PlayerWidget` reintenta
+  leer `hwdec-current` (llega vacío en el primer `video-params`) con un `QTimer`.
+- `Yt::codecRankedScore(altura, mime) = rank*100000 + altura`: la preferencia de
+  códec pesa más que la altura, así el códec que la GPU decodifica gana aunque su
+  variante sea más baja (p. ej. `h264-hw` prefiere h264 1080 antes que VP9 2160,
+  que iría a software). Se usa en `edgeHeight`, `buildEdgeMaster` y
+  `buildFilteredMaster`. El HLS sintético AV1 (`buildAv1Hls`) solo se genera con
+  perfil `Modern` (`av1-hw`).
+- Ajustes → "Volver a detectar hardware" borra `codec_profile` y relanza
+  `HwProbe` en caliente. El selftest `--selftest-hwprobe` imprime el perfil
+  detectado (dependiente de la GPU; no es un assert fijo).
+
 ## Puntos de entrada CLI
 
 - `./build/nevertube_qt2` → app normal
@@ -137,7 +172,7 @@ reproductor.
 - `./build/nevertube_qt2 http://...` → reproducir una URL al arrancar
 - `./build/nevertube_qt2 --selftest-db` / `--selftest-player` /
   `--selftest-innertube` / `--selftest-discover` / `--selftest-home` /
-  `--selftest-feeds` → pruebas
+  `--selftest-feeds` / `--selftest-av1hls` / `--selftest-hwprobe` → pruebas
 
 ## Caché de miniaturas y suscripciones
 

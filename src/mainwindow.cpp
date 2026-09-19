@@ -20,11 +20,13 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFrame>
 #include <QProcess>
 #include <QTimer>
 #include <functional>
 
 #include "models.h"
+#include "hwprobe.h"
 #include "playerwidget.h"
 #include "../src/debug.h"
 #include "ui/format.h"
@@ -145,6 +147,21 @@ protected:
     }
 };
 
+// Migra los nombres de perfil de códec antiguos (detección reactiva) a los del
+// sondeo offline de HwProbe. Se persiste la migración para no repetirla.
+QString normalizeCodecProfile(const QString &raw)
+{
+    if (raw == QLatin1String("modern"))
+        return QStringLiteral("av1-hw");
+    if (raw == QLatin1String("vp9"))
+        return QStringLiteral("vp9-hw");
+    if (raw == QLatin1String("legacy"))
+        return QStringLiteral("h264-hw");
+    if (raw == QLatin1String("nohw"))
+        return QStringLiteral("soft-all");
+    return raw;
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
@@ -158,122 +175,65 @@ MainWindow::MainWindow(QWidget *parent)
 {
     m_db.open();
     m_yt->setVisitorStorage(&m_settings);
-    // Detección del perfil de códec del master edge basada en lo que mpv
-    // decodifica de verdad (hwdec-current) durante la reproducción real:
-    //   - Sin perfil previo: la primera sesión establece "modern" si hay
-    //     decodificación por hardware, "vp9" si el códec decodificado es
-    //     VP9 webm sin AV1, "legacy" si todo es software (h264).
-    //   - Auto-corrección (cadena reactiva por códec, se persiste cada paso):
-    //       modern + AV1 a software -> vp9  (GPU sin decodificador AV1)
-    //       vp9    + VP9 a software -> legacy (GPU sin VP9 tampoco)
-    //     El flujo normal de un PC con HW para todo queda en "modern".
-    const QString savedProfile = m_settings.getString(
+    // Perfil de códec de vídeo. HwProbe sondea la GPU con micro-clips offline y
+    // deja un perfil persistido (av1-hw|vp9-hw|h264-hw|soft-all). Si no hay
+    // resultado se usa h264 (universal) sin persistir, y mientras se sondea no
+    // se reproduce (la petición se encola). La red de seguridad reactiva
+    // (streamDecodeInfoReady) corrige el perfil si el códec que éste da por HW
+    // cae a software.
+    const QString rawProfile = m_settings.getString(
         QStringLiteral("codec_profile"), QString());
-    if (!savedProfile.isEmpty()) {
-        if (savedProfile == QLatin1String("modern")) {
-            m_yt->setCodecProfile(Yt::CodecProfile::Modern);
-            // AV1/VP9 van con margen bajo el throttle: espera corta (1 s) al
-            // arrancar 1080p+ para cubrir el cierre del fast-start.
-            m_playerWidget->setInitialBufferSecs(1.0);
-        } else if (savedProfile == QLatin1String("vp9")) {
-            m_yt->setCodecProfile(Yt::CodecProfile::Vp9);
-            m_playerWidget->setInitialBufferSecs(1.0);
-        } else if (savedProfile == QLatin1String("nohw")) {
-            // PC sin decodificación por hardware: espera más agresiva (8 s) y
-            // tope 1080p.
-            m_yt->setCodecProfile(Yt::CodecProfile::Legacy);
-            m_noHw = true;
-            m_playerWidget->setInitialBufferSecs(8.0);
-        } else {
-            // Legacy/h264 sin confirmar nohw: h264 va al límite del throttle,
-            // espera más agresiva (3 s).
-            m_yt->setCodecProfile(Yt::CodecProfile::Legacy);
-            m_playerWidget->setInitialBufferSecs(3.0);
-        }
+    const QString savedProfile = normalizeCodecProfile(rawProfile);
+    if (!rawProfile.isEmpty() && savedProfile != rawProfile)
+        m_settings.set(QStringLiteral("codec_profile"), savedProfile);
+    if (savedProfile.isEmpty()) {
+        applyCodecProfile(QStringLiteral("h264-hw"), false);
+        startHwProbe();
     } else {
-        // Sin perfil guardado (primera sesión): espera corta por defecto; la
-        // cadena reactiva la ajustará según lo que decodifique la GPU.
-        m_playerWidget->setInitialBufferSecs(1.0);
+        applyCodecProfile(savedProfile, false);
     }
     connect(m_playerWidget, &PlayerWidget::streamDecodeInfoReady, this,
             [this](const QString &codec, const QString &hwdecBackend) {
                 // hwdec-current llega "vacío" en el primer video-params (mpv
-                // aún no decidió/activó el decodificador) y "no" cuando el
-                // decoder se sabe en software. Solo "no" es software real:
-                // vacío = todavía indeterminado, no cuenta como fallo.
-                const bool hwConfirmed =
-                    hwdecBackend == QLatin1String("no");
-                const bool hwOk =
-                    !hwdecBackend.isEmpty() && hwdecBackend != QLatin1String("no");
-                const QString profile = m_settings.getString(
-                    QStringLiteral("codec_profile"), QString());
+                // aún no activó el decodificador) y "no" cuando el decoder se
+                // sabe en software. Solo "no" es software real y dispara la
+                // corrección: vacío = todavía indeterminado.
+                if (hwdecBackend != QLatin1String("no")) {
+                    NT_DEBUG("E2E codec hw=%s cod=%s\n",
+                             hwdecBackend.toUtf8().constData(),
+                             codec.toUtf8().constData());
+                    return;
+                }
+                const QString profile = normalizeCodecProfile(m_settings.getString(
+                    QStringLiteral("codec_profile"), QString()));
                 const bool av1 = codec.contains(QLatin1String("AV1"),
                                                 Qt::CaseInsensitive);
                 const bool vp9 = codec.contains(QLatin1String("VP9"),
                                                Qt::CaseInsensitive);
-                const auto setProfile = [this, &codec, &hwdecBackend](
-                                            const QString &name,
-                                            Yt::CodecProfile prof,
-                                            double waitSecs) {
-                    m_settings.set(QStringLiteral("codec_profile"), name);
-                    m_yt->setCodecProfile(prof);
-                    m_playerWidget->setInitialBufferSecs(waitSecs);
-                    NT_DEBUG("E2E codec_profile=%s wait=%gs (cod=%s hw=%s)\n",
-                             name.toUtf8().constData(), waitSecs,
+                const bool h264 = codec.contains(QLatin1String("avc"),
+                                                 Qt::CaseInsensitive)
+                    || codec.contains(QLatin1String("h264"),
+                                      Qt::CaseInsensitive);
+                // Escalera completa de degradación: el perfil daba por HW el
+                // códec que en realidad decodifica la CPU.
+                if (profile == QLatin1String("av1-hw") && av1) {
+                    NT_DEBUG("E2E codec_profile downgrade av1-hw->vp9-hw "
+                             "cod=%s hw=%s\n",
                              codec.toUtf8().constData(),
                              hwdecBackend.toUtf8().constData());
-                };
-                if (profile.isEmpty()) {
-                    // Primera sesión: fijar el perfil según lo primero que
-                    // decodifique de verdad. Backend vacío = indeterminado:
-                    // esperar al siguiente reporte en vez de fijar un perfil
-                    // equivocado (modern sin AV1 rome la cadena).
-                    if (hwdecBackend.isEmpty())
-                        return;
-                    if (hwOk && av1)
-                        setProfile(QStringLiteral("modern"),
-                                   Yt::CodecProfile::Modern, 1.0);
-                    else if (hwOk && vp9)
-                        setProfile(QStringLiteral("vp9"),
-                                   Yt::CodecProfile::Vp9, 1.0);
-                    else if (hwOk)
-                        // HW que por ahora solo decodificó h264: asumir
-                        // modern (la cadena de degradación lo corrige si no).
-                        setProfile(QStringLiteral("modern"),
-                                   Yt::CodecProfile::Modern, 1.0);
-                    else
-                        setProfile(QStringLiteral("legacy"),
-                                   Yt::CodecProfile::Legacy, 3.0);
-                } else if (profile == QLatin1String("modern")
-                           && hwConfirmed && av1) {
-                    // GPU sin decodificador AV1: AV1 cae a software en esta
-                    // sesión. Degradar a vp9 (hardware con VP9 sí o sí en la
-                    // mayoría de GPUs sin AV1).
-                    setProfile(QStringLiteral("vp9"),
-                               Yt::CodecProfile::Vp9, 1.0);
-                } else if (profile == QLatin1String("vp9")
-                           && hwConfirmed && vp9) {
-                    // GPU sin decodificador VP9: degradar a legacy (h264).
-                    setProfile(QStringLiteral("legacy"),
-                               Yt::CodecProfile::Legacy, 3.0);
-                }
-                // Modo sin HW en absoluto: el perfil quedó en legacy y lo que
-                // se decodifica (h264 u otro) también es software. En ese PC
-                // solo 1080p máximo y es espera agresiva de buffer al arrancar.
-                // No disparar en cada stream repetido: solo la primera vez.
-                if (profile != QLatin1String("nohw") && hwConfirmed
-                    && profile == QLatin1String("legacy")) {
-                    m_settings.set(QStringLiteral("codec_profile"),
-                                   QStringLiteral("nohw"));
-                    m_noHw = true;
-                    // El h264 a 1080p va pegado al throttle: espera agresiva
-                    // (8 s de contenido) antes de arrancar. 720p no espera.
-                    m_playerWidget->setInitialBufferSecs(8.0);
-                    if (m_player.maxHeight() > 1080)
-                        m_player.setMaxHeight(1080);
-                    NT_DEBUG("E2E nohw=1 profile=nohw (cod=%s hw=%s)\n",
+                    applyCodecProfile(QStringLiteral("vp9-hw"), true);
+                } else if (profile == QLatin1String("vp9-hw") && vp9) {
+                    NT_DEBUG("E2E codec_profile downgrade vp9-hw->h264-hw "
+                             "cod=%s hw=%s\n",
                              codec.toUtf8().constData(),
                              hwdecBackend.toUtf8().constData());
+                    applyCodecProfile(QStringLiteral("h264-hw"), true);
+                } else if (profile == QLatin1String("h264-hw") && h264) {
+                    NT_DEBUG("E2E codec_profile downgrade h264-hw->soft-all "
+                             "cod=%s hw=%s\n",
+                             codec.toUtf8().constData(),
+                             hwdecBackend.toUtf8().constData());
+                    applyCodecProfile(QStringLiteral("soft-all"), true);
                 }
             });
     m_elapsed.start();
@@ -299,6 +259,12 @@ MainWindow::MainWindow(QWidget *parent)
         m_player.setMaxHeight(1080);
     m_player.setMaxHeight(m_player.maxHeight());
 
+
+    // Volumen/silencio persistidos en la sesión anterior.
+    const double savedVol = m_settings.getInt(QStringLiteral("volume"), 100);
+    m_player.setVolume(savedVol);
+    if (m_settings.getInt(QStringLiteral("volume_muted"), 0) == 1)
+        m_player.setMuted(true);
     // Preferencia de idioma de audio
     const QString savedAL = m_settings.getString(
         QStringLiteral("audio_language"), QStringLiteral("original"));
@@ -414,6 +380,12 @@ MainWindow::MainWindow(QWidget *parent)
     // nativo (secuestraba el puntero con un segundo diálogo).
     connect(m_settingsPage, &SettingsPage::resetRequested,
             this, [this]() { resetAppData(); });
+    // "Volver a detectar hardware": la página ya borró codec_profile; relanzar
+    // HwProbe. Si hay reproducción en curso no se interrumpe el vídeo actual,
+    // pero la app queda en modo "sondeando" (no admite otra reproducción) hasta
+    // que termine.
+    connect(m_settingsPage, &SettingsPage::redetectHwRequested,
+            this, [this]() { startHwProbe(); });
 
     m_pages->addWidget(m_home);
     m_pages->addWidget(m_search);
@@ -636,21 +608,28 @@ bool MainWindow::handleShortcut(QKeyEvent *event)
         if (!m_player.isActive())
             return false;
         m_player.setVolume(qMin(m_player.volume() + 5.0, 100.0));
+        persistVolume();
         updateMiniIcons();
         return true;
     case Qt::Key_Down:
         if (!m_player.isActive())
             return false;
         m_player.setVolume(qMax(m_player.volume() - 5.0, 0.0));
+        persistVolume();
         updateMiniIcons();
         return true;
     case Qt::Key_M:
         if (!m_player.isActive())
             return false;
         m_player.toggleMute();
+        persistVolume();
         updateMiniIcons();
         return true;
     case Qt::Key_F:
+        // Pantalla completa solo desde la página del reproductor: el atajo no
+        // debe escalar la ventana cuando el usuario está en Home, Ajustes, etc.
+        if (m_pages->currentWidget() != m_watch)
+            return false;
         m_watch->toggleFullscreen();
         return true;
     case Qt::Key_Escape:
@@ -824,6 +803,7 @@ void MainWindow::setupMiniBar()
     });
     connect(m_miniMuteBtn, &QPushButton::clicked, this, [this]() {
         m_player.toggleMute();
+        persistVolume();
         updateMiniIcons();
     });
     connect(m_miniCloseBtn, &QPushButton::clicked, this, [this]() {
@@ -945,6 +925,18 @@ void MainWindow::setMiniThumb()
                   Qt::SmoothTransformation));
 }
 
+// Persiste volumen y silencio actuales del controlador (src/db/settings:
+// claves "volume" / "volume_muted"); MainWindow::persistVolume() al arranque
+// los vuelve a aplicar. Se llama tras cada cambio hecho por el usuario.
+void MainWindow::persistVolume()
+{
+    m_settings.set(QStringLiteral("volume"),
+                   QString::number(m_player.volume()));
+    m_settings.set(QStringLiteral("volume_muted"),
+                   m_player.muted() ? QStringLiteral("1")
+                                    : QStringLiteral("0"));
+}
+
 void MainWindow::updateMiniIcons()
 {
     if (!m_miniPlayBtn || !m_miniMuteBtn)
@@ -1058,6 +1050,130 @@ void MainWindow::showPreviousTab()
         m_navButtons[nav]->setChecked(true);
 }
 
+void MainWindow::applyCodecProfile(const QString &profile, bool persist)
+{
+    if (persist)
+        m_settings.set(QStringLiteral("codec_profile"), profile);
+    m_noHw = profile == QLatin1String("soft-all");
+    if (profile == QLatin1String("av1-hw")) {
+        m_yt->setCodecProfile(Yt::CodecProfile::Modern);
+        m_playerWidget->setInitialBufferSecs(1.0);
+    } else if (profile == QLatin1String("vp9-hw")) {
+        m_yt->setCodecProfile(Yt::CodecProfile::Vp9);
+        m_playerWidget->setInitialBufferSecs(1.0);
+    } else if (profile == QLatin1String("soft-all")) {
+        // Sin HW: h264 (universal) -> perfil Legacy, espera agresiva y tope
+        // 1080p (a un CPU puro un 1440p+ le revienta).
+        m_yt->setCodecProfile(Yt::CodecProfile::Legacy);
+        m_playerWidget->setInitialBufferSecs(6.0);
+        if (m_player.maxHeight() > 1080)
+            m_player.setMaxHeight(1080);
+    } else {
+        // h264-hw (y perfiles desconocidos): h264 por hardware, margen bajo el
+        // throttle -> espera corta.
+        m_yt->setCodecProfile(Yt::CodecProfile::Legacy);
+        m_playerWidget->setInitialBufferSecs(1.5);
+    }
+    NT_DEBUG("E2E codec_profile apply=%s persist=%d noHw=%d\n",
+             profile.toUtf8().constData(), persist ? 1 : 0, m_noHw ? 1 : 0);
+    if (m_settingsPage)
+        m_settingsPage->updateCodecProfile(profile);
+}
+
+void MainWindow::showHwPopup()
+{
+    if (m_hwPopup || !m_hwProbing)
+        return;
+    m_hwPopup = new QFrame(this);
+    m_hwPopup->setObjectName(QStringLiteral("hwProbePopup"));
+    m_hwPopup->setAttribute(Qt::WA_StyledBackground, true);
+    m_hwPopup->setStyleSheet(QStringLiteral(
+        "#hwProbePopup { background: rgba(18,18,18,0.96);"
+        " border: 1px solid #3a3a3a; border-radius: 10px; }"));
+    auto *lay = new QVBoxLayout(m_hwPopup);
+    lay->setContentsMargins(28, 22, 28, 22);
+    lay->setSpacing(8);
+    auto *title = new QLabel(QStringLiteral("Detectando hardware de vídeo"),
+                             m_hwPopup);
+    title->setStyleSheet(QStringLiteral(
+        "color: #fff; font-size: 16px; font-weight: 600;"));
+    title->setAlignment(Qt::AlignCenter);
+    auto *text = new QLabel(
+        QStringLiteral("Comprobando la aceleración de vídeo de tu equipo.\n"
+                       "La reproducción comenzará al terminar."),
+        m_hwPopup);
+    text->setStyleSheet(QStringLiteral("color: #c8c8c8; font-size: 12px;"));
+    text->setAlignment(Qt::AlignCenter);
+    lay->addWidget(title);
+    lay->addWidget(text);
+    m_hwPopup->adjustSize();
+    centerHwPopup();
+    m_hwPopup->show();
+    m_hwPopup->raise();
+}
+
+void MainWindow::centerHwPopup()
+{
+    if (!m_hwPopup || !centralWidget())
+        return;
+    const QRect g = centralWidget()->geometry();
+    const QSize s = m_hwPopup->size();
+    m_hwPopup->move(g.center().x() - s.width() / 2,
+                    g.center().y() - s.height() / 2);
+    m_hwPopup->raise();
+}
+
+void MainWindow::startHwProbe()
+{
+    if (m_hwProbing)
+        return;
+    // HwProbe es de un solo uso (m_done): re-crearlo en cada re-detección, si no
+    // start() sería un no-op y m_hwProbing quedaría colgado para siempre.
+    if (m_hwProbe) {
+        m_hwProbe->deleteLater();
+        m_hwProbe = nullptr;
+    }
+    m_hwProbing = true;
+    m_hwProbe = new HwProbe(this);
+    connect(m_hwProbe, &HwProbe::finished, this,
+            [this](const QString &profile) {
+                m_hwProbing = false;
+                if (m_hwPopupTimer)
+                    m_hwPopupTimer->stop();
+                if (m_hwPopup) {
+                    m_hwPopup->hide();
+                    m_hwPopup->deleteLater();
+                    m_hwPopup = nullptr;
+                }
+                if (profile.isEmpty()) {
+                    // Indeterminado (los clips no decodifican): h264 sin
+                    // persistir; se reintentará en el próximo arranque.
+                    applyCodecProfile(QStringLiteral("h264-hw"), false);
+                } else {
+                    applyCodecProfile(profile, true);
+                }
+                if (m_hasPendingWatch) {
+                    const QVector<VideoInfo> v = m_pendingWatch;
+                    const int idx = m_pendingIndex;
+                    const qlonglong pos = m_pendingPos;
+                    m_hasPendingWatch = false;
+                    openWatchAt(v, idx, pos);
+                }
+            });
+    // El cartel solo aparece si el sondeo tarda (PC básico); en un PC rápido el
+    // resultado llega antes de 300 ms y el usuario no ve nada.
+    if (!m_hwPopupTimer) {
+        m_hwPopupTimer = new QTimer(this);
+        m_hwPopupTimer->setSingleShot(true);
+        connect(m_hwPopupTimer, &QTimer::timeout, this, [this]() {
+            if (m_hwProbing)
+                showHwPopup();
+        });
+    }
+    m_hwPopupTimer->start(300);
+    m_hwProbe->start();
+}
+
 void MainWindow::openWatch(const QVector<VideoInfo> &videos, int startIndex)
 {
     openWatchAt(videos, startIndex, 0);
@@ -1109,6 +1225,17 @@ void MainWindow::openWatchResume(const QVector<VideoInfo> &videos,
 void MainWindow::openWatchAt(const QVector<VideoInfo> &videos, int startIndex,
                              qlonglong startPositionMs)
 {
+    // Sondeo de hardware en curso: no se puede reproducir todavía. Se encola la
+    // petición (con su posición de reanudación) y se muestra el cartel, que se
+    // cierra al terminar el sondeo, momento en que se abre el vídeo.
+    if (m_hwProbing) {
+        m_pendingWatch = videos;
+        m_pendingIndex = startIndex;
+        m_pendingPos = startPositionMs;
+        m_hasPendingWatch = true;
+        showHwPopup();
+        return;
+    }
     // Deja de sembrar radios de Descubre: al abrir un vídeo la radio de
     // "A continuación" pasa a ser el único consumidor de fetchRadio()
     // (single-flight en Innertube).

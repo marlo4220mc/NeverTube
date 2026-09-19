@@ -39,6 +39,9 @@ public:
     void previous();
     void playPause();
     void toggleMute();
+    // Fija el estado de silencio sin alternarlo (para restaurar el volumen del
+    // usuario al arrancar). muted==true pone el volumen a 0, false lo recuerda.
+    void setMuted(bool muted);
     void setVolume(double volume);
     void seek(double seconds);
     void reloadCurrent();

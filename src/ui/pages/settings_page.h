@@ -18,6 +18,9 @@ class SettingsPage : public QWidget
 public:
     explicit SettingsPage(SettingsRepo *settings, QWidget *parent = nullptr);
 
+    // Refresca la fila "Aceleración de vídeo" con el perfil vigente.
+    void updateCodecProfile(const QString &profile);
+
 signals:
     void qualityChanged(const QString &value);
     void nextModeChanged(const QString &mode);
@@ -26,6 +29,7 @@ signals:
     void gridDensityChanged(const QString &density);
     void clearThumbsRequested();
     void resetRequested();
+    void redetectHwRequested();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -48,6 +52,7 @@ private:
     void centerPopup();
 
     SettingsRepo *m_settings;
+    QLabel *m_codecProfileLabel = nullptr;
     QFrame *m_confirmPopup = nullptr;
     QLabel *m_confirmTitle = nullptr;
     QLabel *m_confirmText = nullptr;

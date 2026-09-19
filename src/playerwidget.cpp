@@ -43,7 +43,7 @@ PlayerWidget::PlayerWidget(QWidget *parent)
     mpv_set_option_string(m_mpv, "cache-initial", "3MiB");
     mpv_set_option_string(m_mpv, "demuxer-readahead-secs", "20");
     mpv_set_option_string(m_mpv, "vd-lavc-threads", "2");
-    mpv_set_option_string(m_mpv, "audio-buffer", "0.5");
+    mpv_set_option_string(m_mpv, "audio-buffer", "2.0");
     mpv_set_option_string(m_mpv, "video-sync", "audio");
 
     if (mpv_initialize(m_mpv) < 0) {
@@ -323,11 +323,34 @@ void PlayerWidget::setAudioLanguage(const QString &lang)
 void PlayerWidget::setInitialBufferSecs(double secs)
 {
     m_initialBufferSecs = secs;
-    if (m_bufferTimer) {
+    // NO destruir un timer de buffer ACTIVO: el sondeo de perfil puede ajustar
+    // la espera mientras el primer vídeo ya arranca, y destruir el timer dejaría
+    // el vídeo pausado (setPaused(true)) sin nadie que lo reanude. Si está
+    // activo se deja terminar; la nueva espera aplica al siguiente arranque.
+    if (m_bufferTimer && !m_bufferTimer->isActive()) {
         m_bufferTimer->stop();
         m_bufferTimer->deleteLater();
         m_bufferTimer = nullptr;
     }
+}
+
+void PlayerWidget::retryHwdec()
+{
+    // hwdec-current quedó vacío en el primer video-params: reintentar hasta
+    // que mpv lo resuelva (o un tope de seguridad de ~6 s).
+    if (++m_hwdecRetryAttempts >= 40) {
+        if (m_hwdecRetry)
+            m_hwdecRetry->stop();
+        emit streamDecodeInfoReady(videoCodec(), hwdecCurrent());
+        return;
+    }
+    const QString hwd = hwdecCurrent();
+    if (hwd.isEmpty())
+        return;
+    m_hwdecRetry->stop();
+    NT_DEBUG("E2E hwdec probe retry codec=%s hw=%s\n",
+             videoCodec().toUtf8().constData(), hwd.toUtf8().constData());
+    emit streamDecodeInfoReady(videoCodec(), hwd);
 }
 
 void PlayerWidget::checkInitialBuffer()
@@ -436,8 +459,10 @@ void PlayerWidget::handleEvent(mpv_event *event)
     case MPV_EVENT_PLAYBACK_RESTART:
     case MPV_EVENT_START_FILE:
         // Cada stream nuevo vuelve a dar oportunidad de reportar códec/hwdec
-        // (para la auto-corrección del perfil del master edge).
+        // (para la red de seguridad del perfil de códec).
         m_hwdecProbed = false;
+        if (m_hwdecRetry)
+            m_hwdecRetry->stop();
         m_lastProgressMs = QDateTime::currentMSecsSinceEpoch();
         if (m_state != QLatin1String("playing")) {
             m_state = QStringLiteral("playing");
@@ -511,7 +536,22 @@ NT_DEBUG("E2E mpv video-params %lldx%lld\n",
                 emit videoSizeChanged(int(m_videoW), int(m_videoH));
             if (!m_hwdecProbed && m_videoW > 0) {
                 m_hwdecProbed = true;
-                emit streamDecodeInfoReady(videoCodec(), hwdecCurrent());
+                // hwdec-current llega "vacío" en el primer video-params (mpv aún
+                // no activó el decodificador) y "no" cuando es software; solo un
+                // backend real confirma HW. Si viene vacío, reintentar con un
+                // QTimer hasta que mpv lo resuelva.
+                if (hwdecCurrent().isEmpty()) {
+                    if (!m_hwdecRetry) {
+                        m_hwdecRetry = new QTimer(this);
+                        m_hwdecRetry->setInterval(150);
+                        connect(m_hwdecRetry, &QTimer::timeout, this,
+                                &PlayerWidget::retryHwdec);
+                    }
+                    m_hwdecRetryAttempts = 0;
+                    m_hwdecRetry->start();
+                } else {
+                    emit streamDecodeInfoReady(videoCodec(), hwdecCurrent());
+                }
             }
             // Espera inicial de buffer en alta resolución (>=1080p): aquí ya
             // conocemos la altura real del stream (en FILE_LOADED aún es 0).
