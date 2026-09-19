@@ -13,8 +13,37 @@
 #include "yt.h"
 #include "yt_innertube.h"
 
+#ifdef Q_OS_WIN
+namespace {
+// La app está marcada WIN32_EXECUTABLE_TARGET (sin consola propia). Para que
+// los selftests imptiman y el CI/la máquina de pruebas vean los logs, nos pegamos a la
+// consola del proceso padre (shell del CI) o creamos una si se lanza con
+// doble clic. Núcleo del reproductor no se toca: es arranque de la app.
+void ensureConsoleAttached()
+{
+    if (GetConsoleWindow())
+        return; // ya tenemos (o hay) consola
+    bool ok = false;
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) { // CI: hereda stdout del runner
+        ok = true;
+    } else if (AllocConsole()) {                // doble clic: consola propia
+        ok = true;
+    }
+    if (ok) {
+        FILE *f = nullptr;
+        freopen_s(&f, "CONOUT$", "w", stdout);
+        freopen_s(&f, "CONOUT$", "w", stderr);
+        freopen_s(&f, "CONIN$", "r", stdin);
+    }
+}
+} // namespace
+#endif // Q_OS_WIN
+
 int main(int argc, char *argv[])
 {
+#ifdef Q_OS_WIN
+    ensureConsoleAttached();
+#endif
     QApplication app(argc, argv);
     Q_INIT_RESOURCE(resources);
     app.setApplicationName(QStringLiteral("nevertube"));
