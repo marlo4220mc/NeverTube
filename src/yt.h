@@ -149,6 +149,9 @@ private:
     void resolveViaInnertube(const QString &videoId, int maxHeight,
                              int preferredClient, bool forceRefresh = false);
     void channelVideosYtDlp(const QString &channelId);
+    void startChannelRace(const QString &channelId);
+    void channelRaceLeg(bool innertube, const QString &channelId,
+                        const QVector<VideoInfo> &videos);
     void trendingYtDlp();
     void execJson(QStringList args, std::function<void(const QJsonObject &)> done);
     void execLines(QStringList args, std::function<void(const QStringList &)> done);
@@ -208,6 +211,15 @@ private:
 
     HlsServer m_hls;
     Innertube m_innertube;
+    // Estado de la carrera de canales (Innertube vs yt-dlp en paralelo): id
+    // del canal en curso, patas completadas/con datos, y si ya se emitió
+    // channelVideosFinished (una sola vez por apertura).
+    QString m_chanRaceId;
+    bool m_chanRaceInnDone = false;
+    bool m_chanRaceInnOk = false;
+    bool m_chanRaceYtDone = false;
+    bool m_chanRaceYtOk = false;
+    bool m_chanRaceEmitted = false;
     SettingsRepo *m_visitorStore = nullptr;
     int m_resolveGen = 0;
     QString m_audioLang;

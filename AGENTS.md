@@ -204,6 +204,7 @@ tarda (>300 ms, PC básico) o si el usuario intenta reproducir mientras sondea.
   `PlayerWidget` (render) vs páginas (vistas).
 - Repos SQLite en `src/db/`; infraestructura reutilizable en `src/ui/`.
 - Resolución de streams: Innertube (cliente VISIONOS, `src/yt_innertube.*`) primero y yt-dlp como fallback (`Yt::resolveWithYtDlp`).
+- Carga de canales: CARRERA en paralelo (`Yt::startChannelRace`/`channelRaceLeg`): se lanzan Innertube (`fetchChannelVideos`) y yt-dlp (playlist UU) a la vez y se emite `channelVideosFinished` con el primer resultado que traiga vídeos con id no vacío (si ambos fallan, una vez, vacío). Evita que en redes donde /browse responde 400 (la máquina de pruebas) cada apertura espere las 2 rondas Innertube fallidas antes del fallback (~segundos de más vs Linux). Un leg con 0 vídeos de id no vacío no cuenta como datos (parseVideos({}) fabrica 1 vídeo falso "Sin título").
 - Overlay de los controles NO es un widget separado: vive dentro de
   `WatchPage::m_overlay`/`PlayerContainer` (src/ui/pages/watch_page.cpp).
   Cualquier cambio ahí que afecte el área de video requiere el selftest.
