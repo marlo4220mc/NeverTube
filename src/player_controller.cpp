@@ -336,6 +336,12 @@ void PlayerController::toggleMute()
     m_player->setVolume(m_muted ? 0.0 : m_volume);
 }
 
+void PlayerController::setMuted(bool muted)
+{
+    m_muted = muted;
+    m_player->setVolume(muted ? 0.0 : m_volume);
+}
+
 void PlayerController::setVolume(double volume)
 {
     m_volume = qBound(0.0, volume, 100.0);
@@ -372,6 +378,10 @@ void PlayerController::onStreamStalled()
     if (m_stableSince.isValid() && m_stableSince.elapsed() > 60000)
         m_recoverAttempts = 0;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    // (1) Recaída rápida (<8s desde el último intento): el micro-seek local no
+    // bastó -> síntoma de red real (URL caducada/cortada). Aquí sí se consume
+    // el presupuesto y se re-resuelve con URLs frescas vía reloadCurrent().
+    // (2) Presupuesto agotado: se abandona.
     if (m_recoverAttempts >= 3 || (m_lastRecoverMs > 0
                                    && now - m_lastRecoverMs < 8000)) {
         setPhase(QStringLiteral("error"));
@@ -379,12 +389,18 @@ void PlayerController::onStreamStalled()
             "La reproducción se interrumpió y no se pudo recuperar.");
         return;
     }
-    ++m_recoverAttempts;
+    // Primer atasco detectado: el audio-buffer de mpv se agotó pero el vídeo
+    // sigue (HW); como el usuario comprobó, un micro-seek a la posición actual
+    // revive la pista al instante sin re-resolver red (reloadCurrent() hubiera
+    // tardado 8-25s re-bajando URLs). Es local y barato: no cuenta contra el
+    // presupuesto de intentos de red. mpv puede emitir streamStalled repetido
+    // mientras el demuxer se re-prima; si recae antes de 8s el bloque (1)
+    // decide que es red real.
     m_lastRecoverMs = now;
-    NT_DEBUG("E2E streamStalled recuperar intento=%d pos=%.1f\n",
-             m_recoverAttempts, m_player->position());
-    // Re-resuelve con URLs frescas y reanuda en la posición actual.
-    reloadCurrent();
+    NT_DEBUG("E2E streamStalled -> micro-seek local pos=%.1f\n",
+             m_player->position());
+    m_player->seek(m_player->position());
+    return;
 }
 
 void PlayerController::stop()

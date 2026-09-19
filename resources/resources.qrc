@@ -1,5 +1,8 @@
 <RCC>
     <qresource prefix="/">
+        <file>clips/h264.mp4</file>
+        <file>clips/vp9.webm</file>
+        <file>clips/av1.mkv</file>
         <file>nav/home_active.png</file>
         <file>nav/home_circular.png</file>
         <file>nav/home_disabled.png</file>

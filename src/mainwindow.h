@@ -23,12 +23,15 @@ class SettingsPage;
 class PlayerWidget;
 class ThumbnailCache;
 class Yt;
+class HwProbe;
 
 class QKeyEvent;
 class QLabel;
 class QPushButton;
 class QStackedWidget;
 class QVBoxLayout;
+class QFrame;
+class QTimer;
 
 class MainWindow : public QMainWindow
 {
@@ -67,6 +70,11 @@ private:
     void setupNav();
     void setupMiniBar();
     void updateMiniPlayer();
+    // Persiste volumen y silencio del reproductor en la BD de ajustes
+    // (claves "volume" / "volume_muted"), para volver a aplicarlos en el
+    // próximo arranque. Lee el estado del controlador; se llama tras cada
+    // cambio hecho por el usuario (teclado, mini bar u overlay).
+    void persistVolume();
     void applyMiniVideoMode();
     void updateMiniBar();
     void updateMiniIcons();
@@ -75,6 +83,16 @@ private:
     bool handleShortcut(QKeyEvent *event);
     void openWatchAt(const QVector<VideoInfo> &videos, int startIndex,
                      qlonglong startPositionMs);
+
+    // Perfil de códec de vídeo (av1-hw|vp9-hw|h264-hw|soft-all). Aplica el
+    // perfil a Yt + espera de buffer (y tope 1080p en soft-all) y, si persist,
+    // lo guarda en settings.
+    void applyCodecProfile(const QString &profile, bool persist);
+    // Lanza el sondeo offline HwProbe; el cartel bloqueante solo aparece si
+    // tarda (PC básico) o si el usuario intenta reproducir mientras sondea.
+    void startHwProbe();
+    void showHwPopup();
+    void centerHwPopup();
 
     AppDatabase m_db;
     Yt *m_yt = nullptr;
@@ -135,4 +153,15 @@ private:
     // la espera inicial de buffer por % para 1080p.
     bool m_noHw = false;
     QElapsedTimer m_elapsed;
+
+    // Sondeo de hardware de vídeo (HwProbe) y su cartel. Mientras m_hwProbing
+    // está activo no se reproduce: la petición se encola y se ejecuta al acabar.
+    HwProbe *m_hwProbe = nullptr;
+    bool m_hwProbing = false;
+    QFrame *m_hwPopup = nullptr;
+    QTimer *m_hwPopupTimer = nullptr;
+    bool m_hasPendingWatch = false;
+    QVector<VideoInfo> m_pendingWatch;
+    int m_pendingIndex = 0;
+    qlonglong m_pendingPos = 0;
 };

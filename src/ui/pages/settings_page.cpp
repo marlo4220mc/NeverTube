@@ -135,10 +135,30 @@ static QString gridDensityFromValue(const QString &val)
                                           : QStringLiteral("Cómoda");
 }
 
+// Texto legible del perfil detectado por HwProbe (codec_profile).
+static QString codecProfileText(const QString &val)
+{
+    if (val == QLatin1String("av1-hw"))
+        return QStringLiteral("AV1 por hardware (óptima)");
+    if (val == QLatin1String("vp9-hw"))
+        return QStringLiteral("VP9 por hardware");
+    if (val == QLatin1String("h264-hw"))
+        return QStringLiteral("H.264 por hardware");
+    if (val == QLatin1String("soft-all") || val == QLatin1String("nohw"))
+        return QStringLiteral("Sin aceleración (CPU)");
+    return QStringLiteral("Sin detectar");
+}
+
 SettingsPage::SettingsPage(SettingsRepo *settings, QWidget *parent)
     : QWidget(parent), m_settings(settings)
 {
     buildUI();
+}
+
+void SettingsPage::updateCodecProfile(const QString &profile)
+{
+    if (m_codecProfileLabel)
+        m_codecProfileLabel->setText(codecProfileText(profile));
 }
 
 QPushButton *SettingsPage::makeValueButton(const QString &text)
@@ -243,7 +263,10 @@ void SettingsPage::buildUI()
         QStringLiteral("Calidad de reproducción"),
         qualityOptions(m_settings->getString(
                            QStringLiteral("codec_profile"),
-                           QStringLiteral("")) == QLatin1String("nohw")),
+                           QStringLiteral("")) == QLatin1String("nohw")
+                       || m_settings->getString(
+                              QStringLiteral("codec_profile"),
+                              QStringLiteral("")) == QLatin1String("soft-all")),
         m_settings->getString(QStringLiteral("quality"),
                               QStringLiteral("auto")),
         QStringLiteral("auto"), qualityFromValue,
@@ -287,6 +310,35 @@ void SettingsPage::buildUI()
             m_settings->set(QStringLiteral("mini_video"), val);
             emit miniVideoModeChanged(val);
         });
+
+    // Aceleración de vídeo: resultado del sondeo offline (HwProbe). Solo
+    // informativo; "Volver a detectar" borra el perfil y relanza el sondeo al
+    // momento (MainWindow::redetectHwRequested).
+    {
+        auto *row = new QHBoxLayout;
+        row->setSpacing(8);
+        auto *lbl = new QLabel(QStringLiteral("Aceleración de vídeo"));
+        lbl->setStyleSheet(QStringLiteral("color:#ECECEC; min-width:200px;"));
+        row->addWidget(lbl);
+        m_codecProfileLabel = new QLabel(codecProfileText(
+            m_settings->getString(QStringLiteral("codec_profile"),
+                                  QString())));
+        m_codecProfileLabel->setStyleSheet(QStringLiteral("color:#8F8F8F;"));
+        row->addWidget(m_codecProfileLabel);
+        row->addStretch(1);
+        auto *btn = new QPushButton(QStringLiteral("Volver a detectar"));
+        btn->setStyleSheet(QStringLiteral(
+            "font-size:12px; padding:6px 14px; background-color:#1F1F1F;"
+            " border:1px solid #2A2A2A; border-radius:8px; color:#ECECEC;"));
+        btn->setCursor(Qt::PointingHandCursor);
+        connect(btn, &QPushButton::clicked, this, [this]() {
+            m_settings->set(QStringLiteral("codec_profile"), QString());
+            updateCodecProfile(QString());
+            emit redetectHwRequested();
+        });
+        row->addWidget(btn);
+        scrollLay->addLayout(row);
+    }
 
     // Idioma de audio: pista preferida cuando el vídeo la ofrece (incluye
     // doblajes automáticos/IA si vienen con LANGUAGE).
@@ -389,13 +441,7 @@ void SettingsPage::buildUI()
                                 content);
     verLabel->setStyleSheet(QStringLiteral("font-size:12px; color:#ECECEC;"));
     scrollLay->addWidget(verLabel);
-
-    auto *dbLabel = new QLabel(
-        QStringLiteral("Ruta de datos: ~/Documents/mini_tube/mini_tube.db"),
-        content);
-    dbLabel->setStyleSheet(QStringLiteral("font-size:11px; color:#8F8F8F;"));
-    scrollLay->addWidget(dbLabel);
-
+ 
     auto *telemetryNote = new QLabel(
         QStringLiteral("Sin telemetría: esta aplicación no envía datos de "
                        "uso, búsquedas ni historial a ningún servidor. "
