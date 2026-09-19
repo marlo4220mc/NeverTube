@@ -114,8 +114,17 @@ target_link_libraries(nevertube_qt2 PRIVATE
 
 if(WIN32)
   set_target_properties(nevertube_qt2 PROPERTIES WIN32_EXECUTABLE TRUE)
-  # Qt5.15.2 MSVC Release: qlist.h:915 incumple stdext::make_checked_array_iterator
-  # (extensión SOLO-Debug de la STL MSVC) => C2653/C3861 en repos/own.cpp.
-  # Pin _ITERATOR_DEBUG_LEVEL=0 (fix documentado Qt5+MSVC Release, 1 flag aditivo).
-  target_compile_definitions(nevertube_qt2 PRIVATE _ITERATOR_DEBUG_LEVEL=0)
+  if(MSVC)
+    # Qt5.15.2, qlist.h:915 (QList::operator==): usa stdext::make_checked_array_iterator
+    # vía QT_MAKE_CHECKED_ARRAY_ITERATOR de forma INCONDICIONAL en MSVC. VS2026
+    # (MSVC 14.5x, _MSC_VER >= 1950, la única imagen que deja GitHub) ELIMINÓ ese
+    # símbolo de su STL => C2653/C3861 en cualquier TU que instancie QList==.
+    # Fix: forzar inclusión de un shim que lo reimplementa devolviendo el puntero
+    # crudo (idéntico a la rama no-MSVC de Qt). Es un no-op fuera de MSVC>=1950.
+    # /FI (force-include): cabe antes de TODO cabecera Qt, sin tocar el reproductor.
+    target_compile_options(nevertube_qt2 PRIVATE
+      "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/msvc_stdext_shim.h")
+    # NOTA: _ITERATOR_DEBUG_LEVEL=0 NO arregla esto (el símbolo no depende de ese
+    # macro); se deja de usar en favor del shim.
+  endif()
 endif()
