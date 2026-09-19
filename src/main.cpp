@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QSslSocket>
 #include <QStyleFactory>
 #include <QTimer>
 
@@ -17,9 +18,11 @@
 #include <windows.h>
 namespace {
 // La app está marcada WIN32_EXECUTABLE_TARGET (sin consola propia). Para que
-// los selftests imptiman y el CI/la máquina de pruebas vean los logs, nos pegamos a la
-// consola del proceso padre (shell del CI) o creamos una si se lanza con
-// doble clic. Núcleo del reproductor no se toca: es arranque de la app.
+// los selftests impriman y el CI/la máquina de pruebas vean los logs, nos pegamos a la
+// consola del proceso padre (shell del CI) o, en doble clic con
+// NEVERTUBE_DEBUG=1 (depuración explícita), creamos una consola propia. En un
+// lanzamiento normal con doble clic NO se abre ninguna ventana de terminal.
+// Núcleo del reproductor no se toca: es arranque de la app.
 void ensureConsoleAttached()
 {
     // SI CI/redirección ya nos dio un stdout válido (pipe heredada del runner vía
@@ -31,10 +34,12 @@ void ensureConsoleAttached()
     if (GetConsoleWindow())
         return; // ya tenemos (o hay) consola
     bool ok = false;
-    if (AttachConsole(ATTACH_PARENT_PROCESS)) { // CI: hereda stdout del runner
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) { // shell/CI: hereda la consola del padre
         ok = true;
-    } else if (AllocConsole()) {                // doble clic: consola propia
-        ok = true;
+    } else if (qEnvironmentVariableIsSet("NEVERTUBE_DEBUG")) {
+        // Doble clic SIN consola madre: la app normal no abre terminal. Solo una
+        // sesión de depuración explícita (NEVERTUBE_DEBUG=1) abre consola propia.
+        ok = (AllocConsole() != FALSE);
     }
     if (ok) {
         FILE *f = nullptr;
@@ -131,6 +136,15 @@ int main(int argc, char *argv[])
                      proto ? "OK" : "FAIL", chain ? "OK" : "FAIL",
                      (proto && chain) ? "SELFTEST OK" : "SELFTEST FAIL");
         return (proto && chain) ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-ssl"))) {
+        // Backend TLS (Windows: OpenSSL 1.1 en DLLs al lado del exe). Si las
+        // DLLs de OpenSSL faltan o no cargan, supportsSsl() es false y todas
+        // las llamadas HTTPS fallan con "TLS initialization failed".
+        const bool ok = QSslSocket::supportsSsl();
+        std::fprintf(stderr, "SELFTEST ssl -> %s\n", ok ? "OK" : "FAIL");
+        return ok ? 0 : 1;
     }
 
     MainWindow window;

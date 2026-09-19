@@ -47,6 +47,7 @@ solaparse sobre otro, ni en vertical ni en horizontal.
 ./build/nevertube_qt2 --selftest-discover  # radios guardadas: guardar/recuperar/re-seleccionar/persistencia/descarte
 ./build/nevertube_qt2 --selftest-av1hls    # HLS sintético AV1 (offline): MAP/BYTERANGE, /seg.mp4, &nt único
 ./build/nevertube_qt2 --selftest-hwprobe   # sondeo HW offline (micro-clips): av1-hw|vp9-hw|h264-hw|soft-all
+./build/nevertube_qt2 --selftest-ssl       # backend TLS (OpenSSL 1.1 junto al exe) cargado
 ```
 
 El selftest del player verifica invariantes del núcleo protegido sin
@@ -61,6 +62,11 @@ defecto, evitando ruido en el bucle de 33 ms):
 ```sh
 NEVERTUBE_DEBUG=1 ./build/nevertube_qt2
 ```
+
+En Windows, `NEVERTUBE_DEBUG=1` también hace que un lanzamiento con doble clic
+abra una consola propia para ese log; sin la variable, la app (subsistema GUI)
+no abre ninguna ventana de terminal. Lanzada desde una shell, siempre hereda la
+consola del proceso padre.
 
 Usar `NT_DEBUG(...)` (src/debug.h) para trazas de depuración.
 
