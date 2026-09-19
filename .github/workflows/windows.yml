@@ -106,3 +106,32 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem build-win/Release -ErrorAction SilentlyContinue |
             Select-Object Name, Length
+
+      - name: instalar Inno Setup (choco)
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: empaquetar setup.exe instalable (windeployqt + DLLs mpv-dev + ytdlp + iscc)
+        shell: pwsh
+        run: |
+          $exe = "build-win\Release\nevertube_qt2.exe"
+          if (-not (Test-Path $exe)) { Write-Host "no está $exe"; exit 1 }
+          Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
+          & "$env:Qt5_DIR\bin\windeployqt.exe" --release --no-translations `
+            --no-system-dlls $exe -dir dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem mpv-dev -Recurse -Filter *.dll |
+            ForEach-Object { Copy-Item $_.FullName dist\ }
+          Copy-Item ytdlp.exe dist\ -ErrorAction SilentlyContinue
+          Copy-Item $exe dist\nevertube_qt2.exe
+          & "$env:ProgramFiles\Inno Setup 6\ISCC.exe" dist.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem setup-out | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nevertube-windows-setup
+          path: setup-out/
+          retention-days: 21
