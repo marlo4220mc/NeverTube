@@ -91,7 +91,8 @@ jobs:
           $lib = Join-Path (Split-Path $dll) 'libmpv-2.lib'
           & $libexe /machine:x64 /def:$def "/out:$lib" *> libmpv-lib.log
           if ($LASTEXITCODE -ne 0) { Write-Host "lib falló:"; Get-Content libmpv-lib.log; exit $LASTEXITCODE }
-          Write-Host "libmpv-2.lib generado en $lib"
+          $dir = (Resolve-Path mpv-dev).Path
+          Write-Host "libmpv-2.lib generado en $lib; MPV_DEV_DIR=$dir"
           cmake -S . -B build-win `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_PREFIX_PATH="$env:Qt5_DIR" `
