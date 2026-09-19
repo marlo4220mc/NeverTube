@@ -12,7 +12,7 @@ resto sigue igual (Qt5, OpenGL, SQLite). Esta sección solo se ejecuta si
 ## Requisitos
 
 1. **Qt 5.15.x** (MSVC 2019 o MinGW) → al final `windeployqt` se encarga de las DLLs de Qt.
-2. **mpv dev para Windows** (descarga de `https://mpv.io/installation/` → mpv-dev-x86_64):
+2. **mpv dev para Windows** (descarga de `https://mpv.io/installation/` → mpv-dev-i686; el equipo objetivo es Windows x86 de 32 bits, así que TODO el build es Win32):
    - `mpv.lib` / `mpv-2.dll` (libmpv)
    - cabeceras `mpv/client.h` etc.
    - La rama `find_package(unofficial-mpv CONFIG)` del CMake detecta esto.
@@ -23,7 +23,7 @@ resto sigue igual (Qt5, OpenGL, SQLite). Esta sección solo se ejecuta si
 
 ```sh
 # en la carpeta del proyecto
-cmake -B build -DCMAKE_PREFIX_PATH="C:/Qt/5.15.2/msvc2019_64" -G "Visual Studio 17 2022" -A x64
+cmake -B build -DCMAKE_PREFIX_PATH="C:/Qt/5.15.2/msvc2019" -G "Visual Studio 17 2022" -A Win32
 cmake --build build --config Release
 
 # empaquetar en un solo dir
