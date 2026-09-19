@@ -56,8 +56,8 @@ begin
   if not Exec(ExpandConstant('{tmp}\VC_redist.x86.exe'),
               '/install /quiet /norestart', '', SW_HIDE,
               ewWaitUntilTerminated, R) then begin
-    MsgBox('No se pudo ejecutar el runtime de Microsoft (VC_redist.x86.exe).' +
-           #13#10 + 'La app no podrá arrancar sin él.', mbError, MB_OK);
+    MsgBox('No se pudo ejecutar el runtime de Microsoft (VC_redist.x86.exe).'
+           + #13#10 + 'La app no podrá arrancar sin él.', mbError, MB_OK);
   end else if (R <> 0) and (R <> 1638) and (R <> 3010) then begin
     MsgBox(Format('El runtime de Microsoft (VC_redist.x86.exe) falló con el ' +
                   'código %d. La app no podrá arrancar sin él.', [R]),
