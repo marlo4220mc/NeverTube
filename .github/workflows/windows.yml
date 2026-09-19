@@ -249,7 +249,7 @@ jobs:
       # producía `if ($null -ne 0) { exit $null }` → código 0 y el step se
       # daba por verde tras el PRIMER selftest, saltándose los demás. Por eso
       # cada selftest va con Start-Process -Wait -PassThru y se lee .ExitCode.
-      - name: smoke test del paquete dist (arranca sin DLLs faltantes + handshake TLS real + mpv init)
+      - name: smoke test del paquete dist (DLLs ok + TLS real + mpv init + yt-dlp + feeds + busqueda)
         shell: pwsh
         run: |
           # windeployqt solo despliega qwindows.dll; el offscreen se inyecta
@@ -297,6 +297,11 @@ jobs:
             exit $p.ExitCode }
           # qoffscreen se quita solo al final (todos los selftests lo necesitan).
           $rc = Invoke-Selftest '--selftest-search'
+          if ($rc -ne 0) { exit $rc }
+          # Cadena de feeds real (carrera de canales Innertube vs yt-dlp +
+          # trending): valida que la apertura de canal termina una sola vez, sin
+          # colgarse ni crashear, en la ruta que acelera la máquina de pruebas.
+          $rc = Invoke-Selftest '--selftest-feeds'
           Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
           if ($rc -ne 0) { exit $rc }
 
