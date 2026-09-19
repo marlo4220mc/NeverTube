@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Qt 5.15.2 MSVC2019 x64 (la misma config de BUILD_WINDOWS.md)
+      # Qt 5.15.2 MSVC2019 x64 — la misma config de BUILD_WINDOWS.md
       - uses: jurplel/install-qt-action@v4
         with:
           version: '5.15.2'
@@ -21,29 +21,49 @@ jobs:
           target: 'desktop'
           arch: 'win64_msvc2019_64'
 
-      # mpv: windows-latest ya trae vcpkg → find_package(unofficial-mpv CONFIG)
-      # que es exactamente lo que pide tu rama if(WIN32) (target MPV::MPV).
-      - name: vcpkg install mpv
+      # ── mpv PARA WINDOWS: NO vcpkg. El port `mpv` fue RETIRADO del registro
+      # (`error: mpv does not exist`, visto en el run anterior). Tu CMake WIN32
+      # ya usa MPV_DEV_DIR (find_path/find_library con find_library mpv-2),
+      # exactamente contra el dev-package OFICIAL: shinchiro/mpv-winbuild-cmake
+      # → asset `mpv-dev-x86_64-*.7z` (include/mpv/*.h + lib/mpv-2.lib +
+      # mpv-2.dll). Esto es lo que manda BUILD_WINDOWS.md paso 2.
+      - name: bajar mpv-dev (shinchiro/mpv-winbuild-cmake, asset mpv-dev-x86_64-*.7z)
         shell: pwsh
         run: |
-          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install mpv:x64-windows
+          $headers = @{ 'User-Agent' = 'nevertube-ci' }
+          $rel = Invoke-RestMethod `
+            -Uri 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest' `
+            -Headers $headers
+          $asset = $rel.assets | Where-Object {
+            $_.name -like 'mpv-dev-x86_64-*' } | Select-Object -First 1
+          if (-not $asset) {
+            Write-Host 'asset mpv-dev-x86_64-* no encontrado; assets:'
+            $rel.assets | ForEach-Object { $_.name }
+            exit 1
+          }
+          Write-Host "bajando $($asset.name) desde $($asset.browser_download_url)"
+          curl.exe -sL -o mpv-dev.7z $asset.browser_download_url
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:ProgramFiles/7-Zip/7z.exe" x -y -ompv-dev mpv-dev.7z
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem mpv-dev -Recurse -File | Select-Object -First 20 FullName
 
       # yt-dlp.exe junto al exe
-      - name: bajar yt-dlp.exe
+      - name: bajar ytdlp.exe
         shell: pwsh
         run: |
-          curl.exe -sL -o yt-dlp.exe `
+          curl.exe -sL -o ytdlp.exe `
             https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: configure (WIN32 + toolchain vcpkg)
+      - name: configure (WIN32 + MPV_DEV_DIR)
         shell: pwsh
         run: |
+          $dir = (Resolve-Path mpv-dev).Path
           cmake -S . -B build-win `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_PREFIX_PATH="$env:Qt5_DIR" `
-            -DCMAKE_BUILD_TYPE=Release
+            "-DMPV_DEV_DIR=$dir"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: build Release
@@ -51,61 +71,55 @@ jobs:
         run: |
           cmake --build build-win --config Release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem build-win/Release -ErrorAction SilentlyContinue
 
-      # windeployqt + DLL mpv + yt-dlp a la carpeta del exe
-      - name: empaquetar
-        shell: pwsh
-        run: |
-          $exe = "build-win/Release/nevertube_qt2.exe"
-          & "$env:Qt5_DIR/bin/windeployqt.exe" --release $exe
-          Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin/mpv-2.dll" "build-win/Release/"
-          Copy-Item "yt-dlp.exe" "build-win/Release/"
-          Get-ChildItem build-win/Release
-
-      # ── SELFTESTS con LOG COMPLETO (lo que quieres ver en la máquina de pruebas) ──
+      # ── SELFTESTS: LOGS COMPLETOS + RC como artefactos (lo que revisas en la
+      # el equipo de pruebas; el núcleo protegido imprime aquí, sin vcpkg de por medio) ──
       - name: SELFTEST db
         shell: pwsh
         run: |
-          & "build-win/Release/nevertube_qt2.exe" --selftest-db *> selftest-db.log
+          & "./build-win/Release/nevertube_qt2.exe" --selftest-db *> selftest-db.log
           $rc = $LASTEXITCODE
-          Write-Host "SELFTEST-DB RC=$rc (0=OK)"
+          Write-Host "SELFTEST-DB RC=$rc (0=OK: SQLite repos)"
           Get-Content selftest-db.log
           if ($rc -ne 0) { exit $rc }
 
       - name: SELFTEST player (núcleo protegido)
         shell: pwsh
         run: |
-          & "build-win/Release/nevertube_qt2.exe" --selftest-player *> selftest-player.log
+          & "./build-win/Release/nevertube_qt2.exe" --selftest-player *> selftest-player.log
           $rc = $LASTEXITCODE
-          Write-Host "SELFTEST-PLAYER RC=$rc (0=OK: hwdec, timer=33ms, render-FBO)"
+          Write-Host "SELFTEST-PLAYER RC=$rc (0=OK: hwdec=auto, timer=33ms, render-FBO)"
           Get-Content selftest-player.log
           if ($rc -ne 0) { exit $rc }
 
       - name: SELFTEST av1hls
         shell: pwsh
         run: |
-          & "build-win/Release/nevertube_qt2.exe" --selftest-av1hls *> selftest-av1hls.log
+          & "./build-win/Release/nevertube_qt2.exe" --selftest-av1hls *> selftest-av1hls.log
           $rc = $LASTEXITCODE
-          Write-Host "SELFTEST-AV1HLS RC=$rc (0=OK)"
+          Write-Host "SELFTEST-AV1HLS RC=$rc (0=OK: HLS AV1 sintético offline)"
           Get-Content selftest-av1hls.log
           if ($rc -ne 0) { exit $rc }
 
-      # Perfil HW de TU equipo (informativo: av1-hw|vp9-hw|h264-hw|soft-all)
-      - name: SELFTEST hwprobe (perfil, no asertado)
+      # Perfil HW de TU equipo (informativo; continue-on-error porque depende
+      # de la GPU exacta y no aseveramos en CI)
+      - name: SELFTEST hwprobe (perfil, informativo)
         continue-on-error: true
         shell: pwsh
         run: |
-          & "build-win/Release/nevertube_qt2.exe" --selftest-hwprobe *> selftest-hwprobe.log
-          Write-Host "SELFTEST-HWPROBE RC=$LASTEXITCODE"
+          & "./build-win/Release/nevertube_qt2.exe" --selftest-hwprobe *> selftest-hwprobe.log
+          Write-Host "SELFTEST-HWPROBE RC=$LASTEXITCODE (0=OK; perfil: av1-hw|vp9-hw|h264-hw|soft-all)"
           Get-Content selftest-hwprobe.log
 
-      # Logs + exe como artefactos descargables
+      # Logs completos descargables
       - uses: actions/upload-artifact@v4
         with:
-          name: selftest-logs
+          name: nevertube-selftest-logs
           path: selftest-*.log
           retention-days: 14
 
+      # El exe WIN32 empaquetado (para descargar a la máquina de pruebas)
       - uses: actions/upload-artifact@v4
         with:
           name: nevertube-windows-exe
