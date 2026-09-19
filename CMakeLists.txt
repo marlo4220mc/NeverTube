@@ -8,7 +8,10 @@ set(CMAKE_AUTORCC ON)
 
 find_package(Qt5 REQUIRED COMPONENTS Core Gui Widgets Network Sql)
 find_package(OpenGL REQUIRED)
-find_package(PkgConfig REQUIRED)
+# pkg-config SOLO se usa para mpv en Linux (PkgConfig::MPV). En Windows NO
+# existe pkg-config y mpv va por MPV_DEV_DIR (find_path/find_library), así que
+# el find_package(PkgConfig) debe vivir en el else() para no reventar el
+# configure WIN32 (sin pkg-config en el runner → "Could NOT find PkgConfig").
 # mpv: en Linux se halla con pkg-config (mpv.pc, target PkgConfig::MPV). En
 # Windows NO hay CONFIG usable en el registro de vcpkg (el port `mpv` se retiró:
 # `error: mpv does not exist`), así que se enlaza contra el dev-package oficial
@@ -33,6 +36,7 @@ if(WIN32)
     INTERFACE_INCLUDE_DIRECTORIES "${MPV_INCLUDE_DIR}"
     INTERFACE_LINK_LIBRARIES "${MPV_LIBRARY}")
 else()
+  find_package(PkgConfig REQUIRED)
   pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
   add_library(MPV::MPV INTERFACE IMPORTED)
   set_target_properties(MPV::MPV PROPERTIES
