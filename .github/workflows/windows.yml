@@ -63,7 +63,8 @@ jobs:
           cmake -S . -B build-win `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_PREFIX_PATH="$env:Qt5_DIR" `
-            "-DMPV_DEV_DIR=$dir"
+            "-DMPV_DEV_DIR=$dir" `
+            "-DMPV_LIBRARY=$dir/libmpv-2.dll"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: build Release
