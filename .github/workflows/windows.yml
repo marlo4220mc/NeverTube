@@ -121,13 +121,20 @@ jobs:
           Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
           $qtroot = Split-Path (Split-Path $env:Qt5_DIR)
           & "$qtroot\bin\windeployqt.exe" --release --no-translations `
-            --no-system-dlls $exe -dir dist
+            $exe -dir dist
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem mpv-dev -Recurse -Filter *.dll |
             ForEach-Object { Copy-Item $_.FullName dist\ }
           Copy-Item ytdlp.exe dist\ -ErrorAction SilentlyContinue
           Copy-Item $exe dist\nevertube_qt2.exe
-          & "$env:ProgramFiles\Inno Setup 6\ISCC.exe" dist.iss
+          # choco instala Inno en ProgramFiles(x86); localizar ISCC.exe en cualquiera de las dos
+          $iscc = Get-ChildItem "$env:ProgramFiles\Inno Setup*\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $iscc) {
+            Write-Host "ISCC.exe no encontrado (choco innosetup falló antes?)"
+            exit 1 }
+          & $iscc.FullName dist.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem setup-out | Select-Object Name, Length
 
