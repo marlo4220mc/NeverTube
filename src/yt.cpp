@@ -173,14 +173,7 @@ Yt::Yt(QObject *parent)
             &Yt::homeMoreReady);
     connect(&m_innertube, &Innertube::channelVideosReady, this,
             [this](const QString &channelId, const QVector<VideoInfo> &videos) {
-                // Innertube primero; si no dio vídeos (fallo/500/vacío) cae al
-                // fallback yt-dlp. Si ese también falla, se emite vacío y la
-                // UI oculta la sección.
-                if (!videos.isEmpty()) {
-                    emit channelVideosFinished(videos);
-                    return;
-                }
-                channelVideosYtDlp(channelId);
+                channelRaceLeg(true, channelId, videos);
             });
     connect(&m_innertube, &Innertube::trendingReady, this,
             [this](const QVector<VideoInfo> &videos) {
@@ -330,13 +323,20 @@ void Yt::trending(int limit)
 void Yt::channelVideos(const QString &channelId, int limit)
 {
     Q_UNUSED(limit);
+    // Carrera: Innertube y yt-dlp en paralelo, se emite el primero con datos.
+    // En redes donde /browse responde 400 (la máquina de pruebas) esto evita esperar las
+    // 2 rondas Innertube fallidas (visitor retry) antes del fallback yt-dlp:
+    // el canal llega cuando yt-dlp responde (~seg), igual de rápido que en
+    // Linux, donde gana Innertube en la primera ronda.
+    startChannelRace(channelId);
     m_innertube.fetchChannelVideos(channelId);
+    channelVideosYtDlp(channelId);
 }
 
-// Fallback degradado del feed de canales cuando Innertube no da vídeos.
+// Pata yt-dlp de la carrera de canales (UU playlist en paralelo a Innertube).
 void Yt::channelVideosYtDlp(const QString &channelId)
 {
-    NT_DEBUG("E2E channelVideos fallback yt-dlp id=%s\n",
+    NT_DEBUG("E2E channelVideos leg yt-dlp id=%s\n",
              channelId.toUtf8().constData());
     const QString uuId = QStringLiteral("UU%1").arg(channelId.mid(2));
     const QStringList args = {
@@ -350,14 +350,58 @@ void Yt::channelVideosYtDlp(const QString &channelId)
         QStringLiteral("--dump-single-json"),
         QStringLiteral("https://www.youtube.com/playlist?list=%1").arg(uuId),
     };
-    execJson(args, [this](const QJsonObject &root) {
+    execJson(args, [this, channelId](const QJsonObject &root) {
         QVector<VideoInfo> videos = parseVideos(root);
         std::sort(videos.begin(), videos.end(), [](const VideoInfo &a,
                                                    const VideoInfo &b) {
             return a.publishedAt > b.publishedAt;
         });
-        emit channelVideosFinished(videos);
+        channelRaceLeg(false, channelId, videos);
     });
+}
+
+// Inicia la carrera de canales (Innertube vs yt-dlp) para un canal concreto.
+void Yt::startChannelRace(const QString &channelId)
+{
+    m_chanRaceId = channelId;
+    m_chanRaceInnDone = false;
+    m_chanRaceInnOk = false;
+    m_chanRaceYtDone = false;
+    m_chanRaceYtOk = false;
+    m_chanRaceEmitted = false;
+}
+
+// Una pata de la carrera terminó: se emite channelVideosFinished UNA vez. Un
+// leg "trae datos" solo si tiene algún vídeo con id no vacío (parseVideos({})
+// fabrica 1 vídeo falso "Sin título" cuando yt-dlp no pudo iniciar; ese no
+// cuenta como datos). Resultados de patas atrasadas o de aperturas previas
+// (channelId distinto) se descartan.
+void Yt::channelRaceLeg(bool innertube, const QString &channelId,
+                        const QVector<VideoInfo> &videos)
+{
+    if (channelId != m_chanRaceId || m_chanRaceEmitted)
+        return;
+    const bool ok = std::any_of(
+        videos.begin(), videos.end(),
+        [](const VideoInfo &v) { return !v.id.isEmpty(); });
+    if (innertube) {
+        m_chanRaceInnDone = true;
+        m_chanRaceInnOk = ok;
+    } else {
+        m_chanRaceYtDone = true;
+        m_chanRaceYtOk = ok;
+    }
+    if ((m_chanRaceInnDone && m_chanRaceInnOk)
+        || (m_chanRaceYtDone && m_chanRaceYtOk)) {
+        // Este leg tiene datos y es el primero: sus vídeos son los ganadores.
+        m_chanRaceEmitted = true;
+        emit channelVideosFinished(videos);
+        return;
+    }
+    if (m_chanRaceInnDone && m_chanRaceYtDone) {
+        m_chanRaceEmitted = true;
+        emit channelVideosFinished(QVector<VideoInfo>());
+    }
 }
 
 // Fallback degradado de tendencias cuando Innertube no da vídeos.
