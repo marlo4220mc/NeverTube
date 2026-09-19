@@ -394,9 +394,10 @@ void Yt::channelInfo(const QString &channelId)
     };
     execJson(args, [this, channelId](const QJsonObject &root) {
         const ChannelInfo info = channelFromJson(channelId, root);
-        NT_DEBUG("E2E channelInfo id=%s name=%s subs=%d\n",
+        NT_DEBUG("E2E channelInfo id=%s name=%s subs=%lld\n",
                  channelId.toUtf8().constData(),
-                 info.name.toUtf8().constData(), info.subscriberCount);
+                 info.name.toUtf8().constData(),
+                 static_cast<long long>(info.subscriberCount));
         emit channelInfoReady(info);
     });
 }
@@ -850,35 +851,34 @@ int Yt::closestHeight(int requested, const QVector<int> &heights)
     return upper == std::numeric_limits<int>::max() ? requested : upper;
 }
 
-// Bonus de código para el perfil edge: qué códec se prefiere según el perfil
-// de hardware detectado. Reno: AV1/VP9/h264.
-//   Modern (HW con AV1): AV1 +50, VP9 +40, h264 0.
-//   Vp9 (HW sin AV1):    VP9 +50, h264 0, AV1 nunca (penaliza -50).
-//   Legacy (sin HW moderno): h264 +50, VP9/AV1 0.
-int Yt::profileBonus(const QString &mime) const
+// Puntuación de un formato de vídeo: preferencia de códec (×100000) + altura.
+// Reno: AV1 > VP9 > h264. La preferencia pesa más que la altura, de modo que el
+// códec que la GPU decodifica por hardware gana aunque su variante sea más baja
+// (p.ej. Legacy elige h264 1080 antes que VP9 2160, que iría a software).
+int Yt::codecRankedScore(int height, const QString &mimeOrCodecs) const
 {
-    const bool isH264 = mime.contains(QLatin1String("avc1"))
-                        || mime.contains(QLatin1String("avc3"));
-    const bool isAV1 = mime.contains(QLatin1String("av01"));
-    // Formato del codec en adaptiveFormats: webm VP9 puede venir como
-    // codecs="vp9" o codecs="vp09.00.10.08". Contener "vp09" cubre el
-    // último; "vp9" con comilla/espacio/';' cubre el abreviado sin
-    // colisionar con vp09 (vp9 no es prefijo de vp09).
-    const bool isVP9 = mime.contains(QLatin1String("vp09"))
-                       || mime.contains(QLatin1String("\"vp9\""));
+    const bool isH264 = mimeOrCodecs.contains(QLatin1String("avc1"))
+                        || mimeOrCodecs.contains(QLatin1String("avc3"));
+    const bool isAV1 = mimeOrCodecs.contains(QLatin1String("av01"));
+    // webm VP9 puede venir como codecs="vp9" o codecs="vp09.00.10.08".
+    const bool isVP9 = mimeOrCodecs.contains(QLatin1String("vp09"))
+                       || mimeOrCodecs.contains(QLatin1String("\"vp9\""));
+    int rank = 0;
     switch (m_codecProfile) {
     case CodecProfile::Modern:
-        if (isAV1) return 50; // AV1: mejor ratio calidad/bitrate
-        if (isVP9) return 40; // VP9 como respaldo
-        return 0;
+        if (isAV1) rank = 2;
+        else if (isVP9) rank = 1;
+        break;
     case CodecProfile::Vp9:
-        if (isVP9) return 50; // solo VP9
-        if (isAV1) return -50; // AV1 sin hwdec = software caro, evitarlo
-        return 0;
+        if (isVP9) rank = 2;
+        else if (isAV1) rank = -1; // AV1 sin hwdec = software caro, evitarlo
+        break;
     case CodecProfile::Legacy:
     default:
-        return isH264 ? 50 : 0;
+        rank = isH264 ? 2 : 0;
+        break;
     }
+    return rank * 100000 + height;
 }
 
 // La mayor altura <= maxHeight de los adaptiveFormats con url directa,
@@ -887,7 +887,7 @@ int Yt::profileBonus(const QString &mime) const
 int Yt::edgeHeight(const QJsonArray &formats, int maxHeight)
 {
     int best = -1;
-    int bestScore = -1;
+    int bestScore = std::numeric_limits<int>::min();
     for (const QJsonValue &val : formats) {
         const QJsonObject f = val.toObject();
         if (f.value(QStringLiteral("url")).toString().isEmpty())
@@ -898,9 +898,7 @@ int Yt::edgeHeight(const QJsonArray &formats, int maxHeight)
             continue;
         if (h > maxHeight)
             continue;
-        int score = h * 100;
-        if (profileBonus(mime) > 0)
-            score += profileBonus(mime);
+        const int score = codecRankedScore(h, mime);
         if (score > bestScore) {
             bestScore = score;
             best = h;
@@ -931,7 +929,7 @@ QString Yt::buildEdgeMaster(const QString &videoId,
 
     QJsonObject bestVideo, bestAudio;
     int bestVideoH = 0;
-    int bestScore = -1;
+    int bestScore = std::numeric_limits<int>::min();
     int bestAudioScore = -1;
     const bool wantOriginal = audioLang.isEmpty()
                               || audioLang == QLatin1String("original");
@@ -945,26 +943,7 @@ QString Yt::buildEdgeMaster(const QString &videoId,
         if (mime.startsWith(QLatin1String("video/")) && h > 0) {
             if (h > maxHeight)
                 continue;
-            int score = h * 100;
-            const bool isH264 = mime.contains(QLatin1String("avc1"))
-                                || mime.contains(QLatin1String("avc3"));
-            const bool isAV1 = mime.contains(QLatin1String("av01"));
-            const bool isVP9 = mime.contains(QLatin1String("vp09"))
-                               || mime.contains(QLatin1String("\"vp9\""));
-            switch (m_codecProfile) {
-            case CodecProfile::Modern:
-                if (isAV1) score += 50; // AV1: mejor calidad a igual altura
-                else if (isVP9) score += 40; // VP9 de respaldo
-                break;
-            case CodecProfile::Vp9:
-                if (isVP9) score += 50; // solo VP9
-                else if (isAV1) score -= 50; // AV1 sin hwdec = software caro
-                break;
-            case CodecProfile::Legacy:
-            default:
-                if (isH264) score += 50; // h264: HW en cualquier GPU
-                break;
-            }
+            const int score = codecRankedScore(h, mime);
             if (score > bestScore) {
                 bestScore = score;
                 bestVideo = f;
@@ -1096,6 +1075,7 @@ QString Yt::buildFilteredMaster(const QString &videoId,
     QStringList audioLines;
     QStringList bestInf, bestUrl;
     int bestHeight = 0;
+    int bestScore = std::numeric_limits<int>::min();
     const QStringList lines = QString::fromUtf8(masterBody).split(QLatin1Char('\n'));
     bool sawHeader = false;
     bool nextIsUrl = false;
@@ -1119,12 +1099,15 @@ QString Yt::buildFilteredMaster(const QString &videoId,
                 if (x >= 0)
                     height = dim.mid(x + 1).toInt();
             }
-            // Conservar solo UNA variante: la de mayor altura <= maxHeight.
-            // Reduce mpv de 22 sub-playlists (~20s) a 1 (~2-4s).
-            if (height > 0 && height <= maxHeight && height > bestHeight) {
+            // Conservar solo UNA variante: la mejor por códec preferido y
+            // altura (<= maxHeight). Reduce mpv de 22 sub-playlists (~20s) a 1
+            // (~2-4s) y respeta el códec que la GPU decodifica por hardware.
+            const int score = codecRankedScore(height, line);
+            if (height > 0 && height <= maxHeight && score > bestScore) {
                 bestInf.clear();
                 bestUrl.clear();
                 bestInf.append(line);
+                bestScore = score;
                 bestHeight = height;
                 nextIsUrl = true;
             } else {
@@ -1672,13 +1655,25 @@ void Yt::execJson(QStringList args, std::function<void(const QJsonObject &)> don
 {
     auto *process = new QProcess(this);
     auto fired = std::make_shared<bool>(false);
+    auto timedOut = std::make_shared<bool>(false);
     QObject::connect(process,
                      static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
                          &QProcess::finished),
-                     process, [this, process, done, fired]() {
+                     process, [this, process, done, fired, timedOut]() {
                          if (*fired)
                              return;
                          *fired = true;
+                         if (*timedOut) {
+                             // kill() por timeout: responder igualmente y
+                             // liberar el proceso. Sin esto el llamante nunca
+                             // recibe done() y el objeto QProcess queda vivo.
+                             Q_EMIT error(QStringLiteral(
+                                 "yt-dlp tardó demasiado (timeout)."));
+                             if (done)
+                                 done(QJsonObject());
+                             process->deleteLater();
+                             return;
+                         }
                          const int code = process->exitCode();
                          if (code != 0) {
                              const QString err =
@@ -1706,11 +1701,9 @@ void Yt::execJson(QStringList args, std::function<void(const QJsonObject &)> don
                              done(doc.object());
                          process->deleteLater();
                      });
-    QTimer::singleShot(120000, process, [process, fired]() {
-        if (!*fired) {
-            *fired = true;
-            process->kill();
-        }
+    QTimer::singleShot(120000, process, [process, timedOut]() {
+        *timedOut = true;
+        process->kill();
     });
     process->setProcessChannelMode(QProcess::SeparateChannels);
     process->start(QStringLiteral("yt-dlp"), args);
@@ -1729,13 +1722,22 @@ void Yt::execLines(QStringList args, std::function<void(const QStringList &)> do
 {
     auto *process = new QProcess(this);
     auto fired = std::make_shared<bool>(false);
+    auto timedOut = std::make_shared<bool>(false);
     QObject::connect(process,
                      static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
                          &QProcess::finished),
-                     process, [process, done, fired]() {
+                     process, [this, process, done, fired, timedOut]() {
                          if (*fired)
                              return;
                          *fired = true;
+                         if (*timedOut) {
+                             Q_EMIT error(QStringLiteral(
+                                 "yt-dlp tardó demasiado (timeout)."));
+                             if (done)
+                                 done(QStringList());
+                             process->deleteLater();
+                             return;
+                         }
                          QStringList lines;
                          if (process->exitCode() == 0) {
                              const QByteArray out = process->readAllStandardOutput();
@@ -1750,11 +1752,9 @@ void Yt::execLines(QStringList args, std::function<void(const QStringList &)> do
                              done(lines);
                          process->deleteLater();
                      });
-    QTimer::singleShot(120000, process, [process, fired]() {
-        if (!*fired) {
-            *fired = true;
-            process->kill();
-        }
+    QTimer::singleShot(120000, process, [process, timedOut]() {
+        *timedOut = true;
+        process->kill();
     });
     process->setProcessChannelMode(QProcess::SeparateChannels);
     process->start(QStringLiteral("yt-dlp"), args);

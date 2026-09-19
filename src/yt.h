@@ -182,9 +182,12 @@ private:
                             const QJsonArray &adaptiveFormats, int maxHeight,
                             const QString &audioLang, int durationSeconds,
                             QString *audioUrlOut);
-    // Bonus de puntaje por perfil de códec: qué códec se prefiere según el
-    // perfil de hardware detectado (Modern: AV1>VP9; Vp9: solo VP9; Legacy: h264).
-    int profileBonus(const QString &mime) const;
+    // Puntaje de un formato de vídeo por altura + preferencia de códec según el
+    // perfil de hardware detectado (Modern: AV1>VP9>h264; Vp9: VP9>h264, AV1
+    // penalizado; Legacy: h264). La preferencia de códec pesa ×100000, así que
+    // gana el códec preferido aunque sea más bajo, y dentro de él la mayor
+    // altura.
+    int codecRankedScore(int height, const QString &mimeOrCodecs) const;
 
     static QString qualityName(int height);
     static int closestHeight(int requested, const QVector<int> &heights);

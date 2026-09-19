@@ -66,10 +66,8 @@ signals:
     // Se emite al empezar a decodificar cada stream real: el códec y el backend
     // de decodificación por hardware que mpv usa de verdad (hwdec-current,
     // p.ej. "vaapi"/"vulkan-copy"; "no"/vacío = software). MainWindow lo usa
-    // para detectar (solo la primera vez) si hay decodificación por hardware y
-    // persistir el perfil de códec del master edge, y para auto-corregirse:
-    // si el perfil es "modern" y al reproducir AV1 mpv cae a software, degrada
-    // a "legacy" (esa GPU no tiene decodificador AV1).
+    // como red de seguridad del perfil de códec detectado por HwProbe: si el
+    // códec que el perfil da por HW cae a software, degrada el perfil.
     void streamDecodeInfoReady(const QString &codec, const QString &hcdecBackend);
     // La posición se estancó > 5 s reproduciendo (sin pausa de usuario ni
     // buffer inicial). El controlador re-resuelve con URLs frescas y reanuda.
@@ -84,6 +82,7 @@ private slots:
     void onFrameReady();
     void checkInitialBuffer();
     void checkStall();
+    void retryHwdec();
 
 private:
     static void mpvWakeup(void *ctx);
@@ -107,6 +106,11 @@ private:
     bool m_audioAdded = false;
     bool m_redrawTimerActive = false;
     bool m_hwdecProbed = false;
+    // hwdec-current llega vacío hasta que mpv activa el decodificador; se
+    // reintenta con este timer para que la red de seguridad del perfil reciba
+    // un backend resuelto ya en el primer vídeo.
+    QTimer *m_hwdecRetry = nullptr;
+    int m_hwdecRetryAttempts = 0;
     // Espera inicial de buffer (segundos de contenido), activa para >=1080p.
     double m_initialBufferSecs = 0.0;
     QTimer *m_bufferTimer = nullptr;

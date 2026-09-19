@@ -8,6 +8,7 @@
 #include <cstdio>
 
 #include "db/repositories.h"
+#include "hwprobe.h"
 #include "player_selftest.h"
 #include "yt.h"
 #include "yt_innertube.h"
@@ -53,6 +54,34 @@ int main(int argc, char *argv[])
 
     if (args.contains(QLatin1String("--selftest-av1hls"))) {
         return av1HlsSelfTest() ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-hwprobe"))) {
+        // Diagnóstico dependiente de la GPU: imprime el perfil detectado
+        // (av1-hw/vp9-hw/h264-hw/soft-all) o INDETERMINADO. No es un assert
+        // fijo, sino una comprobación de que el sondeo concluye.
+        HwProbe probe;
+        bool decided = false;
+        int rc = 1;
+        QObject::connect(&probe, &HwProbe::finished, &app,
+                         [&](const QString &profile) {
+                             decided = true;
+                             std::fprintf(stderr, "SELFTEST hwprobe -> %s\n",
+                                          profile.isEmpty()
+                                              ? "INDETERMINADO"
+                                              : profile.toUtf8().constData());
+                             rc = profile.isEmpty() ? 1 : 0;
+                             app.quit();
+                         });
+        QTimer::singleShot(15000, &app, [&]() {
+            if (!decided) {
+                std::fprintf(stderr, "SELFTEST hwprobe -> TIMEOUT\n");
+                app.quit();
+            }
+        });
+        probe.start();
+        app.exec();
+        return rc;
     }
 
     if (args.contains(QLatin1String("--selftest-home"))) {

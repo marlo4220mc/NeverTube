@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -406,6 +407,13 @@ void SearchPage::showHistory()
 
 void SearchPage::onHistoryClear()
 {
+    const auto btn = QMessageBox::question(
+        this, QStringLiteral("Borrar historial"),
+        QStringLiteral("¿Borrar todo el historial de búsquedas? Esta acción no "
+                       "se puede deshacer."),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (btn != QMessageBox::Yes)
+        return;
     setHistory(QStringList());
     showHistory();
 }
