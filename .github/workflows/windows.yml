@@ -52,24 +52,27 @@ jobs:
       # de OpenSSL 1.1 (libssl-1_1-x64.dll / libcrypto-1_1-x64.dll) DESDE la
       # carpeta del exe. windeployqt NO las despliega: sin ellas, cualquier
       # HTTPS falla en la máquina objetivo con "qt.network.ssl ... TLS
-      # initialization failed" (innertube/YouTube no cargan). Instalar los
-      # binarios oficiales (Shining Light Productions, el proveedor de OpenSSL
-      # que indica Qt en Windows) y embeber las DLLs en el paquete.
-      - name: instalar OpenSSL 1.1.1w (DLLs TLS que carga Qt5Network)
+      # initialization failed" (innertube/YouTube no cargan). Se extraen los
+      # binarios oficiales de OpenSSL 1.1.1w (Shining Light Productions) del
+      # instalador Inno SIN ejecutarlo (innoextract): no hay elevación/UAC en
+      # el runner ni toca C:\ ni el registro.
+      - name: extraer OpenSSL 1.1.1w (DLLs TLS que carga Qt5Network)
         shell: pwsh
         run: |
+          curl.exe -sL -o innoextract.zip `
+            https://github.com/dscharrer/innoextract/releases/download/1.9/innoextract-1.9-windows.zip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Expand-Archive innoextract.zip innoextract-tool -Force
           curl.exe -sL -o openssl-111.exe `
             https://slproweb.com/download/Win64OpenSSL_Light-1_1_1w.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          # Es un instalador Inno Setup (no NSIS): flags /VERYSILENT. El runner
-          # corre como admin y escribe en C:\OpenSSL-Win64.
-          Start-Process -Wait -FilePath .\openssl-111.exe `
-            -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
-          if (-not (Test-Path 'C:\OpenSSL-Win64\bin\libssl-1_1-x64.dll')) {
-            Write-Host 'OpenSSL no instalado en C:\OpenSSL-Win64\bin'
+          & .\innoextract-tool\innoextract.exe openssl-111.exe | Out-Null
+          if (-not (Test-Path 'app\bin\libssl-1_1-x64.dll') -or `
+              -not (Test-Path 'app\bin\libcrypto-1_1-x64.dll')) {
+            Write-Host 'extracción OpenSSL falló (app\bin\*.dll)'
             exit 1 }
-          Get-Item 'C:\OpenSSL-Win64\bin\libssl-1_1-x64.dll', `
-            'C:\OpenSSL-Win64\bin\libcrypto-1_1-x64.dll' | Select-Object Name, Length
+          Get-Item 'app\bin\libssl-1_1-x64.dll', `
+            'app\bin\libcrypto-1_1-x64.dll' | Select-Object Name, Length
 
       # ── CONFIGURE: libmpv-2.lib de IMPORTACIÓN MSVC (dumpbin + lib vía vswhere) ──
       # mpv-dev NO trae libmpv-2.lib: trae `libmpv.dll.a` (MinGW), que MSVC NO
@@ -171,8 +174,8 @@ jobs:
           # OpenSSL 1.1.1 = backend TLS de Qt5Network. windeployqt NO la despliega:
           # sin estas DLLs al lado del exe, todo HTTPS falla en la máquina de pruebas con
           # "TLS initialization failed" (no cargan innertube/YouTube).
-          Copy-Item C:\OpenSSL-Win64\bin\libssl-1_1-x64.dll dist\
-          Copy-Item C:\OpenSSL-Win64\bin\libcrypto-1_1-x64.dll dist\
+          Copy-Item app\bin\libssl-1_1-x64.dll dist\
+          Copy-Item app\bin\libcrypto-1_1-x64.dll dist\
           $missing = @('libmpv-2.dll','vulkan-1.dll','libssl-1_1-x64.dll',
             'libcrypto-1_1-x64.dll') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
