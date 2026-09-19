@@ -172,9 +172,23 @@ jobs:
           if (-not (Test-Path $exe)) { Write-Host "no está $exe"; exit 1 }
           Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
           $qtroot = Split-Path (Split-Path $env:Qt5_DIR)
+          # --compiler-runtime: copia el runtime MSVC (msvcp140.dll,
+          # vcruntime140.dll, ...) JUNTO al exe. Por defecto windeployqt los
+          # deja en dist\vc_redist\ o no los copia, y la máquina de pruebas (Win7 sin el
+          # VC++ redist instalado) muere con "falta msvcp140.dll" al arrancar
+          # (en esta máquina funciona porque el redist está en el sistema).
           & "$qtroot\bin\windeployqt.exe" --release --no-translations `
-            $exe -dir dist
+            --compiler-runtime $exe -dir dist
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Refuerzo determinista: si windeployqt no dejó el CRT junto al exe
+          # (o quedó el subdirectorio vc_redist\\ inútil), copiar la carpeta
+          # CRT x86 del Visual Studio local y quitar vc_redist\\.
+          Remove-Item dist\vc_redist -Recurse -Force -ErrorAction SilentlyContinue
+          $crt = Get-ChildItem 'C:\Program Files*\Microsoft Visual Studio\*\*\VC\Redist\MSVC\*\x86\Microsoft.VC*.CRT' `
+            -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if ($crt) {
+            Copy-Item "$($crt.FullName)\*.dll" dist\ -ErrorAction SilentlyContinue }
           Get-ChildItem mpv-dev -Recurse -Filter *.dll |
             ForEach-Object { Copy-Item $_.FullName dist\ }
           Copy-Item yt-dlp.exe dist\ -ErrorAction SilentlyContinue
@@ -195,7 +209,8 @@ jobs:
           Copy-Item app\bin\libssl-1_1.dll dist\
           Copy-Item app\bin\libcrypto-1_1.dll dist\
           $missing = @('libmpv-2.dll','vulkan-1.dll','libssl-1_1.dll',
-            'libcrypto-1_1.dll','yt-dlp.exe') |
+            'libcrypto-1_1.dll','yt-dlp.exe','msvcp140.dll',
+            'vcruntime140.dll') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
           if ($missing) {
             Write-Host "dist incompleto: faltan $missing"
