@@ -60,11 +60,52 @@ jobs:
         shell: pwsh
         run: |
           $dir = (Resolve-Path mpv-dev).Path
+          $dll = (Get-ChildItem mpv-dev -Recurse -Filter 'libmpv-2.dll' |
+            Select-Object -First 1).FullName
+          if (-not $dll) { Write-Host "libmpv-2.dll NO está en mpv-dev"; exit 1 }
+          # MSVC NO puede enlazar una DLL cruda (LNK1107): necesita su librería
+          # de importación. El dev-package oficial (shinchiro/mpv-winbuild-cmake)
+          # trae SOLO DLL+cabeceras, así que se genera el .lib aquí mismo con la
+          # receta estándar: dumpbin /exports → .def → lib /def.
+          #
+          # dumpbin/lib NO están en PATH en pwsh de windows-latest (viven en el
+          # toolset MSVC y hace falta vcvars64). Se localizan por ruta completa
+          # con vswhere (receta robusta, sin depender del entorno):
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { Write-Host "vswhere NO está"; exit 1 }
+          $vspath = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $vspath) { Write-Host "VS con toolset VC no hallado"; exit 1 }
+          $msvc = Get-ChildItem (Join-Path $vspath 'VC\Tools\MSVC') -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+          $bindir = Join-Path $msvc.FullName 'bin\Hostx64\x64'
+          $dumpbinExe = Join-Path $bindir 'dumpbin.exe'
+          $libExe    = Join-Path $bindir 'lib.exe'
+          if (-not (Test-Path $dumpbinExe) -or -not (Test-Path $libExe)) {
+            Write-Host "dumpbin/lib no hallados en $bindir"; exit 1 }
+
+          $exports = & $dumpbinExe /exports $dll
+          if ($LASTEXITCODE -ne 0) { Write-Host "dumpbin falló"; exit $LASTEXITCODE }
+          $def = Join-Path $env:RUNNER_TEMP 'libmpv.def'
+          $nom = [System.IO.Path]::GetFileName($dll)
+          "LIBRARY $nom" | Set-Content -Encoding ASCII $def
+          'EXPORTS' | Add-Content -Encoding ASCII $def
+          foreach ($l in $exports) {
+            if ($l -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+([A-Za-z_]\w*)\s*$') {
+              $Matches[1] | Add-Content -Encoding ASCII $def
+            }
+          }
+          $lib = Join-Path $dir 'libmpv-2.lib'
+          & $libExe /machine:x64 /def:$def "/out:$lib" *> libmpv-lib.log
+          if ($LASTEXITCODE -ne 0) { Get-Content libmpv-lib.log; exit $LASTEXITCODE }
+          Write-Host "mpv import lib generado: $lib"
+          if (Test-Path $lib) { } else { exit 1 }
           cmake -S . -B build-win `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_PREFIX_PATH="$env:Qt5_DIR" `
             "-DMPV_DEV_DIR=$dir" `
-            "-DMPV_LIBRARY=$dir/libmpv-2.dll"
+            "-DMPV_LIBRARY=$lib"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: build Release
