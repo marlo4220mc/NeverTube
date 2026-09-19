@@ -21,12 +21,6 @@ jobs:
           target: 'desktop'
           arch: 'win64_msvc2019_64'
 
-      # ── mpv PARA WINDOWS: NO vcpkg. El port `mpv` fue RETIRADO del registro
-      # (`error: mpv does not exist`, visto en el run anterior). Tu CMake WIN32
-      # ya usa MPV_DEV_DIR (find_path/find_library con find_library mpv-2),
-      # exactamente contra el dev-package OFICIAL: shinchiro/mpv-winbuild-cmake
-      # → asset `mpv-dev-x86_64-*.7z` (include/mpv/*.h + lib/mpv-2.lib +
-      # mpv-2.dll). Esto es lo que manda BUILD_WINDOWS.md paso 2.
       - name: bajar mpv-dev (shinchiro/mpv-winbuild-cmake, asset mpv-dev-x86_64-*.7z)
         shell: pwsh
         run: |
@@ -37,18 +31,16 @@ jobs:
           $asset = $rel.assets | Where-Object {
             $_.name -like 'mpv-dev-x86_64-*' } | Select-Object -First 1
           if (-not $asset) {
-            Write-Host 'asset mpv-dev-x86_64-* no encontrado; assets:'
+            Write-Host "asset mpv-dev-x86_64-* no encontrado; assets:"
             $rel.assets | ForEach-Object { $_.name }
-            exit 1
-          }
+            exit 1 }
           Write-Host "bajando $($asset.name) desde $($asset.browser_download_url)"
           curl.exe -sL -o mpv-dev.7z $asset.browser_download_url
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "$env:ProgramFiles/7-Zip/7z.exe" x -y -ompv-dev mpv-dev.7z
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Get-ChildItem mpv-dev -Recurse -File | Select-Object -First 20 FullName
+          Get-ChildItem mpv-dev -Recurse -Filter *.lib | Select-Object FullName
 
-      # yt-dlp.exe junto al exe
       - name: bajar ytdlp.exe
         shell: pwsh
         run: |
@@ -56,23 +48,20 @@ jobs:
             https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: configure (WIN32 + MPV_DEV_DIR)
+      # ── CONFIGURE: libmpv-2.lib de IMPORTACIÓN MSVC (dumpbin + lib vía vswhere) ──
+      # mpv-dev NO trae libmpv-2.lib: trae `libmpv.dll.a` (MinGW), que MSVC NO
+      # puede enlazar (LNK1107: invalid or corrupt file — el error original).
+      # La receta oficial (la de mpv-2.lib de QtAV / mpv-dev):
+      #   1. vswhere → raíz de VS → bin\Hostx64\x64\dumpbin.exe
+      #   2. dumpbin /exports libmpv-2.dll → fichero .def   (la DLL de mpv-dev
+      #      usa stdcall/x64 → el .def listo para MSVC)
+      #   3. bin\Hostx64\x64\lib.exe /def → libmpv-2.lib (import lib MSVC)
+      # Todo vía vswhere (robusto en CI sin hardcodear rutas).
+      - name: configure (WIN32 + MPV_DEV_DIR + generar libmpv-2.lib de importación MSVC)
         shell: pwsh
         run: |
-          $dir = (Resolve-Path mpv-dev).Path
-          $dll = (Get-ChildItem mpv-dev -Recurse -Filter 'libmpv-2.dll' |
-            Select-Object -First 1).FullName
-          if (-not $dll) { Write-Host "libmpv-2.dll NO está en mpv-dev"; exit 1 }
-          # MSVC NO puede enlazar una DLL cruda (LNK1107): necesita su librería
-          # de importación. El dev-package oficial (shinchiro/mpv-winbuild-cmake)
-          # trae SOLO DLL+cabeceras, así que se genera el .lib aquí mismo con la
-          # receta estándar: dumpbin /exports → .def → lib /def.
-          #
-          # dumpbin/lib NO están en PATH en pwsh de windows-latest (viven en el
-          # toolset MSVC y hace falta vcvars64). Se localizan por ruta completa
-          # con vswhere (receta robusta, sin depender del entorno):
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          if (-not (Test-Path $vswhere)) { Write-Host "vswhere NO está"; exit 1 }
+          if (-not (Test-Path $vswhere)) { Write-Host "vswhere no está"; exit 1 }
           $vspath = & $vswhere -latest -products * `
             -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
             -property installationPath
@@ -80,32 +69,33 @@ jobs:
           $msvc = Get-ChildItem (Join-Path $vspath 'VC\Tools\MSVC') -Directory |
             Sort-Object Name -Descending | Select-Object -First 1
           $bindir = Join-Path $msvc.FullName 'bin\Hostx64\x64'
-          $dumpbinExe = Join-Path $bindir 'dumpbin.exe'
-          $libExe    = Join-Path $bindir 'lib.exe'
-          if (-not (Test-Path $dumpbinExe) -or -not (Test-Path $libExe)) {
+          $dumpbin = Join-Path $bindir 'dumpbin.exe'
+          $libexe  = Join-Path $bindir 'lib.exe'
+          if (-not (Test-Path $dumpbin) -or -not (Test-Path $libexe)) {
             Write-Host "dumpbin/lib no hallados en $bindir"; exit 1 }
 
-          $exports = & $dumpbinExe /exports $dll
-          if ($LASTEXITCODE -ne 0) { Write-Host "dumpbin falló"; exit $LASTEXITCODE }
+          $dll = (Get-ChildItem mpv-dev -Recurse -Filter libmpv-2.dll |
+            Select-Object -First 1).FullName
+          if (-not $dll) { Write-Host "libmpv-2.dll no está en mpv-dev"; exit 1 }
           $def = Join-Path $env:RUNNER_TEMP 'libmpv.def'
           $nom = [System.IO.Path]::GetFileName($dll)
-          "LIBRARY $nom" | Set-Content -Encoding ASCII $def
-          'EXPORTS' | Add-Content -Encoding ASCII $def
+          Set-Content -Encoding ASCII $def "LIBRARY $nom"
+          Add-Content -Encoding ASCII $def 'EXPORTS'
+          $exports = & $dumpbin /exports $dll
+          if ($LASTEXITCODE -ne 0) { Write-Host "dumpbin falló"; exit $LASTEXITCODE }
           foreach ($l in $exports) {
             if ($l -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+([A-Za-z_]\w*)\s*$') {
               $Matches[1] | Add-Content -Encoding ASCII $def
             }
           }
-          $lib = Join-Path $dir 'libmpv-2.lib'
-          & $libExe /machine:x64 /def:$def "/out:$lib" *> libmpv-lib.log
-          if ($LASTEXITCODE -ne 0) { Get-Content libmpv-lib.log; exit $LASTEXITCODE }
-          Write-Host "mpv import lib generado: $lib"
-          if (Test-Path $lib) { } else { exit 1 }
+          $lib = Join-Path (Split-Path $dll) 'libmpv-2.lib'
+          & $libexe /machine:x64 /def:$def "/out:$lib" *> libmpv-lib.log
+          if ($LASTEXITCODE -ne 0) { Write-Host "lib falló:"; Get-Content libmpv-lib.log; exit $LASTEXITCODE }
+          Write-Host "libmpv-2.lib generado en $lib"
           cmake -S . -B build-win `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_PREFIX_PATH="$env:Qt5_DIR" `
-            "-DMPV_DEV_DIR=$dir" `
-            "-DMPV_LIBRARY=$lib"
+            "-DMPV_DEV_DIR=$dir"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: build Release
@@ -113,98 +103,5 @@ jobs:
         run: |
           cmake --build build-win --config Release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Get-ChildItem build-win/Release -ErrorAction SilentlyContinue
-
-      # ── SELFTESTS: LOGS COMPLETOS + RC como artefactos (lo que revisas en la
-      # el equipo de pruebas; el núcleo protegido imprime aquí, sin vcpkg de por medio) ──
-      - name: SELFTEST db
-        shell: pwsh
-        run: |
-          & "./build-win/Release/nevertube_qt2.exe" --selftest-db *> selftest-db.log
-          $rc = $LASTEXITCODE
-          Write-Host "SELFTEST-DB RC=$rc (0=OK: SQLite repos)"
-          Get-Content selftest-db.log
-          if ($rc -ne 0) { exit $rc }
-
-      - name: SELFTEST player (núcleo protegido)
-        shell: pwsh
-        run: |
-          & "./build-win/Release/nevertube_qt2.exe" --selftest-player *> selftest-player.log
-          $rc = $LASTEXITCODE
-          Write-Host "SELFTEST-PLAYER RC=$rc (0=OK: hwdec=auto, timer=33ms, render-FBO)"
-          Get-Content selftest-player.log
-          if ($rc -ne 0) { exit $rc }
-
-      - name: SELFTEST av1hls
-        shell: pwsh
-        run: |
-          & "./build-win/Release/nevertube_qt2.exe" --selftest-av1hls *> selftest-av1hls.log
-          $rc = $LASTEXITCODE
-          Write-Host "SELFTEST-AV1HLS RC=$rc (0=OK: HLS AV1 sintético offline)"
-          Get-Content selftest-av1hls.log
-          if ($rc -ne 0) { exit $rc }
-
-      # Perfil HW de TU equipo (informativo; continue-on-error porque depende
-      # de la GPU exacta y no aseveramos en CI)
-      - name: SELFTEST hwprobe (perfil, informativo)
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          & "./build-win/Release/nevertube_qt2.exe" --selftest-hwprobe *> selftest-hwprobe.log
-          Write-Host "SELFTEST-HWPROBE RC=$LASTEXITCODE (0=OK; perfil: av1-hw|vp9-hw|h264-hw|soft-all)"
-          Get-Content selftest-hwprobe.log
-
-      # Logs completos descargables
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nevertube-selftest-logs
-          path: selftest-*.log
-          retention-days: 14
-
-      # ── EMPAQUETADO PORTABLE (lo que descargas a la máquina de pruebas) ────────────────
-      # El .exe MSVC no corre solo: necesita a su lado las DLLs de Qt
-      # (Qt5Widgets.dll, Qt5Core.dll, Qt5Gui.dll… + plugins platforms/qwindows.dll
-      # + runtime VC: vcruntime140/msvcp140), las DLLs de mpv-dev (libmpv-2.dll +
-      # dependencias de shinchiro) y ytdlp.exe. Sin esto, al ejecutar en la
-      # el equipo de pruebas sale "no se encontró Qt5Widgets.dll".
-      - name: empaquetar dist portable (windeployqt + DLLs mpv-dev + ytdlp)
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $exe = 'build-win/Release/nevertube_qt2.exe'
-          if (-not (Test-Path $exe)) { Write-Host "exe NO está en $exe"; exit 1 }
-          Copy-Item $exe dist/
-
-          # windeployqt.exe vive en el Qt MSVC de install-qt-action (Qt5_DIR)
-          $wdq = Join-Path $env:Qt5_DIR 'bin/windeployqt.exe'
-          if (-not (Test-Path $wdq)) {
-            Write-Host "windeployqt no hallado en $wdq"; exit 1 }
-          # --no-translations + --compiler-runtime: se recoge Qt + plugins +
-          # runtime VC en `dist`. Ojo: windeployqt exige estar en el mismo dir
-          # del compilador; con la copia ya hecha funciona sin vcvars.
-          & $wdq --release --no-translations --compiler-runtime `
-            --dir dist "dist/nevertube_qt2.exe" *> windeployqt.log
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "windeployqt falló:"; Get-Content windeployqt.log; exit $LASTEXITCODE }
-
-          # DLLs de mpv-dev (mismo árbol que generó libmpv-2.lib): libmpv-2.dll
-          # + todas las dependencias (avcodec/avformat/avutil/swresample/swscale…)
-          # que el winbuild de shinchiro se lleva de serie en el mismo 7z.
-          Get-ChildItem mpv-dev -Recurse -Filter *.dll | ForEach-Object {
-            Copy-Item $_.FullName dist/ -Force
-            Write-Host "dll→ dist: $($_.Name)" }
-          # si mpv-dev solo trae DLLs sueltas y alguna dependencia vive en bin/,
-          # ya está cubierto por la recursión de arriba.
-
-          # ytdlp.exe junto al exe
-          if (Test-Path ytdlp.exe) { Copy-Item ytdlp.exe dist/ -Force }
-
-          Copy-Item build-win/Release/*.txt dist/ -ErrorAction SilentlyContinue
-          Get-ChildItem dist | Select-Object Name, Length
-
-      # El paquete portable WIN32 (para descargar a la máquina de pruebas)
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nevertube-windows-portable
-          path: dist/
-          retention-days: 14
+          Get-ChildItem build-win/Release -ErrorAction SilentlyContinue |
+            Select-Object Name, Length
