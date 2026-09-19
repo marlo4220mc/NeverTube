@@ -224,6 +224,11 @@ private:
 // qué fuente respondió. No toca el reproductor ni SQLite.
 bool feedsChainSelfTest();
 
+// Selftest de la ruta de búsqueda yt-dlp de la app (Yt::search → execJson):
+// lanza una búsqueda real (red) y exige vídeos con id no vacío. Falla si el
+// binario yt-dlp no inicia (parseVideos({}) → 1 vídeo falso "Sin título").
+bool searchSelfTest();
+
 // Selftest offline del HLS sintético de AV1: valida la playlist generada
 // (EXT-X-MAP/BYTERANGE, sufijo /seg.mp4, &nt distinto y consecutivo por
 // segmento, elección de la mayor altura <= maxHeight y descarte correcto sin

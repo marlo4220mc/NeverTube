@@ -6,12 +6,14 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QProcess>
+#include <QStandardPaths>
 #include <QRandomGenerator>
 #include <QTextStream>
 #include <QTimer>
@@ -37,6 +39,30 @@ const QString kYtLangArg = QStringLiteral("youtube:lang=es");
 // Centinelas para m_winningClient (índices de cliente Innertube son >= 0).
 constexpr int kResolveYtDlp = -1;      // yt-dlp fue quien resolvió
 constexpr int kResolveUnknown = -2;    // aún sin ganador registrado
+
+// Ruta del binario yt-dlp que lanza la app (QProcess). La app arranca el
+// proceso como "yt-dlp", así que Windows solo lo encuentra si existe un
+// archivo con ese nombre en PATH o junto al exe; si el instalador lo trae con
+// OTRo nombre (p. ej. el antiguo `ytdlp.exe`), QProcess no lo halla y
+// búsquedas/canales/fallbacks devuelven vacío (parseVideos({}) crea 1 vídeo
+// falso "Sin título"). Orden de resolución:
+//   1) yt-dlp.exe junto al ejecutable (lo que empaqueta el instalador);
+//   2) ytdlp.exe junto al ejecutable (instalaciones antiguas);
+//   3) un "yt-dlp" ya presente en el PATH del sistema.
+QString ytDlpBinary()
+{
+    const QString dir = QCoreApplication::applicationDirPath();
+    const QString packaged = dir + QStringLiteral("/yt-dlp.exe");
+    if (QFileInfo::exists(packaged))
+        return packaged;
+    const QString legacy = dir + QStringLiteral("/ytdlp.exe");
+    if (QFileInfo::exists(legacy))
+        return legacy;
+    const QString inPath = QStandardPaths::findExecutable(QStringLiteral("yt-dlp"));
+    if (!inPath.isEmpty())
+        return inPath;
+    return QStringLiteral("yt-dlp");
+}
 
 int boundedSafe(int value)
 {
@@ -1706,7 +1732,7 @@ void Yt::execJson(QStringList args, std::function<void(const QJsonObject &)> don
         process->kill();
     });
     process->setProcessChannelMode(QProcess::SeparateChannels);
-    process->start(QStringLiteral("yt-dlp"), args);
+    process->start(ytDlpBinary(), args);
     if (!process->waitForStarted(3000)) {
         if (!*fired) {
             *fired = true;
@@ -1757,7 +1783,7 @@ void Yt::execLines(QStringList args, std::function<void(const QStringList &)> do
         process->kill();
     });
     process->setProcessChannelMode(QProcess::SeparateChannels);
-    process->start(QStringLiteral("yt-dlp"), args);
+    process->start(ytDlpBinary(), args);
     if (!process->waitForStarted(3000)) {
         if (!*fired) {
             *fired = true;
@@ -1856,6 +1882,53 @@ bool feedsChainSelfTest()
                  channelOk ? "OK" : "vacío", channelVideos,
                  trendOk ? "OK" : "vacío", trendVideos);
     return channelDone && trendDone;
+}
+
+// Selftest de la ruta de BÚSQUEDA yt-dlp de la app (usada por search, el
+// fallback de canales y el de trending): lanza Yt::search con 3 resultados y
+// exige vídeos con id real. Detecta el fallo "yt-dlp no inicia" (binario mal
+// nombrado o no encontrado): en ese caso execJson llama done({}) y
+// parseVideos({}) devuelve 1 vídeo falso con id='' ("Sin título") → aquí
+// falla con idVacios>0.
+bool searchSelfTest()
+{
+    std::fprintf(stderr, "SEARCH SELFTEST start\n");
+    Yt yt;
+    bool done = false;
+    // Watchdog global: la búsqueda hace red real; no colgar el selftest.
+    QTimer watchdog;
+    watchdog.setSingleShot(true);
+    QObject::connect(&watchdog, &QTimer::timeout, []() {
+        std::fprintf(stderr, "SELFTEST FAIL: search (timeout global)\n");
+        QCoreApplication::exit(1);
+    });
+    watchdog.start(90000);
+    QObject::connect(&yt, &Yt::searchFinished,
+                     [&](const QString &, const QVector<VideoInfo> &videos) {
+                         if (done)
+                             return;
+                         done = true;
+                         int emptyIds = 0;
+                         for (const VideoInfo &v : videos) {
+                             if (v.id.isEmpty())
+                                 ++emptyIds;
+                         }
+                         const bool ok = !videos.isEmpty() && emptyIds == 0;
+                         std::fprintf(stderr,
+                                      "SEARCH videos=%d idVacios=%d -> %s\n",
+                                      videos.size(), emptyIds,
+                                      ok ? "OK" : "FAIL");
+                         QCoreApplication::exit(ok ? 0 : 2);
+                     });
+    QObject::connect(&yt, &Yt::error, [&](const QString &msg) {
+        if (done)
+            return;
+        done = true;
+        std::fprintf(stderr, "SEARCH error=%s\n", msg.toUtf8().constData());
+        QCoreApplication::exit(3);
+    });
+    yt.search(QStringLiteral("musica"), 3, 0);
+    return QCoreApplication::exec() == 0;
 }
 
 bool av1HlsSelfTest()

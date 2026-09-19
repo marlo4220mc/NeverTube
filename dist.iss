@@ -2,7 +2,7 @@
 ; Como el `win_exe.yml` / `flutter_distributor`, el entregable de la
 ; `setup.exe` INSTALABLE que NO es un `dist/` con DLLs sueltas
 ; lleva TODO dentro (nevertube_qt2.exe + Qt5Widgets/Core/Gui.dll + plugins
-; platforms/qwindows.dll + runtime VC + DLLs mpv-dev + ytdlp.exe). Un solo
+; platforms/qwindows.dll + runtime VC + DLLs mpv-dev + yt-dlp.exe). Un solo
 ; archivo único para descargar.
 ;
 ; ATENCIÓN: la sintaxis de Inno EXIGE `[Setup]`, `AppName=…`, etc. a columna 0.

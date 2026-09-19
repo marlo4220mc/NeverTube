@@ -209,6 +209,12 @@ int main(int argc, char *argv[])
         return (proto && chain) ? 0 : 1;
     }
 
+    if (args.contains(QLatin1String("--selftest-search"))) {
+        const bool ok = searchSelfTest();
+        std::fprintf(stderr, "SELFTEST search -> %s\n", ok ? "OK" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
     if (args.contains(QLatin1String("--selftest-tls"))) {
         QString detail;
         const bool ok = tlsHandshakeSelfTest(&detail);
