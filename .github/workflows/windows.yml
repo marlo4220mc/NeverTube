@@ -48,6 +48,29 @@ jobs:
             https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # Qt 5.15.2 (msvc2019_64) carga su backend TLS por LoadLibrary de las DLLs
+      # de OpenSSL 1.1 (libssl-1_1-x64.dll / libcrypto-1_1-x64.dll) DESDE la
+      # carpeta del exe. windeployqt NO las despliega: sin ellas, cualquier
+      # HTTPS falla en la máquina objetivo con "qt.network.ssl ... TLS
+      # initialization failed" (innertube/YouTube no cargan). Instalar los
+      # binarios oficiales (Shining Light Productions, el proveedor de OpenSSL
+      # que indica Qt en Windows) y embeber las DLLs en el paquete.
+      - name: instalar OpenSSL 1.1.1w (DLLs TLS que carga Qt5Network)
+        shell: pwsh
+        run: |
+          curl.exe -sL -o openssl-111.exe `
+            https://slproweb.com/download/Win64OpenSSL_Light-1_1_1w.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Es un instalador Inno Setup (no NSIS): flags /VERYSILENT. El runner
+          # corre como admin y escribe en C:\OpenSSL-Win64.
+          Start-Process -Wait -FilePath .\openssl-111.exe `
+            -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+          if (-not (Test-Path 'C:\OpenSSL-Win64\bin\libssl-1_1-x64.dll')) {
+            Write-Host 'OpenSSL no instalado en C:\OpenSSL-Win64\bin'
+            exit 1 }
+          Get-Item 'C:\OpenSSL-Win64\bin\libssl-1_1-x64.dll', `
+            'C:\OpenSSL-Win64\bin\libcrypto-1_1-x64.dll' | Select-Object Name, Length
+
       # ── CONFIGURE: libmpv-2.lib de IMPORTACIÓN MSVC (dumpbin + lib vía vswhere) ──
       # mpv-dev NO trae libmpv-2.lib: trae `libmpv.dll.a` (MinGW), que MSVC NO
       # puede enlazar (LNK1107: invalid or corrupt file — el error original).
@@ -145,8 +168,16 @@ jobs:
             Write-Host "vulkan-1.dll no hallada en C:\VulkanSDK\*\runtime\x64"
             exit 1 }
           Copy-Item $vk.FullName dist\
-          if (-not (Test-Path dist\libmpv-2.dll) -or -not (Test-Path dist\vulkan-1.dll)) {
-            Write-Host "dist incompleto: libmpv-2.dll=$(Test-Path dist\libmpv-2.dll) vulkan-1.dll=$(Test-Path dist\vulkan-1.dll)"
+          # OpenSSL 1.1.1 = backend TLS de Qt5Network. windeployqt NO la despliega:
+          # sin estas DLLs al lado del exe, todo HTTPS falla en la máquina de pruebas con
+          # "TLS initialization failed" (no cargan innertube/YouTube).
+          Copy-Item C:\OpenSSL-Win64\bin\libssl-1_1-x64.dll dist\
+          Copy-Item C:\OpenSSL-Win64\bin\libcrypto-1_1-x64.dll dist\
+          $missing = @('libmpv-2.dll','vulkan-1.dll','libssl-1_1-x64.dll',
+            'libcrypto-1_1-x64.dll') |
+            Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
+          if ($missing) {
+            Write-Host "dist incompleto: faltan $missing"
             exit 1 }
           # choco instala Inno en ProgramFiles(x86); localizar ISCC.exe en cualquiera de las dos
           $iscc = Get-ChildItem "$env:ProgramFiles\Inno Setup*\ISCC.exe",
@@ -160,10 +191,11 @@ jobs:
           Get-ChildItem setup-out | Select-Object Name, Length
 
       # Smoke test: arrancar el binario DESDE dist\ (con todo su maquillaje de
-      # DLLs) y ejecutar un selftest headless. Detecta en CI el bug de "DLL
-      # faltante al arrancar" (vulkan-1.dll) que en local solo aparece en la
-      # máquina objetivo.
-      - name: smoke test del paquete dist (arranca sin DLLs faltantes)
+      # DLLs) y ejecutar selftests headless. Detecta en CI el bug de "DLL
+      # faltante al arrancar" (vulkan-1.dll) y el de backend TLS sin cargar
+      # (OpenSSL ausente → "TLS initialization failed") que en local solo
+      # aparecen en la máquina objetivo.
+      - name: smoke test del paquete dist (arranca sin DLLs faltantes + TLS ok)
         shell: pwsh
         run: |
           # windeployqt solo despliega qwindows.dll; el offscreen se inyecta
@@ -171,6 +203,13 @@ jobs:
           $qtsrc = Split-Path (Split-Path $env:Qt5_DIR)
           Copy-Item "$qtsrc\plugins\platforms\qoffscreen.dll" dist\platforms\ -Force
           $env:QT_QPA_PLATFORM = 'offscreen'
+          # TLS: sin las DLLs de OpenSSL junto al exe, supportsSsl()=false.
+          & .\dist\nevertube_qt2.exe --selftest-ssl
+          $rc = $LASTEXITCODE
+          Write-Host "smoke selftest-ssl exit=$rc"
+          if ($rc -ne 0) {
+            Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
+            exit $rc }
           & .\dist\nevertube_qt2.exe --selftest-db
           $rc = $LASTEXITCODE
           Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
