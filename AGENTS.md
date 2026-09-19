@@ -48,6 +48,7 @@ solaparse sobre otro, ni en vertical ni en horizontal.
 ./build/nevertube_qt2 --selftest-av1hls    # HLS sintético AV1 (offline): MAP/BYTERANGE, /seg.mp4, &nt único
 ./build/nevertube_qt2 --selftest-hwprobe   # sondeo HW offline (micro-clips): av1-hw|vp9-hw|h264-hw|soft-all
 ./build/nevertube_qt2 --selftest-ssl       # backend TLS (OpenSSL 1.1 junto al exe) cargado
+./build/nevertube_qt2 --selftest-tls       # handshake TLS REAL contra hosts públicos (no solo carga)
 ```
 
 El selftest del player verifica invariantes del núcleo protegido sin

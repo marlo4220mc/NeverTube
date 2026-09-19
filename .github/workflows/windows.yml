@@ -208,9 +208,14 @@ jobs:
       # Smoke test: arrancar el binario DESDE dist\ (con todo su maquillaje de
       # DLLs) y ejecutar selftests headless. Detecta en CI el bug de "DLL
       # faltante al arrancar" (vulkan-1.dll) y el de backend TLS sin cargar
-      # (OpenSSL ausente → "TLS initialization failed") que en local solo
-      # aparecen en la máquina objetivo.
-      - name: smoke test del paquete dist (arranca sin DLLs faltantes + TLS ok)
+      # (OpenSSL ausente → "TLS initialization failed"). --selftest-tls va un
+      # paso más allá que --selftest-ssl (que solo comprueba supportsSsl():
+      # carga de DLLs): hace un HANDSHAKE TLS real contra hosts públicos. Sin
+      # él, un OpenSSL que carga pero aborta en el primer SSL_CTX/handshake
+      # ("OpenSSL internal error, assertion failed: lock != NULL", visto en
+      # Windows de 32 bits) pasaba de verde en CI y reventaba solo en la
+      # máquina de pruebas al arrancar (primera petición HTTPS del feed).
+      - name: smoke test del paquete dist (arranca sin DLLs faltantes + handshake TLS real)
         shell: pwsh
         run: |
           # windeployqt solo despliega qwindows.dll; el offscreen se inyecta
@@ -218,10 +223,11 @@ jobs:
           $qtsrc = Split-Path (Split-Path $env:Qt5_DIR)
           Copy-Item "$qtsrc\plugins\platforms\qoffscreen.dll" dist\platforms\ -Force
           $env:QT_QPA_PLATFORM = 'offscreen'
-          # TLS: sin las DLLs de OpenSSL junto al exe, supportsSsl()=false.
-          & .\dist\nevertube_qt2.exe --selftest-ssl
+          # TLS: handshake real. Si OpenSSL aborta (lock != NULL) el proceso
+          # muere con abort() y el step falla con el assert en el log.
+          & .\dist\nevertube_qt2.exe --selftest-tls
           $rc = $LASTEXITCODE
-          Write-Host "smoke selftest-ssl exit=$rc"
+          Write-Host "smoke selftest-tls exit=$rc"
           if ($rc -ne 0) {
             Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
             exit $rc }

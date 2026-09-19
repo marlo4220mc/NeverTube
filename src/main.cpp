@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QEventLoop>
 #include <QSslSocket>
 #include <QStyleFactory>
 #include <QTimer>
@@ -50,6 +51,76 @@ void ensureConsoleAttached()
 }
 } // namespace
 #endif // Q_OS_WIN
+
+// SELFTEST TLS con handshake REAL. El viejo --selftest-ssl solo cargaba las
+// DLLs de OpenSSL (supportsSsl): un backend que carga pero aborta en el
+// primer uso real (p. ej. "OpenSSL internal error, assertion failed:
+// lock != NULL", conocido en Windows con Qt 5.15.2 + OpenSSL 1.1.1 en una
+// máquina x86 de 32 bits) pasaba desapercibido en CI. Este selftest abre una
+// conexión TLS real contra hosts públicos y comprueba que el engine completa
+// el handshake; si OpenSSL aborta internamente, el proceso muere con abort()
+// y el CI lo marca rojo con el mensaje del assert en el log.
+static bool tlsHandshakeSelfTest(QString *outDetail)
+{
+    const bool supported = QSslSocket::supportsSsl();
+    std::fprintf(stderr, "SELFTEST tls: supportsSsl=%s build=%s runtime=%s\n",
+                 supported ? "yes" : "no",
+                 QSslSocket::sslLibraryBuildVersionString().toUtf8().constData(),
+                 QSslSocket::sslLibraryVersionString().toUtf8().constData());
+    if (!supported) {
+        *outDetail =
+            QStringLiteral("backend TLS no disponible (DLLs OpenSSL no cargan)");
+        return false;
+    }
+
+    const char *const hosts[] = {
+        "www.youtube.com",
+        "www.google.com",
+        "example.com",
+    };
+    for (const char *hostC : hosts) {
+        const QString host = QString::fromUtf8(hostC);
+        QSslSocket socket;
+        socket.setPeerVerifyMode(QSslSocket::VerifyNone); // testea el engine, no certs
+        socket.ignoreSslErrors();
+        QEventLoop loop;
+        QTimer timer;
+        timer.setSingleShot(true);
+        bool encrypted = false;
+        QString err;
+        QObject::connect(&socket, &QSslSocket::encrypted, &loop,
+                         [&]() {
+                             encrypted = true;
+                             loop.quit();
+                         });
+        QObject::connect(&socket,
+                         QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::errorOccurred),
+                         &loop, [&](QAbstractSocket::SocketError) {
+                             err = socket.errorString();
+                             loop.quit();
+                         });
+        QObject::connect(&timer, &QTimer::timeout, &loop,
+                         [&]() {
+                             err = QStringLiteral("timeout 15s");
+                             loop.quit();
+                         });
+        std::fprintf(stderr, "SELFTEST tls: handshake %s ...\n", hostC);
+        timer.start(15000);
+        socket.connectToHostEncrypted(host, 443);
+        loop.exec();
+        if (encrypted) {
+            std::fprintf(stderr, "SELFTEST tls: %s -> ENCRYPTED OK\n", hostC);
+            *outDetail = QString::fromUtf8(hostC);
+            return true;
+        }
+        std::fprintf(stderr, "SELFTEST tls: %s -> %s\n", hostC,
+                     err.isEmpty() ? "sin encrypted ni error"
+                                   : err.toUtf8().constData());
+    }
+    *outDetail =
+        QStringLiteral("ningún host completó el handshake TLS");
+    return false;
+}
 
 int main(int argc, char *argv[])
 {
@@ -136,6 +207,14 @@ int main(int argc, char *argv[])
                      proto ? "OK" : "FAIL", chain ? "OK" : "FAIL",
                      (proto && chain) ? "SELFTEST OK" : "SELFTEST FAIL");
         return (proto && chain) ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-tls"))) {
+        QString detail;
+        const bool ok = tlsHandshakeSelfTest(&detail);
+        std::fprintf(stderr, "SELFTEST tls -> %s (%s)\n",
+                     ok ? "OK" : "FAIL", detail.toUtf8().constData());
+        return ok ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-ssl"))) {
