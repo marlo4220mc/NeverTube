@@ -1,0 +1,113 @@
+name: Windows selftest completo (CI x86)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      NEVERTUBE_DEBUG: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      # Qt 5.15.2 MSVC2019 x64 (la misma config de BUILD_WINDOWS.md)
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2019_64'
+
+      # mpv: windows-latest ya trae vcpkg → find_package(unofficial-mpv CONFIG)
+      # que es exactamente lo que pide tu rama if(WIN32) (target MPV::MPV).
+      - name: vcpkg install mpv
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install mpv:x64-windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # yt-dlp.exe junto al exe
+      - name: bajar yt-dlp.exe
+        shell: pwsh
+        run: |
+          curl.exe -sL -o yt-dlp.exe `
+            https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: configure (WIN32 + toolchain vcpkg)
+        shell: pwsh
+        run: |
+          cmake -S . -B build-win `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DCMAKE_PREFIX_PATH="$env:Qt5_DIR" `
+            -DCMAKE_BUILD_TYPE=Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: build Release
+        shell: pwsh
+        run: |
+          cmake --build build-win --config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # windeployqt + DLL mpv + yt-dlp a la carpeta del exe
+      - name: empaquetar
+        shell: pwsh
+        run: |
+          $exe = "build-win/Release/nevertube_qt2.exe"
+          & "$env:Qt5_DIR/bin/windeployqt.exe" --release $exe
+          Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin/mpv-2.dll" "build-win/Release/"
+          Copy-Item "yt-dlp.exe" "build-win/Release/"
+          Get-ChildItem build-win/Release
+
+      # ── SELFTESTS con LOG COMPLETO (lo que quieres ver en la máquina de pruebas) ──
+      - name: SELFTEST db
+        shell: pwsh
+        run: |
+          & "build-win/Release/nevertube_qt2.exe" --selftest-db *> selftest-db.log
+          $rc = $LASTEXITCODE
+          Write-Host "SELFTEST-DB RC=$rc (0=OK)"
+          Get-Content selftest-db.log
+          if ($rc -ne 0) { exit $rc }
+
+      - name: SELFTEST player (núcleo protegido)
+        shell: pwsh
+        run: |
+          & "build-win/Release/nevertube_qt2.exe" --selftest-player *> selftest-player.log
+          $rc = $LASTEXITCODE
+          Write-Host "SELFTEST-PLAYER RC=$rc (0=OK: hwdec, timer=33ms, render-FBO)"
+          Get-Content selftest-player.log
+          if ($rc -ne 0) { exit $rc }
+
+      - name: SELFTEST av1hls
+        shell: pwsh
+        run: |
+          & "build-win/Release/nevertube_qt2.exe" --selftest-av1hls *> selftest-av1hls.log
+          $rc = $LASTEXITCODE
+          Write-Host "SELFTEST-AV1HLS RC=$rc (0=OK)"
+          Get-Content selftest-av1hls.log
+          if ($rc -ne 0) { exit $rc }
+
+      # Perfil HW de TU equipo (informativo: av1-hw|vp9-hw|h264-hw|soft-all)
+      - name: SELFTEST hwprobe (perfil, no asertado)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          & "build-win/Release/nevertube_qt2.exe" --selftest-hwprobe *> selftest-hwprobe.log
+          Write-Host "SELFTEST-HWPROBE RC=$LASTEXITCODE"
+          Get-Content selftest-hwprobe.log
+
+      # Logs + exe como artefactos descargables
+      - uses: actions/upload-artifact@v4
+        with:
+          name: selftest-logs
+          path: selftest-*.log
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nevertube-windows-exe
+          path: build-win/Release/
+          retention-days: 14
