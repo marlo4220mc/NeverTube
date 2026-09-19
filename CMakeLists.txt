@@ -10,16 +10,28 @@ find_package(Qt5 REQUIRED COMPONENTS Core Gui Widgets Network Sql)
 find_package(OpenGL REQUIRED)
 find_package(PkgConfig REQUIRED)
 # mpv: en Linux se halla con pkg-config (mpv.pc, target PkgConfig::MPV). En
-# Windows a través de vcpkg → paquete CONFIG `unofficial-mpv` (target
-# `unofficial::mpv`) que entrega import-lib + mpv-2.dll + headers. Se unifica
-# en MPV::MPV para que target_link_libraries no dependa de la plataforma.
-# Esta máquina (Linux) compila/verifica la rama else(); la if(WIN32) es
-# build-config y el build final de Windows corre en el equipo del usuario.
+# Windows NO hay CONFIG usable en el registro de vcpkg (el port `mpv` se retiró:
+# `error: mpv does not exist`), así que se enlaza contra el dev-package oficial
+# de mpv.io (shinchiro/mpv-winbuild-cmake, `mpv-dev-*.7z`): headers `mpv/*.h` +
+# import-lib `mpv-2.lib` + `mpv-2.dll`, ruta en la variable MPV_DEV_DIR
+# (BUILD_WINDOWS.md / workflow windows). Se unifica en MPV::MPV para que
+# target_link_libraries no dependa de la plataforma. Esta máquina (Linux)
+# compila/verifica la rama else(); la if(WIN32) es build-config y el build
+# final de Windows corre en el equipo/CI del usuario.
 if(WIN32)
-  find_package(unofficial-mpv CONFIG REQUIRED)
+  set(MPV_DEV_DIR "" CACHE PATH "Directorio del paquete mpv-dev de Windows (include/ + lib/ + dll)")
+  if(NOT MPV_DEV_DIR)
+    message(FATAL_ERROR "WIN32 necesita -DMPV_DEV_DIR=<ruta a mpv-dev> (BUILD_WINDOWS.md)")
+  endif()
+  find_path(MPV_INCLUDE_DIR mpv/client.h PATHS "${MPV_DEV_DIR}" PATH_SUFFIXES include NO_DEFAULT_PATH)
+  find_library(MPV_LIBRARY NAMES mpv-2 mpv PATHS "${MPV_DEV_DIR}" PATH_SUFFIXES lib NO_DEFAULT_PATH)
+  if(NOT MPV_INCLUDE_DIR OR NOT MPV_LIBRARY)
+    message(FATAL_ERROR "mpv-dev incompleto en '${MPV_DEV_DIR}': falta include/mpv/client.h (got '${MPV_INCLUDE_DIR}') o mpv-2.lib (got '${MPV_LIBRARY}'). Revisa BUILD_WINDOWS.md")
+  endif()
   add_library(MPV::MPV INTERFACE IMPORTED)
   set_target_properties(MPV::MPV PROPERTIES
-    INTERFACE_LINK_LIBRARIES unofficial::mpv)
+    INTERFACE_INCLUDE_DIRECTORIES "${MPV_INCLUDE_DIR}"
+    INTERFACE_LINK_LIBRARIES "${MPV_LIBRARY}")
 else()
   pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
   add_library(MPV::MPV INTERFACE IMPORTED)
