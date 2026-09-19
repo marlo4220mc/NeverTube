@@ -21,6 +21,12 @@ namespace {
 // doble clic. Núcleo del reproductor no se toca: es arranque de la app.
 void ensureConsoleAttached()
 {
+    // SI CI/redirección ya nos dio un stdout válido (pipe heredada del runner vía
+    // Start-Process -RedirectStandardOutput), NO tocamos nada: el runner captura
+    // esa pipe. Adjuntar/AllocConsole + freopen(CONOUT$) robaría el output.
+    const HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (out && out != INVALID_HANDLE_VALUE)
+        return;
     if (GetConsoleWindow())
         return; // ya tenemos (o hay) consola
     bool ok = false;
