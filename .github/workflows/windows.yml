@@ -161,9 +161,50 @@ jobs:
           path: selftest-*.log
           retention-days: 14
 
-      # El exe WIN32 empaquetado (para descargar a la máquina de pruebas)
+      # ── EMPAQUETADO PORTABLE (lo que descargas a la máquina de pruebas) ────────────────
+      # El .exe MSVC no corre solo: necesita a su lado las DLLs de Qt
+      # (Qt5Widgets.dll, Qt5Core.dll, Qt5Gui.dll… + plugins platforms/qwindows.dll
+      # + runtime VC: vcruntime140/msvcp140), las DLLs de mpv-dev (libmpv-2.dll +
+      # dependencias de shinchiro) y ytdlp.exe. Sin esto, al ejecutar en la
+      # el equipo de pruebas sale "no se encontró Qt5Widgets.dll".
+      - name: empaquetar dist portable (windeployqt + DLLs mpv-dev + ytdlp)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $exe = 'build-win/Release/nevertube_qt2.exe'
+          if (-not (Test-Path $exe)) { Write-Host "exe NO está en $exe"; exit 1 }
+          Copy-Item $exe dist/
+
+          # windeployqt.exe vive en el Qt MSVC de install-qt-action (Qt5_DIR)
+          $wdq = Join-Path $env:Qt5_DIR 'bin/windeployqt.exe'
+          if (-not (Test-Path $wdq)) {
+            Write-Host "windeployqt no hallado en $wdq"; exit 1 }
+          # --no-translations + --compiler-runtime: se recoge Qt + plugins +
+          # runtime VC en `dist`. Ojo: windeployqt exige estar en el mismo dir
+          # del compilador; con la copia ya hecha funciona sin vcvars.
+          & $wdq --release --no-translations --compiler-runtime `
+            --dir dist "dist/nevertube_qt2.exe" *> windeployqt.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "windeployqt falló:"; Get-Content windeployqt.log; exit $LASTEXITCODE }
+
+          # DLLs de mpv-dev (mismo árbol que generó libmpv-2.lib): libmpv-2.dll
+          # + todas las dependencias (avcodec/avformat/avutil/swresample/swscale…)
+          # que el winbuild de shinchiro se lleva de serie en el mismo 7z.
+          Get-ChildItem mpv-dev -Recurse -Filter *.dll | ForEach-Object {
+            Copy-Item $_.FullName dist/ -Force
+            Write-Host "dll→ dist: $($_.Name)" }
+          # si mpv-dev solo trae DLLs sueltas y alguna dependencia vive en bin/,
+          # ya está cubierto por la recursión de arriba.
+
+          # ytdlp.exe junto al exe
+          if (Test-Path ytdlp.exe) { Copy-Item ytdlp.exe dist/ -Force }
+
+          Copy-Item build-win/Release/*.txt dist/ -ErrorAction SilentlyContinue
+          Get-ChildItem dist | Select-Object Name, Length
+
+      # El paquete portable WIN32 (para descargar a la máquina de pruebas)
       - uses: actions/upload-artifact@v4
         with:
-          name: nevertube-windows-exe
-          path: build-win/Release/
+          name: nevertube-windows-portable
+          path: dist/
           retention-days: 14
