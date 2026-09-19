@@ -119,7 +119,8 @@ jobs:
           $exe = "build-win\Release\nevertube_qt2.exe"
           if (-not (Test-Path $exe)) { Write-Host "no está $exe"; exit 1 }
           Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
-          & "$env:Qt5_DIR\bin\windeployqt.exe" --release --no-translations `
+          $qtroot = Split-Path (Split-Path $env:Qt5_DIR)
+          & "$qtroot\bin\windeployqt.exe" --release --no-translations `
             --no-system-dlls $exe -dir dist
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem mpv-dev -Recurse -Filter *.dll |
