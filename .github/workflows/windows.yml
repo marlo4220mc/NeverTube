@@ -113,6 +113,15 @@ jobs:
           choco install innosetup --yes --no-progress
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # libmpv-2.dll (build de shinchiro) importa vulkan-1.dll ESTÁTICAMENTE. En
+      # máquinas sin runtime Vulkan (el equipo de pruebas) la app no arranca:
+      # "no se encontró vulkan-1.dll". Embeber el loader oficial en el paquete.
+      - name: instalar Vulkan Runtime SOLO (vulkan-1.dll, sin el SDK de 0.75 GB)
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          install_runtime_only: true
+          cache: true
+
       - name: empaquetar setup.exe instalable (windeployqt + DLLs mpv-dev + ytdlp + iscc)
         shell: pwsh
         run: |
@@ -127,6 +136,18 @@ jobs:
             ForEach-Object { Copy-Item $_.FullName dist\ }
           Copy-Item ytdlp.exe dist\ -ErrorAction SilentlyContinue
           Copy-Item $exe dist\nevertube_qt2.exe
+          # Embeber el loader oficial de Vulkan: sin él, en la máquina de pruebas falla el
+          # arranque (libmpv-2.dll lo importa estáticamente, "falta vulkan-1.dll").
+          $vk = Get-ChildItem 'C:\VulkanSDK\*\runtime\x64\vulkan-1.dll' `
+            -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $vk) {
+            Write-Host "vulkan-1.dll no hallada en C:\VulkanSDK\*\runtime\x64"
+            exit 1 }
+          Copy-Item $vk.FullName dist\
+          if (-not (Test-Path dist\libmpv-2.dll) -or -not (Test-Path dist\vulkan-1.dll)) {
+            Write-Host "dist incompleto: libmpv-2.dll=$(Test-Path dist\libmpv-2.dll) vulkan-1.dll=$(Test-Path dist\vulkan-1.dll)"
+            exit 1 }
           # choco instala Inno en ProgramFiles(x86); localizar ISCC.exe en cualquiera de las dos
           $iscc = Get-ChildItem "$env:ProgramFiles\Inno Setup*\ISCC.exe",
             "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
@@ -137,6 +158,24 @@ jobs:
           & $iscc.FullName dist.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem setup-out | Select-Object Name, Length
+
+      # Smoke test: arrancar el binario DESDE dist\ (con todo su maquillaje de
+      # DLLs) y ejecutar un selftest headless. Detecta en CI el bug de "DLL
+      # faltante al arrancar" (vulkan-1.dll) que en local solo aparece en la
+      # máquina objetivo.
+      - name: smoke test del paquete dist (arranca sin DLLs faltantes)
+        shell: pwsh
+        run: |
+          # windeployqt solo despliega qwindows.dll; el offscreen se inyecta
+          # solo para el smoke y se quita después (no va al instalador).
+          $qtsrc = Split-Path (Split-Path $env:Qt5_DIR)
+          Copy-Item "$qtsrc\plugins\platforms\qoffscreen.dll" dist\platforms\ -Force
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          & .\dist\nevertube_qt2.exe --selftest-db
+          $rc = $LASTEXITCODE
+          Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
+          Write-Host "smoke selftest-db exit=$rc"
+          if ($rc -ne 0) { exit $rc }
 
       - uses: actions/upload-artifact@v4
         with:
