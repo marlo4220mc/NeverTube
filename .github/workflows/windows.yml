@@ -189,6 +189,17 @@ jobs:
             Sort-Object FullName -Descending | Select-Object -First 1
           if ($crt) {
             Copy-Item "$($crt.FullName)\*.dll" dist\ -ErrorAction SilentlyContinue }
+          # UCRT (Universal C Runtime): los builds MSVC 2015+ y las DLLs de Qt
+          # enlazan contra la UCRT, y en la máquina de pruebas (Win7 SP1 sin KB2999226)
+          # faltan los api-ms-win-crt-*.dll ("api-ms-win-crt-runtime-l1-1-0"
+          # la pidió al arrancar). Se copian desde el redist ucrt x86 de la
+          # Windows SDK (el mismo set que instala el VC++ redist en modo
+          # app-local): junto al exe la app funciona en Win7 sin tocar sistema.
+          $ucrt = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Redist\*\ucrt\DLLs\x86' `
+            -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if ($ucrt) {
+            Copy-Item "$($ucrt.FullName)\*.dll" dist\ -ErrorAction SilentlyContinue }
           Get-ChildItem mpv-dev -Recurse -Filter *.dll |
             ForEach-Object { Copy-Item $_.FullName dist\ }
           Copy-Item yt-dlp.exe dist\ -ErrorAction SilentlyContinue
@@ -210,7 +221,8 @@ jobs:
           Copy-Item app\bin\libcrypto-1_1.dll dist\
           $missing = @('libmpv-2.dll','vulkan-1.dll','libssl-1_1.dll',
             'libcrypto-1_1.dll','yt-dlp.exe','msvcp140.dll',
-            'vcruntime140.dll') |
+            'vcruntime140.dll','ucrtbase.dll',
+            'api-ms-win-crt-runtime-l1-1-0.dll') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
           if ($missing) {
             Write-Host "dist incompleto: faltan $missing"
