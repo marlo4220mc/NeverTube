@@ -114,4 +114,8 @@ target_link_libraries(nevertube_qt2 PRIVATE
 
 if(WIN32)
   set_target_properties(nevertube_qt2 PROPERTIES WIN32_EXECUTABLE TRUE)
+  # Qt5.15.2 MSVC Release: qlist.h:915 incumple stdext::make_checked_array_iterator
+  # (extensión SOLO-Debug de la STL MSVC) => C2653/C3861 en repos/own.cpp.
+  # Pin _ITERATOR_DEBUG_LEVEL=0 (fix documentado Qt5+MSVC Release, 1 flag aditivo).
+  target_compile_definitions(nevertube_qt2 PRIVATE _ITERATOR_DEBUG_LEVEL=0)
 endif()
