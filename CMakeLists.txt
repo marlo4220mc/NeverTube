@@ -127,7 +127,13 @@ if(WIN32)
     # Fix: forzar inclusión de un shim que lo reimplementa devolviendo el puntero
     # crudo (idéntico a la rama no-MSVC de Qt). Es un no-op fuera de MSVC>=1950.
     # /FI (force-include): cabe antes de TODO cabecera Qt, sin tocar el reproductor.
+    # /utf-8: los .cpp son UTF-8 SIN BOM y MSVC por defecto los lee como CP1252
+    # (codepage del sistema). QStringLiteral compila a u"..." (UTF-16): sin
+    # /utf-8, "á"/"ñ" (bytes 0xC3+) se transforman con la página de códigos
+    # equivocada y salen como "Ã¡"/"Ã±" (mojibake) en Windows; en Linux
+    # (GCC) con UTF-8 iba bien. /utf-8 fuerza source+execution charset a UTF-8.
     target_compile_options(nevertube_qt2 PRIVATE
+      "/utf-8"
       "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/msvc_stdext_shim.h"
       "/DWINVER=0x0601" "/D_WIN32_WINNT=0x0601")
     # NOTA: _ITERATOR_DEBUG_LEVEL=0 NO arregla esto (el símbolo no depende de ese
