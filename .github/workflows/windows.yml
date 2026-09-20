@@ -180,15 +180,11 @@ jobs:
           & "$qtroot\bin\windeployqt.exe" --release --no-translations `
             --compiler-runtime $exe -dir dist
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          # Refuerzo determinista: si windeployqt no dejó el CRT junto al exe
-          # (o quedó el subdirectorio vc_redist\\ inútil), copiar la carpeta
-          # CRT x86 del Visual Studio local y quitar vc_redist\\.
+          # Refuerzo eliminado: la copia manual desde el VS local del runner
+          # traía un CRT demasiado nuevo (VS2022+), rompiendo Win7 (GetSystemTimePreciseAsFileTime).
+          # Windeployqt ya maneja el runtime necesario.
           Remove-Item dist\vc_redist -Recurse -Force -ErrorAction SilentlyContinue
-          $crt = Get-ChildItem 'C:\Program Files*\Microsoft Visual Studio\*\*\VC\Redist\MSVC\*\x86\Microsoft.VC*.CRT' `
-            -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending | Select-Object -First 1
-          if ($crt) {
-            Copy-Item "$($crt.FullName)\*.dll" dist\ -ErrorAction SilentlyContinue }
+
           # PURGA de la UCRT app-local: windeployqt --compiler-runtime copia
           # junto al exe la UCRT del SDK (ucrtbase.dll + api-ms-win-crt-*.dll)
           # que importa GetSystemTimePreciseAsFileTime (W8+) y muere en Win7 con
