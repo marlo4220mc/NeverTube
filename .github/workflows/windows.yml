@@ -55,7 +55,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "$env:ProgramFiles/7-Zip/7z.exe" x -y -ompv-dev mpv-dev.7z
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Rename-Item mpv-dev\mpv-1.dll mpv-dev\libmpv-2.dll
+          Rename-Item mpv-dev\mpv-1.dll -NewName libmpv-2.dll
           New-Item -ItemType Directory mpv-dev\include\mpv | Out-Null
           Move-Item mpv-dev\include\*.h mpv-dev\include\mpv\
           Get-ChildItem mpv-dev -Recurse -Filter *.dll | Select-Object FullName
