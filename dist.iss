@@ -40,6 +40,17 @@ Source: "dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs; Exclude
 ; ignora y un redist que fallara en silencio dejaría una app que no arranca.
 Source: "dist\VC_redist.x86.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: InstallVcRedist()
 
+; Limpieza de instalaciones ANTERIORES del equipo objetivo: las versiones <= 840e16c
+; empaquetaban la UCRT de la Windows SDK app-local (ucrtbase.dll +
+; api-ms-win-crt-*.dll junto al exe). Al instalar ENCIMA sin desinstalar, el
+; loader resuelve app-local primero y carga esa UCRT de SDK (que importa
+; GetSystemTimePreciseAsFileTime, W8+) aunque el redist ya esté en System32;
+; produce exactamente el fallo "punto de entrada... en KERNEL32.dll". Inno no
+; borra lo que no está en [Files], así que se elimina explícitamente aquí.
+[InstallDelete]
+Type: files; Name: "{app}\ucrtbase.dll"
+Type: files; Name: "{app}\api-ms-win-crt-*"
+
 [Icons]
 Name: "{group}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"
 
