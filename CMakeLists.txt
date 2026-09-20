@@ -6,6 +6,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
+# Limitar la dependencia del sistema operativo a Windows 7 (WINVER=0x0601 / WIN32_WINNT=0x0601)
+# para que el binario no intente importar funciones nuevas de Win8+ como AdjustWindowRectExForDpi,
+# que no existen en USER32.dll de Win7 SP1.
+add_compile_definitions(WINVER=0x0601 _WIN32_WINNT=0x0601)
+
 find_package(Qt5 REQUIRED COMPONENTS Core Gui Widgets Network Sql)
 find_package(OpenGL REQUIRED)
 # pkg-config SOLO se usa para mpv en Linux (PkgConfig::MPV). En Windows NO
@@ -123,8 +128,15 @@ if(WIN32)
     # crudo (idéntico a la rama no-MSVC de Qt). Es un no-op fuera de MSVC>=1950.
     # /FI (force-include): cabe antes de TODO cabecera Qt, sin tocar el reproductor.
     target_compile_options(nevertube_qt2 PRIVATE
-      "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/msvc_stdext_shim.h")
+      "/FI${CMAKE_CURRENT_SOURCE_DIR}/src/msvc_stdext_shim.h"
+      "/DWINVER=0x0601" "/D_WIN32_WINNT=0x0601")
     # NOTA: _ITERATOR_DEBUG_LEVEL=0 NO arregla esto (el símbolo no depende de ese
     # macro); se deja de usar en favor del shim.
+  endif()
+  # Compilación dirigida a Windows 7 (SP1): evita que el linker genere importaciones
+  # de funciones de Windows 10/11 (como AdjustWindowRectExForDpi, GetSystemTimePreciseAsFileTime)
+  # que hacen que nevertube_qt2.exe falle en el target con "Entry Point Not Found".
+  if(WIN32)
+    target_compile_definitions(nevertube_qt2 PRIVATE WINVER=0x0601 _WIN32_WINNT=0x0601)
   endif()
 endif()
