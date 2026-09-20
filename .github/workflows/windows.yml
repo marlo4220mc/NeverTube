@@ -172,17 +172,18 @@ jobs:
           if (-not (Test-Path $exe)) { Write-Host "no está $exe"; exit 1 }
           Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
           $qtroot = Split-Path (Split-Path $env:Qt5_DIR)
-          # --compiler-runtime: copia el runtime MSVC (msvcp140.dll,
-          # vcruntime140.dll, ...) JUNTO al exe. Por defecto windeployqt los
-          # deja en dist\vc_redist\ o no los copia, y la máquina de pruebas (Win7 sin el
-          # VC++ redist instalado) muere con "falta msvcp140.dll" al arrancar
-          # (en esta máquina funciona porque el redist está en el sistema).
+          # --compiler-runtime: intenta copiar el runtime MSVC
+          # (msvcp140.dll, vcruntime140.dll, ...) junto al exe. En el
+          # runner de CI NO los deja (viene del VS del host, no de la
+          # máquina de pruebas), así que hay que proveerlos de otra forma o confiar
+          # en el VC_redist.x86.exe instalado por el setup (que pone la
+          # UCRT + CRT de Microsoft en System32, la versión Win7-compatible).
           & "$qtroot\bin\windeployqt.exe" --release --no-translations `
             --compiler-runtime $exe -dir dist
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          # Refuerzo eliminado: la copia manual desde el VS local del runner
-          # traía un CRT demasiado nuevo (VS2022+), rompiendo Win7 (GetSystemTimePreciseAsFileTime).
-          # Windeployqt ya maneja el runtime necesario.
+          # windeployqt no dejó los CRT del sistema en dist\ (no es
+          # necesario: el setup instala VC_redist.x86.exe, Visual C++
+          # 2015-2019, que provee msvcp140/vcruntime140/UCRT en la máquina de pruebas).
           Remove-Item dist\vc_redist -Recurse -Force -ErrorAction SilentlyContinue
 
           # PURGA de la UCRT app-local: windeployqt --compiler-runtime copia
@@ -202,11 +203,14 @@ jobs:
           # importa GetSystemTimePreciseAsFileTime (W8+) y ucrtbase muere al
           # cargar con "punto de entrada ... en KERNEL32.dll". La única UCRT
           # válida para Win7 es la del runtime de Microsoft (VC_redist.x86.exe),
-          # que detecta Win7 e instala la variante compatible. Se descarga, se
-          # empaqueta en el setup y se instala desde el AfterInstall de
-          # dist.iss (/install /quiet /norestart, PrivilegesRequired=admin,
-          # con comprobación del código de salida).
-          Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x86.exe' `
+          # que detecta Win7 e instala la variante compatible. El redist de
+          # VS2015-2019 es el que cubre msvcp140/vcruntime140 y la UCRT sin
+          # traer imports W8+; el de VS2022+ los trae (rompe Win7). Se descarga,
+          # se empaqueta en el setup y se instala desde el AfterInstall de
+          # dist.iss (/install /passive /norestart, PrivilegesRequired=admin,
+          # con comprobación del código de salida). /passive: muestra barra de
+          # progreso al usuario en lugar de instalar en silencio.
+          Invoke-WebRequest -Uri 'https://aka.ms/vs/15/release/vc_redist.x86.exe' `
             -OutFile 'dist\VC_redist.x86.exe'
           $vr = Get-Item 'dist\VC_redist.x86.exe' -ErrorAction SilentlyContinue
           if (-not $vr -or $vr.Length -lt 1000000) {
@@ -232,8 +236,7 @@ jobs:
           Copy-Item app\bin\libssl-1_1.dll dist\
           Copy-Item app\bin\libcrypto-1_1.dll dist\
           $missing = @('libmpv-2.dll','vulkan-1.dll','libssl-1_1.dll',
-            'libcrypto-1_1.dll','yt-dlp.exe','msvcp140.dll',
-            'vcruntime140.dll','VC_redist.x86.exe') |
+            'libcrypto-1_1.dll','yt-dlp.exe','VC_redist.x86.exe') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
           if ($missing) {
             Write-Host "dist incompleto: faltan $missing"

@@ -37,7 +37,10 @@ Source: "dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs; Exclude
 ; El redist va a {tmp}: se ejecuta en AfterInstall (al instalarse) y se limpia
 ; solo al terminar la instalación (no queda dentro de {app}\ como un exe de 13
 ; MB suelto). AfterInstall permite comprobar el código de salida: [Run] lo
-; ignora y un redist que fallara en silencio dejaría una app que no arranca.
+; ignora y un redist que fallara dejaría una app que no arranca.
+; VC_redist.x86.exe = Visual C++ 2015-2019 (la versión 2022+ trae los imports
+; W8+ que rompen Win7). /passive: muestra barra de progreso en lugar de
+; instalar en silencio (/quiet). /norestart: no reinicia al terminar.
 Source: "dist\VC_redist.x86.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: InstallVcRedist()
 
 ; Limpieza de instalaciones ANTERIORES del equipo objetivo: las versiones <= 840e16c
@@ -57,15 +60,17 @@ Name: "{group}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"
 [Code]
 // UCRT + CRT de Microsoft para el equipo objetivo (Win7 SP1): la UCRT de la Windows
 // SDK importa GetSystemTimePreciseAsFileTime (W8+) y no carga; la variante del
-// redist sí es compatible con Win7. /install /quiet /norestart evita diálogos
-// y reinicios. Códigos aceptables: 0 = instalado, 1638 = ya había una versión
-// más nueva, 3010 = requiere reinicio (instalado igual).
+// redist sí es compatible con Win7. /install /passive /norestart evita
+// reinicios y muestra progreso (no es silencioso). Códigos aceptables:
+// 0 = instalado, 1638 = ya había una versión más nueva, 3010 = requiere
+// reinicio (instalado igual). VC_redist.x86.exe = Visual C++ 2015-2019
+// (la 2022+ trae imports W8+ que rompen Win7).
 procedure InstallVcRedist();
 var
   R: Integer;
 begin
   if not Exec(ExpandConstant('{tmp}\VC_redist.x86.exe'),
-              '/install /quiet /norestart', '', SW_HIDE,
+              '/install /passive /norestart', '', SW_SHOW,
               ewWaitUntilTerminated, R) then begin
     MsgBox('No se pudo ejecutar el runtime de Microsoft (VC_redist.x86.exe).'
            + #13#10 + 'La app no podrá arrancar sin él.', mbError, MB_OK);
