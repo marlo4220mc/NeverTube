@@ -197,7 +197,7 @@ jobs:
           # válida para Win7 es la del VC_redist.x86.exe que instala dist.iss
           # (incluye la UCRT vía KB2999226). Sin la purga, la máquina de pruebas de 32-bit
           # no arranca ni el instalador ni la app.
-          Get-ChildItem dist -File |
+          Get-ChildItem dist -Recurse -File |
             Where-Object { $_.Name -eq 'ucrtbase.dll' -or
               $_.Name -like 'api-ms-win-crt-*' } |
             Remove-Item -Force -ErrorAction SilentlyContinue
@@ -242,6 +242,31 @@ jobs:
           if ($missing) {
             Write-Host "dist incompleto: faltan $missing"
             exit 1 }
+          # Gate Win7 (imports): ninguna DLL del paquete puede importar
+          # ESTÁTICAMENTE GetSystemTimePreciseAsFileTime (existe solo desde
+          # W8+). La ucrtbase de la Windows SDK lo importa así y por eso el
+          # loader muere en Win7 con "punto de entrada ... en KERNEL32.dll";
+          # la ucrtbase del redist (KB2999226) NO lo importa (lo resuelve en
+          # runtime) y por eso funciona. El CI corre en W10/W11 donde la
+          # ucrtbase de SDK carga igual, así que un CI verde NO demuestra
+          # Win7: sin este scan el bug de 840e16c puede volver verde.
+          # dumpbin /imports lista todos los entry points que importa cada DLL
+          # del paquete (versión x86, carga en la máquina de pruebas; dumpbin Hostx64/x64
+          # analiza igual DLLs i686, como ya hace el step de configure).
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vspath = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $msvc = Get-ChildItem (Join-Path $vspath 'VC\Tools\MSVC') -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+          $dumpbin = Join-Path $msvc.FullName 'bin\Hostx64\x64\dumpbin.exe'
+          Get-ChildItem dist -Recurse -Filter *.dll | ForEach-Object {
+            $imp = & $dumpbin /imports $_.FullName
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "dumpbin falló en $($_.FullName)"; exit $LASTEXITCODE }
+            if ($imp | Select-String -SimpleMatch 'GetSystemTimePreciseAsFileTime') {
+              Write-Host "¡$($_.Name) importa GetSystemTimePreciseAsFileTime (W8+): rompe Win7!"
+              exit 1 }
+          }
+          Write-Host "gate Win7 OK: ninguna DLL de dist importa GetSystemTimePreciseAsFileTime"
           # choco instala Inno en ProgramFiles(x86); localizar ISCC.exe en cualquiera de las dos
           $iscc = Get-ChildItem "$env:ProgramFiles\Inno Setup*\ISCC.exe",
             "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
