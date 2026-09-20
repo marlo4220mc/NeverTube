@@ -189,6 +189,18 @@ jobs:
             Sort-Object FullName -Descending | Select-Object -First 1
           if ($crt) {
             Copy-Item "$($crt.FullName)\*.dll" dist\ -ErrorAction SilentlyContinue }
+          # PURGA de la UCRT app-local: windeployqt --compiler-runtime copia
+          # junto al exe la UCRT del SDK (ucrtbase.dll + api-ms-win-crt-*.dll)
+          # que importa GetSystemTimePreciseAsFileTime (W8+) y muere en Win7 con
+          # "The procedure entry point GetSystemTimePreciseAsFileTime could not
+          # be located in the dynamic link library KERNEL32.dll". La ÚNICA UCRT
+          # válida para Win7 es la del VC_redist.x86.exe que instala dist.iss
+          # (incluye la UCRT vía KB2999226). Sin la purga, la máquina de pruebas de 32-bit
+          # no arranca ni el instalador ni la app.
+          Get-ChildItem dist -File |
+            Where-Object { $_.Name -eq 'ucrtbase.dll' -or
+              $_.Name -like 'api-ms-win-crt-*' } |
+            Remove-Item -Force -ErrorAction SilentlyContinue
           # UCRT (Universal C Runtime): NO se puede empaquetar la UCRT de la
           # Windows SDK junto al exe para la máquina de pruebas (Win7 SP1): esa versión
           # importa GetSystemTimePreciseAsFileTime (W8+) y ucrtbase muere al
