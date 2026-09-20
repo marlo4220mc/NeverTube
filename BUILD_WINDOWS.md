@@ -17,6 +17,19 @@ resto sigue igual (Qt5, OpenGL, SQLite). Esta sección solo se ejecuta si
    - cabeceras `include/*.h` → reordenar a `include/mpv/*.h` (layout que espera CMake)
    - La rama `if(WIN32)` del CMake (`MPV_DEV_DIR`) detecta esto.
 3. **yt-dlp.exe** en el directorio de salida (junto al `.exe`).
+   - El build oficial `yt-dlp_x86.exe` (32 bits) empaqueta un Python 3.10+ y
+     PyInstaller importa ESTÁTICAMENTE `api-ms-win-core-path-l1-1-0.dll`
+     (`PathCchCanonicalize`/`PathCchCanonicalizeEx`…), un api-set que solo existe
+     desde Windows 8 → en Win7 el loader falla con *"api-ms-win-core-path-l1-1-0.dll
+     is missing from your computer"* al lanzar la app (la primera vez que el
+     programa invoca yt-dlp). Arreglo: copiar junto a `yt-dlp.exe` el polyfill
+     **x86** del repo `adang1345/api-ms-win-core-path` (releases → v1.0.0 →
+     `api-ms-win-core-path.zip`, archivo `x86/api-ms-win-core-path-l1-1-0.dll`;
+     implementación basada en Wine, LGPL-2.1, heredada de
+     `nalexandru/api-ms-win-core-path-HACK`, sin imports W8+). En Win7 el loader
+     de api-sets no reconoce ese nombre y cae a la búsqueda normal de DLLs, así
+     que basta dejarlo en la misma carpeta. Lleva acompañadas sus licencias
+     (`LICENSE.txt`, `COPYING.LIB`, `LICENSE_WINE.txt`).
 4. **windeployqt** para copiar Qt al lado del ejecutable.
 
 ## Pasos (en Windows)
