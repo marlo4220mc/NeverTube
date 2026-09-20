@@ -135,13 +135,12 @@ end;
 // esas funciones existen y entran los mpv/yt-dlp OFICIALES, así que aquí se
 // gatea por versión: el KB solo se toca en Windows 7.
 function IsWindows7(): Boolean;
-var
-  Major, Minor, Revision, Build: Cardinal;
 begin
-  if GetWindowsVersion(Major, Minor, Revision, Build) then
-    Result := (Major = 6) and (Minor = 1)
-  else
-    Result := False;
+  // GetWindowsVersion (desde Inno 6.x): devuelve major/minor/build empaquetados
+  // en un solo Cardinal ($0601xxxx en Win7). Se testea con el ISCC del CI
+  // (Inno 6.7.1 por choco) y el 7.x local.
+  Result := ((GetWindowsVersion shr 24) = 6) and
+            (((GetWindowsVersion shr 16) and $FF) = 1);
 end;
 
 procedure InstallKb2533623();
