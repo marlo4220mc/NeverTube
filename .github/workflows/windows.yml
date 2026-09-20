@@ -60,37 +60,45 @@ jobs:
           Move-Item mpv-dev\include\*.h mpv-dev\include\mpv\
           Get-ChildItem mpv-dev -Recurse -Filter *.dll | Select-Object FullName
 
-      - name: bajar yt-dlp x86 (build 32 bits, empaquetado como yt-dlp.exe)
+      - name: bajar yt-dlp x86 win7 (fork nicolaasjan, empaquetado como yt-dlp.exe)
         shell: pwsh
         run: |
-          # yt-dlp.exe oficial ya es x64 y no arranca en Windows de 32 bits;
-          # yt-dlp_x86.exe es el build de 32 bits. Se guarda SIEMPRE como
-          # "yt-dlp.exe" para que la app lo encuentre junto a su exe
-          # (Yt::ytDlpBinary: appdir/yt-dlp.exe -> appdir/ytdlp.exe -> PATH).
-          # Empaquetarlo con OTRo nombre (el antiguo ytdlp.exe) rompía
+          # yt-dlp del fork nicolaasjan/yt-dlp (mantiene builds para Win7:
+          # "in-between releases" entre medio de los oficiales + Python 3.14
+          # preparado para Windows 7). yt-dlp_x86_win7.exe es el build de 32
+          # bits. Los builds OFICIALES (Python 3.10+) no cargan en la máquina de pruebas
+          # Win7 (api-ms-win-core-path + AddDllDirectory sin cubrir).
+          # Se guarda SIEMPRE como "yt-dlp.exe" para que la app lo encuentre
+          # junto a su exe (Yt::ytDlpBinary: appdir/yt-dlp.exe -> appdir/ytdlp.exe
+          # -> PATH). Empaquetarlo con OTRo nombre (el antiguo ytdlp.exe) rompía
           # búsquedas/canales: QProcess lanza "yt-dlp" y Windows solo lo halla
           # si el archivo se llama así.
           curl.exe -sL -o yt-dlp.exe `
-            https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_x86.exe
+            https://github.com/nicolaasjan/yt-dlp/releases/download/2026.08.28.073407/yt-dlp_x86_win7.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $yt = Get-Item yt-dlp.exe
+          if (-not $yt -or $yt.Length -lt 10000000) {
+            Write-Host "yt-dlp win7 no llegó ($($yt.Length) bytes)"; exit 1 }
           & .\yt-dlp.exe --version
-          if ($LASTEXITCODE -ne 0) { Write-Host "yt-dlp x86 roto"; exit $LASTEXITCODE }
+          if ($LASTEXITCODE -ne 0) { Write-Host "yt-dlp win7 roto"; exit $LASTEXITCODE }
 
-      # yt-dlp_x86.exe está empaquetado con PyInstaller de Python 3.10+ (PEP 11:
-      # Python 3.9+ dejó de soportar Win7). Ese runtime importa ESTÁTICAMENTE
-      # api-ms-win-core-path-l1-1-0.dll (PathCchCanonicalize/CanonicalizeEx/
-      # RemoveExtension/...), un api-set que solo existe desde Windows 8: en la
-      # Win7 el loader muere con "api-ms-win-core-path-l1-1-0.dll is
-      # missing from your computer" (verificado en máquina: el error salta al
-      # arrancar la app, en Yt::ytDlpBinary). Único arreglo: proveer un polyfill
-      # x86 de esa api-set (implementación basada en Wine, LGPL-2.1). Se usa el
-      # del repo adang1345/api-ms-win-core-path (fork actualizado de
-      # nalexandru/api-ms-win-core-path-HACK, mantenido para PythonVista):
-      # release v1.0.0. En Win7 el loader de api-sets no reconoce el nombre y cae
-      # a la búsqueda normal de DLLs → basta copiar el archivo junto a yt-dlp.exe
-      # (misma carpeta dist\). El binario x86 solo importa KERNEL32 (el gate de
-      # imports W8+ no se dispara) y exporta el set Path* completo, incluidos
-      # PathCchCanonicalize y PathCchCanonicalizeEx.
+      # El python314.dll del yt-dlp_x86_win7.exe (fork nicolaasjan) importa
+      # ESTÁTICAMENTE api-ms-win-core-path-l1-1-0.dll (PathCchCanonicalize/
+      # CanonicalizeEx/RemoveExtension/...), un api-set que solo existe desde
+      # Windows 8: en la Win7 el loader muere con "api-ms-win-core-path-
+      # l1-1-0.dll is missing from your computer" (verificado en máquina: el
+      # error salta al arrancar la app, en Yt::ytDlpBinary). Único arreglo:
+      # proveer un polyfill x86 de esa api-set (implementación basada en Wine,
+      # LGPL-2.1). Se usa el del repo adang1345/api-ms-win-core-path (fork
+      # actualizado de nalexandru/api-ms-win-core-path-HACK, mantenido para
+      # PythonVista): release v1.0.0. En Win7 el loader de api-sets no reconoce
+      # el nombre y cae a la búsqueda normal de DLLs → basta copiar el archivo
+      # junto a yt-dlp.exe (misma carpeta dist\). El binario x86 solo importa
+      # KERNEL32 (el gate de imports W8+ no se dispara) y exporta el set Path*
+      # completo, incluidos PathCchCanonicalize y PathCchCanonicalizeEx.
+      # Los DEMÁS imports W8+ del python314 (AddDllDirectory,
+      # GetFileInformationByHandleEx, GetFinalPathNameByHandle) los añade
+      # KB2533623, que el setup de Inno instala si kernel32 no los exporta.
       - name: bajar polyfill api-ms-win-core-path x86 (para yt-dlp en Win7)
         shell: pwsh
         run: |
@@ -116,6 +124,29 @@ jobs:
             if ($LASTEXITCODE -ne 0 -or -not $ok) { Write-Host "licencia $lf no llegó"; exit 1 }
           }
           Get-Item api-ms-win-core-path-l1-1-0.dll | Select-Object Name, Length
+
+      # KB2533623 para la máquina de pruebas SIN updates: su kernel32 no exporta
+      # AddDllDirectory / GetFileInformationByHandleEx / GetFinalPathNameByHandle
+      # (las añade KB2533623, que nunca se instaló porque la máquina de pruebas está sin
+      # actualizaciones a propósito). Es exactamente lo que importa el
+      # python314.dll del yt-dlp_x86_win7.exe: sin el KB el loader muere con
+      # "The procedure entry point AddDllDirectory could not be located in the
+      # dynamic link library KERNEL32.dll" (verificado en VMware: instalado el
+      # KB, funciona). El .msu standalone (Windows6.1-KB2533623-x86.msu, ~1,2 MB)
+      # se descarga del repo beny1226/Windows-7-KB2533623 (x86 y x64 incluidos)
+      # y el setup de Inno lo instala con wusa /quiet /norestart cuando detecta
+      # que kernel32 no exporta AddDllDirectory (GetProcAddress). Así la app
+      # sigue funcionando en Win7 sin updates.
+      - name: bajar KB2533623 x86 (.msu que el setup instala si falta AddDllDirectory)
+        shell: pwsh
+        run: |
+          curl.exe -sL -o KB2533623-x86.msu `
+            https://github.com/beny1226/Windows-7-KB2533623/raw/main/Windows6.1-KB2533623-x86.msu
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $kb = Get-Item KB2533623-x86.msu
+          if (-not $kb -or $kb.Length -lt 500000) {
+            Write-Host 'KB2533623-x86.msu no llegó'; exit 1 }
+          Write-Host "KB2533623-x86.msu $($kb.Length) bytes"
 
       # Qt 5.15.2 (msvc2019 x86) carga su backend TLS por LoadLibrary de las DLLs
       # de OpenSSL 1.1 (libssl-1_1.dll / libcrypto-1_1.dll) DESDE la
@@ -279,9 +310,12 @@ jobs:
           # van junto al binario para redistribución correcta.
           Copy-Item api-ms-win-core-path-l1-1-0.dll dist\
           Copy-Item LICENSE.txt, COPYING.LIB, LICENSE_WINE.txt dist\
+          # KB2533623: el instalador lo deja en {tmp} y lo instala con wusa
+          # solo si kernel32 no exporta AddDllDirectory (Win7 sin updates).
+          Copy-Item KB2533623-x86.msu dist\
           $missing = @('libmpv-2.dll','libssl-1_1.dll',
             'libcrypto-1_1.dll','yt-dlp.exe','VC_redist.x86.exe',
-            'api-ms-win-core-path-l1-1-0.dll') |
+            'api-ms-win-core-path-l1-1-0.dll','KB2533623-x86.msu') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
           if ($missing) {
             Write-Host "dist incompleto: faltan $missing"
