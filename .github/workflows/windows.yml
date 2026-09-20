@@ -22,27 +22,42 @@ jobs:
           target: 'desktop'
           arch: 'win32_msvc2019'
 
-      # libmpv-2.dll desde media-kit/libmpv-win32-video-cmake (i686, release
-      # 20241021, git-0f78584) — NO desde shinchiro/mpv-winbuild-cmake.
-      # Por qué: los builds de shinchiro de mayo 2026 en adelante incrustan un
-      # OpenSSL 3 de master con el commit roto 1e1ea715 (PR #32633 de openssl,
-      # "lock != NULL") que mata la app con
-      #   :0: OpenSSL internal error: assertion failed: lock != NULL
-      # ya sea al inicializar mpv (ago-sep 2026) o al reproducir de verdad
-      # (may-jun 2026). El build de media-kit es de oct 2024 (OpenSSL anterior
-      # al bug): verificado localmente con reproducción real en x86
-      # (--selftest-hwprobe → vp9-hw; paintGL frames; sin assert). Además es
-      # una URL pinada de release, no "latest": no depende del pruneo de
-      # releases ni de rate limit de la API. Mismo formato mpv-dev
-      # (include/ + libmpv-2.dll) que usaba shinchiro.
-      - name: bajar mpv-dev i686 (media-kit/libmpv-win32-video-cmake 20241021)
+      # libmpv-2.dll desde mpv-player-windows (sourceforge), build MinGW i686 de
+      # 2021-05-30 (git-fd8c673) — ANTERIOR a que mpv dejara de soportar Windows
+      # 7, así que su tabla de imports solo usa DLLs y símbolos que existen en
+      # Win7 SP1 (KERNEL32/USER32/msvcrt/OPENGL32/MFPlat/bcrypt/...). Sin
+      # AdjustWindowRectExForDpi ni GetSystemMetricsForDpi (USER32, W10), sin
+      # GetDpiForMonitor (SHCORE, W8.1) ni api-ms-win-core-winrt|path|synch
+      # (W8). El pin previo (media-kit/libmpv-win32-video-cmake 20241021,
+      # git-0f78584) importaba ESOS símbolos ESTÁTICAMENTE (verificado con
+      # objdump: slots 0x11d56420/0x11d5655c/0x11d56b3c) y en Win7 SP1 el loader
+      # moría en el primero de ellos con
+      #   "The procedure entry point AdjustWindowRectExForDpi could not be
+      #    located in the dynamic link library USER32.dll"
+      # Este build MinGW además: ffmpeg+OpenSSL compilados DENTRO del propio DLL
+      # (no trae DLLs de dependencia aparte), usa msvcrt del sistema (sin
+      # libgcc/libwinpthread) y NO importa vulkan-1.dll (no hace falta
+      # empaquetar el loader de Vulkan). Y evita shinchiro/mpv-winbuild-cmake
+      # (los builds de mayo 2026 en adelante incrustan un OpenSSL 3 de master
+      # con el commit roto 1e1ea715, "lock != NULL", que mata la app en
+      # mpv_initialize). Revisado en CI por el gate de imports W8+.
+      # El paquete es dev: `mpv-1.dll` + headers sueltos en include/ (sin la
+      # subcarpeta mpv/) + `libmpv.dll.a` (MinGW, NO enlazable por MSVC: por eso
+      # se regenera el import lib con dumpbin en el step de configure). Se
+      # renombra a libmpv-2.dll (mismo nombre que esperan la copia a dist y
+      # dist.iss) y se reordena include/ al layout `include/mpv/*.h` que exige
+      # CMake (find_path mpv/client.h).
+      - name: bajar mpv-dev i686 (mpv-player-windows 20210530-git-fd8c673, Win7-clean)
         shell: pwsh
         run: |
-          $url = 'https://github.com/media-kit/libmpv-win32-video-cmake/releases/download/20241021/mpv-dev-i686-20241021-git-0f78584.7z'
+          $url = 'https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-i686-20210530-git-fd8c673.7z/download'
           curl.exe -sL -o mpv-dev.7z $url
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "$env:ProgramFiles/7-Zip/7z.exe" x -y -ompv-dev mpv-dev.7z
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Rename-Item mpv-dev\mpv-1.dll mpv-dev\libmpv-2.dll
+          New-Item -ItemType Directory mpv-dev\include\mpv | Out-Null
+          Move-Item mpv-dev\include\*.h mpv-dev\include\mpv\
           Get-ChildItem mpv-dev -Recurse -Filter *.dll | Select-Object FullName
 
       - name: bajar yt-dlp x86 (build 32 bits, empaquetado como yt-dlp.exe)
@@ -123,8 +138,12 @@ jobs:
           Add-Content -Encoding ASCII $def 'EXPORTS'
           $exports = & $dumpbin /exports $dll
           if ($LASTEXITCODE -ne 0) { Write-Host "dumpbin falló"; exit $LASTEXITCODE }
+          # El build MinGW de 2021 exporta además de mpv_* la basura interna de
+          # libbluray (Java_org_videolan_*/Java_java_awt_*, con @N) y de
+          # libarchive (archive_*): el .def de importación MSVC solo necesita
+          # mpv_* (los demás no se usan y ensucian el import lib).
           foreach ($l in $exports) {
-            if ($l -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+([A-Za-z_]\w*)\s*$') {
+            if ($l -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(mpv_\w*)\s*$') {
               $Matches[1] | Add-Content -Encoding ASCII $def
             }
           }
@@ -153,17 +172,6 @@ jobs:
         run: |
           choco install innosetup --yes --no-progress
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      # libmpv-2.dll (el i686 de media-kit, como el de shinchiro) importa
-      # vulkan-1.dll ESTÁTICAMENTE. En máquinas sin runtime Vulkan (el equipo de pruebas)
-      # la app no arranca: "no se encontró vulkan-1.dll". Embeber el loader
-      # oficial x86 en el paquete (un exe de 32 bits SOLO carga el loader de
-      # 32 bits).
-      - name: instalar Vulkan Runtime SOLO (vulkan-1.dll x86, sin el SDK de 0.75 GB)
-        uses: jakoch/install-vulkan-sdk-action@v1
-        with:
-          install_runtime_only: true
-          cache: true
 
       - name: empaquetar setup.exe instalable (windeployqt + DLLs mpv-dev + yt-dlp + iscc)
         shell: pwsh
@@ -220,35 +228,35 @@ jobs:
             ForEach-Object { Copy-Item $_.FullName dist\ }
           Copy-Item yt-dlp.exe dist\ -ErrorAction SilentlyContinue
           Copy-Item $exe dist\nevertube_qt2.exe
-          # Embeber el loader oficial de Vulkan x86: sin él, en la máquina de pruebas falla
-          # el arranque (libmpv-2.dll i686 lo importa estáticamente, "falta
-          # vulkan-1.dll"). jakoch deja runtime\x86 y runtime\x64.
-          $vk = Get-ChildItem 'C:\VulkanSDK\*\runtime\x86\vulkan-1.dll' `
-            -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $vk) {
-            Write-Host "vulkan-1.dll x86 no hallada en C:\VulkanSDK\*\runtime\x86"
-            exit 1 }
-          Copy-Item $vk.FullName dist\
           # OpenSSL 1.1.1 = backend TLS de Qt5Network. windeployqt NO la despliega:
           # sin estas DLLs al lado del exe, todo HTTPS falla en la máquina de pruebas con
           # "TLS initialization failed" (no cargan innertube/YouTube).
           Copy-Item app\bin\libssl-1_1.dll dist\
           Copy-Item app\bin\libcrypto-1_1.dll dist\
-          $missing = @('libmpv-2.dll','vulkan-1.dll','libssl-1_1.dll',
+          $missing = @('libmpv-2.dll','libssl-1_1.dll',
             'libcrypto-1_1.dll','yt-dlp.exe','VC_redist.x86.exe') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
           if ($missing) {
             Write-Host "dist incompleto: faltan $missing"
             exit 1 }
           # Gate Win7 (imports): ninguna DLL del paquete puede importar
-          # ESTÁTICAMENTE GetSystemTimePreciseAsFileTime (existe solo desde
-          # W8+). La ucrtbase de la Windows SDK lo importa así y por eso el
-          # loader muere en Win7 con "punto de entrada ... en KERNEL32.dll";
-          # la ucrtbase del redist (KB2999226) NO lo importa (lo resuelve en
-          # runtime) y por eso funciona. El CI corre en W10/W11 donde la
-          # ucrtbase de SDK carga igual, así que un CI verde NO demuestra
-          # Win7: sin este scan el bug de 840e16c puede volver verde.
+          # ESTÁTICAMENTE símbolos que no existen en Win7 SP1. Lista cubierta:
+          #  - GetSystemTimePreciseAsFileTime (W8+): la ucrtbase de la Windows
+          #    SDK lo importa así y por eso el loader muere en Win7 con "punto de
+          #    entrada ... en KERNEL32.dll" (la ucrtbase del redist KB2999226 NO
+          #    lo importa, por eso el bug de 840e16c necesita este scan: el CI
+          #    corre en W10/W11 donde la ucrtbase de SDK carga igual, así que un
+          #    CI verde NO demuestra Win7).
+          #  - AdjustWindowRectExForDpi / GetSystemMetricsForDpi (USER32, W10) y
+          #    GetDpiForMonitor (SHCORE, W8.1): los importó ESTÁTICAMENTE el pin
+          #    previo de libmpv (media-kit 20241021) y en Win7 el loader moría
+          #    con "The procedure entry point AdjustWindowRectExForDpi could not
+          #    be located in the dynamic link library USER32.dll". El pin actual
+          #    (mpv-player-windows 20210530) es limpio; este gate lo fija para
+          #    que no vuelva a reintroducirse un pin con imports W8+.
+          #  - api-ms-win-core-winrt|-winrt-error|-path|-synch (W8) y las APIs de
+          #    espera por dirección (WaitOnAddress/WakeByAddress*): presentes en
+          #    builds de mpv nuevos, no en Win7.
           # dumpbin /imports lista todos los entry points que importa cada DLL
           # del paquete (versión x86, carga en la máquina de pruebas; dumpbin Hostx64/x64
           # analiza igual DLLs i686, como ya hace el step de configure).
@@ -257,15 +265,23 @@ jobs:
           $msvc = Get-ChildItem (Join-Path $vspath 'VC\Tools\MSVC') -Directory |
             Sort-Object Name -Descending | Select-Object -First 1
           $dumpbin = Join-Path $msvc.FullName 'bin\Hostx64\x64\dumpbin.exe'
+          $win7poison = @('GetSystemTimePreciseAsFileTime','AdjustWindowRectExForDpi',
+            'GetSystemMetricsForDpi','GetDpiForMonitor','PathCchCanonicalizeEx',
+            'SetThreadDpiAwarenessContext','SetProcessDpiAwarenessContext',
+            'WaitOnAddress','WakeByAddressAll','WakeByAddressSingle',
+            'RoGetActivationFactory','RoOriginateLanguageException')
           Get-ChildItem dist -Recurse -Filter *.dll | ForEach-Object {
             $imp = & $dumpbin /imports $_.FullName
             if ($LASTEXITCODE -ne 0) {
               Write-Host "dumpbin falló en $($_.FullName)"; exit $LASTEXITCODE }
-            if ($imp | Select-String -SimpleMatch 'GetSystemTimePreciseAsFileTime') {
-              Write-Host "¡$($_.Name) importa GetSystemTimePreciseAsFileTime (W8+): rompe Win7!"
-              exit 1 }
+            foreach ($sym in $win7poison) {
+              if ($imp | Select-String -SimpleMatch $sym) {
+                Write-Host "¡$($_.Name) importa $sym (W8+): rompe Win7!"
+                exit 1
+              }
+            }
           }
-          Write-Host "gate Win7 OK: ninguna DLL de dist importa GetSystemTimePreciseAsFileTime"
+          Write-Host "gate Win7 OK: ninguna DLL de dist importa símbolos W8+ ($($win7poison -join ', '))"
           # choco instala Inno en ProgramFiles(x86); localizar ISCC.exe en cualquiera de las dos
           $iscc = Get-ChildItem "$env:ProgramFiles\Inno Setup*\ISCC.exe",
             "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
@@ -279,7 +295,7 @@ jobs:
 
       # Smoke test: arrancar el binario DESDE dist\ (con todo su maquillaje de
       # DLLs) y ejecutar selftests headless. Detecta en CI el bug de "DLL
-      # faltante al arrancar" (vulkan-1.dll) y el de backend TLS sin cargar
+      # faltante al arrancar" y el de backend TLS sin cargar
       # (OpenSSL ausente → "TLS initialization failed"). --selftest-tls va un
       # paso más allá que --selftest-ssl (que solo comprueba supportsSsl():
       # carga de DLLs): hace un HANDSHAKE TLS real contra hosts públicos. Sin
@@ -290,9 +306,10 @@ jobs:
       # --selftest-hwprobe es el gate del libmpv: inicializa mpv en headless
       # (vo=null) y decodifica los micro-clips AV1/VP9/h264. Con los builds de
       # shinchiro que llevan el OpenSSL roto, aborta con lock != NULL al hacer
-      # mpv_initialize; la fuente (media-kit) está pinada precisamente para
-      # evitar ese combo. La reproducción REAL ya se verifica aparte (la DLL
-      # pinada está validada en máquina con paintGL+frames).
+      # mpv_initialize; el pin actual (mpv-player-windows 20210530) es un build
+      # MinGW de 2021 con OpenSSL anterior a ese bug. La reproducción REAL se
+      # verifica aparte (la DLL pinada está validada en máquina con
+      # paintGL+frames) y el gate de imports W8+ fija la compatibilidad Win7.
       #
       # ¡OJO con el exit code! nevertube_qt2.exe es de SUBSISTEMA GUI: al
       # lanzarlo con `&` PowerShell NO espera a que termine NI fija
