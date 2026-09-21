@@ -344,9 +344,21 @@ void PlayerController::setMuted(bool muted)
 
 void PlayerController::setVolume(double volume)
 {
-    m_volume = qBound(0.0, volume, 100.0);
+    m_volume = qBound(0.0, volume, double(m_volumeMax));
     if (m_volume > 0.0)
         m_muted = false;
+    const int muted = m_muted ? 1 : 0;
+    m_player->setProperty("volume_muted", muted);
+    m_player->setVolume(m_volume);
+}
+
+void PlayerController::setVolumeMax(double maxPercent)
+{
+    m_volumeMax = qBound(100, int(qRound(maxPercent)), 200);
+    // El volumen actual puede quedar por encima del nuevo tope: capar.
+    if (m_volume > double(m_volumeMax))
+        m_volume = double(m_volumeMax);
+    m_player->setVolumeMax(double(m_volumeMax));
     m_player->setVolume(m_volume);
 }
 
