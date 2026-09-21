@@ -1,5 +1,6 @@
 #include "settings_page.h"
 
+#include <QActionGroup>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -108,13 +109,34 @@ static QString valueFromAudioLang(const QString &text)
 
 static QString audioLangFromValue(const QString &val)
 {
-    if (val == QStringLiteral("es"))
+    if (val == QLatin1String("es"))
         return QStringLiteral("Español");
-    if (val == QStringLiteral("en"))
+    if (val == QLatin1String("en"))
         return QStringLiteral("Inglés");
-    if (val == QStringLiteral("pt"))
+    if (val == QLatin1String("pt"))
         return QStringLiteral("Portugués");
     return QStringLiteral("Original");
+}
+
+// Volumen máximo (mpv "volume-max"): 100% por defecto, 150/175/200 disponibles
+// como "headroom" para quienes necesiten más volumen. Cada opción >100% pide
+// confirmación por seguridad auditiva (riesgo de daño con audífonos).
+static QStringList volumeMaxOptions()
+{
+    return {QStringLiteral("100%"), QStringLiteral("150%"),
+            QStringLiteral("175%"), QStringLiteral("200%")};
+}
+
+static QString valueFromVolumeMax(const QString &text)
+{
+    QString s = text;
+    s.remove(QLatin1Char('%'));
+    return s;
+}
+
+static QString volumeMaxFromValue(const QString &val)
+{
+    return val + QStringLiteral("%");
 }
 
 static QStringList gridDensityOptions()
@@ -161,9 +183,9 @@ void SettingsPage::updateCodecProfile(const QString &profile)
         m_codecProfileLabel->setText(codecProfileText(profile));
 }
 
-QPushButton *SettingsPage::makeValueButton(const QString &text)
+QPushButton *SettingsPage::makeActionButton(const QString &text)
 {
-    auto *btn = new QPushButton(text + QStringLiteral("  ▾"), this);
+    auto *btn = new QPushButton(text, this);
     btn->setCursor(Qt::PointingHandCursor);
     btn->setStyleSheet(
         QStringLiteral("font-size:12px; padding:7px 14px;"
@@ -174,30 +196,110 @@ QPushButton *SettingsPage::makeValueButton(const QString &text)
     return btn;
 }
 
+QPushButton *SettingsPage::makeValueButton(const QString &text)
+{
+    return makeActionButton(text + QStringLiteral("  ▾"));
+}
+
+// Construye un menú de selección asociado al botón `btn`. La callback `onPick`
+// recibe la opción elegida y se ejecuta SÍNCRONAMENTE: si retorna, se considera
+// el cambio aceptado y el botón pasa a mostrar la opción nueva. Para opciones
+// que necesitan confirmación ASÍNCRONA (modal no modal), usar
+// setupValueMenuWithConfirm() en su lugar.
 void SettingsPage::setupValueMenu(
     QPushButton *btn, const QStringList &options, const QString &current,
     const std::function<void(const QString &)> &onPick)
 {
     auto *menu = new QMenu(btn);
+    // Grupo exclusivo: solo una QAction puede quedar marcada POR MARCO. El
+    // toggle automático de Qt en acciones checkable sueltas marcaba la nueva
+    // sin desmarcar la anterior (doble check); con el grupo, cliquear una
+    // acción desmarca el resto de forma atómica.
+    auto *group = new QActionGroup(menu);
+    group->setExclusive(true);
+    // currentOpt: opción vigente (texto exacto de una QAction del menú). Vive
+    // en un shared_ptr porque los triggers se ejecutan mucho después de que
+    // esta función retorne (la pila ya no existe).
+    auto currentOpt = std::make_shared<QString>(current);
+    auto syncMenu = [menu, btn](const QString &opt) {
+        for (QAction *a : menu->actions())
+            a->setChecked(a->text() == opt);
+        btn->setText(opt + QStringLiteral("  ▾"));
+    };
+    // Al abrir el menú re-sincroniza checks y texto del botón con la opción
+    // vigente; sin esto, Qt deja el check de la última acción marcada y el
+    // menú reabre con checks viejos ("doble check").
+    connect(btn, &QPushButton::clicked, btn,
+            [btn, menu, currentOpt, syncMenu]() {
+                syncMenu(*currentOpt);
+                menu->popup(btn->mapToGlobal(QPoint(0, btn->height())));
+            });
     for (const QString &opt : options) {
         QAction *act = menu->addAction(opt);
         act->setCheckable(true);
-        act->setChecked(opt == current);
+        group->addAction(act);
         connect(act, &QAction::triggered, btn,
-                [btn, menu, opt, onPick]() {
-                    for (QAction *a : menu->actions())
-                        a->setChecked(a->text() == opt);
-                    btn->setText(opt + QStringLiteral("  ▾"));
+                [btn, opt, onPick, currentOpt, syncMenu]() {
                     onPick(opt);
+                    *currentOpt = opt;
+                    syncMenu(opt);
                 });
     }
-    // Sin WA_DeleteOnClose: el menú queda vivo con el botón (como en los 3
-    // puntos de biblioteca); borrarlo al cerrar dejaría un puntero colgante
-    // en la lambda de "clicked" y la app crashearía al reabrir el cuadro.
+    syncMenu(*currentOpt);
+}
+
+// Variante con confirmación ASÍNCRONA (modal no modal). `confirm(opt,
+// applyVisual)` decide por cada opción si aplica directo o muestra el modal:
+//   - Si aplica directo (p. ej. volver a 100%): hace los cambios reales
+//     (BD + signal) y llama applyVisual(opt) para reflejar botón + checks.
+//   - Si muestra modal: al Aceptar aplica los cambios y llama applyVisual(opt);
+//     al Cancelar NO llama applyVisual — el botón y el menú conservan la
+//     opción previa.
+// applyVisual es un wrapper que además registra la opción aceptada como la
+// vigente, para que la próxima apertura del menú la muestre marcada.
+void SettingsPage::setupValueMenuWithConfirm(
+    QPushButton *btn, const QStringList &options, const QString &current,
+    const std::function<void(const QString &,
+                              const std::function<void(const QString &)> &)>
+        &confirm)
+{
+    auto *menu = new QMenu(btn);
+    // Grupo exclusivo: solo una QAction puede quedar marcada POR MARCO (ver
+    // comentario en setupValueMenu). Con el grupo, al cliquear una opción el
+    // check anterior se desmarca de forma atómica.
+    auto *group = new QActionGroup(menu);
+    group->setExclusive(true);
+    // currentOpt: opción visualmente vigente (texto exacto de una QAction).
+    auto currentOpt = std::make_shared<QString>(current);
+    auto syncMenu = [menu, btn](const QString &opt) {
+        for (QAction *a : menu->actions())
+            a->setChecked(a->text() == opt);
+        btn->setText(opt + QStringLiteral("  ▾"));
+    };
+    // applyVisual que recibe el caller: registra la opción aceptada y la
+    // refleja. Al cancelar el modal el caller NO lo invoca, así currentOpt
+    // queda en la opción previa.
+    auto applyAndTrack = [currentOpt, syncMenu](const QString &opt) {
+        *currentOpt = opt;
+        syncMenu(opt);
+    };
+    // Antes de abrir, sincroniza el check con la opción vigente (puede haber
+    // cambiado tras un aceptar/cancelar anterior).
     connect(btn, &QPushButton::clicked, btn,
-            [btn, menu]() {
+            [btn, menu, currentOpt, syncMenu]() {
+                syncMenu(*currentOpt);
                 menu->popup(btn->mapToGlobal(QPoint(0, btn->height())));
             });
+    for (const QString &opt : options) {
+        QAction *act = menu->addAction(opt);
+        act->setCheckable(true);
+        group->addAction(act);
+        connect(act, &QAction::triggered, btn,
+                [btn, opt, confirm, applyAndTrack]() {
+                    confirm(opt, applyAndTrack);
+                });
+    }
+    syncMenu(*currentOpt);
 }
 
 void SettingsPage::buildUI()
@@ -233,13 +335,27 @@ void SettingsPage::buildUI()
         scrollLay->addWidget(subTitle);
     };
 
-    auto addOptionRow = [this, scrollLay](
+    // Nota aclaratoria bajo un ajuste: siempre se agrupa con su fila en un
+    // bloque de espaciado corto (nunca suelta en scrollLay, que separa con 24px).
+    auto addNote = [content](const QString &text) {
+        auto *note = new QLabel(text, content);
+        note->setStyleSheet(QStringLiteral("font-size:10px; color:#8F8F8F;"));
+        note->setWordWrap(true);
+        return note;
+    };
+
+    auto addOptionRow = [this, scrollLay, addNote](
                             const QString &labelText,
                             const QStringList &options,
                             const QString &saved,
                             const QString &defaultVal,
                             const std::function<QString(const QString &)> &fromVal,
-                            const std::function<void(const QString &)> &onPick) {
+                            const std::function<void(const QString &)> &onPick,
+                            const QString &note = QString()) {
+        // Bloque "fila + nota": la nota queda pegada a su ajuste (spacing 4);
+        // el spacing de 24 de scrollLay separa bloques completos, no fila-nota.
+        auto *block = new QVBoxLayout;
+        block->setSpacing(4);
         auto *row = new QHBoxLayout;
         row->setSpacing(8);
         auto *lbl = new QLabel(labelText);
@@ -247,8 +363,10 @@ void SettingsPage::buildUI()
         row->addWidget(lbl);
         QPushButton *btn = makeValueButton(fromVal(saved));
         row->addWidget(btn, 1, Qt::AlignRight);
-        scrollLay->addLayout(row);
-        // Actualizar con la opción persistida
+        block->addLayout(row);
+        if (!note.isEmpty())
+            block->addWidget(addNote(note));
+        scrollLay->addLayout(block);
         setupValueMenu(btn, options, fromVal(saved), onPick);
         Q_UNUSED(defaultVal);
     };
@@ -326,11 +444,7 @@ void SettingsPage::buildUI()
         m_codecProfileLabel->setStyleSheet(QStringLiteral("color:#8F8F8F;"));
         row->addWidget(m_codecProfileLabel);
         row->addStretch(1);
-        auto *btn = new QPushButton(QStringLiteral("Volver a detectar"));
-        btn->setStyleSheet(QStringLiteral(
-            "font-size:12px; padding:6px 14px; background-color:#1F1F1F;"
-            " border:1px solid #2A2A2A; border-radius:8px; color:#ECECEC;"));
-        btn->setCursor(Qt::PointingHandCursor);
+        auto *btn = makeActionButton(QStringLiteral("Volver a detectar"));
         connect(btn, &QPushButton::clicked, this, [this]() {
             m_settings->set(QStringLiteral("codec_profile"), QString());
             updateCodecProfile(QString());
@@ -351,17 +465,70 @@ void SettingsPage::buildUI()
             const QString val = valueFromAudioLang(text);
             m_settings->set(QStringLiteral("audio_language"), val);
             emit audioLanguageChanged(val);
-        });
-
-    auto *noteAudio = new QLabel(
+        },
         QStringLiteral(
             "Nota: la preferencia se aplica solo cuando el vídeo tiene una "
-            "pista en ese idioma. Si no existe, se usará el audio original."),
-        content);
-    noteAudio->setStyleSheet(
-        QStringLiteral("font-size:10px; color:#8F8F8F; padding-top:2px;"));
-    noteAudio->setWordWrap(true);
-    scrollLay->addWidget(noteAudio);
+            "pista en ese idioma. Si no existe, se usará el audio original."));
+
+    // Volumen máximo (mpv "volume-max"): permite headroom sobre el 100%.
+    // Cualquier opción por encima del 100% pide confirmación antes de aplicar:
+    // a niveles altos el audio puede dañar audífonos/oidos. Para evitar
+    // sorpresas, el volumen persistido se CAPA a 100% — al cerrar la app
+    // siempre arranca en 100% aunque la sesión anterior hubiera subido más.
+    // Si el usuario CANCELA el modal, el botón sigue mostrando la opción
+    // previa (setupValueMenuWithConfirm no aplica visualmente al cancelar).
+    {
+        auto *block = new QVBoxLayout;
+        block->setSpacing(4);
+        auto *row = new QHBoxLayout;
+        row->setSpacing(8);
+        auto *lbl = new QLabel(QStringLiteral("Volumen máximo"));
+        lbl->setStyleSheet(QStringLiteral("color:#ECECEC; min-width:200px;"));
+        row->addWidget(lbl);
+        const QString saved = m_settings->getString(
+            QStringLiteral("volume_max"), QStringLiteral("100"));
+        QPushButton *btn = makeValueButton(volumeMaxFromValue(saved));
+        row->addWidget(btn, 1, Qt::AlignRight);
+        block->addLayout(row);
+        // `current` es el TEXTO del menú ("150%"), no el valor crudo ("150"):
+        // los checks y el texto del botón comparan contra el texto de las
+        // QAction (que incluye el %).
+        setupValueMenuWithConfirm(
+            btn, volumeMaxOptions(), volumeMaxFromValue(saved),
+            [this](const QString &text,
+                   const std::function<void(const QString &)> &applyVisual) {
+                const QString val = valueFromVolumeMax(text);
+                if (val == QStringLiteral("100")) {
+                    // Sin modal: aplica directo.
+                    m_settings->set(QStringLiteral("volume_max"), val);
+                    emit volumeMaxChanged(val);
+                    applyVisual(text);
+                    return;
+                }
+                // Con modal: aplicamos SOLO al Aceptar.
+                const QString confirmText = QStringLiteral(
+                    "Subir el volumen máximo a %1 puede causar daño auditivo "
+                    "permanente. Úsalo solo con altavoces externos y a un "
+                    "nivel cómodo. Al cerrar la app el volumen volverá a 100% "
+                    "aunque lo subas más alto. ¿Continuar?").arg(val);
+                showConfirmPopup(
+                    QStringLiteral("Volumen por encima del 100%"),
+                    confirmText, QStringLiteral("Aceptar"),
+                    [this, val, text, applyVisual]() {
+                        m_settings->set(QStringLiteral("volume_max"), val);
+                        emit volumeMaxChanged(val);
+                        applyVisual(text);
+                    });
+                // Al Cancelar: no se llama applyVisual, no se toca BD, no se
+                // emite signal. El botón y el menú conservan la opción previa.
+            });
+        // Nota pegada al bloque (antes colgaba suelta con el spacing de 24).
+        block->addWidget(addNote(QStringLiteral(
+            "Por seguridad, el volumen solo se guarda hasta el 100%. Al "
+            "reiniciar la app, aunque el ajuste siga por encima, el "
+            "reproductor empezará al 100%.")));
+        scrollLay->addLayout(block);
+    }
 
     scrollLay->addStretch(1);
 
@@ -440,17 +607,15 @@ void SettingsPage::buildUI()
     auto *verLabel = new QLabel(QStringLiteral("Versión 1.0 (nevertube_qt2)"),
                                 content);
     verLabel->setStyleSheet(QStringLiteral("font-size:12px; color:#ECECEC;"));
-    scrollLay->addWidget(verLabel);
- 
-    auto *telemetryNote = new QLabel(
+
+    auto *aboutBlock = new QVBoxLayout;
+    aboutBlock->setSpacing(4);
+    aboutBlock->addWidget(verLabel);
+    aboutBlock->addWidget(addNote(
         QStringLiteral("Sin telemetría: esta aplicación no envía datos de "
                        "uso, búsquedas ni historial a ningún servidor. "
-                       "Todo permanece local en tu dispositivo."),
-        content);
-    telemetryNote->setStyleSheet(
-        QStringLiteral("font-size:11px; color:#8F8F8F; padding-top:4px;"));
-    telemetryNote->setWordWrap(true);
-    scrollLay->addWidget(telemetryNote);
+                       "Todo permanece local en tu dispositivo.")));
+    scrollLay->addLayout(aboutBlock);
 
     // --- Popup flotante de confirmación (no modal) ---
     m_confirmPopup = new QFrame(this);

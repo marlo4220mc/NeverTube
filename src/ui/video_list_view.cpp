@@ -233,6 +233,51 @@ public:
         p->drawText(r, Qt::TextWordWrap | Qt::AlignTop, first);
     }
 
+    // Título de rejilla con salto de línea: si no cabe en una fila, usa una
+    // SEGUNDA línea (wrap por palabras) en lugar de cortarse con "…" a media
+    // palabra. Solo si aun así no cabe en las dos, se elide la última. La celda
+    // ya reserva 34px de título (applyGridGeometry), así que no hay solape.
+    static void drawGridTitle(QPainter *p, const QRect &r, const QString &text)
+    {
+        const QFontMetricsF fm(p->font());
+        const qreal w = r.width();
+        if (fm.horizontalAdvance(text) <= w) {
+            p->drawText(r, Qt::AlignLeft | Qt::AlignTop, text);
+            return;
+        }
+
+        // Primera línea: se llenan palabras hasta que la siguiente ya no cabe.
+        const QStringList words = text.split(QLatin1Char(' '));
+        QString first;
+        for (const QString &wd : words) {
+            const QString cand = first.isEmpty()
+                                     ? wd
+                                     : first + QLatin1Char(' ') + wd;
+            if (fm.horizontalAdvance(cand) <= w)
+                first = cand;
+            else
+                break;
+        }
+        if (first.isEmpty()) {
+            // Una sola palabra más ancha que la celda: elide en línea única.
+            p->drawText(r, Qt::AlignLeft | Qt::AlignTop,
+                        fm.elidedText(text, Qt::ElideRight, w));
+            return;
+        }
+
+        p->drawText(r, Qt::AlignLeft | Qt::AlignTop, first);
+        QString second = text.mid(first.size());
+        while (!second.isEmpty() && second.at(0) == QLatin1Char(' '))
+            second.remove(0, 1);
+        if (second.isEmpty())
+            return;
+        const int lh = qRound(fm.height());
+        const QRect secondR(r.left(), r.top() + lh, r.width(),
+                            qMax(0, r.height() - lh));
+        const QString rest = fm.elidedText(second, Qt::ElideRight, w);
+        p->drawText(secondR, Qt::AlignLeft | Qt::AlignTop, rest);
+    }
+
 private:
     void paintGrid(QPainter *p, const QStyleOptionViewItem &opt,
                    const VideoInfo &v) const
@@ -257,7 +302,7 @@ private:
         const QRect titleR(r.left() + 8 * m_scale,
                            qRound(thumbR.bottom()) + 8 * m_scale,
                            qRound(gw - 16 * m_scale), 34);
-        elideTitle(p, titleR, v.title);
+        drawGridTitle(p, titleR, v.title);
         p->restore();
 
         p->save();
