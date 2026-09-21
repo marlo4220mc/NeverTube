@@ -124,56 +124,56 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     bodyLayout->addWidget(m_busy);
 
     // ▶ Continuar viendo
-    m_contTitle = new QLabel(QStringLiteral("▶  Continuar viendo"), this);
+    m_contTitle = new QLabel(QStringLiteral("Continuar viendo"), this);
     m_contTitle->setObjectName(QStringLiteral("sectionTitle"));
     m_contGrid = new VideoListView(m_thumbs, this);
     m_contGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_contGrid->setFixedHeight(kGridH);
+    m_contGrid->setFixedHeight(0);
     bodyLayout->addWidget(m_contTitle);
     bodyLayout->addWidget(m_contGrid);
 
     // 🎲 Descubre
     auto *discRow = new QHBoxLayout;
     discRow->setSpacing(4);
-    m_discTitle = new QLabel(QStringLiteral("🎲  Descubre"), this);
+    m_discTitle = new QLabel(QStringLiteral("Descubre"), this);
     m_discTitle->setObjectName(QStringLiteral("sectionTitle"));
     discRow->addWidget(m_discTitle);
     discRow->addStretch(1);
-    m_discMoreBtn = new QPushButton(QStringLiteral("↻ Otro"), this);
+    m_discMoreBtn = new QPushButton(QStringLiteral("Otro"), this);
     m_discMoreBtn->setObjectName(QStringLiteral("ghost"));
     discRow->addWidget(m_discMoreBtn);
     bodyLayout->addLayout(discRow);
     m_discGrid = new VideoListView(m_thumbs, this);
     m_discGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_discGrid->setFixedHeight(kGridH);
+    m_discGrid->setFixedHeight(0);
     bodyLayout->addWidget(m_discGrid);
 
     // 🔔 Nuevos de tus suscripciones
     m_feedTitle = new QLabel(
-        QStringLiteral("🔔  Nuevos de tus suscripciones"), this);
+        QStringLiteral("Nuevos de tus suscripciones"), this);
     m_feedTitle->setObjectName(QStringLiteral("sectionTitle"));
     m_feedGrid = new VideoListView(m_thumbs, this);
     m_feedGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_feedGrid->setFixedHeight(kGridH);
+    m_feedGrid->setFixedHeight(0);
     bodyLayout->addWidget(m_feedTitle);
     bodyLayout->addWidget(m_feedGrid);
 
     // ✨ Recomendado por YouTube
     m_homeTitle = new QLabel(
-        QStringLiteral("✨  Recomendado por YouTube"), this);
+        QStringLiteral("Recomendado por YouTube"), this);
     m_homeTitle->setObjectName(QStringLiteral("sectionTitle"));
     m_homeGrid = new VideoListView(m_thumbs, this);
     m_homeGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_homeGrid->setFixedHeight(kGridH);
+    m_homeGrid->setFixedHeight(0);
     bodyLayout->addWidget(m_homeTitle);
     bodyLayout->addWidget(m_homeGrid);
 
     // 🔥 Tendencias
-    m_trendTitle = new QLabel(QStringLiteral("🔥  Tendencias"), this);
+    m_trendTitle = new QLabel(QStringLiteral("Tendencias"), this);
     m_trendTitle->setObjectName(QStringLiteral("sectionTitle"));
     m_trendGrid = new VideoListView(m_thumbs, this);
     m_trendGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_trendGrid->setFixedHeight(kGridH);
+    m_trendGrid->setFixedHeight(0);
     bodyLayout->addWidget(m_trendTitle);
     bodyLayout->addWidget(m_trendGrid);
 
@@ -218,6 +218,12 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     connect(m_yt, &Yt::channelVideosFinished, this, &HomePage::onChannelVideos);
     connect(m_yt, &Yt::homeReady, this, &HomePage::onHomeReady);
     connect(m_yt, &Yt::radioReady, this, &HomePage::onRadioReady);
+    // Cada reproducción escribe el historial (PlayerController::playIndex →
+    // HistoryRepo::add). Sin esta conexión, volver al Home tras reproducir un
+    // vídeo no refresca "Continuar viendo" ni oculta el empty-state.
+    connect(m_history, &HistoryRepo::changed, this,
+            &HomePage::refreshContinueWatching);
+    connect(m_history, &HistoryRepo::changed, this, &HomePage::refreshBusy);
 
     connect(m_contGrid, &VideoListView::videoActivated, this,
             [this](int index, const VideoInfo &) {
@@ -259,6 +265,8 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     m_banner->hide();
     m_busy->show();
 
+    buildEmptyState();
+
     loadPersistedSections();
 }
 
@@ -266,6 +274,68 @@ bool HomePage::cachedFresh(qint64 at, qint64 ttlMs) const
 {
     return at > 0 && (nowMs() - at) < ttlMs;
 }
+
+// Panel "vacío": se muestra cuando NO hay contenido del usuario
+// (sin historial, sin suscripciones, sin radios Descubre). En ese caso la
+// app arranca sin poder ofrecer Continuar viendo / Descubre / Nuevos de tus
+// suscripciones, y el panel guía al usuario en lugar de dejarlo mirando un
+// Home con solo "Recomendado" y "Tendencias". Se oculta en cuanto aparece
+// cualquiera de esas secciones (lo controla refreshBusy).
+void HomePage::buildEmptyState()
+{
+    auto *emptyBox = new QFrame(m_body);
+    emptyBox->setObjectName(QStringLiteral("popupDialog"));
+    emptyBox->setStyleSheet(
+        QStringLiteral("QFrame { background:#181818; border:1px solid #262626;"
+                       " border-radius:12px; }"));
+    auto *emptyLay = new QVBoxLayout(emptyBox);
+    emptyLay->setContentsMargins(28, 24, 28, 24);
+    emptyLay->setSpacing(8);
+    auto *emptyTitle = new QLabel(
+        QStringLiteral("Aún no hay contenido personalizado"), emptyBox);
+    emptyTitle->setStyleSheet(
+        QStringLiteral("color:#ECECEC; font-size:15px; font-weight:700;"
+                       " border:none; background:transparent;"));
+    emptyTitle->setAlignment(Qt::AlignCenter);
+    auto *emptyBody = new QLabel(
+        QStringLiteral("Reproducí un vídeo o suscribite a un canal desde el "
+                       "buscador para llenar tu Continuar viendo, Descubre y "
+                       "Nuevos de tus suscripciones. Mientras tanto, arriba "
+                       "tenés Recomendado y Tendencias."),
+        emptyBox);
+    emptyBody->setStyleSheet(
+        QStringLiteral("color:#9aa2ad; font-size:12px; border:none;"
+                       " background:transparent;"));
+    emptyBody->setWordWrap(true);
+    emptyBody->setAlignment(Qt::AlignCenter);
+    emptyLay->addWidget(emptyTitle);
+    emptyLay->addWidget(emptyBody);
+    auto *emptyRow = new QHBoxLayout;
+    emptyRow->setSpacing(8);
+    emptyRow->addStretch(1);
+    auto *goSearch = new QPushButton(QStringLiteral("Ir a Buscar"), emptyBox);
+    goSearch->setCursor(Qt::PointingHandCursor);
+    goSearch->setStyleSheet(
+        QStringLiteral("font-size:12px; padding:8px 18px;"
+                       " background-color:#FF0033; color:#FFFFFF;"
+                       " border:none; border-radius:8px;"));
+    connect(goSearch, &QPushButton::clicked, this,
+            [this]() { emit navigateToSearchRequested(); });
+    emptyRow->addWidget(goSearch);
+    emptyRow->addStretch(1);
+    emptyLay->addLayout(emptyRow);
+    // Se inserta en el bodyLayout JUSTO ANTES de "Continuar viendo". Si esa
+    // sección está oculta, el panel ocupa su lugar y al cerrarse las
+    // secciones se reagrupan naturalmente con el spacing del layout.
+    if (!m_bodyLayout)
+        return;
+    int idx = m_bodyLayout->indexOf(m_contTitle);
+    if (idx < 0)
+        idx = m_bodyLayout->count();
+    m_bodyLayout->insertWidget(idx, emptyBox);
+    m_emptyState = emptyBox;
+}
+
 
 // Al arrancar se recupera el Home persistido para mostrarlo al instante:
 // Recomendado/Feed/Tendencias vienen del home_cache (metadatos resueltos con el
@@ -864,21 +934,42 @@ void HomePage::setMiniPlayerVisible(bool visible)
 
 void HomePage::refreshBusy()
 {
-    const bool anyContent = !m_continueVideos.isEmpty() || !m_feed.isEmpty()
-        || !m_home.isEmpty() || !m_discoverVideos.isEmpty()
+    // Contenido PERSONALIZADO: el historial cuenta aunque el vídeo no figure
+    // en "Continuar viendo" (p. ej. reproducción completa o dejada al inicio,
+    // que m_continueVideos no incluye). Un refreshBusy es barato; recientIds(1)
+    // es una consulta local, por eso se pregunta directamente a la BD y no se
+    // depende de listas ya renderizadas.
+    const bool hasHistory = m_history && !m_history->recentIds(1).isEmpty();
+    const bool anyUserContent = hasHistory || !m_feed.isEmpty()
+        || !m_discoverVideos.isEmpty();
+    const bool anyContent = anyUserContent || !m_home.isEmpty()
         || !m_trending.isEmpty();
     const bool loading = m_feedBusy || m_homeBusy || m_trendBusy
         || m_discoverBusy;
     m_busy->setVisible(loading && !anyContent);
     m_banner->setVisible(!m_ytAvailable && m_home.isEmpty()
                          && m_trending.isEmpty());
+    // Empty-state: se muestra cuando NO hay contenido personalizado del
+    // usuario (historial, suscripciones, radios Descubre) — el home solo
+    // tiene Recomendado y/o Tendencias, que son de red. Cubre el hueco
+    // visual que dejaban "Continuar viendo", "Descubre" y "Nuevos de tus
+    // suscripciones" ocultos, y guía al usuario.
+    if (m_emptyState)
+        m_emptyState->setVisible(!anyUserContent);
+    NT_DEBUG("E2E refreshBusy: history=%d feed=%d disc=%d cont=%d empty=%d\n",
+             hasHistory ? 1 : 0, m_feed.size(), m_discoverVideos.size(),
+             m_continueVideos.size(),
+             m_emptyState ? (m_emptyState->isVisible() ? 1 : 0) : -1);
 }
 
 void HomePage::adjustGridHeight(VideoListView *grid)
 {
     const int count = grid->videos().size();
     if (count == 0) {
-        grid->setFixedHeight(kGridH);
+        // 0 vídeos: el grid se va a ocultar, lo dejamos con altura 0 para
+        // que no consuma el hueco enorme en el scroll (sino, queda un
+        // vacío visual antes de la siguiente sección).
+        grid->setFixedHeight(0);
         return;
     }
     const int w = grid->width();

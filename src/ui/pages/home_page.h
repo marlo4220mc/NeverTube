@@ -73,6 +73,8 @@ signals:
     void openRequested(const QVector<VideoInfo> &videos, int startIndex);
     void resumeRequested(const QVector<VideoInfo> &videos, int startIndex,
                          qlonglong startPositionMs);
+    // Empty-state del home: el usuario pidió ir a Buscar.
+    void navigateToSearchRequested();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -107,6 +109,10 @@ private:
     // recibir datos frescos. Los ids se deducen de la lista en orden mostrado.
     void saveSection(const QString &section, const QVector<VideoInfo> &videos);
     void ensureDiscover();
+    // Construye e inserta en el bodyLayout el panel "Tu inicio aún está
+    // vacío". Se muestra hasta que cualquier sección tenga contenido (lo
+    // controla refreshBusy). Construido una sola vez (en el ctor).
+    void buildEmptyState();
     // Construye la selección de Descubre SOLO desde radios guardadas (sin red)
     // y la muestra. Si no hay radios útiles, dispara la generación de
     // inicialización (única excepción que toca Yt::radioVideos).
@@ -145,6 +151,11 @@ private:
     QWidget *m_body;
     QLabel *m_busy;
     QLabel *m_banner;
+    // Panel "Aún no hay nada para mostrar": se muestra cuando TODAS las
+    // secciones están vacías (sin historial, sin suscripciones, sin radios
+    // Descubre, sin caché previa). Cierra el hueco gigante que dejaban las
+    // secciones hide() y le dice al usuario qué hacer para empezar.
+    QWidget *m_emptyState = nullptr;
 
     QLabel *m_contTitle;
     VideoListView *m_contGrid;
