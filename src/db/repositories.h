@@ -40,10 +40,12 @@ private:
     AppDatabase &m_db;
 };
 
-class HistoryRepo
+class HistoryRepo : public QObject
 {
+    Q_OBJECT
 public:
-    explicit HistoryRepo(AppDatabase &db, DiscoverRepo *discover = nullptr);
+    explicit HistoryRepo(AppDatabase &db, DiscoverRepo *discover = nullptr,
+                         QObject *parent = nullptr);
 
     bool add(const QString &videoId, qlonglong positionMs = 0);
     bool remove(const QString &videoId);
@@ -59,6 +61,12 @@ public:
     // Posición inicial de reanudación para un vídeo del historial: 0 si está
     // completo (o no tiene progreso), su posición de otro modo.
     static qlonglong resumeStartMs(const VideoInfo &v, qlonglong positionMs);
+
+signals:
+    // Cambió el historial (nuevo vídeo reproducido, posición actualizada,
+    // borrado manual). HomePage lo conecta para refrescar "Continuar viendo"
+    // y reevaluar el empty-state en cuanto hay datos del usuario.
+    void changed();
 
 private:
     AppDatabase &m_db;
