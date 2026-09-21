@@ -403,8 +403,9 @@ VideoInfo VideoCacheRepo::fromRow(const QSqlQuery &q) const
     return v;
 }
 
-HistoryRepo::HistoryRepo(AppDatabase &db, DiscoverRepo *discover)
-    : m_db(db), m_discover(discover)
+HistoryRepo::HistoryRepo(AppDatabase &db, DiscoverRepo *discover,
+                         QObject *parent)
+    : QObject(parent), m_db(db), m_discover(discover)
 {
 }
 
@@ -417,7 +418,12 @@ bool HistoryRepo::add(const QString &videoId, qlonglong positionMs)
     q.addBindValue(videoId);
     q.addBindValue(nowMs());
     q.addBindValue(positionMs);
-    return q.exec();
+    const bool ok = q.exec();
+    // Avisar a las vistas (p.ej. "Continuar viendo" del Home y su empty-state)
+    // aunque la inserción sea un UPDATE de posición: el orden de watched_at
+    // cambió y la lista pudo reordenarse.
+    emit changed();
+    return ok;
 }
 
 bool HistoryRepo::remove(const QString &videoId)
@@ -433,6 +439,7 @@ bool HistoryRepo::remove(const QString &videoId)
     if (m_discover)
         m_discover->clearForSeed(videoId);
 
+    emit changed();
     return true;
 }
 
@@ -445,6 +452,7 @@ bool HistoryRepo::clear()
     if (m_discover)
         m_discover->clearAll();
 
+    emit changed();
     return true;
 }
 
