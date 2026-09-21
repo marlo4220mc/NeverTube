@@ -20,6 +20,7 @@ class Yt;
 
 class QFrame;
 class QLabel;
+class QLineEdit;
 class QListWidget;
 class QMenu;
 class QPushButton;
@@ -85,6 +86,9 @@ private slots:
 
 public slots:
     void toggleFullscreen();
+    // Reaplica el rango/valor del slider del overlay desde el controlador
+    // (p.ej. al cambiar el ajuste "Volumen máximo" en Ajustes).
+    void refreshVolumeSlider();
 
 private:
     void updateQueue();
@@ -101,7 +105,16 @@ private:
     int idxToQuality(int idx) const;
     void setQualityIndex(int index);
     void toggleQualityMenu();
+    // Conectada a PlayerWidget::qualityLimitsChanged: oculta los items del
+    // menú de resoluciones por encima del techo real del archivo. Ignora
+    // valores <= 0 (carga incompleta) para no romper el menú.
+    void applyQualityLimits(int maxVideoHeight);
     void showPlaylistMenu();
+    // Popup estilado "Nueva playlist" (mismo popupDialog que Biblioteca):
+    // tras crearla, si hay vídeo pendiente se añade a la playlist nueva.
+    void openCreatePlaylistPopup();
+    void closeCreatePlaylistPopup();
+    void submitCreatePlaylist();
     void showOverlayControls();
     void hideOverlayControls();
     void updateOverlayIcons();
@@ -153,9 +166,22 @@ private:
     nt::Icon m_starFilledIcon = nt::Icon::StarFilled;
     nt::Icon m_watchLaterIcon = nt::Icon::WatchLater;
     nt::Icon m_playlistIcon = nt::Icon::ListAdd;
+    QFrame *m_plPopup = nullptr;
+    QLabel *m_plPopupTitle = nullptr;
+    QLineEdit *m_plName = nullptr;
+    QPushButton *m_plOk = nullptr;
+    QString m_plPendingVideoId;
     QPushButton *m_quality;
     QFrame *m_qualityMenu;
     QWidget *m_qualityMenuAnchor;
+    // Items del menú de resoluciones, alineados con kQualities[]/{360,480,
+    // 720,1080,1440,2160}. Se ocultan individualmente (no se quitan) cuando
+    // el archivo cargado no tiene esa pista: ver applyQualityLimits.
+    QVector<QPushButton *> m_qualityItems;
+    // Altura REAL del vídeo en reproducción (mpv video-params/h). Permite
+    // mostrar honestamente la altura en el botón para clips sub-360p (donde
+    // kQualities[] no tiene entrada), sin engañar con la 360p más cercana.
+    int m_videoHeight = 0;
     int m_qualityIndex = 2;
     bool m_qualityMenuActive = false;
     bool m_autoQuality = false;
