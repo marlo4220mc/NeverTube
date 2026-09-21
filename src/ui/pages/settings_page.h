@@ -26,6 +26,7 @@ signals:
     void nextModeChanged(const QString &mode);
     void miniVideoModeChanged(const QString &mode);
     void audioLanguageChanged(const QString &code);
+    void volumeMaxChanged(const QString &value);
     void gridDensityChanged(const QString &density);
     void clearThumbsRequested();
     void resetRequested();
@@ -39,10 +40,22 @@ private:
     // Fila "etiqueta + botón de valor": el botón abre un QMenu con las
     // alternativas (mismo patrón que los tres puntos de Biblioteca). Al
     // elegir una opción llama a onPick(displayText).
+    // Botón de acción simple (mismo estilo y tamaño que los de valor, sin el
+    // sufijo "▾"): usado p. ej. por "Volver a detectar".
+    QPushButton *makeActionButton(const QString &text);
     QPushButton *makeValueButton(const QString &text);
     void setupValueMenu(QPushButton *btn, const QStringList &options,
                         const QString &current,
                         const std::function<void(const QString &)> &onPick);
+    // Variante con confirmación asíncrona (modal). `confirm(opt, applyVisual)`
+    // decide por opción: aplica directo o muestra modal; al Aceptar llama
+    // applyVisual (que registra la opción y actualiza botón + checks), al
+    // Cancelar NO lo llama. `current` es el texto exacto de una QAction.
+    void setupValueMenuWithConfirm(
+        QPushButton *btn, const QStringList &options, const QString &current,
+        const std::function<void(const QString &,
+                                  const std::function<void(const QString &)> &)>
+            &confirm);
     // Popup flotante no modal (mismo patrón que Nueva playlist), centrado en
     // la página; no bloquea ni secuestra el puntero.
     void showConfirmPopup(const QString &title, const QString &text,
