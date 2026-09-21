@@ -41,6 +41,9 @@ public slots:
     void setPaused(bool paused);
     void seek(double seconds);
     void setVolume(double volume);
+    // Tope máximo del volumen de mpv (mpv "volume-max"). Default 100; el ajuste
+    // "Volumen máximo" de Ajustes puede subirlo a 150/175/200 para dar headroom.
+    void setVolumeMax(double maxPercent);
     void setSubVisibility(bool visible);
     void setAudioLanguage(const QString &lang);
     // Para VP9/webm: agregar pista de audio externa (opus webm direct URL).
@@ -69,6 +72,12 @@ signals:
     // como red de seguridad del perfil de códec detectado por HwProbe: si el
     // códec que el perfil da por HW cae a software, degrada el perfil.
     void streamDecodeInfoReady(const QString &codec, const QString &hcdecBackend);
+    // Cuando un stream termina de cargarse, se emite la mayor altura (píxeles)
+    // disponible entre sus pistas de vídeo. WatchPage la usa para filtrar el
+    // menú de resoluciones: ocultar los ítems por encima de lo que existe para
+    // ese vídeo (evita ofrecer "1080p" en un clip de 720p). 0 si no se pudo
+    // determinar (en ese caso el menú se queda completo).
+    void qualityLimitsChanged(int maxVideoHeight);
     // La posición se estancó > 5 s reproduciendo (sin pausa de usuario ni
     // buffer inicial). El controlador re-resuelve con URLs frescas y reanuda.
     void streamStalled();
@@ -90,6 +99,17 @@ private:
     void handleEvent(mpv_event *event);
     void emitAspectIfReady();
     void addAudioFileNow();
+    // single loadfile de vídeo+audio externo juntos: mpv abre y sincroniza
+    // ambas pistas desde el arranque (opción per-file "audio-files" en el
+    // comando loadfile). Devuelve el código del comando; <0 -> fallback
+    // audio-add posterior (addAudioFileNow en FILE_LOADED).
+    int loadFileWithAudio(const QByteArray &videoUrl);
+    // Lee mpv "track-list" y devuelve la altura máxima entre las pistas de
+    // vídeo. Devuelve 0 si el archivo aún no cargó (FILE_LOADED no llegó) o
+    // si la consulta falló. La lista de calidades del menú (WatchPage) se
+    // oculta por encima del techo real para no ofrecer resoluciones que el
+    // mpv no puede seleccionar.
+    int probeMaxVideoHeight() const;
 
     mpv_handle *m_mpv = nullptr;
     mpv_render_context *m_rctx = nullptr;
@@ -100,6 +120,10 @@ private:
     QString m_hwdec;
     int64_t m_videoW = 0;
     int64_t m_videoH = 0;
+    // Altura máxima real entre las pistas de vídeo del archivo cargado
+    // (track-list). 0 si aún no se leyó. Consumida por WatchPage para
+    // filtrar el menú de resoluciones.
+    int m_videoMaxH = 0;
     double m_aspect = 0.0;
     QString m_audioLang;
     QString m_pendingAudioFile;

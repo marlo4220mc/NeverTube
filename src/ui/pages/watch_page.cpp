@@ -337,13 +337,16 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     btnRow->addWidget(m_ovMuteBtn);
 
     m_ovVolume = new QSlider(Qt::Horizontal, m_ctrlBar);
-    m_ovVolume->setRange(0, 100);
+    m_ovVolume->setRange(0, m_player->volumeMax());
     m_ovVolume->setValue(int(m_player->volume()));
     m_ovVolume->setFixedWidth(80);
     m_ovVolume->setCursor(Qt::PointingHandCursor);
     connect(m_ovVolume, &QSlider::valueChanged, this, [this](int v) {
         m_player->setVolume(v);
-        if (m_settings)
+        // El capado a 100% en persistencia está en MainWindow::persistVolume,
+        // llamado por otros paths. Aquí, si v>100 (boost activo) no se persiste
+        // para evitar que un volumen alto sobreviva al reinicio de la app.
+        if (m_settings && v <= 100)
             m_settings->set(QStringLiteral("volume"), QString::number(v));
     });
     btnRow->addWidget(m_ovVolume);
@@ -402,10 +405,14 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         && m_settings->getString(QStringLiteral("codec_profile"),
                                  QStringLiteral("av1-hw"))
                == QStringLiteral("soft-all");
+    m_qualityItems.reserve(6);
     for (int i = 0; i < 6; ++i) {
         auto *item = new QPushButton(
             QStringLiteral("%1p").arg(kQualities[i]), m_qualityMenu);
         item->setFixedWidth(90);
+        // soft-all: CPU solo, no se ofrecen 1440p/2160p. Cada item se
+        // guarda en m_qualityItems para ocultarlo en caliente si el mpv
+        // emite un techo real inferior (ver applyQualityLimits).
         item->setVisible(!(softAll && (i == 4 || i == 5)));
         const int idx = i;
         connect(item, &QPushButton::clicked, this, [this, idx]() {
@@ -414,6 +421,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             m_qualityMenuActive = false;
         });
         menuLay->addWidget(item);
+        m_qualityItems.append(item);
     }
     m_qualityMenu->adjustSize();
     m_qualityMenu->hide();
@@ -681,6 +689,12 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             &WatchPage::onPositionChanged);
     connect(playerWidget, &PlayerWidget::videoSizeChanged, this,
             &WatchPage::onVideoSizeChanged);
+    // Cuando mpv carga el archivo emite la altura máxima real de sus
+    // pistas; si limita a 720p, ocultamos 1080p/1440p/2160p del menú de
+    // resoluciones (mpv no podría seleccionar esas pistas y quedaba como
+    // "click inerte" para el usuario).
+    connect(playerWidget, &PlayerWidget::qualityLimitsChanged, this,
+            &WatchPage::applyQualityLimits);
     connect(m_yt, &Yt::detailReady, this, &WatchPage::onDetailReady);
     connect(m_yt, &Yt::detailFailed, this, &WatchPage::onDetailFailed);
     connect(m_yt, &Yt::relatedReady, this, &WatchPage::onRelatedReady);
@@ -958,6 +972,7 @@ void WatchPage::updateActionButtons()
     paint(m_shareBtn, m_shareIcon, false);
     paint(m_starBtn, m_isStarred ? m_starFilledIcon : m_starIcon, m_isStarred);
     paint(m_watchLaterBtn, m_watchLaterIcon, m_watchLaterMarked);
+    paint(m_playlistBtn, m_playlistIcon, false);
 }
 
 void WatchPage::showPlaylistMenu()
@@ -986,21 +1001,93 @@ void WatchPage::showPlaylistMenu()
     menu.addSeparator();
     QAction *newAct = menu.addAction(QStringLiteral("+ Nueva playlist"));
     connect(newAct, &QAction::triggered, this, [this, v]() {
-        bool ok = false;
-        const QString title = QInputDialog::getText(
-            this, QStringLiteral("Nueva playlist"),
-            QStringLiteral("Nombre:"), QLineEdit::Normal, QString(), &ok);
-        if (!ok || title.trimmed().isEmpty())
-            return;
-        const QString id = m_playlists->create(title.trimmed());
-        if (!id.isEmpty())
-            m_playlists->addVideo(id, v.id);
+        m_plPendingVideoId = v.id;
+        openCreatePlaylistPopup();
     });
     if (playlists.isEmpty() && !anyAdded)
         menu.addAction(QStringLiteral("Sin playlists todavía"))->setEnabled(false);
     menu.exec(m_playlistBtn
                   ? m_playlistBtn->mapToGlobal(QPoint(0, m_playlistBtn->height()))
                   : QCursor::pos());
+}
+
+// Popup estilado "Nueva playlist" con el mismo popupDialog que Biblioteca,
+// para que el flujo de agregar a playlist tenga el mismo diseño en toda la app.
+void WatchPage::openCreatePlaylistPopup()
+{
+    if (!m_plPopup) {
+        m_plPopup = new QFrame(this);
+        m_plPopup->setObjectName(QStringLiteral("popupDialog"));
+        m_plPopup->setFixedWidth(340);
+        m_plPopup->raise();
+        m_plPopup->hide();
+
+        auto *v = new QVBoxLayout(m_plPopup);
+        v->setContentsMargins(18, 16, 18, 14);
+        v->setSpacing(10);
+
+        m_plPopupTitle = new QLabel(QStringLiteral("Nueva playlist"), m_plPopup);
+        m_plPopupTitle->setObjectName(QStringLiteral("popupTitle"));
+        v->addWidget(m_plPopupTitle);
+
+        m_plName = new QLineEdit(m_plPopup);
+        m_plName->setPlaceholderText(QStringLiteral("Nombre de la playlist"));
+        m_plName->setClearButtonEnabled(true);
+        m_plName->installEventFilter(this);
+        v->addWidget(m_plName);
+
+        auto *row = new QHBoxLayout;
+        row->addStretch(1);
+        auto *cancel = new QPushButton(QStringLiteral("Cancelar"), m_plPopup);
+        cancel->setObjectName(QStringLiteral("ghost"));
+        cancel->setCursor(Qt::PointingHandCursor);
+        connect(cancel, &QPushButton::clicked, this,
+                &WatchPage::closeCreatePlaylistPopup);
+        row->addWidget(cancel);
+        m_plOk = new QPushButton(QStringLiteral("Crear"), m_plPopup);
+        m_plOk->setObjectName(QStringLiteral("primary"));
+        m_plOk->setCursor(Qt::PointingHandCursor);
+        connect(m_plOk, &QPushButton::clicked, this,
+                &WatchPage::submitCreatePlaylist);
+        row->addWidget(m_plOk);
+        v->addLayout(row);
+
+        connect(m_plName, &QLineEdit::returnPressed, this,
+                &WatchPage::submitCreatePlaylist);
+    }
+    m_plPopupTitle->setText(QStringLiteral("Nueva playlist"));
+    m_plOk->setText(QStringLiteral("Crear"));
+    m_plName->clear();
+    m_plPopup->adjustSize();
+    const int x = (width() - m_plPopup->width()) / 2;
+    const int y = (height() - m_plPopup->height()) / 2;
+    m_plPopup->move(qMax(0, x), qMax(0, y));
+    m_plPopup->raise();
+    m_plPopup->show();
+    m_plName->setFocus(Qt::OtherFocusReason);
+}
+
+void WatchPage::closeCreatePlaylistPopup()
+{
+    if (m_plPopup)
+        m_plPopup->hide();
+}
+
+void WatchPage::submitCreatePlaylist()
+{
+    if (!m_plPopup || !m_plName)
+        return;
+    const QString name = m_plName->text().trimmed();
+    if (name.isEmpty())
+        return;
+    const QString id = m_playlists->create(name);
+    if (id.isEmpty())
+        return;
+    if (!m_plPendingVideoId.isEmpty()) {
+        m_playlists->addVideo(id, m_plPendingVideoId);
+        m_plPendingVideoId.clear();
+    }
+    closeCreatePlaylistPopup();
 }
 
 void WatchPage::onChannelInfo(const ChannelInfo &channel)
@@ -1187,7 +1274,6 @@ void WatchPage::onQualityChanged(int index)
     if (m_player->isActive())
         m_player->reloadCurrent();
 }
-
 bool WatchPage::applyAutoFromVideoSize(int height)
 {
     if (height <= 0)
@@ -1205,6 +1291,32 @@ void WatchPage::stepAutoUpIfPlaying()
 {
     // Auto v1: sin subida activa durante reproducción; solo recordar.
     Q_UNUSED(this);
+}
+
+// Oculta los ítems del menú de resoluciones por encima del techo real del
+// archivo cargado (p.ej. clip de 720p → 1080p/1440p/2160p invisibles).
+// Si maxHeight <= 0 (consulta fallida o FILE_LOADED sin tracks aún), deja
+// el menú como está. Los ítems se ocultan (no se quitan) para preservar
+// los índices de idxToQuality().
+// Oculta los ítems del menú por encima del techo REAL de pistas del archivo
+// (p.ej. clip de 720p → 1080p/1440p/2160p invisibles). El menú solo conoce
+// {360,480,720,1080,1440,2160}; para vídeos sub-360p (p.ej. "Me at the zoo"
+// a 240p) quedan todos ocultos — el botón muestra la altura real del vídeo
+// (ver onVideoSizeChanged) en lugar de la calidad más cercana al menú.
+void WatchPage::applyQualityLimits(int maxVideoHeight)
+{
+    if (maxVideoHeight <= 0 || m_qualityItems.isEmpty())
+        return;
+    NT_DEBUG("E2E qualityLimits apply max=%d items=%d\n",
+             maxVideoHeight, int(m_qualityItems.size()));
+    static const int kQualities[] = {360, 480, 720, 1080, 1440, 2160};
+    for (int i = 0; i < int(m_qualityItems.size()); ++i) {
+        QPushButton *b = m_qualityItems.at(i);
+        if (!b)
+            continue;
+        b->setVisible(kQualities[i] <= maxVideoHeight);
+    }
+    m_qualityMenu->adjustSize();
 }
 
 int WatchPage::qualityIndexForHeight(int height) const
@@ -1225,14 +1337,14 @@ void WatchPage::onVideoSizeChanged(int width, int height)
 {
     if (height <= 0 || !m_player->isActive())
         return;
-    if (m_autoQuality) {
-        applyAutoFromVideoSize(height);
-        return; // en auto no sincronizamos botón con índice fijo (sigue Auto)
-    }
-    const int idx = qualityIndexForHeight(height);
-    m_qualityIndex = idx;
-    m_quality->setText(QStringLiteral("%1p").arg(idxToQuality(idx)));
-    NT_DEBUG("E2E combo sync %dx%d -> idx=%d\n", width, height, idx);
+    m_videoHeight = height;
+    // Calidad pedida (la última guardada por el usuario o al clickear el menú):
+    // el botón debe mostrar esa calidad mientras el archivo la tenga.
+    const int requested = idxToQuality(m_qualityIndex);
+    const int visible = (requested <= height) ? requested : height;
+    m_quality->setText(QStringLiteral("%1p").arg(visible));
+    NT_DEBUG("E2E combo sync %dx%d requested=%d button=%d\n",
+             width, height, requested, visible);
 }
 
 int WatchPage::idxToQuality(int idx) const
@@ -1455,5 +1567,16 @@ void WatchPage::updateOverlayIcons()
         nt::Icon::Subtitles,
         m_subsVisible ? QColor("#FF0033") : nt::kText, 18));
     QSignalBlocker block(m_ovVolume);
+    m_ovVolume->setValue(qRound(m_player->volume()));
+}
+
+void WatchPage::refreshVolumeSlider()
+{
+    if (!m_ovVolume)
+        return;
+    QSignalBlocker block(m_ovVolume);
+    // Aplica el rango nuevo (puede haber cambiado por el ajuste de Ajustes).
+    m_ovVolume->setRange(0, m_player->volumeMax());
+    // El volumen actual puede haber quedado capeado por el nuevo tope.
     m_ovVolume->setValue(qRound(m_player->volume()));
 }

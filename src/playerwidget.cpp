@@ -7,6 +7,7 @@
 #include <QTimer>
 
 #include <clocale>
+#include <cstdlib>
 #include <cstring>
 
 #include <mpv/render_gl.h>
@@ -18,6 +19,100 @@ static void *getProcAddress(void *ctx, const char *name)
     Q_UNUSED(ctx);
     QOpenGLContext *glc = QOpenGLContext::currentContext();
     return glc ? reinterpret_cast<void *>(glc->getProcAddress(name)) : nullptr;
+}
+
+// Construye un mpv_node de tipo string con el valor indicado. El buffer lo
+// asigna el llamador y lo libera con mpv_nodeFreeStr().
+static void mpvNodeSetStr(mpv_node *n, const QByteArray &s)
+{
+    n->format = MPV_FORMAT_STRING;
+    char *buf = static_cast<char *>(malloc(size_t(s.size()) + 1));
+    std::memcpy(buf, s.constData(), size_t(s.size()));
+    buf[s.size()] = '\0';
+    n->u.string = buf;
+}
+
+static void mpvNodeFreeStr(mpv_node *n)
+{
+    if (n->format == MPV_FORMAT_STRING) {
+        free(n->u.string);
+        n->u.string = nullptr;
+    }
+    n->format = MPV_FORMAT_NONE;
+}
+
+// loadfile con la opción per-file "audio-files": el vídeo y el audio externo se
+// abren y se sincronizan en la misma carga. Sin esto mpv arranca solo con el
+// vídeo y el audio entra después (vídeo mudo inicial + dropfps del re-sync; y
+// en re-resoluciones el audio puede no llegar). Devuelve el código del comando.
+int PlayerWidget::loadFileWithAudio(const QByteArray &videoUrl)
+{
+    if (videoUrl.isEmpty() || m_pendingAudioFile.isEmpty())
+        return MPV_ERROR_INVALID_PARAMETER;
+
+    mpv_node args{};
+    mpv_node options{};
+    mpv_node_list argList{};
+    mpv_node_list optList{};
+    mpv_node argv[5]{};
+    mpv_node optv[1]{};
+
+    mpvNodeSetStr(&argv[0], QByteArrayLiteral("loadfile"));
+    mpvNodeSetStr(&argv[1], videoUrl);
+    mpvNodeSetStr(&argv[2], QByteArrayLiteral("replace"));
+
+    optList.num = 1;
+    optList.keys = static_cast<char **>(calloc(1, sizeof(char *)));
+    {
+        const QByteArray k(QByteArrayLiteral("audio-files"));
+        char *kbuf = static_cast<char *>(malloc(size_t(k.size()) + 1));
+        std::memcpy(kbuf, k.constData(), size_t(k.size()));
+        kbuf[k.size()] = '\0';
+        optList.keys[0] = kbuf;
+    }
+    optList.values = optv;
+    options.format = MPV_FORMAT_NODE_MAP;
+    options.u.list = &optList;
+    // mpv interpreta audio-files como una lista de strings separada por ':';
+    // un URL https://... se parte en trozos (https, //host, etc.). Escapamos
+    // cada ':' con '\:' para que el valor llegue íntegro como una sola entrada.
+    QByteArray audioEsc = m_pendingAudioFile.toUtf8();
+    audioEsc.replace(':', "\\:");
+    mpvNodeSetStr(&optv[0], audioEsc);
+
+    // Firma moderna (mpv >= 0.38): loadfile url replace index=<int> options.
+    // Firma vieja (mpv 0.33-0.37, p. ej. bundle Windows): sin el argumento
+    // "index", las opciones van en cuarta posición. Se prueba la moderna y, si
+    // el mpv no la entiende (INVALID_PARAMETER), se reintenta con la vieja.
+    int r = MPV_ERROR_INVALID_PARAMETER;
+    for (int pass = 0; pass < 2 && r == MPV_ERROR_INVALID_PARAMETER; ++pass) {
+        if (pass == 0) {
+            argList.num = 5;
+            argList.values = argv;
+            argv[3].format = MPV_FORMAT_INT64; // índice (ignorado con replace)
+            argv[3].u.int64 = -1;
+            argv[4] = options;
+        } else {
+            argList.num = 4;
+            argList.values = argv;
+            argv[3] = options;
+        }
+        args.format = MPV_FORMAT_NODE_ARRAY;
+        args.u.list = &argList;
+        mpv_node result{};
+        r = mpv_command_node(m_mpv, &args, &result);
+        if (r >= 0)
+            mpv_free_node_contents(&result);
+    }
+
+    mpvNodeFreeStr(&argv[0]);
+    mpvNodeFreeStr(&argv[1]);
+    mpvNodeFreeStr(&argv[2]);
+    mpvNodeFreeStr(&optv[0]);
+    free(optList.keys);
+    NT_DEBUG("E2E loadfile+audio-files res=%d len=%d\n", r,
+             int(m_pendingAudioFile.size()));
+    return r;
 }
 
 PlayerWidget::PlayerWidget(QWidget *parent)
@@ -209,9 +304,26 @@ void PlayerWidget::playUrl(const QString &url, double startAt)
     int paused = 0;
     mpv_set_property(m_mpv, "pause", MPV_FORMAT_FLAG, &paused);
     m_paused = false;
-    NT_DEBUG("E2E playUrl len=%d http=%d\n", int(u.size()),
-             url.startsWith(QLatin1String("http")) ? 1 : 0);
-    mpv_command_async(m_mpv, 0, cmd);
+    NT_DEBUG("E2E playUrl len=%d http=%d audio=%d\n", int(u.size()),
+             url.startsWith(QLatin1String("http")) ? 1 : 0,
+             int(!m_pendingAudioFile.isEmpty()));
+    // Con audio externo (edge/AV1-HLS) el vídeo y el audio se abren en el MISMO
+    // loadfile (opción per-file "audio-files"): mpv los sincroniza desde el
+    // arranque, sin el vídeo mudo inicial y el dropfps del re-sync posterior.
+    // Si el comando falla (mpv viejo sin la opción), se conserva el loadfile
+    // simple y FILE_LOADED hará el audio-add de antes.
+    if (!m_pendingAudioFile.isEmpty()) {
+        const int r = loadFileWithAudio(u);
+        if (r >= 0) {
+            m_pendingAudioFile.clear();
+        } else {
+            NT_DEBUG("E2E loadfile+audio-files fallo (%s); fallback audio-add\n",
+                     mpv_error_string(r));
+            mpv_command_async(m_mpv, 0, cmd);
+        }
+    } else {
+        mpv_command_async(m_mpv, 0, cmd);
+    }
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     m_lastProgressMs = nowMs;
     m_videoLoadMs = nowMs;
@@ -267,6 +379,14 @@ void PlayerWidget::setVolume(double volume)
     mpv_set_property(m_mpv, "volume", MPV_FORMAT_DOUBLE, &volume);
 }
 
+void PlayerWidget::setVolumeMax(double maxPercent)
+{
+    if (!m_mpv)
+        return;
+    const QByteArray v = QByteArray::number(maxPercent, 'f', 1);
+    mpv_set_option_string(m_mpv, "volume-max", v.constData());
+}
+
 void PlayerWidget::setSubVisibility(bool visible)
 {
     if (!m_mpv)
@@ -290,11 +410,11 @@ void PlayerWidget::setAudioFile(const QString &url)
         m_audioAdded = false;
         return;
     }
-    // Si el archivo todavía no está cargado, el comando se aplicará en
-    // MPV_EVENT_FILE_LOADED para garantizar que el owner está listo.
-    if (m_state.isEmpty())
-        return;
-    addAudioFileNow();
+    // El audio externo se adjunta EN el próximo playUrl (loadfile con la opción
+    // per-file "audio-files"), no con un audio-add suelto aquí: añadirlo antes
+    // del loadfile engancharía la pista al stream ANTERIOR aún cargado y en el
+    // restablecimiento (re-resolver) podía acabar mudo. addAudioFileNow() sigue
+    // como respaldo si playUrl no consumió la URL.
 }
 
 void PlayerWidget::addAudioFileNow()
@@ -436,6 +556,57 @@ void PlayerWidget::mpvUpdate(void *ctx)
     QMetaObject::invokeMethod(self, "onFrameReady", Qt::QueuedConnection);
 }
 
+// Lee mpv "track-list" y devuelve la altura máxima entre las pistas de
+// vídeo. Devuelve 0 si el archivo aún no cargó (FILE_LOADED no llegó) o si
+// la consulta falló. Llamado justo después de FILE_LOADED para que
+// WatchPage oculte del menú de resoluciones las opciones por encima del
+// techo real (evita ofrecer 1080p en un clip de 720p). mpv devuelve
+// track-list como nodo ARRAY de MAPs; cada mapa trae "type"=="video",
+// "codec" (p.ej. h264/vp9/av1) y dimensiones. La altura "real" de cada
+// pista está en "demux-h" (no en "video-params/h", que es de la pista
+// actualmente seleccionada). Se ignora "mjpeg" (miniaturas/portadas).
+int PlayerWidget::probeMaxVideoHeight() const
+{
+    if (!m_mpv)
+        return 0;
+    mpv_node node{};
+    if (mpv_get_property(m_mpv, "track-list", MPV_FORMAT_NODE, &node) < 0)
+        return 0;
+    int maxH = 0;
+    if (node.format == MPV_FORMAT_NODE_ARRAY) {
+        for (int i = 0; i < node.u.list->num; ++i) {
+            mpv_node *entry = &node.u.list->values[i];
+            if (!entry || entry->format != MPV_FORMAT_NODE_MAP)
+                continue;
+            QString type, codec;
+            int64_t h = 0;
+            for (int j = 0; j < entry->u.list->num; ++j) {
+                const QString k = QString::fromUtf8(
+                    entry->u.list->keys[j]);
+                mpv_node *v = &entry->u.list->values[j];
+                if (!v)
+                    continue;
+                if (k == QLatin1String("type")
+                        && v->format == MPV_FORMAT_STRING)
+                    type = QString::fromUtf8(v->u.string);
+                else if (k == QLatin1String("codec")
+                        && v->format == MPV_FORMAT_STRING)
+                    codec = QString::fromUtf8(v->u.string);
+                else if (k == QLatin1String("demux-h")
+                        && v->format == MPV_FORMAT_INT64)
+                    h = v->u.int64;
+            }
+            if (type == QLatin1String("video")
+                    && codec != QLatin1String("mjpeg")
+                    && h > 0
+                    && maxH < int(h))
+                maxH = int(h);
+        }
+    }
+    mpv_free_node_contents(&node);
+    return maxH;
+}
+
 void PlayerWidget::poll()
 {
     if (!m_mpv)
@@ -455,6 +626,14 @@ void PlayerWidget::handleEvent(mpv_event *event)
         // El archivo principal terminó de cargar: ahora sí se puede adjuntar
         // el audio externo (audio-add) sin "no file loaded".
         addAudioFileNow();
+        // También es el primer momento en que track-list tiene las pistas
+        // reales. Lo consultamos una vez para que WatchPage filtre el menú
+        // de resoluciones: si el vídeo solo llega a 720p, no se ofrecen
+        // 1080p+ (que mpv no podría seleccionar y quedarían como "clicks
+        // inertes" para el usuario).
+        m_videoMaxH = probeMaxVideoHeight();
+        NT_DEBUG("E2E qualityLimits max=%d\n", m_videoMaxH);
+        emit qualityLimitsChanged(m_videoMaxH);
         break;
     case MPV_EVENT_PLAYBACK_RESTART:
     case MPV_EVENT_START_FILE:
