@@ -261,6 +261,11 @@ MainWindow::MainWindow(QWidget *parent)
 
 
     // Volumen/silencio persistidos en la sesión anterior.
+    // "volume_max" es el ajuste "Volumen máximo" de Ajustes (100/150/175/200);
+    // "volume" solo se persiste si ≤ 100, así que con boost activo el slider
+    // SIEMPRE arranca al 100% (independiente del valor que dejó el usuario).
+    const int volumeMax = m_settings.getInt(QStringLiteral("volume_max"), 100);
+    m_player.setVolumeMax(volumeMax);
     const double savedVol = m_settings.getInt(QStringLiteral("volume"), 100);
     m_player.setVolume(savedVol);
     if (m_settings.getInt(QStringLiteral("volume_muted"), 0) == 1)
@@ -353,6 +358,16 @@ MainWindow::MainWindow(QWidget *parent)
                 if (m_yt)
                     m_yt->setAudioLanguage(val);
             });
+    // Volumen máximo: aplica el tope a mpv en caliente. Como el volumen actual
+    // se cape a 100 en persistVolume, al activar >100 el volumen visible
+    // SE QUEDA en su valor (≤100) y el slider del overlay se reajusta solo.
+    connect(m_settingsPage, &SettingsPage::volumeMaxChanged,
+            this, [this](const QString &val) {
+                m_player.setVolumeMax(val.toInt());
+                // Refresca el slider del overlay para reflejar el nuevo rango.
+                m_watch->refreshVolumeSlider();
+                persistVolume();
+            });
     connect(m_settingsPage, &SettingsPage::miniVideoModeChanged,
             this, [this]() {
                 // Si se cambia estando ya en el mini (Ajustes es visible con el
@@ -399,6 +414,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_home, &HomePage::openRequested, this, &MainWindow::openWatch);
     connect(m_home, &HomePage::resumeRequested, this,
             &MainWindow::openWatchResume);
+    connect(m_home, &HomePage::navigateToSearchRequested, this,
+            &MainWindow::goSearch);
     connect(m_search, &SearchPage::openRequested, this, &MainWindow::openWatch);
     connect(m_search, &SearchPage::channelRequested, this,
             [this](const QString &channelId) {
@@ -928,10 +945,13 @@ void MainWindow::setMiniThumb()
 // Persiste volumen y silencio actuales del controlador (src/db/settings:
 // claves "volume" / "volume_muted"); MainWindow::persistVolume() al arranque
 // los vuelve a aplicar. Se llama tras cada cambio hecho por el usuario.
+// NOTA: si el ajuste "Volumen máximo" está activo (>100), el volumen persistido
+// se CAPA a 100 para que al reiniciar la app el slider arranque al 100% y NO
+// quede en el valor alto de la sesión anterior (protección auditiva).
 void MainWindow::persistVolume()
 {
-    m_settings.set(QStringLiteral("volume"),
-                   QString::number(m_player.volume()));
+    const double v = qMin(m_player.volume(), 100.0);
+    m_settings.set(QStringLiteral("volume"), QString::number(v));
     m_settings.set(QStringLiteral("volume_muted"),
                    m_player.muted() ? QStringLiteral("1")
                                     : QStringLiteral("0"));

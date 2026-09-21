@@ -43,6 +43,10 @@ public:
     // usuario al arrancar). muted==true pone el volumen a 0, false lo recuerda.
     void setMuted(bool muted);
     void setVolume(double volume);
+    // Tope superior del slider (mpv volume-max). Default 100; ajustes puede
+    // subirlo a 150/175/200. El slider se clamp aquí, NO en el widget.
+    void setVolumeMax(double maxPercent);
+    int volumeMax() const { return m_volumeMax; }
     void seek(double seconds);
     void reloadCurrent();
     void stop();
@@ -102,6 +106,7 @@ private:
     double m_duration = 0.0;
     bool m_muted = false;
     double m_volume = 100.0;
+    int m_volumeMax = 100;
     int m_maxHeight = 720;
     int m_resolveGen = 0;
     double m_seekBack = 0.0;
