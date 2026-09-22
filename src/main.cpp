@@ -185,7 +185,7 @@ int main(int argc, char *argv[])
                              rc = profile.isEmpty() ? 1 : 0;
                              app.quit();
                          });
-        QTimer::singleShot(15000, &app, [&]() {
+        QTimer::singleShot(50000, &app, [&]() {
             if (!decided) {
                 std::fprintf(stderr, "SELFTEST hwprobe -> TIMEOUT\n");
                 app.quit();

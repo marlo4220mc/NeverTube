@@ -63,6 +63,8 @@ private:
     // indica que mpv cayó a software tras intentar el HW.
     bool m_sawHwLog = false;
     bool m_sawSwLog = false;
+    // Un reintento por clip si expira el timeout (init de hw lento en VMs).
+    bool m_clipRetried = false;
 };
 
 #endif
