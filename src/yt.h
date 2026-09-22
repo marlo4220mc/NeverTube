@@ -131,6 +131,12 @@ signals:
     void playlistDetailReady(const PlaylistInfo &info,
                              const QVector<VideoInfo> &videos);
     void streamReady(const StreamInfo &stream);
+    // Alturas de vídeo disponibles del vídeo (adaptiveFormats de Innertube),
+    // independientes del tope que pida el perfil: el menú de resoluciones del
+    // reproductor las usa para ofrecer todas las calidades reales aunque Auto
+    // haya pedido una baja. Vacío = indeterminado (el menú cae al techo del
+    // stream cargado).
+    void streamHeightsReady(const QString &videoId, const QVector<int> &heights);
     void error(const QString &message);
     void resolveError(const QString &message);
     void relatedReady(const QString &videoId, const QVector<VideoInfo> &videos);

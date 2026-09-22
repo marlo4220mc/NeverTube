@@ -99,8 +99,6 @@ private:
     void updateActionButtons();
     void enterFullscreen();
     void leaveFullscreen();
-    bool applyAutoFromVideoSize(int height);
-    void stepAutoUpIfPlaying();
     int qualityIndexForHeight(int height) const;
     int idxToQuality(int idx) const;
     void setQualityIndex(int index);
@@ -109,6 +107,10 @@ private:
     // menú de resoluciones por encima del techo real del archivo. Ignora
     // valores <= 0 (carga incompleta) para no romper el menú.
     void applyQualityLimits(int maxVideoHeight);
+    // Conectada a Yt::streamHeightsReady: guarda la altura máxima que ofrece
+    // el vídeo (adaptiveFormats) para que Auto no oculte calidades reales que
+    // el stream cargado no trae (p.ej. Auto pide 360 de un vídeo 1080).
+    void onStreamHeights(const QString &videoId, const QVector<int> &heights);
     void showPlaylistMenu();
     // Popup estilado "Nueva playlist" (mismo popupDialog que Biblioteca):
     // tras crearla, si hay vídeo pendiente se añade a la playlist nueva.
@@ -186,6 +188,10 @@ private:
     bool m_qualityMenuActive = false;
     bool m_autoQuality = false;
     int m_autoHeight = 360;
+    // Altura máxima que ofrece el vídeo según Innertube (Yt::streamHeightsReady).
+    // El menú ofrece todas las calidades reales aunque Auto haya pedido una
+    // baja. 0 = indeterminado (cae al techo del stream cargado).
+    int m_availableMaxH = 0;
     QLabel *m_descLabel;
     QPushButton *m_descToggle = nullptr;
     bool m_descExpanded = false;
