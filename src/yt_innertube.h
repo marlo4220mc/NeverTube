@@ -11,10 +11,10 @@
 class Ipv4Https;
 
 // Resolución de streams de YouTube mediante el API Innertube, de forma
-// independiente de la UI, del reproductor y de yt-dlp.
+// independiente de la UI y del reproductor.
 //
 // Flujo: GET /sw.js_data → visitorData → POST youtubei/v1/player (cascada de
-// clientes estilo NewPipe/yt-dlp: VISIONOS primario, luego IOS,
+// clientes estilo NewPipe: VISIONOS primario, luego IOS,
 // WEB_EMBEDDED_PLAYER, TVHTML5_SIMPLY y ANDROID_VR) → streamingData
 // (hlsManifestUrl + adaptiveFormats, este último para conocer qué alturas de
 // vídeo existen sin alimentar a mpv). fetchMaster() descarga el master HLS
@@ -459,12 +459,12 @@ bool innertubeSelfTest();
 bool homeBrowseSelfTest();
 
 // Selftest de los feeds del Home por Innertube: vídeos de un canal (browse
-// "Vídeos" tab + params, Yt-dlp como referencia del channelId por
-// NEVERTUBE_TEST_CHANNEL) y Tendencias (FEtrending). Verifica estado HTTP,
-// tamaño, renderers, vídeos reales (id, título, duración), orden, duplicados,
-// límite, y el comportamiento vacío/error. No toca el reproductor ni SQLite.
+// "Vídeos" tab + params; canal configurable con NEVERTUBE_TEST_CHANNEL) y
+// Tendencias (FEtrending). Verifica estado HTTP, tamaño, renderers, vídeos
+// reales (id, título, duración), orden, duplicados, límite y el comportamiento
+// vacío/error. No toca el reproductor ni SQLite.
 bool feedsProtocolSelfTest();
 
-// Selftest de los endpoints migrados de yt-dlp a Innertube: búsqueda, ficha de
-// canal, pestañas (videos/shorts/live), detalle de vídeo y playlist.
+// Selftest de los endpoints de browse de Innertube: búsqueda, ficha de canal,
+// pestañas (videos/shorts/live), detalle de vídeo y playlist.
 bool innertubeBrowseSelfTest();

@@ -137,8 +137,8 @@ Yt::Yt(QObject *parent)
             });
     connect(&m_innertube, &Innertube::trendingReady, this,
             &Yt::trendingFinished);
-    // Búsqueda, ficha/pestañas de canal, detalle de vídeo y playlist: antes se
-    // pedían a yt-dlp; ahora van por Innertube.
+    // Búsqueda, ficha/pestañas de canal, detalle de vídeo y playlist por
+    // Innertube: se reenvían a las señales de Yt que consume la UI.
     connect(&m_innertube, &Innertube::searchReady, this,
             [this](const QString &query, const QVector<VideoInfo> &videos,
                    bool) { emit searchFinished(query, videos); });
@@ -321,7 +321,6 @@ void Yt::channelVideos(const QString &channelId, int limit)
 {
     Q_UNUSED(limit);
     // Innertube: browse de la pestaña "Vídeos" del canal (compactVideoRenderer).
-    // Antes era una carrera contra yt-dlp; ahora solo Innertube.
     m_innertube.fetchChannelVideos(channelId);
 }
 

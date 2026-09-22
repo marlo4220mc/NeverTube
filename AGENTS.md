@@ -104,7 +104,7 @@ están en la caché). Para Descubre, `hasRadio` ya evitaba re-pedir.
 ## AV1 por HLS (sintético)
 
 YouTube **no publica AV1 en su master HLS** (`hlsManifestUrl`): solo VP9/h264
-(verificado con `yt-dlp -F`: todo `av01` es `https`/DASH). Además, la URL
+(verificado: todo `av01` de YouTube es `https`/DASH, no aparece en el master HLS). Además, la URL
 adaptativa AV1 directa (modo "edge") se **estrangula** (~150 KB/s) porque el
 throttle es **por petición** y una descarga continua agota su presupuesto. En
 cambio, cada petición `Range` corta (~2 MB) no está estrangulada, incluso por
@@ -205,7 +205,7 @@ tarda (>300 ms, PC básico) o si el usuario intenta reproducir mientras sondea.
 - UI, lógica y reproducción separadas. `PlayerController` (estado/cola) vs
   `PlayerWidget` (render) vs páginas (vistas).
 - Repos SQLite en `src/db/`; infraestructura reutilizable en `src/ui/`.
-- Resolución de streams: Innertube (cliente VISIONOS, `src/yt_innertube.*`) como única vía; si falla, `Yt::resolveError`. yt-dlp ya NO se usa.
+- Resolución de streams: Innertube (cliente VISIONOS, `src/yt_innertube.*`) como única vía; si falla, `Yt::resolveError`.
 - Carga de canales: Innertube `fetchChannelVideos` (browse pestaña "Vídeos"), sin carrera ni fallback externo. Un resultado con 0 vídeos de id no vacío cuenta como vacío.
 - Búsqueda, ficha de canal, pestañas y detalle: TODO por Innertube (`src/yt_innertube.*`):
   - `Yt::search` → POST `/search` (paginación por `continuation`; parser `compactVideoRenderer`).

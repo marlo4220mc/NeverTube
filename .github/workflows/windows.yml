@@ -330,11 +330,11 @@ jobs:
           $rc = Invoke-Selftest '--selftest-hwprobe'
           if ($rc -ne 0) { exit $rc }
           # qoffscreen se quita solo al final (todos los selftests lo necesitan).
-          # Búsqueda real por Innertube (antes yt-dlp): vídeos con id no vacío.
+          # Búsqueda real por Innertube: vídeos con id (y canal) no vacíos.
           $rc = Invoke-Selftest '--selftest-search'
           if ($rc -ne 0) { exit $rc }
-          # Endpoints migrados de yt-dlp a Innertube: canal + pestañas
-          # (videos/shorts/live), detalle de vídeo y playlist.
+          # Endpoints Innertube: canal + pestañas (videos/shorts/live), detalle
+          # de vídeo y playlist.
           $rc = Invoke-Selftest '--selftest-browse'
           if ($rc -ne 0) { exit $rc }
           # Cadena de feeds real (canal por Innertube + trending): valida que la
