@@ -198,9 +198,8 @@ private:
     int m_resolveGen = 0;
     QString m_audioLang;
     CodecProfile m_codecProfile = CodecProfile::Legacy;
-    // Método de resolución que logró reproducir cada vídeo: índice del
-    // cliente Innertube (>= 0) o kResolveYtDlp. Se usa para dar prioridad
-    // al cambiar de resolución (re-resolver el mismo vídeo).
+    // Cliente Innertube que logró reproducir cada vídeo (índice >= 0). Se usa
+    // para dar prioridad al cambiar de resolución (re-resolver el mismo vídeo).
     QHash<QString, int> m_winningClient;
 };
 

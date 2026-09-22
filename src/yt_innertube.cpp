@@ -47,7 +47,7 @@ const char kChromeUA[] =
     "(KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
 
 // UA de cliente VISIONOS (coincide con el del body player). Valores tomados
-// de yt-dlp INNERTUBE_CLIENTS y NewPipeExtractor ClientsConstants.
+// de las tablas de clientes de referencia (NewPipeExtractor).
 const char kVisionOSUA[] =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
@@ -73,10 +73,10 @@ constexpr int kMasterTimeoutMs = 15000;
 
 // Cascada de clientes para /player, en orden de preferencia. VISIONOS es el
 // primario (único que hoy no requiere poToken y devuelve hlsManifestUrl en
-// VODs); los demás son el fallback estilo NewPipe/yt-dlp para vídeos que
+// VODs); los demás son el fallback estilo NewPipe para vídeos que
 // exigen login (edad/miembros) o que no responden en VISIONOS. Los valores
-// (versión actual de 2026, device/os/UA) vienen de yt-dlp INNERTUBE_CLIENTS
-// y de NewPipeExtractor ClientsConstants, no son inventados.
+// (versión actual de 2026, device/os/UA) vienen de las tablas de clientes de
+// referencia (NewPipeExtractor), no son inventados.
 struct PlayerClient
 {
     const char *name;
@@ -144,10 +144,9 @@ QVector<int> videoHeights(const QJsonObject &streamingData)
 
 // Contexto de cliente genérico para la cascada, construido a partir de la
 // tabla kPlayerClients. Cada cliente aporta sus campos device/os/UA propios
-// (valores reales de yt-dlp/NewPipe). "hl" se fija en el idioma de la app
-// (auto "es" por el fix de títulos originales: igual que
-// yt-dlp --extractor-args youtube:lang=es: sin esto YouTube auto-traduce los
-// títulos al inglés) y todos los clientes llevan visitorData.
+// (valores reales de los clientes). "hl" se fija en el idioma de la app
+// (auto "es" por el fix de títulos originales: sin esto YouTube auto-traduce
+// los títulos al inglés) y todos los clientes llevan visitorData.
 QJsonObject clientContext(const PlayerClient &pc, const QString &visitorData,
                           const QString &hl = QStringLiteral("es"))
 {
@@ -4235,14 +4234,14 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData)
     static const int kProbeClientOrder[] = {0, 1, 4, 2};
 
     // Clientes de diagnóstico extra para /browse (SOLO este sondeo; NO se usa
-    // en la cascada de producción kPlayerClients). Valores de yt-dlp
-    // INNERTUBE_CLIENTS (client WEB real de navegador y ANDROID real de app).
+    // en la cascada de producción kPlayerClients). Valores de las tablas de
+    // clientes de referencia (WEB real de navegador y ANDROID real de app).
     static const PlayerClient kDiagClients[] = {
         {"WEB", "2.20260708.00.00", 1, kChromeUA,
          nullptr, nullptr, nullptr, nullptr, 0, false, nullptr},
         {"ANDROID", "21.21.39", 3,
          "com.google.android.youtube/21.21.39 (Linux; U; Android 13; Pixel 7 "
-         "Build/TQ3A.230805.001) gzip", // UA de yt-dlp INNERTUBE_CLIENTS
+         "Build/TQ3A.230805.001) gzip", // UA del cliente ANDROID de referencia
          "Google", "Pixel 7", "Android", "13", 33, false, nullptr},
     };
 
@@ -4459,7 +4458,7 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData)
     st->next();
 }
 
-// Selftest de los endpoints migrados de yt-dlp a Innertube: búsqueda, ficha de
+// Selftest de los endpoints de browse de Innertube: búsqueda, ficha de
 // canal, pestañas (videos/shorts/live), detalle de vídeo y playlist. Red real;
 // no toca el reproductor ni SQLite ni ficheros.
 

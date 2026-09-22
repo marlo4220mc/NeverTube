@@ -16,44 +16,7 @@ resto sigue igual (Qt5, OpenGL, SQLite). Esta sección solo se ejecuta si
    - `libmpv-1.dll` → renombrar a `libmpv-2.dll` (el CMake/workflow lo buscan así por compatibilidad con dist.iss y la import lib)
    - cabeceras `include/*.h` → reordenar a `include/mpv/*.h` (layout que espera CMake)
    - La rama `if(WIN32)` del CMake (`MPV_DEV_DIR`) detecta esto.
-3. **yt-dlp.exe** en el directorio de salida (junto al `.exe`).
-   - TODO este apartado es **SOLO para la máquina de pruebas Windows 7**. En versiones
-     superiores (W8/W8.1/W10/W11) entran los **mpv y yt-dlp OFICIALES**: las
-     funciones que faltan ahí (AddDllDirectory y el api-set de Windows 8)
-     existen sin parches. El setup de Inno gatea por versión (`IsWindows7`):
-     el KB solo se toca en Windows 7. El CI genera un único setup progresado
-     para la máquina de pruebas.
-   - Fuente: **fork `nicolaasjan/yt-dlp`**, asset **`yt-dlp_x86_win7.exe`** del
-     último release (`2026.08.28.073407`). Es el build x86 con Python 3.14
-     preparado para Windows 7; los builds OFICIALES (Python 3.10+) no cargan en
-     la Win7.
-   - Su `python314.dll` importa ESTÁTICAMENTE `api-ms-win-core-path-l1-1-0.dll`
-     (`PathCchCanonicalize`/`PathCchCanonicalizeEx`…), un api-set que solo existe
-     desde Windows 8 → en Win7 el loader falla con *"api-ms-win-core-path-l1-1-0.dll
-     is missing from your computer"* al lanzar la app (la primera vez que el
-     programa invoca yt-dlp). Arreglo: copiar junto a `yt-dlp.exe` el polyfill
-     **x86** del repo `adang1345/api-ms-win-core-path` (releases → v1.0.0 →
-     `api-ms-win-core-path.zip`, archivo `x86/api-ms-win-core-path-l1-1-0.dll`;
-     implementación basada en Wine, LGPL-2.1, heredada de
-     `nalexandru/api-ms-win-core-path-HACK`, sin imports W8+). En Win7 el loader
-     de api-sets no reconoce ese nombre y cae a la búsqueda normal de DLLs, así
-     que basta dejarlo en la misma carpeta. Lleva acompañadas sus licencias
-     (`LICENSE.txt`, `COPYING.LIB`, `LICENSE_WINE.txt`).
-   - Además importa `AddDllDirectory`/`GetFileInformationByHandleEx`/
-     `GetFinalPathNameByHandle` (las añade la actualización **KB2533623**, que la
-     el equipo de pruebas sin updates no tiene). El setup de Inno lleva empaquetado
-     `Windows6.1-KB2533623-x86.msu` (repo `beny1226/Windows-7-KB2533623`) y lo
-     instala con `wusa /quiet /norestart` cuando, SOLO en Windows 7
-     (`IsWindows7`), detecta en caliente que `kernel32` no exporta
-     `AddDllDirectory` (GetProcAddress). Antes de instalarla avisa al usuario
-     con un cartel que explica que le **falta la actualización necesaria**
-     (KB2533623). Se ejecuta AL FINAL de la instalación (`CurStepChanged` →
-     `ssPostInstall`), ya con la app completa y los iconos creados, porque la
-     update pide reiniciar (wusa devuelve 3010) y un reinicio en mitad de la
-     copia dejaría la instalación a medias. Evita el error *"The procedure
-     entry point AddDllDirectory could not be located in the dynamic link
-     library KERNEL32.dll"* al lanzar yt-dlp en la máquina de pruebas.
-4. **windeployqt** para copiar Qt al lado del ejecutable.
+3. **windeployqt** para copiar Qt al lado del ejecutable.
 
 ## Pasos (en Windows)
 
@@ -64,7 +27,7 @@ cmake --build build --config Release
 
 # empaquetar en un solo dir
 windeployqt build/nevertube_qt2.exe
-# + copiar mpv-2.dll, mpv.lib?? no: solo la DLL + yt-dlp.exe al lado
+# + copiar libmpv-2.dll al lado del exe (y windeployqt para el resto)
 ```
 
 > Detalle: `CMakeLists.txt` ya define `WIN32_EXECUTABLE TRUE` (`:84`); en
