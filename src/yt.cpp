@@ -1301,14 +1301,21 @@ bool searchSelfTest()
                              return;
                          done = true;
                          int emptyIds = 0;
+                         int emptyChannels = 0;
                          for (const VideoInfo &v : videos) {
                              if (v.id.isEmpty())
                                  ++emptyIds;
+                             if (v.channelId.isEmpty())
+                                 ++emptyChannels;
                          }
-                         const bool ok = !videos.isEmpty() && emptyIds == 0;
+                         // channelId no vacío: la página de search construye
+                         // la sección "Canales" a partir de él.
+                         const bool ok = !videos.isEmpty() && emptyIds == 0
+                                         && emptyChannels == 0;
                          std::fprintf(stderr,
-                                      "SEARCH videos=%d idVacios=%d -> %s\n",
-                                      videos.size(), emptyIds,
+                                      "SEARCH videos=%d idVacios=%d "
+                                      "canalVacio=%d -> %s\n",
+                                      videos.size(), emptyIds, emptyChannels,
                                       ok ? "OK" : "FAIL");
                          QCoreApplication::exit(ok ? 0 : 2);
                      });
