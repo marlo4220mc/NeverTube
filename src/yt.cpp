@@ -331,7 +331,7 @@ void Yt::channelTabVideos(const QString &channelId, const QString &tab, int limi
     if (offset <= 0)
         m_innertube.fetchChannelTab(channelId, tab, limit);
     else
-        m_innertube.fetchChannelTabMore(limit);
+        m_innertube.fetchChannelTabMore(channelId, tab, limit);
 }
 
 void Yt::channelInfo(const QString &channelId)

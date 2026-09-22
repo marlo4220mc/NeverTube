@@ -111,7 +111,8 @@ public slots:
     // página y si hay más.
     void fetchChannelTab(const QString &channelId, const QString &tab,
                          int limit = 25);
-    void fetchChannelTabMore(int limit = 25);
+    void fetchChannelTabMore(const QString &channelId, const QString &tab,
+                             int limit = 25);
 
     // Detalle del vídeo (título, canal, vistas, fecha, descripción y "me
     // gusta") desde el /next. videoDetailReady().
@@ -203,8 +204,10 @@ private:
                       bool more);
     void requestChannelInfo();
     void handleChannelInfo(bool ok, const QString &error, const QByteArray &body);
-    void requestChannelTab(bool more);
-    void handleChannelTab(bool ok, const QString &error, const QByteArray &body,
+    void requestChannelTab(const QString &channelId, const QString &tab,
+                           bool more);
+    void handleChannelTab(const QString &channelId, const QString &tab, bool ok,
+                          const QString &error, const QByteArray &body,
                           bool more);
     void requestVideoDetail();
     void handleVideoDetail(bool ok, const QString &error, const QByteArray &body);
@@ -410,15 +413,23 @@ private:
     bool m_chInfoInFlight = false;
     bool m_chInfoVisitorRetried = false;
     QString m_chInfoId;
-    // Pestaña de canal (videos por VISIONOS; shorts/live por WEB).
-    bool m_chTabPending = false;
-    bool m_chTabInFlight = false;
-    bool m_chTabMoreInFlight = false;
-    bool m_chTabVisitorRetried = false;
-    QString m_chTabId;
-    QString m_chTabName;
-    QString m_chTabContinuation;
-    int m_chTabLimit = 25;
+    // Pestañas de canal (videos por VISIONOS; shorts/live por WEB). La UI pide
+    // las 3 a la vez, así que cada (canal, pestaña) tiene su propio estado:
+    // un único juego de miembros hacia que las respuestas concurrentes se
+    // etiquetaran con la última pestaña pedida.
+    struct ChannelTabState
+    {
+        QString channelId;
+        QString tab;
+        bool inFlight = false;
+        bool moreInFlight = false;
+        bool pending = false;
+        bool visitorRetried = false;
+        QString continuation;
+        int limit = 25;
+    };
+    QHash<QString, ChannelTabState> m_tabStates;
+    static QString tabKey(const QString &channelId, const QString &tab);
     // Detalle del vídeo (/next).
     bool m_detailPending = false;
     bool m_detailInFlight = false;
