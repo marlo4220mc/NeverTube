@@ -857,9 +857,17 @@ void Innertube::dispatchPending()
         m_chInfoPending = false;
         requestChannelInfo();
     }
-    if (m_chTabPending) {
-        m_chTabPending = false;
-        requestChannelTab(false);
+    // Pestañas de canal pendientes de visitorData: relanzar las que esperaban
+    // (puede haber varias: la UI pide videos/shorts/live a la vez).
+    const QList<QString> tabKeys = m_tabStates.keys();
+    for (const QString &key : tabKeys) {
+        ChannelTabState st = m_tabStates.value(key);
+        if (!st.pending)
+            continue;
+        st.pending = false;
+        st.inFlight = true;
+        m_tabStates.insert(key, st);
+        requestChannelTab(st.channelId, st.tab, false);
     }
     if (m_detailPending) {
         m_detailPending = false;
@@ -1858,107 +1866,104 @@ void Innertube::handleChannelInfo(bool ok, const QString &error,
     emit channelInfoReady(info);
 }
 
+QString Innertube::tabKey(const QString &channelId, const QString &tab)
+{
+    return channelId + QLatin1Char('\n') + tab;
+}
+
 void Innertube::fetchChannelTab(const QString &channelId, const QString &tab,
                                 int limit)
 {
-    if (m_chTabInFlight && m_chTabId == channelId && m_chTabName == tab) {
+    const QString key = tabKey(channelId, tab);
+    if (m_tabStates.value(key).inFlight) {
         NT_DEBUG("E2E innertube channelTab single-flight\n");
         return;
     }
-    m_chTabInFlight = true;
-    m_chTabMoreInFlight = false;
-    m_chTabId = channelId;
-    m_chTabName = tab;
-    m_chTabLimit = limit > 0 ? limit : kChannelTabTake;
-    m_chTabContinuation.clear();
-    m_chTabVisitorRetried = false;
+    ChannelTabState st;
+    st.channelId = channelId;
+    st.tab = tab;
+    st.limit = limit > 0 ? limit : kChannelTabTake;
     NT_DEBUG("E2E innertube fetchChannelTab id=%s tab=%s\n",
              channelId.toUtf8().constData(), tab.toUtf8().constData());
     if (m_visitorData.isEmpty()
         || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
-        m_chTabPending = true;
+        st.pending = true;
+        m_tabStates.insert(key, st);
         fetchVisitorData();
         return;
     }
-    requestChannelTab(false);
+    st.inFlight = true;
+    m_tabStates.insert(key, st);
+    requestChannelTab(channelId, tab, false);
 }
 
-void Innertube::fetchChannelTabMore(int limit)
+void Innertube::fetchChannelTabMore(const QString &channelId, const QString &tab,
+                                    int limit)
 {
-    if (m_chTabContinuation.isEmpty() || m_chTabInFlight || m_chTabMoreInFlight) {
+    const QString key = tabKey(channelId, tab);
+    const ChannelTabState cur = m_tabStates.value(key);
+    if (cur.continuation.isEmpty() || cur.inFlight || cur.moreInFlight) {
         NT_DEBUG("E2E innertube channelTab more ignorada\n");
         return;
     }
-    m_chTabLimit = limit > 0 ? limit : kChannelTabTake;
-    m_chTabMoreInFlight = true;
-    requestChannelTab(true);
+    ChannelTabState st = cur;
+    st.moreInFlight = true;
+    if (limit > 0)
+        st.limit = limit;
+    m_tabStates.insert(key, st);
+    requestChannelTab(channelId, tab, true);
 }
 
-void Innertube::requestChannelTab(bool more)
+void Innertube::requestChannelTab(const QString &channelId, const QString &tab,
+                                  bool more)
 {
-    const QString channelId = m_chTabId;
-    const QString tab = m_chTabName;
+    const QString key = tabKey(channelId, tab);
+    const QString continuation = m_tabStates.value(key).continuation;
     m_http->setResult([this, channelId, tab, more](int status,
                                                    const QByteArray &body) {
         NT_DEBUG("E2E innertube channelTab HTTP status=%d size=%d tab=%s\n",
                  status, body.size(), tab.toUtf8().constData());
-        handleChannelTab(status == 200, QString(), body, more);
+        handleChannelTab(channelId, tab, status == 200, QString(), body, more);
     });
-    m_http->setError([this, more](const QString &reason) {
-        handleChannelTab(false, reason, QByteArray(), more);
+    m_http->setError([this, channelId, tab, more](const QString &reason) {
+        handleChannelTab(channelId, tab, false, reason, QByteArray(), more);
     });
     m_http->setTimeoutMs(kPlayerTimeoutMs);
     m_http->setVisitorId(m_visitorData);
 
-    if (tab == QLatin1String("videos")) {
-        // VISIONOS: pestaña Vídeos clásica (compactVideoRenderer).
-        const PlayerClient &pc = kPlayerClients[0];
-        const QJsonObject client = clientContext(pc, m_visitorData, m_hl);
-        QJsonObject body{
-            {QStringLiteral("context"),
-             QJsonObject{{QStringLiteral("client"), client}}}};
-        if (more) {
-            body.insert(QStringLiteral("continuation"), m_chTabContinuation);
-        } else {
-            body.insert(QStringLiteral("browseId"), channelId);
-            body.insert(QStringLiteral("params"),
-                        QString::fromLatin1(kChannelVideosParams));
-        }
-        const QByteArray json =
-            QJsonDocument(body).toJson(QJsonDocument::Compact);
-        m_http->post(kBrowseEndpoint, json, pc.ua, pc.clientId, pc.version,
-                     nullptr, nullptr, nullptr);
-        return;
-    }
-    // Shorts/Directos: cliente WEB (layout moderno). VISIONOS no expone estas
-    // pestañas y devolvía la Home.
+    // Cliente WEB para las tres pestañas: VISIONOS solo expone "Vídeos" y su
+    // continuación devuelve páginas vacías; WEB sirve videos/shorts/live con el
+    // layout moderno (lockups) y continuación funcional.
     const QJsonObject client = webClientContext(m_visitorData, m_hl);
     QJsonObject body{
         {QStringLiteral("context"),
          QJsonObject{{QStringLiteral("client"), client}}}};
     if (more) {
-        body.insert(QStringLiteral("continuation"), m_chTabContinuation);
+        body.insert(QStringLiteral("continuation"), continuation);
     } else {
         body.insert(QStringLiteral("browseId"), channelId);
-        body.insert(QStringLiteral("params"),
-                    QString::fromLatin1(tab == QLatin1String("shorts")
-                                            ? kChannelShortsParams
-                                            : kChannelLiveParams));
+        const char *params = tab == QLatin1String("shorts")
+                                 ? kChannelShortsParams
+                             : tab == QLatin1String("live")
+                                 ? kChannelLiveParams
+                                 : kChannelVideosParams;
+        body.insert(QStringLiteral("params"), QString::fromLatin1(params));
     }
     const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
     m_http->post(kBrowseEndpoint, json, kChromeUA, kWebClientId,
                  kWebClientVersion, nullptr, nullptr, nullptr);
 }
 
-void Innertube::handleChannelTab(bool ok, const QString &error,
+void Innertube::handleChannelTab(const QString &channelId, const QString &tab,
+                                 bool ok, const QString &error,
                                  const QByteArray &body, bool more)
 {
+    const QString key = tabKey(channelId, tab);
+    ChannelTabState st = m_tabStates.value(key);
     if (more)
-        m_chTabMoreInFlight = false;
+        st.moreInFlight = false;
     else
-        m_chTabInFlight = false;
-    const QString channelId = m_chTabId;
-    const QString tab = m_chTabName;
+        st.inFlight = false;
     QVector<VideoInfo> videos;
     QString continuation;
     if (!ok) {
@@ -1971,25 +1976,26 @@ void Innertube::handleChannelTab(bool ok, const QString &error,
             json.remove(0, 4);
         const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
         if (err.error == QJsonParseError::NoError && doc.isObject()) {
-            // VISIONOS (videos) usa compactVideoRenderer; WEB (shorts/live)
-            // usa lockups modernos. Se prueban ambos: el que no aplica da vacío.
-            videos = collectVideoRenderers(doc.object(), m_chTabLimit);
+            // Las tres pestañas van por el cliente WEB (lockups modernos); el
+            // parser clásico queda como respaldo por si el layout cambia.
+            videos = collectWebLockups(doc.object(), st.limit);
             if (videos.isEmpty())
-                videos = collectWebLockups(doc.object(), m_chTabLimit);
+                videos = collectVideoRenderers(doc.object(), st.limit);
             continuation = firstContinuationToken(doc.object());
         } else {
             NT_DEBUG("E2E innertube channelTab json fail size=%d\n", body.size());
         }
     }
-    if (!more) {
-        m_chTabContinuation = continuation;
-        if (videos.isEmpty()
-            && retryBrowseWithFreshVisitor(&m_chTabVisitorRetried,
-                                           &m_chTabPending))
-            return;
-    } else {
-        m_chTabContinuation = continuation;
+    st.continuation = continuation;
+    if (!more && videos.isEmpty() && !st.visitorRetried) {
+        // Un solo reintento con visitorData fresco por (canal, pestaña).
+        st.visitorRetried = true;
+        st.pending = true;
+        m_tabStates.insert(key, st);
+        fetchVisitorData();
+        return;
     }
+    m_tabStates.insert(key, st);
     NT_DEBUG("E2E innertube channelTab ok tab=%s videos=%d more=%d\n",
              tab.toUtf8().constData(), videos.size(),
              continuation.isEmpty() ? 0 : 1);
@@ -4524,11 +4530,12 @@ bool innertubeBrowseSelfTest()
                            QStringLiteral("live")};
     for (const QString &tab : tabs) {
         bool done = false;
+        bool more = false;
         QVector<VideoInfo> got;
         const auto conn = QObject::connect(
             &inn, &Innertube::channelTabReady, &inn,
             [&](const QString &, const QString &, const QVector<VideoInfo> &v,
-                bool) { got = v; done = true; });
+                bool hasMore) { got = v; more = hasMore; done = true; });
         inn.fetchChannelTab(channel, tab, 25);
         const bool r = wait([&]() { return done; }, 30000);
         QObject::disconnect(conn);
@@ -4540,10 +4547,35 @@ bool innertubeBrowseSelfTest()
         const bool good = r && empty == 0
                           && (tab == QLatin1String("live") || !got.isEmpty());
         std::fprintf(stderr,
-                     "BROWSE channelTab %s videos=%d idVacios=%d -> %s\n",
+                     "BROWSE channelTab %s videos=%d idVacios=%d more=%d -> %s\n",
                      tab.toUtf8().constData(), got.size(), empty,
-                     good ? "OK" : "FAIL");
+                     more ? 1 : 0, good ? "OK" : "FAIL");
         ok = ok && good;
+
+        // Continuación ("Mostrar más"): solo cuando la página llega al tamaño
+        // pedido (la UI muestra el botón en ese caso). Debe traer vídeos nuevos
+        // sin repetir los de la primera.
+        if (good && more && got.size() >= 25) {
+            bool done2 = false;
+            QVector<VideoInfo> page2;
+            const auto conn2 = QObject::connect(
+                &inn, &Innertube::channelTabReady, &inn,
+                [&](const QString &, const QString &,
+                    const QVector<VideoInfo> &v, bool) { page2 = v; done2 = true; });
+            inn.fetchChannelTabMore(channel, tab, 25);
+            const bool r2 = wait([&]() { return done2; }, 30000);
+            QObject::disconnect(conn2);
+            int dup = 0;
+            for (const VideoInfo &a : std::as_const(page2))
+                for (const VideoInfo &b : std::as_const(got))
+                    if (a.id == b.id) { ++dup; break; }
+            const bool good2 = r2 && !page2.isEmpty() && dup == 0;
+            std::fprintf(stderr,
+                         "BROWSE channelTabMore %s videos=%d dup=%d -> %s\n",
+                         tab.toUtf8().constData(), page2.size(), dup,
+                         good2 ? "OK" : "FAIL");
+            ok = ok && good2;
+        }
     }
 
     // 4) Detalle de vídeo.
