@@ -37,6 +37,10 @@ private slots:
 
 private:
     void updateSubscribeButton(bool subscribed);
+    // Carga la pestaña index si aún no se ha pedido (lazy): al abrir el canal
+    // solo se piden los vídeos; shorts/directos se piden al entrar en su
+    // pestaña (sus respuestas pesan ~400-500 KB cada una).
+    void loadTab(int index);
 
     Yt *m_yt;
     ThumbnailCache *m_thumbs;
@@ -55,4 +59,6 @@ private:
     QString m_channelId;
     QString m_channelName;
     QVector<QVector<VideoInfo>> m_videos;
+    // Pestañas ya pedidas (0/1 por índice) y si su "Mostrar más" está en curso.
+    QVector<char> m_tabLoaded;
 };
