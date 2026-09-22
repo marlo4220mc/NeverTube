@@ -15,12 +15,17 @@ jobs:
 
       # Qt 5.15.2 MSVC2019 x86 — la máquina de pruebas es de 32 bits (Windows x86 no
       # ejecuta exe/x64). La misma config de BUILD_WINDOWS.md.
+      # cache: true → aqtinstall descarga Qt desde un mirror que el redirector
+      # de download.qt.io elige al azar: a veces el CDN oficial (35-55 s) y a
+      # veces un mirror lento (hasta ~13 min, p.ej. mirror.ossplanet.net). Con
+      # la caché, tras la primera vez no se vuelve a descargar.
       - uses: jurplel/install-qt-action@v4
         with:
           version: '5.15.2'
           host: 'windows'
           target: 'desktop'
           arch: 'win32_msvc2019'
+          cache: true
 
       # libmpv-2.dll desde mpv-player-windows (sourceforge), build MinGW i686 de
       # 2021-05-30 (git-fd8c673) — ANTERIOR a que mpv dejara de soportar Windows
