@@ -104,7 +104,9 @@ void HwProbe::start()
     mpv_set_option_string(m_mpv, "config", "no");
     mpv_set_option_string(m_mpv, "load-scripts", "no");
     mpv_set_option_string(m_mpv, "terminal", "no");
-    mpv_set_option_string(m_mpv, "msg-level", "all=no");
+    // vd=v para capturar el veredicto real del decodificador:
+    //   "Using hardware decoding (<api>)" (info) / "Using software decoding" (verbose).
+    mpv_set_option_string(m_mpv, "msg-level", "all=no,vd=v");
     mpv_set_option_string(m_mpv, "keep-open", "yes");
     mpv_set_option_string(m_mpv, "force-window", "no");
     if (mpv_initialize(m_mpv) < 0) {
@@ -114,6 +116,8 @@ void HwProbe::start()
         finish(QString());
         return;
     }
+    // Los eventos de log traen el veredicto de HW (ver comentario del header).
+    mpv_request_log_messages(m_mpv, "v");
 
     m_index = 0;
     m_clipTimer.start();
@@ -131,6 +135,9 @@ void HwProbe::loadCurrent()
         return;
     const QByteArray p = m_clipPaths[m_index].toUtf8();
     const char *cmd[] = { "loadfile", p.constData(), "replace", nullptr };
+    // Nuevo clip, nuevo veredicto: el log del decodificador anterior no cuenta.
+    m_sawHwLog = false;
+    m_sawSwLog = false;
     mpv_command(m_mpv, cmd);
     NT_DEBUG("E2E hwprobe load %d=%s\n", m_index, p.constData());
 }
@@ -172,6 +179,16 @@ void HwProbe::poll()
             if (end && end->reason != MPV_END_FILE_REASON_QUIT
                 && end->reason != MPV_END_FILE_REASON_STOP)
                 ended = true;
+        } else if (event->event_id == MPV_EVENT_LOG_MESSAGE) {
+            // Veredicto real del decodificador (ver header de hwprobe.h).
+            auto *lm = static_cast<mpv_event_log_message *>(event->data);
+            if (lm && lm->text) {
+                const QString text = QString::fromUtf8(lm->text);
+                if (text.contains(QLatin1String("Using hardware decoding")))
+                    m_sawHwLog = true;
+                else if (text.contains(QLatin1String("Using software decoding")))
+                    m_sawSwLog = true;
+            }
         }
     }
 
@@ -191,11 +208,21 @@ void HwProbe::poll()
     // hwdec-current (lo deja vacío hasta activar el decodificador). Un
     // END_FILE por error (sin llegar a decodificar) es INDETERMINADO, no
     // "software": un fallo de decode no implica falta de soporte HW. En ese
-    // caso se aborta el sondeo y se conserva el default h264 sin persistir.
+    // caso se aborta el sondeo y el llamante aplica un perfil conservador
+    // (soft-all) sin persistir, reintentando el sondeo al arrancar.
+    //
+    // El veredicto de HW manda desde el LOG de mpv. Si mpv dijo "Using software
+    // decoding" es software aunque hwdec-current reporte un backend (GPUs
+    // antiguas con dispositivo de software, p.ej. GMA 950). Solo si mpv no
+    // emitió ninguna de las dos líneas se usa hwdec-current como respaldo.
     if (decoded && !hwdec.isEmpty()) {
-        const bool hardware = hwdec != QLatin1String("no");
-        NT_DEBUG("E2E hwprobe %s hwdec=%s -> %s\n", kClips[m_index].file,
-                 hwdec.toUtf8().constData(), hardware ? "HW" : "SW");
+        const bool logVerdict = m_sawHwLog || m_sawSwLog;
+        const bool hardware = logVerdict ? (m_sawHwLog && !m_sawSwLog)
+                                         : (hwdec != QLatin1String("no"));
+        NT_DEBUG("E2E hwprobe %s hwdec=%s log(hw=%d sw=%d) -> %s\n",
+                 kClips[m_index].file, hwdec.toUtf8().constData(),
+                 m_sawHwLog ? 1 : 0, m_sawSwLog ? 1 : 0,
+                 hardware ? "HW" : "SW");
         advance(hardware);
         return;
     }

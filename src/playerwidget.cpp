@@ -128,8 +128,10 @@ PlayerWidget::PlayerWidget(QWidget *parent)
     mpv_set_option_string(m_mpv, "hwdec", "auto");
     mpv_set_option_string(m_mpv, "keep-open", "no");
     mpv_set_option_string(m_mpv, "terminal", "no");
+    // vd=v: el veredicto real del decodificador ("Using hardware/software
+    // decoding") es verbose y es lo que valida la red de seguridad del perfil.
     mpv_set_option_string(m_mpv, "message-level",
-                          "all=warn,vo=info,vd=info,cache=info,stream=info,network=info");
+                          "all=warn,vo=info,vd=v,cache=info,stream=info,network=info");
     mpv_set_option_string(m_mpv, "cache", "yes");
     mpv_set_option_string(m_mpv, "demuxer-max-bytes", "64MiB");
     // Amortiguación al arranque: sin esto, con el throttle de YouTube la primera
@@ -160,7 +162,7 @@ PlayerWidget::PlayerWidget(QWidget *parent)
     mpv_observe_property(m_mpv, 0, "pause", MPV_FORMAT_FLAG);
     mpv_observe_property(m_mpv, 0, "demuxer-cache-time", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, 0, "network-bytes-per-second", MPV_FORMAT_INT64);
-    mpv_request_log_messages(m_mpv, "info");
+    mpv_request_log_messages(m_mpv, "v");
     mpv_set_wakeup_callback(m_mpv, PlayerWidget::mpvWakeup, this);
 
     // Vigila que la posición avance durante la reproducción: si se congela
@@ -456,6 +458,13 @@ void PlayerWidget::setInitialBufferSecs(double secs)
 
 void PlayerWidget::retryHwdec()
 {
+    // El log de mpv ya dictó software: no hay backend que esperar.
+    if (m_hwdecLogSoftware) {
+        if (m_hwdecRetry)
+            m_hwdecRetry->stop();
+        emit streamDecodeInfoReady(videoCodec(), QStringLiteral("no"));
+        return;
+    }
     // hwdec-current quedó vacío en el primer video-params: reintentar hasta
     // que mpv lo resuelva (o un tope de seguridad de ~6 s).
     if (++m_hwdecRetryAttempts >= 40) {
@@ -640,6 +649,7 @@ void PlayerWidget::handleEvent(mpv_event *event)
         // Cada stream nuevo vuelve a dar oportunidad de reportar códec/hwdec
         // (para la red de seguridad del perfil de códec).
         m_hwdecProbed = false;
+        m_hwdecLogSoftware = false;
         if (m_hwdecRetry)
             m_hwdecRetry->stop();
         m_lastProgressMs = QDateTime::currentMSecsSinceEpoch();
@@ -715,11 +725,16 @@ NT_DEBUG("E2E mpv video-params %lldx%lld\n",
                 emit videoSizeChanged(int(m_videoW), int(m_videoH));
             if (!m_hwdecProbed && m_videoW > 0) {
                 m_hwdecProbed = true;
-                // hwdec-current llega "vacío" en el primer video-params (mpv aún
-                // no activó el decodificador) y "no" cuando es software; solo un
-                // backend real confirma HW. Si viene vacío, reintentar con un
-                // QTimer hasta que mpv lo resuelva.
-                if (hwdecCurrent().isEmpty()) {
+                // El log de mpv manda: si ya dijo "Using software decoding", el
+                // perfil es software aunque hwdec-current reporte un backend
+                // (dispositivos de software en GPUs antiguas). Si no habló,
+                // hwdec-current llega "vacío" hasta que mpv activa el
+                // decodificador, y "no" cuando es software; un backend real
+                // confirma HW. Si viene vacío, reintentar con un QTimer.
+                if (m_hwdecLogSoftware) {
+                    emit streamDecodeInfoReady(videoCodec(),
+                                               QStringLiteral("no"));
+                } else if (hwdecCurrent().isEmpty()) {
                     if (!m_hwdecRetry) {
                         m_hwdecRetry = new QTimer(this);
                         m_hwdecRetry->setInterval(150);
@@ -778,6 +793,24 @@ NT_DEBUG("E2E mpv video-params %lldx%lld\n",
     case MPV_EVENT_LOG_MESSAGE: {
         mpv_event_log_message *log =
             static_cast<mpv_event_log_message *>(event->data);
+        if (log && log->text) {
+            const QString text = QString::fromUtf8(log->text);
+            if (text.contains(QLatin1String("Using software decoding"))) {
+                m_hwdecLogSoftware = true;
+                // Corrección tardía: el veredicto HW pudo emitirse antes de que
+                // llegara esta línea (hwdec-current reportaba un backend falso).
+                // Reemitir "no" para que la red de seguridad degrade el perfil.
+                if (m_hwdecProbed) {
+                    if (m_hwdecRetry)
+                        m_hwdecRetry->stop();
+                    emit streamDecodeInfoReady(videoCodec(),
+                                               QStringLiteral("no"));
+                }
+            } else if (text.contains(
+                           QLatin1String("Using hardware decoding"))) {
+                m_hwdecLogSoftware = false;
+            }
+        }
         NT_DEBUG("[mpv:%s] %s", log->prefix, log->text);
         break;
     }
