@@ -200,19 +200,22 @@ private:
     void handleChannel(bool ok, const QString &error, const QByteArray &body);
     void handleTrending(bool ok, const QString &error, const QByteArray &body);
     void requestSearch(bool more);
-    void handleSearch(bool ok, const QString &error, const QByteArray &body,
-                      bool more);
+    void handleSearch(const QString &query, bool ok, const QString &error,
+                      const QByteArray &body, bool more);
     void requestChannelInfo();
-    void handleChannelInfo(bool ok, const QString &error, const QByteArray &body);
+    void handleChannelInfo(const QString &channelId, bool ok,
+                           const QString &error, const QByteArray &body);
     void requestChannelTab(const QString &channelId, const QString &tab,
                            bool more);
     void handleChannelTab(const QString &channelId, const QString &tab, bool ok,
                           const QString &error, const QByteArray &body,
                           bool more);
     void requestVideoDetail();
-    void handleVideoDetail(bool ok, const QString &error, const QByteArray &body);
+    void handleVideoDetail(const QString &videoId, bool ok,
+                           const QString &error, const QByteArray &body);
     void requestPlaylist();
-    void handlePlaylist(bool ok, const QString &error, const QByteArray &body);
+    void handlePlaylist(const QString &playlistId, bool ok,
+                        const QString &error, const QByteArray &body);
     void handleNext(const QString &videoId, bool ok, const QString &error,
                     const QByteArray &body);
     void handleRadio(const QString &videoId, bool ok, const QString &error,
