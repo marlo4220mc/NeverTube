@@ -114,6 +114,9 @@ private:
     // Pinta la descripción del vídeo como HTML enriquecido (enlaces + saltos
     // de línea) y guarda el texto plano. Vacía = oculta la descripción.
     void applyDescription(const QString &description);
+    // True si el vídeo dado es el que está en reproducción (ignora respuestas
+    // que llegan tarde, de un vídeo ya reemplazado).
+    bool isCurrentVideo(const QString &videoId) const;
     void showPlaylistMenu();
     // Popup estilado "Nueva playlist" (mismo popupDialog que Biblioteca):
     // tras crearla, si hay vídeo pendiente se añade a la playlist nueva.

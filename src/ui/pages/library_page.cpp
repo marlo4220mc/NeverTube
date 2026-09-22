@@ -635,8 +635,8 @@ void LibraryPage::buildRows(
         const VideoInfo &v = videos.at(i);
         auto *row = new RowItem(m_body);
         QString url = v.thumbnailUrl;
-        if (url.isEmpty() && v.id.size() == 11)
-            url = QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg").arg(v.id);
+        if (url.isEmpty())
+            url = fallbackThumbnailUrl(v.id);
         auto *thumb = new AsyncThumb(m_thumbs, QString(),
                                      QStringLiteral("v_%1").arg(v.id), url,
                                      kThumbW, kThumbH, 8, false, row);

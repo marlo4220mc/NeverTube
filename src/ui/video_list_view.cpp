@@ -616,8 +616,8 @@ void VideoListView::refreshThumbnails()
 {
     for (const VideoInfo &v : m_videos) {
         QString url = v.thumbnailUrl;
-        if (url.isEmpty() && v.id.size() == 11)
-            url = QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg").arg(v.id);
+        if (url.isEmpty())
+            url = fallbackThumbnailUrl(v.id);
         m_thumbs->request(cacheKeyFor(v), url);
     }
 }
