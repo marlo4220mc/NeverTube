@@ -1159,26 +1159,8 @@ void WatchPage::onDetailReady(const VideoInfo &video, const QString &desc,
     m_title->setText(m_player->current().title);
     updateChannelRow();
     m_fetchingDetail = false;
-    m_description = desc;
     m_likeCount = likes;
-    if (!desc.isEmpty()) {
-        QString rich = desc.toHtmlEscaped();
-        rich.replace(QLatin1Char('\n'), QStringLiteral("<br>"));
-        const QRegularExpression urlRe(QStringLiteral(
-            R"((https?://[^\s<]+))"));
-        rich.replace(urlRe, QStringLiteral(
-            "<a href=\"\\1\" style=\"color:#FF0033;\">\\1</a>"));
-        m_descLabel->setText(QStringLiteral(
-            "<style>a { text-decoration:none; }</style>") + rich);
-        m_descLabel->setMaximumHeight(60);
-        m_descExpanded = false;
-        m_descToggle->setText(QStringLiteral("Ver más"));
-        m_descLabel->show();
-        m_descToggle->show();
-    } else {
-        m_descLabel->hide();
-        m_descToggle->hide();
-    }
+    applyDescription(desc);
     QStringList meta;
     if (video.viewCount > 0)
         meta << viewsLabel(video.viewCount);
@@ -1214,22 +1196,32 @@ void WatchPage::onCurrentDetailReady(const QString &videoId,
         m_player->renameCurrent(videoId, title);
         m_title->setText(title);
     }
-    if (!description.isEmpty()) {
-        m_description = description;
-        QString rich = description.toHtmlEscaped();
-        rich.replace(QLatin1Char('\n'), QStringLiteral("<br>"));
-        const QRegularExpression urlRe(QStringLiteral(
-            R"((https?://[^\s<]+))"));
-        rich.replace(urlRe, QStringLiteral(
-            "<a href=\"\\1\" style=\"color:#FF0033;\">\\1</a>"));
-        m_descLabel->setText(QStringLiteral(
-            "<style>a { text-decoration:none; }</style>") + rich);
-        m_descLabel->setMaximumHeight(60);
-        m_descExpanded = false;
-        m_descToggle->setText(QStringLiteral("Ver más"));
-        m_descLabel->show();
-        m_descToggle->show();
+    if (!description.isEmpty())
+        applyDescription(description);
+}
+
+// Pinta la descripción del vídeo como HTML enriquecido (enlaces + saltos de
+// línea) y guarda el texto plano. Vacía = oculta la descripción.
+void WatchPage::applyDescription(const QString &description)
+{
+    m_description = description;
+    if (description.isEmpty()) {
+        m_descLabel->hide();
+        m_descToggle->hide();
+        return;
     }
+    QString rich = description.toHtmlEscaped();
+    rich.replace(QLatin1Char('\n'), QStringLiteral("<br>"));
+    const QRegularExpression urlRe(QStringLiteral(R"((https?://[^\s<]+))"));
+    rich.replace(urlRe, QStringLiteral(
+        "<a href=\"\\1\" style=\"color:#FF0033;\">\\1</a>"));
+    m_descLabel->setText(QStringLiteral(
+        "<style>a { text-decoration:none; }</style>") + rich);
+    m_descLabel->setMaximumHeight(60);
+    m_descExpanded = false;
+    m_descToggle->setText(QStringLiteral("Ver más"));
+    m_descLabel->show();
+    m_descToggle->show();
 }
 
 void WatchPage::onPhaseChanged(const QString &phase)

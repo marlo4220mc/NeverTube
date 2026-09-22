@@ -227,6 +227,10 @@ private:
     // dispatcher lo relanza). Evita el refresh forzado de sw.js_data en cada
     // arranque; un fallo real apenas añade un GET + reintento.
     bool retryBrowseWithFreshVisitor(bool *retried, bool *pending);
+    // True si el visitorData vigente sirve (no vacío y sin caducar). Cuando es
+    // false, la fase correspondiente debe marcar su *Pending, llamar a
+    // fetchVisitorData() y salir: el dispatcher la relanzará.
+    bool hasFreshVisitor() const;
     void dispatchPending();
     void handlePlayer(bool ok, const QString &error, const QByteArray &body);
     void handleMaster(bool ok, const QString &error, const QByteArray &body);
