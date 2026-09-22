@@ -69,7 +69,6 @@ public:
     void homeMore();
     bool homeHasContinuation() const;
 
-    QString downloadVideoSelector(int maxHeight) const;
     static QString videoIdFromUrl(const QString &url);
 
     // Un fragmento (subsegmento) del fMP4 según la caja sidx del indexRange.
@@ -150,22 +149,8 @@ signals:
     void homeMoreReady(const QVector<VideoInfo> &videos);
 
 private:
-    void resolveWithYtDlp(const QString &videoId, int maxHeight,
-                          bool fallbackToInnertube = false);
     void resolveViaInnertube(const QString &videoId, int maxHeight,
                              int preferredClient, bool forceRefresh = false);
-    void channelVideosYtDlp(const QString &channelId);
-    void startChannelRace(const QString &channelId);
-    void channelRaceLeg(bool innertube, const QString &channelId,
-                        const QVector<VideoInfo> &videos);
-    void trendingYtDlp();
-    void execJson(QStringList args, std::function<void(const QJsonObject &)> done);
-    void execLines(QStringList args, std::function<void(const QStringList &)> done);
-    void getDetailTry(const QString &videoId, int clientIndex);
-    void getUrls(const QString &videoId, const QString &selector,
-                 std::function<void(const QStringList &)> done);
-    QString buildHlsMaster(const QString &videoId, const QString &videoUrl,
-                           const QString &audioUrl);
     QString buildFilteredMaster(const QString &videoId,
                                 const QByteArray &masterBody, int maxHeight);
     // HLS sintético local para reproducir AV1 por la vía HLS (YouTube no
@@ -203,29 +188,12 @@ private:
     // Altura del vídeo que elegiría buildEdgeMaster (mayor altura <= maxHeight
     // con url directa, h264 preferido). -1 si no hay vídeo aprovechable.
     int edgeHeight(const QJsonArray &formats, int maxHeight);
-    static QString formatSelector(int maxHeight);
-    QString audioSelector() const;
-    static QVector<VideoInfo> parseVideos(const QJsonObject &root);
-    static VideoInfo videoFromJson(const QJsonObject &j);
-    static ChannelInfo channelFromJson(const QString &id, const QJsonObject &j);
-    static void parsePlaylist(const QJsonObject &root, PlaylistInfo *info,
-                              QVector<VideoInfo> *videos);
-    static QString pickThumbnail(const QJsonArray &thumbs);
-    static QString pickAvatar(const QJsonArray &thumbs);
-    static QString fallbackThumb(const QString &videoId);
-    static QString publishedFrom(const QJsonObject &j);
 
     HlsServer m_hls;
     Innertube m_innertube;
-    // Estado de la carrera de canales (Innertube vs yt-dlp en paralelo): id
-    // del canal en curso, patas completadas/con datos, y si ya se emitió
-    // channelVideosFinished (una sola vez por apertura).
-    QString m_chanRaceId;
-    bool m_chanRaceInnDone = false;
-    bool m_chanRaceInnOk = false;
-    bool m_chanRaceYtDone = false;
-    bool m_chanRaceYtOk = false;
-    bool m_chanRaceEmitted = false;
+    // Última consulta de búsqueda: distingue la primera página (fetchSearch)
+    // de la continuación (fetchSearchMore) en Yt::search.
+    QString m_searchQuery;
     SettingsRepo *m_visitorStore = nullptr;
     int m_resolveGen = 0;
     QString m_audioLang;

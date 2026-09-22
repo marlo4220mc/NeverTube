@@ -6,15 +6,11 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
-#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QProcess>
-#include <QStandardPaths>
-#include <QRandomGenerator>
 #include <QTextStream>
 #include <QTimer>
 #include <QUrl>
@@ -30,44 +26,8 @@
 
 namespace {
 
-const QString kNoWarnings = QStringLiteral("--no-warnings");
-// Idioma de los metadatos (títulos): sin esto YouTube auto-traduce títulos a
-// inglés según el contexto, aunque el vídeo sea de un creador hispanohablante.
-const QString kYtLang = QStringLiteral("--extractor-args");
-const QString kYtLangArg = QStringLiteral("youtube:lang=es");
-
-// Centinelas para m_winningClient (índices de cliente Innertube son >= 0).
-constexpr int kResolveYtDlp = -1;      // yt-dlp fue quien resolvió
+// Centinela para m_winningClient (los índices de cliente Innertube son >= 0).
 constexpr int kResolveUnknown = -2;    // aún sin ganador registrado
-
-// Ruta del binario yt-dlp que lanza la app (QProcess). La app arranca el
-// proceso como "yt-dlp", así que Windows solo lo encuentra si existe un
-// archivo con ese nombre en PATH o junto al exe; si el instalador lo trae con
-// OTRo nombre (p. ej. el antiguo `ytdlp.exe`), QProcess no lo halla y
-// búsquedas/canales/fallbacks devuelven vacío (parseVideos({}) crea 1 vídeo
-// falso "Sin título"). Orden de resolución:
-//   1) yt-dlp.exe junto al ejecutable (lo que empaqueta el instalador);
-//   2) ytdlp.exe junto al ejecutable (instalaciones antiguas);
-//   3) un "yt-dlp" ya presente en el PATH del sistema.
-QString ytDlpBinary()
-{
-    const QString dir = QCoreApplication::applicationDirPath();
-    const QString packaged = dir + QStringLiteral("/yt-dlp.exe");
-    if (QFileInfo::exists(packaged))
-        return packaged;
-    const QString legacy = dir + QStringLiteral("/ytdlp.exe");
-    if (QFileInfo::exists(legacy))
-        return legacy;
-    const QString inPath = QStandardPaths::findExecutable(QStringLiteral("yt-dlp"));
-    if (!inPath.isEmpty())
-        return inPath;
-    return QStringLiteral("yt-dlp");
-}
-
-int boundedSafe(int value)
-{
-    return value < 0 ? 0 : value;
-}
 
 // Devuelve el valor del atributo EXT-X-MEDIA dado (p. ej. LANGUAGE, NAME).
 QString mediaAttr(const QString &line, const QLatin1String attr)
@@ -172,17 +132,35 @@ Yt::Yt(QObject *parent)
     connect(&m_innertube, &Innertube::homeMoreReady, this,
             &Yt::homeMoreReady);
     connect(&m_innertube, &Innertube::channelVideosReady, this,
-            [this](const QString &channelId, const QVector<VideoInfo> &videos) {
-                channelRaceLeg(true, channelId, videos);
+            [this](const QString &, const QVector<VideoInfo> &videos) {
+                emit channelVideosFinished(videos);
             });
     connect(&m_innertube, &Innertube::trendingReady, this,
-            [this](const QVector<VideoInfo> &videos) {
-                if (!videos.isEmpty()) {
-                    emit trendingFinished(videos);
+            &Yt::trendingFinished);
+    // Búsqueda, ficha/pestañas de canal, detalle de vídeo y playlist: antes se
+    // pedían a yt-dlp; ahora van por Innertube.
+    connect(&m_innertube, &Innertube::searchReady, this,
+            [this](const QString &query, const QVector<VideoInfo> &videos,
+                   bool) { emit searchFinished(query, videos); });
+    connect(&m_innertube, &Innertube::channelInfoReady, this,
+            &Yt::channelInfoReady);
+    connect(&m_innertube, &Innertube::channelTabReady, this,
+            [this](const QString &channelId, const QString &tab,
+                   const QVector<VideoInfo> &videos, bool) {
+                emit channelTabVideosFinished(channelId, tab, videos);
+            });
+    connect(&m_innertube, &Innertube::videoDetailReady, this,
+            [this](const VideoInfo &video, const QString &description,
+                   qint64 likeCount) {
+                if (video.title.isEmpty()) {
+                    emit detailFailed(video.id);
                     return;
                 }
-                trendingYtDlp();
+                emit detailReady(video, description, likeCount,
+                                 QVector<FormatInfo>());
             });
+    connect(&m_innertube, &Innertube::playlistReady, this,
+            &Yt::playlistDetailReady);
     // Alturas de vídeo disponibles del vídeo para el menú de resoluciones:
     // llegan del master HLS (videoHeights de adaptiveFormats) y, como respaldo,
     // del /player (formatsReady). No tocan la resolución resuelta; solo
@@ -324,20 +302,13 @@ void Yt::setCodecProfile(CodecProfile profile)
 
 void Yt::search(const QString &query, int limit, int offset)
 {
-    QStringList args = {
-        kNoWarnings,
-        kYtLang,
-        kYtLangArg,
-        QStringLiteral("--flat-playlist"),
-        QStringLiteral("--ignore-errors"),
-        QStringLiteral("--dump-single-json"),
-        QStringLiteral("ytsearch%1:%2").arg(offset + limit).arg(query),
-    };
-    if (offset > 0)
-        args << QStringLiteral("--playlist-start") << QString::number(offset + 1);
-    execJson(args, [this, query](const QJsonObject &root) {
-        emit searchFinished(query, parseVideos(root));
-    });
+    // Innertube: offset 0 = primera página; offset > 0 = continuación.
+    if (offset <= 0) {
+        m_searchQuery = query;
+        m_innertube.fetchSearch(query, limit);
+    } else {
+        m_innertube.fetchSearchMore(limit);
+    }
 }
 
 void Yt::trending(int limit)
@@ -349,257 +320,36 @@ void Yt::trending(int limit)
 void Yt::channelVideos(const QString &channelId, int limit)
 {
     Q_UNUSED(limit);
-    // Carrera: Innertube y yt-dlp en paralelo, se emite el primero con datos.
-    // En redes donde /browse responde 400 (la máquina de pruebas) esto evita esperar las
-    // 2 rondas Innertube fallidas (visitor retry) antes del fallback yt-dlp:
-    // el canal llega cuando yt-dlp responde (~seg), igual de rápido que en
-    // Linux, donde gana Innertube en la primera ronda.
-    startChannelRace(channelId);
+    // Innertube: browse de la pestaña "Vídeos" del canal (compactVideoRenderer).
+    // Antes era una carrera contra yt-dlp; ahora solo Innertube.
     m_innertube.fetchChannelVideos(channelId);
-    channelVideosYtDlp(channelId);
-}
-
-// Pata yt-dlp de la carrera de canales (UU playlist en paralelo a Innertube).
-void Yt::channelVideosYtDlp(const QString &channelId)
-{
-    NT_DEBUG("E2E channelVideos leg yt-dlp id=%s\n",
-             channelId.toUtf8().constData());
-    const QString uuId = QStringLiteral("UU%1").arg(channelId.mid(2));
-    const QStringList args = {
-        kNoWarnings,
-        kYtLang,
-        kYtLangArg,
-        QStringLiteral("--flat-playlist"),
-        QStringLiteral("--ignore-errors"),
-        QStringLiteral("--playlist-end"),
-        QStringLiteral("10"),
-        QStringLiteral("--dump-single-json"),
-        QStringLiteral("https://www.youtube.com/playlist?list=%1").arg(uuId),
-    };
-    execJson(args, [this, channelId](const QJsonObject &root) {
-        QVector<VideoInfo> videos = parseVideos(root);
-        std::sort(videos.begin(), videos.end(), [](const VideoInfo &a,
-                                                   const VideoInfo &b) {
-            return a.publishedAt > b.publishedAt;
-        });
-        channelRaceLeg(false, channelId, videos);
-    });
-}
-
-// Inicia la carrera de canales (Innertube vs yt-dlp) para un canal concreto.
-void Yt::startChannelRace(const QString &channelId)
-{
-    m_chanRaceId = channelId;
-    m_chanRaceInnDone = false;
-    m_chanRaceInnOk = false;
-    m_chanRaceYtDone = false;
-    m_chanRaceYtOk = false;
-    m_chanRaceEmitted = false;
-}
-
-// Una pata de la carrera terminó: se emite channelVideosFinished UNA vez. Un
-// leg "trae datos" solo si tiene algún vídeo con id no vacío (parseVideos({})
-// fabrica 1 vídeo falso "Sin título" cuando yt-dlp no pudo iniciar; ese no
-// cuenta como datos). Resultados de patas atrasadas o de aperturas previas
-// (channelId distinto) se descartan.
-void Yt::channelRaceLeg(bool innertube, const QString &channelId,
-                        const QVector<VideoInfo> &videos)
-{
-    if (channelId != m_chanRaceId || m_chanRaceEmitted)
-        return;
-    const bool ok = std::any_of(
-        videos.begin(), videos.end(),
-        [](const VideoInfo &v) { return !v.id.isEmpty(); });
-    if (innertube) {
-        m_chanRaceInnDone = true;
-        m_chanRaceInnOk = ok;
-    } else {
-        m_chanRaceYtDone = true;
-        m_chanRaceYtOk = ok;
-    }
-    if ((m_chanRaceInnDone && m_chanRaceInnOk)
-        || (m_chanRaceYtDone && m_chanRaceYtOk)) {
-        // Este leg tiene datos y es el primero: sus vídeos son los ganadores.
-        m_chanRaceEmitted = true;
-        emit channelVideosFinished(videos);
-        return;
-    }
-    if (m_chanRaceInnDone && m_chanRaceYtDone) {
-        m_chanRaceEmitted = true;
-        emit channelVideosFinished(QVector<VideoInfo>());
-    }
-}
-
-// Fallback degradado de tendencias cuando Innertube no da vídeos.
-void Yt::trendingYtDlp()
-{
-    NT_DEBUG("E2E trending fallback yt-dlp\n");
-    const QStringList args = {
-        kNoWarnings,
-        kYtLang,
-        kYtLangArg,
-        QStringLiteral("--flat-playlist"),
-        QStringLiteral("--ignore-errors"),
-        QStringLiteral("-I"),
-        QStringLiteral("1:8"),
-        QStringLiteral("--dump-single-json"),
-        QStringLiteral("https://www.youtube.com/feed/trending"),
-    };
-    execJson(args, [this](const QJsonObject &root) {
-        emit trendingFinished(parseVideos(root));
-    });
 }
 
 void Yt::channelTabVideos(const QString &channelId, const QString &tab, int limit,
                           int offset)
 {
-    const QString path = tab == QLatin1String("shorts") ? QStringLiteral("/shorts")
-                       : tab == QLatin1String("live") ? QStringLiteral("/streams")
-                       : QStringLiteral("/videos");
-    QStringList args = {
-        kNoWarnings,
-        kYtLang,
-        kYtLangArg,
-        QStringLiteral("--flat-playlist"),
-        QStringLiteral("--ignore-errors"),
-        QStringLiteral("--playlist-end"),
-        QString::number(offset + limit),
-        QStringLiteral("--dump-single-json"),
-        QStringLiteral("https://www.youtube.com/channel/%1%2").arg(channelId, path),
-    };
-    if (offset > 0)
-        args << QStringLiteral("--playlist-start") << QString::number(offset + 1);
-    execJson(args, [this, tab, channelId](const QJsonObject &root) {
-        QVector<VideoInfo> videos = parseVideos(root);
-        NT_DEBUG("E2E channelTabVideos id=%s tab=%s count=%d\n",
-                 channelId.toUtf8().constData(),
-                 tab.toUtf8().constData(), (int)videos.size());
-        emit channelTabVideosFinished(channelId, tab, videos);
-    });
+    if (offset <= 0)
+        m_innertube.fetchChannelTab(channelId, tab, limit);
+    else
+        m_innertube.fetchChannelTabMore(limit);
 }
 
 void Yt::channelInfo(const QString &channelId)
 {
-    const QStringList args = {
-        kNoWarnings,
-        QStringLiteral("--extractor-args"),
-        QStringLiteral("youtube:player_client=web_embedded,lang=es"),
-        QStringLiteral("--skip-download"),
-        QStringLiteral("--dump-single-json"),
-        QStringLiteral("https://www.youtube.com/channel/%1/about").arg(channelId),
-    };
-    execJson(args, [this, channelId](const QJsonObject &root) {
-        const ChannelInfo info = channelFromJson(channelId, root);
-        NT_DEBUG("E2E channelInfo id=%s name=%s subs=%lld\n",
-                 channelId.toUtf8().constData(),
-                 info.name.toUtf8().constData(),
-                 static_cast<long long>(info.subscriberCount));
-        emit channelInfoReady(info);
-    });
+    m_innertube.fetchChannelInfo(channelId);
 }
 
 void Yt::getDetail(const QString &videoId)
 {
-    // web_embedded evita el bloqueo anti-bot del cliente por defecto y
-    // sigue devolviendo título/descripción en el idioma de lang (es).
-    // Algunos vídeos se reportan "Video unavailable" con ese cliente aunque
-    // sí son reproducibles (por Innertube); cascada de clientes para obtener
-    // los metadatos igualmente.
-    getDetailTry(videoId, 0);
-}
-
-void Yt::getDetailTry(const QString &videoId, int clientIndex)
-{
-    static const QStringList clients = {
-        QStringLiteral("web_embedded"),
-        QStringLiteral("tv"),
-        QStringLiteral("tv_embedded"),
-        QStringLiteral("mweb"),
-        QStringLiteral("android"),
-    };
-    if (clientIndex >= clients.size()) {
-        emit detailFailed(videoId);
-        return;
-    }
-    NT_DEBUG("E2E getDetail id=%s client=%s\n",
-             videoId.toUtf8().constData(),
-             clients[clientIndex].toUtf8().constData());
-    const QStringList args = {
-        kNoWarnings,
-        QStringLiteral("--extractor-args"),
-        QStringLiteral("youtube:player_client=%1,lang=es")
-            .arg(clients[clientIndex]),
-        QStringLiteral("--skip-download"),
-        QStringLiteral("--dump-single-json"),
-        QStringLiteral("https://www.youtube.com/watch?v=%1").arg(videoId),
-    };
-    execJson(args, [this, videoId, clientIndex](const QJsonObject &j) {
-        const VideoInfo video = videoFromJson(j);
-        if (video.id.isEmpty()) {
-            // Fracaso de este cliente (JSON vacío o "Video unavailable");
-            // probar el siguiente antes de rendirse.
-            getDetailTry(videoId, clientIndex + 1);
-            return;
-        }
-        QVector<FormatInfo> formats;
-        const QJsonArray raw = j.value(QStringLiteral("formats")).toArray();
-        for (const QJsonValue &val : raw) {
-            const QJsonObject f = val.toObject();
-            const int height = f.value(QStringLiteral("height")).toInt(0);
-            if (height <= 0)
-                continue;
-            const QString vcodec = f.value(QStringLiteral("vcodec")).toString();
-            const QString acodec = f.value(QStringLiteral("acodec")).toString();
-            const bool hasVideo = vcodec.isEmpty() ? f.value(QStringLiteral("has_video")).toBool(true)
-                                                   : vcodec != QLatin1String("none");
-            const bool hasAudio = acodec.isEmpty() ? f.value(QStringLiteral("has_audio")).toBool(true)
-                                                   : acodec != QLatin1String("none");
-            if (!hasVideo || !hasAudio)
-                continue;
-            if (f.value(QStringLiteral("protocol")).toString() == QLatin1String("mhtml"))
-                continue;
-            FormatInfo info;
-            info.formatId = f.value(QStringLiteral("format_id")).toString();
-            if (info.formatId.startsWith(QLatin1String("hls"))
-                || info.formatId.startsWith(QLatin1String("sb")))
-                continue;
-            info.height = height;
-            const QString note = f.value(QStringLiteral("format_note")).toString();
-            info.label = note.isEmpty() ? QStringLiteral("%1p").arg(height) : note;
-            info.ext = f.value(QStringLiteral("ext")).toString();
-            if (info.ext.isEmpty())
-                info.ext = QStringLiteral("mp4");
-            formats.append(info);
-        }
-        std::sort(formats.begin(), formats.end(),
-                  [](const FormatInfo &a, const FormatInfo &b) {
-                      return a.height < b.height;
-                  });
-        const qint64 likes = j.value(QStringLiteral("like_count")).toVariant().toLongLong();
-        const QString description = j.value(QStringLiteral("description")).toString();
-        emit detailReady(video, description, likes, formats);
-    });
+    // Detalle del vídeo (título traducido, descripción, vistas, fecha y likes)
+    // desde el /next de Innertube.
+    m_innertube.fetchVideoDetail(videoId);
 }
 
 void Yt::playlistDetail(const QString &playlistId, int limit)
 {
-    const QStringList args = {
-        kNoWarnings,
-        kYtLang,
-        kYtLangArg,
-        QStringLiteral("--flat-playlist"),
-        QStringLiteral("--ignore-errors"),
-        QStringLiteral("-I"),
-        QStringLiteral("1:%1").arg(limit),
-        QStringLiteral("--dump-single-json"),
-        QStringLiteral("https://www.youtube.com/playlist?list=%1").arg(playlistId),
-    };
-    execJson(args, [this](const QJsonObject &root) {
-        PlaylistInfo info;
-        QVector<VideoInfo> videos;
-        parsePlaylist(root, &info, &videos);
-        emit playlistDetailReady(info, videos);
-    });
+    // Innertube: browse VL<id> (cabecera + playlistVideoRenderer).
+    m_innertube.fetchPlaylist(playlistId, limit);
 }
 
 void Yt::resolveStream(const QString &videoId, int maxHeight,
@@ -609,10 +359,7 @@ void Yt::resolveStream(const QString &videoId, int maxHeight,
     NT_DEBUG("E2E resolveStream id=%s maxH=%d winner=%d refresh=%d\n",
              videoId.toUtf8().constData(), maxHeight, winning,
              int(forceRefresh));
-    if (winning == kResolveYtDlp)
-        resolveWithYtDlp(videoId, maxHeight, /*fallbackToInnertube*/ true);
-    else
-        resolveViaInnertube(videoId, maxHeight, winning, forceRefresh);
+    resolveViaInnertube(videoId, maxHeight, winning, forceRefresh);
 }
 
 void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
@@ -629,9 +376,10 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                 if (vid != videoId || gen != m_resolveGen)
                     return;
                 guard->deleteLater();
-                qWarning("yt: innertube falló para %s (%s); fallback yt-dlp",
+                qWarning("yt: innertube falló para %s (%s)",
                          vid.toUtf8().constData(), reason.toUtf8().constData());
-                resolveWithYtDlp(videoId, maxHeight);
+                emit resolveError(
+                    QStringLiteral("No se pudo resolver el vídeo: %1").arg(reason));
             });
 
     // HLS primario (master de YouTube, sin throttle), edge como respaldo:
@@ -747,14 +495,13 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                             videoId, masterBody, wanted);
                         if (abs.isEmpty()) {
                             // Master no filtrable: si hay edge guardado,
-                            // entregarlo antes de caer a yt-dlp.
+                            // entregarlo; si no, no hay stream.
                             filterGuard->deleteLater();
                             if (edgeUrl->isEmpty()) {
-                                // Sin edge de respaldo: fallback yt-dlp.
-                                qWarning("yt: master sin variantes filtrables para %s; "
-                                         "fallback yt-dlp",
+                                qWarning("yt: master sin variantes filtrables para %s",
                                          videoId.toUtf8().constData());
-                                resolveWithYtDlp(videoId, wanted);
+                                emit resolveError(QStringLiteral(
+                                    "No se pudo preparar el stream del vídeo."));
                                 return;
                             }
                             StreamInfo se;
@@ -786,7 +533,7 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                         emit streamReady(s);
                     });
                 // Fracaso en la fase de master: si hay edge guardado,
-                // entregarlo antes de caer a yt-dlp.
+                // entregarlo; si no, no hay stream.
                 QMetaObject::Connection masterFail;
                 masterFail = connect(
                     innTube, &Innertube::failed, filterGuard,
@@ -811,105 +558,16 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                             emit streamReady(se);
                             return;
                         }
-                        qWarning("yt: innertube falló al filtrar master (%s); "
-                                 "fallback yt-dlp",
+                        qWarning("yt: innertube falló al filtrar master (%s)",
                                  reason.toUtf8().constData());
-                        resolveWithYtDlp(videoId, maxHeight);
+                        emit resolveError(QStringLiteral(
+                            "No se pudo preparar el stream del vídeo."));
                     });
                 Q_UNUSED(masterFail)
                 innTube->fetchMaster(vid, hlsUrl);
             });
 
     m_innertube.fetchHls(videoId, preferredClient, forceRefresh);
-}
-
-void Yt::resolveWithYtDlp(const QString &videoId, int maxHeight,
-                           bool fallbackToInnertube)
-{
-    // Helper interno: si hay fallback habilitado, al fallar reintentar
-    // Innertube con la cascada completa (solo la primera vez).
-    const auto onFail =
-            [this, videoId, maxHeight, fallbackToInnertube](const QString &msg) {
-                if (fallbackToInnertube) {
-                    qWarning("yt: yt-dlp preferido falló; reiniciando cascada "
-                             "innertube para %s",
-                             videoId.toUtf8().constData());
-                    resolveViaInnertube(videoId, maxHeight, -1,
-                                        /*forceRefresh*/ true);
-                    return;
-                }
-                emit resolveError(msg);
-            };
-
-    getUrls(videoId, formatSelector(maxHeight),
-            [this, videoId, maxHeight, onFail](const QStringList &combinedUrls) {
-                if (combinedUrls.size() == 1) {
-                    m_winningClient[videoId] = kResolveYtDlp;
-                    StreamInfo s;
-                    s.url = combinedUrls.first();
-                    s.label = qualityName(maxHeight) + QLatin1Char('p');
-                    s.height = maxHeight;
-                    s.multipleUrls = false;
-                    emit streamReady(s);
-                    return;
-                }
-
-                const QString videoSel =
-                    QStringLiteral("bestvideo[height<=%1][ext=mp4][vcodec^=avc1]"
-                                   "[protocol=m3u8_native]/bestvideo[height<=%1]"
-                                   "[protocol=m3u8_native]/bestvideo[height<=%1]")
-                        .arg(maxHeight);
-                getUrls(videoId, videoSel,
-                        [this, videoId, maxHeight, onFail](
-                            const QStringList &videoUrls) {
-                            if (videoUrls.isEmpty()) {
-                                onFail(QStringLiteral(
-                                    "yt-dlp no devolvió una URL reproducible; "
-                                    "el video puede requerir iniciar sesión."));
-                                return;
-                            }
-                            const QString videoUrl = videoUrls.first();
-                            if (!videoUrl.contains(QLatin1String(".m3u8"))) {
-                                onFail(QStringLiteral(
-                                    "yt-dlp solo devolvió video sin audio."));
-                                return;
-                            }
-                            getUrls(videoId,
-                                    audioSelector(),
-                                    [this, videoId, maxHeight, videoUrl, onFail](
-                                        const QStringList &audioUrls) {
-                                        if (audioUrls.isEmpty()) {
-                                            onFail(QStringLiteral(
-                                                "yt-dlp no devolvió una pista de audio; "
-                                                "el video puede requerir iniciar sesión."));
-                                            return;
-                                        }
-                                        const QString master = buildHlsMaster(
-                                            videoId, videoUrl, audioUrls.first());
-                                        const QString origin = m_hls.start();
-                                        if (master.isEmpty() || origin.isEmpty()) {
-                                            onFail(QStringLiteral(
-                                                "No se pudo preparar el stream de respaldo."));
-                                            return;
-                                        }
-                                        m_winningClient[videoId] = kResolveYtDlp;
-                                        StreamInfo s;
-                                        s.url = origin + QLatin1Char('/')
-                                                + videoId + QLatin1String(".m3u8");
-                                        s.label = qualityName(maxHeight) + QLatin1Char('p');
-                                        s.height = maxHeight;
-                                        s.multipleUrls = false;
-                                        emit streamReady(s);
-                                    });
-                        });
-            });
-}
-
-QString Yt::downloadVideoSelector(int maxHeight) const
-{
-    return QStringLiteral("best[height<=%1][ext=mp4][vcodec!*=vp9]/"
-                          "best[height<=%1]/best")
-        .arg(maxHeight);
 }
 
 QString Yt::qualityName(int height)
@@ -1547,339 +1205,6 @@ QString Yt::buildAv1Hls(const QString &videoId,
     return filePath;
 }
 
-QString Yt::formatSelector(int maxHeight)
-{
-    return QStringLiteral("best[height<=%1][ext=mp4][protocol=https][acodec^=mp4a]/"
-                          "best[height<=%1][ext=mp4][protocol^=http][acodec^=mp4a]")
-        .arg(maxHeight);
-}
-
-// Selector de audio para la vía de respaldo yt-dlp: si hay idioma pedido,
-// que yt-dlp elija una pista con ese idioma (cq "es", "es-ES") antes de caer
-// al mejor audio a secas. Consistente con el resto de la app (audioLang).
-QString Yt::audioSelector() const
-{
-    if (m_audioLang.isEmpty())
-        return QStringLiteral("bestaudio[protocol=m3u8_native]/bestaudio");
-    return QStringLiteral("bestaudio[language^=%1]/"
-                          "bestaudio[protocol=m3u8_native]/bestaudio")
-        .arg(m_audioLang);
-}
-
-QString Yt::buildHlsMaster(const QString &videoId, const QString &videoUrl,
-                           const QString &audioUrl)
-{
-    const QString dir = HlsServer::masterDirPath();
-    const QString filePath = dir + QLatin1Char('/') + videoId + QLatin1String(".m3u8");
-    const QString bw = QString::number(2500000);
-    const QString resolution = QStringLiteral("1280x720");
-    const QString content =
-        QStringLiteral("#EXTM3U\n")
-        + QStringLiteral("#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"aud\",NAME=\"Audio\","
-                         "DEFAULT=YES,AUTOSELECT=YES,URI=\"%1\"\n")
-              .arg(audioUrl)
-        + QStringLiteral("#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=%1,"
-                         "RESOLUTION=%2,AUDIO=\"aud\"\n")
-              .arg(bw, resolution)
-        + videoUrl + QStringLiteral("\n\n");
-    QFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return QString();
-    file.write(content.toUtf8());
-    file.close();
-    return filePath;
-}
-
-QVector<VideoInfo> Yt::parseVideos(const QJsonObject &root)
-{
-    QVector<VideoInfo> list;
-    const QJsonArray entries = root.value(QStringLiteral("entries")).toArray();
-    if (entries.isEmpty()) {
-        if (root.value(QStringLiteral("_type")).toString() == QLatin1String("playlist"))
-            return list;
-        list.append(videoFromJson(root));
-        return list;
-    }
-    for (const QJsonValue &entry : entries)
-        list.append(videoFromJson(entry.toObject()));
-    return list;
-}
-
-VideoInfo Yt::videoFromJson(const QJsonObject &j)
-{
-    VideoInfo v;
-    v.id = j.value(QStringLiteral("id")).toString();
-    if (v.id.startsWith(QLatin1String("ytsearch")))
-        return v;
-    v.title = j.value(QStringLiteral("title")).toString();
-    if (v.title.isEmpty())
-        v.title = QStringLiteral("Sin título");
-    const QString channel = j.value(QStringLiteral("uploader")).toString();
-    v.channel = channel.isEmpty() ? j.value(QStringLiteral("channel")).toString()
-                                  : channel;
-    const QString channelId = j.value(QStringLiteral("channel_id")).toString();
-    v.channelId = channelId.isEmpty() ? j.value(QStringLiteral("uploader_id")).toString()
-                                      : channelId;
-    v.durationSeconds = boundedSafe(j.value(QStringLiteral("duration")).toInt());
-    v.viewCount = boundedSafe(j.value(QStringLiteral("view_count")).toInt());
-    v.publishedAt = publishedFrom(j);
-    v.thumbnailUrl = pickThumbnail(j.value(QStringLiteral("thumbnails")).toArray());
-    if (v.thumbnailUrl.isEmpty())
-        v.thumbnailUrl = fallbackThumb(v.id);
-    const QJsonValue desc = j.value(QStringLiteral("description"));
-    if (desc.isString())
-        v.description = desc.toString();
-    return v;
-}
-
-int boundedSafe(int value) { return value < 0 ? 0 : value; }
-
-ChannelInfo Yt::channelFromJson(const QString &id, const QJsonObject &j)
-{
-    ChannelInfo c;
-    c.id = id;
-    const QString name = j.value(QStringLiteral("channel")).toString();
-    c.name = name.isEmpty() ? j.value(QStringLiteral("uploader")).toString() : name;
-    if (c.name.isEmpty())
-        c.name = id;
-    const QJsonValue subs = j.value(QStringLiteral("channel_follower_count"));
-    if (subs.isDouble())
-        c.subscriberCount = subs.toVariant().toLongLong();
-    else
-        c.subscriberCount = j.value(QStringLiteral("subscriber_count")).toVariant().toLongLong();
-    c.avatarUrl = pickAvatar(j.value(QStringLiteral("thumbnails")).toArray());
-    c.description = j.value(QStringLiteral("description")).toString();
-    return c;
-}
-
-void Yt::parsePlaylist(const QJsonObject &root, PlaylistInfo *info,
-                       QVector<VideoInfo> *videos)
-{
-    info->title = root.value(QStringLiteral("title")).toString();
-    if (info->title.isEmpty())
-        info->title = QStringLiteral("Playlist");
-    info->channel = root.value(QStringLiteral("channel")).toString();
-    info->videoCount = root.value(QStringLiteral("playlist_count")).toInt();
-    const QString thumb = root.value(QStringLiteral("thumbnail")).toString();
-    if (!thumb.isEmpty())
-        info->thumbnailUrl = thumb;
-    const QJsonArray entries = root.value(QStringLiteral("entries")).toArray();
-    for (const QJsonValue &entry : entries)
-        videos->append(videoFromJson(entry.toObject()));
-}
-
-QString Yt::pickThumbnail(const QJsonArray &thumbs)
-{
-    QString best;
-    int bestScore = -1;
-    for (const QJsonValue &val : thumbs) {
-        if (!val.isObject())
-            continue;
-        const QJsonObject t = val.toObject();
-        const QString url = t.value(QStringLiteral("url")).toString();
-        if (url.isEmpty())
-            continue;
-        const int w = t.value(QStringLiteral("width")).toInt(0);
-        const int h = t.value(QStringLiteral("height")).toInt(0);
-        const int pref = t.value(QStringLiteral("preference")).toInt(0);
-        const int score = qMax(w * h, 1) + pref * 1000;
-        if (score > bestScore) {
-            bestScore = score;
-            best = url;
-        }
-    }
-    return best;
-}
-
-QString Yt::pickAvatar(const QJsonArray &thumbs)
-{
-    QString best;
-    int bestScore = -1;
-    for (const QJsonValue &val : thumbs) {
-        if (!val.isObject())
-            continue;
-        const QJsonObject t = val.toObject();
-        const QString url = t.value(QStringLiteral("url")).toString();
-        if (url.isEmpty())
-            continue;
-        const int w = t.value(QStringLiteral("width")).toInt(0);
-        const int h = t.value(QStringLiteral("height")).toInt(0);
-        if (w == 0 || h == 0)
-            continue;
-        const int ratio = qMax(w, h) * 100 / qMin(w, h);
-        const int sqPenalty = qAbs(ratio - 100);
-        const int score = w * h - sqPenalty * w * h / 4;
-        if (score > bestScore) {
-            bestScore = score;
-            best = url;
-        }
-    }
-    return best;
-}
-
-QString Yt::fallbackThumb(const QString &videoId)
-{
-    if (videoId.isEmpty())
-        return QString();
-    const QStringList keys{
-        QStringLiteral("mqdefault"),
-        QStringLiteral("hqdefault"),
-        QStringLiteral("maxresdefault"),
-    };
-    const int idx = QRandomGenerator::global()->bounded(keys.size());
-    return QStringLiteral("https://i.ytimg.com/vi/%1/%2.jpg")
-        .arg(videoId, keys[idx]);
-}
-
-QString Yt::publishedFrom(const QJsonObject &j)
-{
-    const double ts = j.value(QStringLiteral("timestamp")).toDouble(0.0);
-    if (ts > 0.0)
-        return QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(ts * 1000.0))
-            .toUTC()
-            .toString(Qt::ISODate);
-    const QString d = j.value(QStringLiteral("upload_date")).toString();
-    if (d.size() == 8) {
-        const QDate date = QDate::fromString(d, QStringLiteral("yyyyMMdd"));
-        if (date.isValid())
-            return date.toString(Qt::ISODate);
-    }
-    return QString();
-}
-
-void Yt::execJson(QStringList args, std::function<void(const QJsonObject &)> done)
-{
-    auto *process = new QProcess(this);
-    auto fired = std::make_shared<bool>(false);
-    auto timedOut = std::make_shared<bool>(false);
-    QObject::connect(process,
-                     static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-                         &QProcess::finished),
-                     process, [this, process, done, fired, timedOut]() {
-                         if (*fired)
-                             return;
-                         *fired = true;
-                         if (*timedOut) {
-                             // kill() por timeout: responder igualmente y
-                             // liberar el proceso. Sin esto el llamante nunca
-                             // recibe done() y el objeto QProcess queda vivo.
-                             Q_EMIT error(QStringLiteral(
-                                 "yt-dlp tardó demasiado (timeout)."));
-                             if (done)
-                                 done(QJsonObject());
-                             process->deleteLater();
-                             return;
-                         }
-                         const int code = process->exitCode();
-                         if (code != 0) {
-                             const QString err =
-                                 QString::fromUtf8(process->readAllStandardError()).trimmed();
-                             Q_EMIT error(err.isEmpty()
-                                               ? QStringLiteral("yt-dlp falló (código %1).")
-                                                     .arg(code)
-                                               : err);
-                             if (done)
-                                 done(QJsonObject());
-                             process->deleteLater();
-                             return;
-                         }
-                         const QByteArray out = process->readAllStandardOutput();
-                         QJsonParseError parseErr;
-                         const QJsonDocument doc = QJsonDocument::fromJson(out, &parseErr);
-                         if (parseErr.error != QJsonParseError::NoError) {
-                             Q_EMIT error(QStringLiteral("Respuesta JSON inválida de yt-dlp."));
-                             if (done)
-                                 done(QJsonObject());
-                             process->deleteLater();
-                             return;
-                         }
-                         if (done)
-                             done(doc.object());
-                         process->deleteLater();
-                     });
-    QTimer::singleShot(120000, process, [process, timedOut]() {
-        *timedOut = true;
-        process->kill();
-    });
-    process->setProcessChannelMode(QProcess::SeparateChannels);
-    process->start(ytDlpBinary(), args);
-    if (!process->waitForStarted(3000)) {
-        if (!*fired) {
-            *fired = true;
-            Q_EMIT error(QStringLiteral("No se pudo iniciar yt-dlp."));
-            if (done)
-                done(QJsonObject());
-            process->deleteLater();
-        }
-    }
-}
-
-void Yt::execLines(QStringList args, std::function<void(const QStringList &)> done)
-{
-    auto *process = new QProcess(this);
-    auto fired = std::make_shared<bool>(false);
-    auto timedOut = std::make_shared<bool>(false);
-    QObject::connect(process,
-                     static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-                         &QProcess::finished),
-                     process, [this, process, done, fired, timedOut]() {
-                         if (*fired)
-                             return;
-                         *fired = true;
-                         if (*timedOut) {
-                             Q_EMIT error(QStringLiteral(
-                                 "yt-dlp tardó demasiado (timeout)."));
-                             if (done)
-                                 done(QStringList());
-                             process->deleteLater();
-                             return;
-                         }
-                         QStringList lines;
-                         if (process->exitCode() == 0) {
-                             const QByteArray out = process->readAllStandardOutput();
-                             const auto split = QString::fromUtf8(out).split(QLatin1Char('\n'));
-                             for (const QString &raw : split) {
-                                 const QString line = raw.trimmed();
-                                 if (!line.isEmpty() && line.startsWith(QLatin1String("http")))
-                                     lines.append(line);
-                             }
-                         }
-                         if (done)
-                             done(lines);
-                         process->deleteLater();
-                     });
-    QTimer::singleShot(120000, process, [process, timedOut]() {
-        *timedOut = true;
-        process->kill();
-    });
-    process->setProcessChannelMode(QProcess::SeparateChannels);
-    process->start(ytDlpBinary(), args);
-    if (!process->waitForStarted(3000)) {
-        if (!*fired) {
-            *fired = true;
-            if (done)
-                done(QStringList());
-            process->deleteLater();
-        }
-    }
-}
-
-void Yt::getUrls(const QString &videoId, const QString &selector,
-                 std::function<void(const QStringList &)> done)
-{
-    const QStringList args = {
-        kNoWarnings,
-        QStringLiteral("--no-playlist"),
-        QStringLiteral("--extractor-args"),
-        QStringLiteral("youtube:player_client=visionos"),
-        QStringLiteral("--get-url"),
-        QStringLiteral("-f"),
-        selector,
-        QStringLiteral("https://www.youtube.com/watch?v=%1").arg(videoId),
-    };
-    execLines(args, done);
-}
-
 bool feedsChainSelfTest()
 {
     std::fprintf(stderr, "FEEDS-CHAIN SELFTEST start\n");
@@ -1897,7 +1222,7 @@ bool feedsChainSelfTest()
     int channelVideos = 0;
     int trendVideos = 0;
 
-    // Watchdog global: los fallbacks yt-dlp pueden tardar; no colgar el selftest.
+    // Watchdog global: las peticiones de red pueden tardar; no colgar el selftest.
     QTimer watchdog;
     watchdog.setSingleShot(true);
     QObject::connect(&watchdog, &QTimer::timeout, []() {
@@ -1922,8 +1247,8 @@ bool feedsChainSelfTest()
                                       "(fuente=%s)\n",
                                       videos.size(),
                                       videos.isEmpty()
-                                          ? "yt-dlp vacío/degradado"
-                                          : "innertube (o fallback con datos)");
+                                          ? "vacío"
+                                          : "innertube");
                          maybeExit();
                      });
     QObject::connect(&yt, &Yt::trendingFinished,
@@ -1938,8 +1263,8 @@ bool feedsChainSelfTest()
                                       "(fuente=%s)\n",
                                       videos.size(),
                                       videos.isEmpty()
-                                          ? "yt-dlp vacío/degradado"
-                                          : "innertube (o fallback con datos)");
+                                          ? "vacío"
+                                          : "innertube");
                          maybeExit();
                      });
 
@@ -1954,12 +1279,9 @@ bool feedsChainSelfTest()
     return channelDone && trendDone;
 }
 
-// Selftest de la ruta de BÚSQUEDA yt-dlp de la app (usada por search, el
-// fallback de canales y el de trending): lanza Yt::search con 3 resultados y
-// exige vídeos con id real. Detecta el fallo "yt-dlp no inicia" (binario mal
-// nombrado o no encontrado): en ese caso execJson llama done({}) y
-// parseVideos({}) devuelve 1 vídeo falso con id='' ("Sin título") → aquí
-// falla con idVacios>0.
+// Selftest de la BÚSQUEDA por Innertube (usada por search): lanza Yt::search
+// con 3 resultados y exige vídeos con id real y sin duplicados. Falla si el
+// endpoint /search no responde o devuelve renderers sin id.
 bool searchSelfTest()
 {
     std::fprintf(stderr, "SEARCH SELFTEST start\n");

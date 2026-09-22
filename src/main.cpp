@@ -215,6 +215,12 @@ int main(int argc, char *argv[])
         return ok ? 0 : 1;
     }
 
+    if (args.contains(QLatin1String("--selftest-browse"))) {
+        const bool ok = innertubeBrowseSelfTest();
+        std::fprintf(stderr, "SELFTEST browse -> %s\n", ok ? "OK" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
     if (args.contains(QLatin1String("--selftest-tls"))) {
         QString detail;
         const bool ok = tlsHandshakeSelfTest(&detail);

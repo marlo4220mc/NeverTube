@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QHostAddress>
 #include <QHostInfo>
@@ -37,6 +38,8 @@ const char kNextEndpoint[] =
     "/youtubei/v1/next?prettyPrint=false";
 const char kBrowseEndpoint[] =
     "/youtubei/v1/browse?prettyPrint=false";
+const char kSearchEndpoint[] =
+    "/youtubei/v1/search?prettyPrint=false";
 
 // UA del fork de youtube_explode_dart usado para /sw.js_data.
 const char kChromeUA[] =
@@ -109,6 +112,12 @@ const PlayerClient kPlayerClients[] = {
 constexpr int kPlayerClientCount =
     static_cast<int>(sizeof(kPlayerClients) / sizeof(kPlayerClients[0]));
 
+// Cliente WEB (solo browse de pestañas Shorts/Directos del canal): VISIONOS no
+// expone esas pestañas (devuelve la Home) y WEB sí, aunque con el layout
+// moderno (*ViewModel). No requiere X-Goog-Api-Key (verificado).
+constexpr int kWebClientId = 1;
+const char kWebClientVersion[] = "2.20240726.00.00";
+
 const char kFieldMask[] =
     "playabilityStatus.status,playabilityStatus.reason,"
     "streamingData.hlsManifestUrl,streamingData.adaptiveFormats,"
@@ -162,6 +171,20 @@ QJsonObject clientContext(const PlayerClient &pc, const QString &visitorData,
     if (pc.androidSdkVersion > 0)
         client.insert(QStringLiteral("androidSdkVersion"), pc.androidSdkVersion);
     return client;
+}
+
+// Contexto del cliente WEB (browse de pestañas shorts/live). Solo nombre,
+// versión, idioma y visitorData: WEB no necesita device/os ni API key.
+QJsonObject webClientContext(const QString &visitorData, const QString &hl)
+{
+    return QJsonObject{
+        {QStringLiteral("clientName"), QStringLiteral("WEB")},
+        {QStringLiteral("clientVersion"), QString::fromLatin1(kWebClientVersion)},
+        {QStringLiteral("hl"), hl},
+        {QStringLiteral("gl"), QStringLiteral("US")},
+        {QStringLiteral("visitorData"), visitorData},
+        {QStringLiteral("userAgent"), QString::fromLatin1(kChromeUA)},
+    };
 }
 
 QString visitorDataFromSwJsData(const QByteArray &body)
@@ -826,6 +849,26 @@ void Innertube::dispatchPending()
         m_trendPending = false;
         requestTrending();
     }
+    if (m_searchPending) {
+        m_searchPending = false;
+        requestSearch(false);
+    }
+    if (m_chInfoPending) {
+        m_chInfoPending = false;
+        requestChannelInfo();
+    }
+    if (m_chTabPending) {
+        m_chTabPending = false;
+        requestChannelTab(false);
+    }
+    if (m_detailPending) {
+        m_detailPending = false;
+        requestVideoDetail();
+    }
+    if (m_plPending) {
+        m_plPending = false;
+        requestPlaylist();
+    }
 }
 
 bool Innertube::retryBrowseWithFreshVisitor(bool *retried, bool *pending)
@@ -1328,6 +1371,16 @@ const char kTrendingBrowseId[] = "FEtrending";
 // y limita a 8). Suficiente para llenar la sección sin pedir más canales.
 constexpr int kChannelTake = 12;
 constexpr int kTrendingTake = 12;
+// Params de las pestañas Shorts y Directos (browse del canal). VISIONOS los
+// ignora y devuelve la Home; el cliente WEB sí las sirve.
+const char kChannelShortsParams[] = "EgZzaG9ydHPyBgUKA5oBAA==";
+const char kChannelLiveParams[] = "EgdzdHJlYW1z8gYECgJ6AA==";
+// Pestaña "Información" del canal (browse): descripción, país, url canónica.
+const char kChannelAboutParams[] = "EgVhYm91dPIGBAoCEgA=";
+// Tamaño de página de las pestañas de canal y de la búsqueda: la UI muestra
+// "Mostrar más" cuando la página llega a este tamaño.
+constexpr int kChannelTabTake = 25;
+constexpr int kSearchTake = 20;
 
 void Innertube::fetchHome()
 {
@@ -1613,6 +1666,489 @@ void Innertube::handleTrending(bool ok, const QString &error,
     emit trendingReady(videos);
 }
 
+// ---------------------------------------------------------------------------
+// Búsqueda y peticiones de browse de la UI (canal, pestañas, detalle,
+// playlist). Mismo patrón que el Home: single-flight, visitorData y un
+// reintento con visitorData fresco si el browse responde vacío/error.
+
+void Innertube::fetchSearch(const QString &query, int limit)
+{
+    Q_UNUSED(limit);
+    const QString q = query.trimmed();
+    if (q.isEmpty()) {
+        emit searchReady(query, QVector<VideoInfo>(), false);
+        return;
+    }
+    if (m_searchInFlight && m_searchQuery == q) {
+        NT_DEBUG("E2E innertube search single-flight q=%s\n",
+                 q.toUtf8().constData());
+        return;
+    }
+    m_searchInFlight = true;
+    m_searchQuery = q;
+    m_searchContinuation.clear();
+    m_searchVisitorRetried = false;
+    NT_DEBUG("E2E innertube fetchSearch q=%s\n", q.toUtf8().constData());
+    if (m_visitorData.isEmpty()
+        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+        m_searchPending = true;
+        fetchVisitorData();
+        return;
+    }
+    requestSearch(false);
+}
+
+void Innertube::fetchSearchMore(int limit)
+{
+    Q_UNUSED(limit);
+    if (m_searchContinuation.isEmpty() || m_searchInFlight) {
+        NT_DEBUG("E2E innertube search more ignorada\n");
+        return;
+    }
+    m_searchInFlight = true;
+    requestSearch(true);
+}
+
+void Innertube::requestSearch(bool more)
+{
+    const QString query = m_searchQuery;
+    m_http->setResult([this, query, more](int status, const QByteArray &body) {
+        NT_DEBUG("E2E innertube search HTTP status=%d size=%d\n", status,
+                 body.size());
+        handleSearch(status == 200, QString(), body, more);
+    });
+    m_http->setError([this, more](const QString &reason) {
+        handleSearch(false, reason, QByteArray(), more);
+    });
+    m_http->setTimeoutMs(kPlayerTimeoutMs);
+    m_http->setVisitorId(m_visitorData);
+
+    const PlayerClient &pc = kPlayerClients[0]; // VISIONOS
+    const QJsonObject client = clientContext(pc, m_visitorData, m_hl);
+    const QJsonObject context{{QStringLiteral("client"), client}};
+    QJsonObject body;
+    if (more) {
+        body = {{QStringLiteral("context"), context},
+                {QStringLiteral("continuation"), m_searchContinuation}};
+    } else {
+        body = {{QStringLiteral("context"), context},
+                {QStringLiteral("query"), query}};
+    }
+    const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    m_http->post(kSearchEndpoint, json, pc.ua, pc.clientId, pc.version,
+                 nullptr, nullptr, nullptr);
+}
+
+void Innertube::handleSearch(bool ok, const QString &error,
+                             const QByteArray &body, bool more)
+{
+    m_searchInFlight = false;
+    const QString query = m_searchQuery;
+    if (!ok) {
+        NT_DEBUG("E2E innertube search HTTP err: %s\n",
+                 error.toUtf8().constData());
+        if (!more
+            && retryBrowseWithFreshVisitor(&m_searchVisitorRetried,
+                                           &m_searchPending))
+            return;
+        emit searchReady(query, QVector<VideoInfo>(), false);
+        return;
+    }
+    QJsonParseError err;
+    QByteArray json = body.trimmed();
+    if (json.startsWith(")]}'"))
+        json.remove(0, 4);
+    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        NT_DEBUG("E2E innertube search json fail size=%d\n", body.size());
+        if (!more
+            && retryBrowseWithFreshVisitor(&m_searchVisitorRetried,
+                                           &m_searchPending))
+            return;
+        emit searchReady(query, QVector<VideoInfo>(), false);
+        return;
+    }
+    QString continuation;
+    const QVector<VideoInfo> videos =
+        parseSearchBrowse(doc.object(), kSearchTake, &continuation);
+    m_searchContinuation = continuation;
+    if (!more && videos.isEmpty()
+        && retryBrowseWithFreshVisitor(&m_searchVisitorRetried,
+                                       &m_searchPending))
+        return;
+    NT_DEBUG("E2E innertube search ok q=%s videos=%d more=%d\n",
+             query.toUtf8().constData(), videos.size(),
+             continuation.isEmpty() ? 0 : 1);
+    emit searchReady(query, videos, !continuation.isEmpty());
+}
+
+void Innertube::fetchChannelInfo(const QString &channelId)
+{
+    if (m_chInfoInFlight && m_chInfoId == channelId) {
+        NT_DEBUG("E2E innertube channelInfo single-flight\n");
+        return;
+    }
+    m_chInfoInFlight = true;
+    m_chInfoId = channelId;
+    m_chInfoVisitorRetried = false;
+    NT_DEBUG("E2E innertube fetchChannelInfo id=%s\n",
+             channelId.toUtf8().constData());
+    if (m_visitorData.isEmpty()
+        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+        m_chInfoPending = true;
+        fetchVisitorData();
+        return;
+    }
+    requestChannelInfo();
+}
+
+void Innertube::requestChannelInfo()
+{
+    const QString channelId = m_chInfoId;
+    m_http->setResult([this, channelId](int status, const QByteArray &body) {
+        NT_DEBUG("E2E innertube channelInfo HTTP status=%d size=%d id=%s\n",
+                 status, body.size(), channelId.toUtf8().constData());
+        handleChannelInfo(status == 200, QString(), body);
+    });
+    m_http->setError([this](const QString &reason) {
+        handleChannelInfo(false, reason, QByteArray());
+    });
+    m_http->setTimeoutMs(kPlayerTimeoutMs);
+    m_http->setVisitorId(m_visitorData);
+
+    const PlayerClient &pc = kPlayerClients[0]; // VISIONOS
+    const QJsonObject client = clientContext(pc, m_visitorData, m_hl);
+    const QJsonObject body{
+        {QStringLiteral("context"), QJsonObject{{QStringLiteral("client"), client}}},
+        {QStringLiteral("browseId"), channelId},
+        {QStringLiteral("params"), QString::fromLatin1(kChannelAboutParams)},
+    };
+    const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    m_http->post(kBrowseEndpoint, json, pc.ua, pc.clientId, pc.version,
+                 nullptr, nullptr, nullptr);
+}
+
+void Innertube::handleChannelInfo(bool ok, const QString &error,
+                                  const QByteArray &body)
+{
+    m_chInfoInFlight = false;
+    const QString channelId = m_chInfoId;
+    ChannelInfo info;
+    info.id = channelId;
+    if (ok) {
+        QJsonParseError err;
+        QByteArray json = body.trimmed();
+        if (json.startsWith(")]}'"))
+            json.remove(0, 4);
+        const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+        if (err.error == QJsonParseError::NoError && doc.isObject())
+            parseChannelInfo(doc.object(), &info);
+        else
+            NT_DEBUG("E2E innertube channelInfo json fail size=%d\n", body.size());
+    } else {
+        NT_DEBUG("E2E innertube channelInfo HTTP err: %s\n",
+                 error.toUtf8().constData());
+    }
+    if (info.name.isEmpty()
+        && retryBrowseWithFreshVisitor(&m_chInfoVisitorRetried, &m_chInfoPending))
+        return;
+    NT_DEBUG("E2E innertube channelInfo ok name=%s subs=%lld\n",
+             info.name.toUtf8().constData(),
+             static_cast<long long>(info.subscriberCount));
+    emit channelInfoReady(info);
+}
+
+void Innertube::fetchChannelTab(const QString &channelId, const QString &tab,
+                                int limit)
+{
+    Q_UNUSED(limit);
+    if (m_chTabInFlight && m_chTabId == channelId && m_chTabName == tab) {
+        NT_DEBUG("E2E innertube channelTab single-flight\n");
+        return;
+    }
+    m_chTabInFlight = true;
+    m_chTabMoreInFlight = false;
+    m_chTabId = channelId;
+    m_chTabName = tab;
+    m_chTabContinuation.clear();
+    m_chTabVisitorRetried = false;
+    NT_DEBUG("E2E innertube fetchChannelTab id=%s tab=%s\n",
+             channelId.toUtf8().constData(), tab.toUtf8().constData());
+    if (m_visitorData.isEmpty()
+        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+        m_chTabPending = true;
+        fetchVisitorData();
+        return;
+    }
+    requestChannelTab(false);
+}
+
+void Innertube::fetchChannelTabMore(int limit)
+{
+    Q_UNUSED(limit);
+    if (m_chTabContinuation.isEmpty() || m_chTabInFlight || m_chTabMoreInFlight) {
+        NT_DEBUG("E2E innertube channelTab more ignorada\n");
+        return;
+    }
+    m_chTabMoreInFlight = true;
+    requestChannelTab(true);
+}
+
+void Innertube::requestChannelTab(bool more)
+{
+    const QString channelId = m_chTabId;
+    const QString tab = m_chTabName;
+    m_http->setResult([this, channelId, tab, more](int status,
+                                                   const QByteArray &body) {
+        NT_DEBUG("E2E innertube channelTab HTTP status=%d size=%d tab=%s\n",
+                 status, body.size(), tab.toUtf8().constData());
+        handleChannelTab(status == 200, QString(), body, more);
+    });
+    m_http->setError([this, more](const QString &reason) {
+        handleChannelTab(false, reason, QByteArray(), more);
+    });
+    m_http->setTimeoutMs(kPlayerTimeoutMs);
+    m_http->setVisitorId(m_visitorData);
+
+    if (tab == QLatin1String("videos")) {
+        // VISIONOS: pestaña Vídeos clásica (compactVideoRenderer).
+        const PlayerClient &pc = kPlayerClients[0];
+        const QJsonObject client = clientContext(pc, m_visitorData, m_hl);
+        QJsonObject body{
+            {QStringLiteral("context"),
+             QJsonObject{{QStringLiteral("client"), client}}}};
+        if (more) {
+            body.insert(QStringLiteral("continuation"), m_chTabContinuation);
+        } else {
+            body.insert(QStringLiteral("browseId"), channelId);
+            body.insert(QStringLiteral("params"),
+                        QString::fromLatin1(kChannelVideosParams));
+        }
+        const QByteArray json =
+            QJsonDocument(body).toJson(QJsonDocument::Compact);
+        m_http->post(kBrowseEndpoint, json, pc.ua, pc.clientId, pc.version,
+                     nullptr, nullptr, nullptr);
+        return;
+    }
+    // Shorts/Directos: cliente WEB (layout moderno). VISIONOS no expone estas
+    // pestañas y devolvía la Home.
+    const QJsonObject client = webClientContext(m_visitorData, m_hl);
+    QJsonObject body{
+        {QStringLiteral("context"),
+         QJsonObject{{QStringLiteral("client"), client}}}};
+    if (more) {
+        body.insert(QStringLiteral("continuation"), m_chTabContinuation);
+    } else {
+        body.insert(QStringLiteral("browseId"), channelId);
+        body.insert(QStringLiteral("params"),
+                    QString::fromLatin1(tab == QLatin1String("shorts")
+                                            ? kChannelShortsParams
+                                            : kChannelLiveParams));
+    }
+    const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    m_http->post(kBrowseEndpoint, json, kChromeUA, kWebClientId,
+                 kWebClientVersion, nullptr, nullptr, nullptr);
+}
+
+void Innertube::handleChannelTab(bool ok, const QString &error,
+                                 const QByteArray &body, bool more)
+{
+    if (more)
+        m_chTabMoreInFlight = false;
+    else
+        m_chTabInFlight = false;
+    const QString channelId = m_chTabId;
+    const QString tab = m_chTabName;
+    QVector<VideoInfo> videos;
+    QString continuation;
+    if (!ok) {
+        NT_DEBUG("E2E innertube channelTab HTTP err: %s\n",
+                 error.toUtf8().constData());
+    } else {
+        QJsonParseError err;
+        QByteArray json = body.trimmed();
+        if (json.startsWith(")]}'"))
+            json.remove(0, 4);
+        const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+        if (err.error == QJsonParseError::NoError && doc.isObject()) {
+            // VISIONOS (videos) usa compactVideoRenderer; WEB (shorts/live)
+            // usa lockups modernos. Se prueban ambos: el que no aplica da vacío.
+            videos = collectVideoRenderers(doc.object(), kChannelTabTake);
+            if (videos.isEmpty())
+                videos = collectWebLockups(doc.object(), kChannelTabTake);
+            continuation = firstContinuationToken(doc.object());
+        } else {
+            NT_DEBUG("E2E innertube channelTab json fail size=%d\n", body.size());
+        }
+    }
+    if (!more) {
+        m_chTabContinuation = continuation;
+        if (videos.isEmpty()
+            && retryBrowseWithFreshVisitor(&m_chTabVisitorRetried,
+                                           &m_chTabPending))
+            return;
+    } else {
+        m_chTabContinuation = continuation;
+    }
+    NT_DEBUG("E2E innertube channelTab ok tab=%s videos=%d more=%d\n",
+             tab.toUtf8().constData(), videos.size(),
+             continuation.isEmpty() ? 0 : 1);
+    emit channelTabReady(channelId, tab, videos, !continuation.isEmpty());
+}
+
+void Innertube::fetchVideoDetail(const QString &videoId)
+{
+    if (m_detailInFlight && m_detailId == videoId) {
+        NT_DEBUG("E2E innertube videoDetail single-flight\n");
+        return;
+    }
+    m_detailInFlight = true;
+    m_detailId = videoId;
+    m_detailVisitorRetried = false;
+    NT_DEBUG("E2E innertube fetchVideoDetail id=%s\n",
+             videoId.toUtf8().constData());
+    if (m_visitorData.isEmpty()
+        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+        m_detailPending = true;
+        fetchVisitorData();
+        return;
+    }
+    requestVideoDetail();
+}
+
+void Innertube::requestVideoDetail()
+{
+    const QString videoId = m_detailId;
+    m_http->setResult([this, videoId](int status, const QByteArray &body) {
+        NT_DEBUG("E2E innertube videoDetail HTTP status=%d size=%d\n", status,
+                 body.size());
+        handleVideoDetail(status == 200, QString(), body);
+    });
+    m_http->setError([this](const QString &reason) {
+        handleVideoDetail(false, reason, QByteArray());
+    });
+    m_http->setTimeoutMs(kPlayerTimeoutMs);
+    m_http->setVisitorId(m_visitorData);
+
+    const PlayerClient &pc = kPlayerClients[0]; // VISIONOS
+    const QJsonObject client = clientContext(pc, m_visitorData, m_hl);
+    const QJsonObject body{
+        {QStringLiteral("context"), QJsonObject{{QStringLiteral("client"), client}}},
+        {QStringLiteral("videoId"), videoId},
+        {QStringLiteral("racyCheckOk"), true},
+        {QStringLiteral("contentCheckOk"), true},
+    };
+    const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    m_http->post(kNextEndpoint, json, pc.ua, pc.clientId, pc.version,
+                 nullptr, nullptr, nullptr);
+}
+
+void Innertube::handleVideoDetail(bool ok, const QString &error,
+                                  const QByteArray &body)
+{
+    m_detailInFlight = false;
+    const QString videoId = m_detailId;
+    VideoInfo video;
+    QString description;
+    qint64 likeCount = 0;
+    if (!ok) {
+        NT_DEBUG("E2E innertube videoDetail HTTP err: %s\n",
+                 error.toUtf8().constData());
+    } else {
+        QJsonParseError err;
+        QByteArray json = body.trimmed();
+        if (json.startsWith(")]}'"))
+            json.remove(0, 4);
+        const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+        if (err.error == QJsonParseError::NoError && doc.isObject())
+            parseVideoDetail(doc.object(), &video, &description, &likeCount);
+        else
+            NT_DEBUG("E2E innertube videoDetail json fail size=%d\n", body.size());
+    }
+    if (video.id.isEmpty())
+        video.id = videoId;
+    NT_DEBUG("E2E innertube videoDetail ok id=%s title=%d desc=%d likes=%lld\n",
+             videoId.toUtf8().constData(), video.title.size(), description.size(),
+             static_cast<long long>(likeCount));
+    emit videoDetailReady(video, description, likeCount);
+}
+
+void Innertube::fetchPlaylist(const QString &playlistId, int limit)
+{
+    Q_UNUSED(limit);
+    if (m_plInFlight && m_plId == playlistId) {
+        NT_DEBUG("E2E innertube playlist single-flight\n");
+        return;
+    }
+    m_plInFlight = true;
+    m_plId = playlistId;
+    m_plVisitorRetried = false;
+    NT_DEBUG("E2E innertube fetchPlaylist id=%s\n",
+             playlistId.toUtf8().constData());
+    if (m_visitorData.isEmpty()
+        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+        m_plPending = true;
+        fetchVisitorData();
+        return;
+    }
+    requestPlaylist();
+}
+
+void Innertube::requestPlaylist()
+{
+    const QString playlistId = m_plId;
+    m_http->setResult([this, playlistId](int status, const QByteArray &body) {
+        NT_DEBUG("E2E innertube playlist HTTP status=%d size=%d id=%s\n",
+                 status, body.size(), playlistId.toUtf8().constData());
+        handlePlaylist(status == 200, QString(), body);
+    });
+    m_http->setError([this](const QString &reason) {
+        handlePlaylist(false, reason, QByteArray());
+    });
+    m_http->setTimeoutMs(kPlayerTimeoutMs);
+    m_http->setVisitorId(m_visitorData);
+
+    const PlayerClient &pc = kPlayerClients[0]; // VISIONOS
+    const QJsonObject client = clientContext(pc, m_visitorData, m_hl);
+    const QJsonObject body{
+        {QStringLiteral("context"), QJsonObject{{QStringLiteral("client"), client}}},
+        {QStringLiteral("browseId"), QStringLiteral("VL") + playlistId},
+    };
+    const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    m_http->post(kBrowseEndpoint, json, pc.ua, pc.clientId, pc.version,
+                 nullptr, nullptr, nullptr);
+}
+
+void Innertube::handlePlaylist(bool ok, const QString &error,
+                               const QByteArray &body)
+{
+    m_plInFlight = false;
+    const QString playlistId = m_plId;
+    PlaylistInfo info;
+    info.id = playlistId;
+    QVector<VideoInfo> videos;
+    if (!ok) {
+        NT_DEBUG("E2E innertube playlist HTTP err: %s\n",
+                 error.toUtf8().constData());
+    } else {
+        QJsonParseError err;
+        QByteArray json = body.trimmed();
+        if (json.startsWith(")]}'"))
+            json.remove(0, 4);
+        const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+        if (err.error == QJsonParseError::NoError && doc.isObject())
+            parsePlaylistBrowse(doc.object(), &info, &videos);
+        else
+            NT_DEBUG("E2E innertube playlist json fail size=%d\n", body.size());
+    }
+    if (info.title.isEmpty() && videos.isEmpty()
+        && retryBrowseWithFreshVisitor(&m_plVisitorRetried, &m_plPending))
+        return;
+    NT_DEBUG("E2E innertube playlist ok title=%s videos=%d\n",
+             info.title.toUtf8().constData(), videos.size());
+    emit playlistReady(info, videos);
+}
+
 namespace {
 
 // Texto de un nodo (simpleText o runs).
@@ -1718,6 +2254,76 @@ QString relativeToIso(const QString &text)
         .toString(Qt::ISODate);
 }
 
+// Cuenta numérica de un texto localizado ("16,9 M de suscriptores",
+// "47 M de visualizaciones", "1.234 suscriptores"). En "es" la coma es
+// decimal y el punto millar; el sufijo M/K/B multiplica.
+long long countFromText(const QString &raw)
+{
+    const QString t = raw.simplified();
+    if (t.isEmpty())
+        return 0;
+    const QString low = t.toLower();
+    double mult = 1.0;
+    if (low.contains(QStringLiteral("mil millones"))
+        || low.contains(QStringLiteral("billion")))
+        mult = 1e9;
+    else if (low.contains(QStringLiteral("millon")) || low.contains(QLatin1Char('m')))
+        mult = 1e6;
+    else if (low.contains(QStringLiteral("mil")) || low.contains(QLatin1Char('k')))
+        mult = 1e3;
+    else if (low.contains(QLatin1Char('b')))
+        mult = 1e9;
+    QString num;
+    for (const QChar c : t) {
+        if (c.isDigit() || c == QLatin1Char(',') || c == QLatin1Char('.'))
+            num += c;
+        else
+            break;
+    }
+    if (num.isEmpty())
+        return 0;
+    const int lastSep = qMax(num.lastIndexOf(QLatin1Char(',')),
+                             num.lastIndexOf(QLatin1Char('.')));
+    if (lastSep >= 0) {
+        const int after = num.size() - lastSep - 1;
+        if (mult > 1.0 || after <= 2) {
+            // Multiplicador o separador decimal: coma decimal, punto de millar.
+            num.remove(QLatin1Char('.'));
+            num.replace(QLatin1Char(','), QLatin1Char('.'));
+        } else {
+            // Sin multiplicador y 3 dígitos tras el separador: millar.
+            num.remove(QLatin1Char(','));
+            num.remove(QLatin1Char('.'));
+        }
+    }
+    bool ok = false;
+    const double v = num.toDouble(&ok);
+    return ok ? qRound64(v * mult) : 0;
+}
+
+// Primer valor con esa clave en el árbol (Undefined si no aparece).
+QJsonValue findFirstValue(const QJsonValue &root, const QString &key)
+{
+    if (root.isObject()) {
+        const QJsonObject o = root.toObject();
+        if (o.contains(key))
+            return o.value(key);
+        for (auto it = o.begin(); it != o.end(); ++it) {
+            const QJsonValue r = findFirstValue(it.value(), key);
+            if (!r.isUndefined())
+                return r;
+        }
+    } else if (root.isArray()) {
+        const QJsonArray arr = root.toArray();
+        for (const QJsonValue &e : arr) {
+            const QJsonValue r = findFirstValue(e, key);
+            if (!r.isUndefined())
+                return r;
+        }
+    }
+    return QJsonValue(QJsonValue::Undefined);
+}
+
 } // namespace
 
 // compactVideoRenderer / videoRenderer → VideoInfo.
@@ -1753,20 +2359,6 @@ VideoInfo Innertube::videoFromHomeRenderer(const QJsonObject &item) const
     const QJsonArray thumbs = r->value(QStringLiteral("thumbnail"))
                                   .toObject().value(QStringLiteral("thumbnails"))
                                   .toArray();
-    // TEMPORAL: logging de variantes de thumbnail
-    if (!thumbs.isEmpty() && !v.id.isEmpty()) {
-        fprintf(stderr, "THUMB_VARIANTS id=%s count=%d\n", 
-                v.id.toUtf8().constData(), thumbs.size());
-        for (int i = 0; i < thumbs.size(); ++i) {
-            const QJsonObject th = thumbs[i].toObject();
-            const int w = th.value(QStringLiteral("width")).toInt();
-            const int h = th.value(QStringLiteral("height")).toInt();
-            const QString url = th.value(QStringLiteral("url")).toString();
-            const double aspect = h > 0 ? double(w) / double(h) : 0;
-            fprintf(stderr, "  [%d] %dx%d aspect=%.3f url=%s\n", 
-                    i, w, h, aspect, url.right(40).toUtf8().constData());
-        }
-    }
     if (!thumbs.isEmpty())
         v.thumbnailUrl = thumbs.last().toObject()
                              .value(QStringLiteral("url")).toString();
@@ -1944,6 +2536,330 @@ QVector<VideoInfo> Innertube::parseHomeBrowse(const QJsonObject &root,
             unique.append(v);
     }
     return unique;
+}
+
+// ---------------------------------------------------------------------------
+// Renderers modernos del cliente WEB (pestañas Shorts/Directos del canal, que
+// VISIONOS no expone): shortsLockupViewModel y lockupViewModel.
+
+namespace {
+
+QString webLockupThumb(const QJsonObject &contentImage)
+{
+    const QJsonArray sources = contentImage
+                                   .value(QStringLiteral("thumbnailViewModel"))
+                                   .toObject().value(QStringLiteral("image"))
+                                   .toObject().value(QStringLiteral("sources"))
+                                   .toArray();
+    return sources.isEmpty()
+        ? QString()
+        : sources.last().toObject().value(QStringLiteral("url")).toString();
+}
+
+int webLockupDuration(const QJsonObject &contentImage)
+{
+    const QJsonArray overlays = contentImage
+                                    .value(QStringLiteral("thumbnailViewModel"))
+                                    .toObject().value(QStringLiteral("overlays"))
+                                    .toArray();
+    for (const QJsonValue &ov : overlays) {
+        const QJsonArray badges = ov.toObject()
+            .value(QStringLiteral("thumbnailBottomOverlayViewModel")).toObject()
+            .value(QStringLiteral("badges")).toArray();
+        for (const QJsonValue &b : badges) {
+            const QString txt = b.toObject()
+                .value(QStringLiteral("thumbnailBadgeViewModel")).toObject()
+                .value(QStringLiteral("text")).toString();
+            const QStringList parts = txt.split(QLatin1Char(':'));
+            if (parts.size() == 2)
+                return parts.at(0).toInt() * 60 + parts.at(1).toInt();
+            if (parts.size() == 3)
+                return parts.at(0).toInt() * 3600 + parts.at(1).toInt() * 60
+                       + parts.at(2).toInt();
+        }
+    }
+    return 0;
+}
+
+QString webFallbackThumb(const QString &id)
+{
+    return id.size() == 11
+        ? QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg").arg(id)
+        : QString();
+}
+
+// shortsLockupViewModel: id en entityId="shorts-shelf-item-<id>", título y
+// vistas en overlayMetadata, miniatura vertical en thumbnailViewModel.
+VideoInfo videoFromWebShorts(const QJsonObject &sl)
+{
+    VideoInfo v;
+    v.id = sl.value(QStringLiteral("entityId")).toString();
+    const QString prefix = QStringLiteral("shorts-shelf-item-");
+    if (v.id.startsWith(prefix))
+        v.id.remove(0, prefix.size());
+    const QJsonObject ov = sl.value(QStringLiteral("overlayMetadata")).toObject();
+    v.title = ov.value(QStringLiteral("primaryText")).toObject()
+                  .value(QStringLiteral("content")).toString();
+    v.viewCount = countFromText(ov.value(QStringLiteral("secondaryText")).toObject()
+                                    .value(QStringLiteral("content")).toString());
+    const QJsonArray sources = sl.value(QStringLiteral("thumbnailViewModel"))
+                                   .toObject().value(QStringLiteral("image"))
+                                   .toObject().value(QStringLiteral("sources"))
+                                   .toArray();
+    if (!sources.isEmpty())
+        v.thumbnailUrl = sources.last().toObject()
+                             .value(QStringLiteral("url")).toString();
+    if (v.thumbnailUrl.isEmpty())
+        v.thumbnailUrl = webFallbackThumb(v.id);
+    return v;
+}
+
+// lockupViewModel: id=contentId, título en lockupMetadataViewModel, vistas y
+// fecha en metadataRows, miniatura+duración en contentImage.
+VideoInfo videoFromWebLockup(const QJsonObject &lv)
+{
+    VideoInfo v;
+    v.id = lv.value(QStringLiteral("contentId")).toString();
+    const QJsonObject md = lv.value(QStringLiteral("metadata")).toObject()
+                               .value(QStringLiteral("lockupMetadataViewModel"))
+                               .toObject();
+    v.title = md.value(QStringLiteral("title")).toObject()
+                  .value(QStringLiteral("content")).toString();
+    const QJsonArray rows = md.value(QStringLiteral("metadata")).toObject()
+                                .value(QStringLiteral("contentMetadataViewModel"))
+                                .toObject()
+                                .value(QStringLiteral("metadataRows")).toArray();
+    for (const QJsonValue &r : rows) {
+        const QJsonArray parts = r.toObject()
+                                     .value(QStringLiteral("metadataParts")).toArray();
+        for (const QJsonValue &p : parts) {
+            const QString t = p.toObject().value(QStringLiteral("text")).toObject()
+                                  .value(QStringLiteral("content")).toString();
+            if (t.contains(QStringLiteral("visualizacion"))
+                || t.contains(QStringLiteral("view")))
+                v.viewCount = countFromText(t);
+            else if (t.contains(QStringLiteral("hace"))
+                     || t.contains(QStringLiteral("ago")))
+                v.publishedAt = relativeToIso(t);
+        }
+    }
+    const QJsonObject contentImage = lv.value(QStringLiteral("contentImage")).toObject();
+    v.thumbnailUrl = webLockupThumb(contentImage);
+    v.durationSeconds = webLockupDuration(contentImage);
+    if (v.thumbnailUrl.isEmpty())
+        v.thumbnailUrl = webFallbackThumb(v.id);
+    return v;
+}
+
+} // namespace
+
+// Primer token de continuación del árbol, sea cual sea el layout
+// (continuationCommand / nextContinuationData / reloadContinuationData).
+QString Innertube::firstContinuationToken(const QJsonObject &root)
+{
+    QString token;
+    std::function<void(const QJsonValue &)> walk = [&](const QJsonValue &val) {
+        if (!token.isEmpty())
+            return;
+        if (val.isArray()) {
+            for (const QJsonValue &e : val.toArray())
+                walk(e);
+            return;
+        }
+        if (!val.isObject())
+            return;
+        const QJsonObject o = val.toObject();
+        if (o.contains(QStringLiteral("continuationCommand")))
+            token = o.value(QStringLiteral("continuationCommand")).toObject()
+                        .value(QStringLiteral("token")).toString();
+        if (token.isEmpty() && o.contains(QStringLiteral("nextContinuationData")))
+            token = o.value(QStringLiteral("nextContinuationData")).toObject()
+                        .value(QStringLiteral("continuation")).toString();
+        if (token.isEmpty() && o.contains(QStringLiteral("reloadContinuationData")))
+            token = o.value(QStringLiteral("reloadContinuationData")).toObject()
+                        .value(QStringLiteral("continuation")).toString();
+        if (!token.isEmpty())
+            return;
+        for (auto it = o.begin(); it != o.end(); ++it)
+            walk(it.value());
+    };
+    walk(QJsonValue(root));
+    return token;
+}
+
+// Página de /search: compactVideoRenderer del sectionListRenderer.
+QVector<VideoInfo> Innertube::parseSearchBrowse(const QJsonObject &root,
+                                                int maxCount,
+                                                QString *continuation) const
+{
+    if (continuation)
+        *continuation = firstContinuationToken(root);
+    return collectVideoRenderers(root, maxCount);
+}
+
+// Recorre el árbol recolectando los lockups modernos del cliente WEB sin
+// duplicar ids (pestañas Shorts/Directos del canal).
+QVector<VideoInfo> Innertube::collectWebLockups(const QJsonObject &root,
+                                                int maxCount) const
+{
+    QVector<VideoInfo> out;
+    std::function<void(const QJsonValue &)> collect = [&](const QJsonValue &val) {
+        if (out.size() >= maxCount)
+            return;
+        if (val.isArray()) {
+            for (const QJsonValue &e : val.toArray())
+                collect(e);
+            return;
+        }
+        if (!val.isObject())
+            return;
+        const QJsonObject o = val.toObject();
+        VideoInfo v;
+        if (o.contains(QStringLiteral("shortsLockupViewModel")))
+            v = videoFromWebShorts(
+                o.value(QStringLiteral("shortsLockupViewModel")).toObject());
+        else if (o.contains(QStringLiteral("lockupViewModel")))
+            v = videoFromWebLockup(
+                o.value(QStringLiteral("lockupViewModel")).toObject());
+        if (!v.id.isEmpty()) {
+            bool seen = false;
+            for (const VideoInfo &d : std::as_const(out))
+                if (d.id == v.id) { seen = true; break; }
+            if (!seen)
+                out.append(v);
+            return;
+        }
+        for (auto it = o.begin(); it != o.end(); ++it)
+            collect(it.value());
+    };
+    collect(QJsonValue(root));
+    return out;
+}
+
+// Ficha de canal del browse "Información": c4TabbedHeaderRenderer (título,
+// avatar, suscriptores) + channelAboutMetadataRenderer (descripción).
+void Innertube::parseChannelInfo(const QJsonObject &root, ChannelInfo *info)
+{
+    if (!info)
+        return;
+    const QJsonObject header = findFirstValue(
+        QJsonValue(root), QStringLiteral("c4TabbedHeaderRenderer")).toObject();
+    if (!header.isEmpty()) {
+        const QString id = header.value(QStringLiteral("channelId")).toString();
+        if (!id.isEmpty())
+            info->id = id;
+        info->name = header.value(QStringLiteral("title")).toString();
+        info->subscriberCount = countFromText(
+            homeTextOf(header.value(QStringLiteral("subscriberCountText"))));
+        const QJsonArray av = header.value(QStringLiteral("avatar")).toObject()
+                                  .value(QStringLiteral("thumbnails")).toArray();
+        if (!av.isEmpty())
+            info->avatarUrl = av.last().toObject()
+                                  .value(QStringLiteral("url")).toString();
+    }
+    const QJsonObject about = findFirstValue(
+        QJsonValue(root), QStringLiteral("channelAboutMetadataRenderer")).toObject();
+    if (!about.isEmpty()) {
+        if (info->name.isEmpty())
+            info->name = homeTextOf(about.value(QStringLiteral("title")));
+        info->description = homeTextOf(about.value(QStringLiteral("description")));
+        const QJsonArray av = about.value(QStringLiteral("avatar")).toObject()
+                                  .value(QStringLiteral("thumbnails")).toArray();
+        if (info->avatarUrl.isEmpty() && !av.isEmpty())
+            info->avatarUrl = av.last().toObject()
+                                  .value(QStringLiteral("url")).toString();
+    }
+}
+
+// Detalle de vídeo del /next: videoMetadataRenderer (título, vistas, fecha,
+// canal, descripción) + likeButtonRenderer (me gusta).
+void Innertube::parseVideoDetail(const QJsonObject &root, VideoInfo *video,
+                                 QString *description, qint64 *likeCount)
+{
+    if (video)
+        *video = VideoInfo{};
+    const QJsonObject vm = findFirstValue(
+        QJsonValue(root), QStringLiteral("videoMetadataRenderer")).toObject();
+    if (vm.isEmpty())
+        return;
+    if (video) {
+        video->id = vm.value(QStringLiteral("videoId")).toString();
+        video->title = homeTextOf(vm.value(QStringLiteral("title")));
+        video->viewCount = countFromText(
+            homeTextOf(vm.value(QStringLiteral("viewCountText"))));
+        video->publishedAt = relativeToIso(
+            homeTextOf(vm.value(QStringLiteral("dateText"))));
+        const QJsonObject owner = vm.value(QStringLiteral("owner")).toObject()
+                                      .value(QStringLiteral("videoOwnerRenderer"))
+                                      .toObject();
+        video->channel = homeTextOf(owner.value(QStringLiteral("title")));
+        video->channelId = owner.value(QStringLiteral("navigationEndpoint"))
+                               .toObject().value(QStringLiteral("browseEndpoint"))
+                               .toObject().value(QStringLiteral("browseId"))
+                               .toString();
+    }
+    if (description)
+        *description = homeTextOf(vm.value(QStringLiteral("description")));
+    if (likeCount) {
+        const QJsonObject like = vm.value(QStringLiteral("likeButton")).toObject()
+                                     .value(QStringLiteral("likeButtonRenderer"))
+                                     .toObject();
+        *likeCount = like.value(QStringLiteral("likeCount"))
+                         .toVariant().toLongLong();
+    }
+}
+
+// Playlist (browse VL<id>): playlistHeaderRenderer + playlistVideoRenderer.
+void Innertube::parsePlaylistBrowse(const QJsonObject &root, PlaylistInfo *info,
+                                    QVector<VideoInfo> *videos)
+{
+    if (info) {
+        const QJsonObject ph = findFirstValue(
+            QJsonValue(root), QStringLiteral("playlistHeaderRenderer")).toObject();
+        if (!ph.isEmpty()) {
+            info->title = homeTextOf(ph.value(QStringLiteral("title")));
+            info->channel = homeTextOf(ph.value(QStringLiteral("ownerText")));
+            info->videoCount = int(countFromText(
+                homeTextOf(ph.value(QStringLiteral("numVideosText")))));
+        }
+    }
+    if (!videos)
+        return;
+    std::function<void(const QJsonValue &)> collect = [&](const QJsonValue &val) {
+        if (val.isArray()) {
+            for (const QJsonValue &e : val.toArray())
+                collect(e);
+            return;
+        }
+        if (!val.isObject())
+            return;
+        const QJsonObject o = val.toObject();
+        if (o.contains(QStringLiteral("playlistVideoRenderer"))) {
+            const QJsonObject pv =
+                o.value(QStringLiteral("playlistVideoRenderer")).toObject();
+            VideoInfo v;
+            v.id = pv.value(QStringLiteral("videoId")).toString();
+            v.title = homeTextOf(pv.value(QStringLiteral("title")));
+            v.channel = homeTextOf(pv.value(QStringLiteral("shortBylineText")));
+            v.durationSeconds =
+                pv.value(QStringLiteral("lengthSeconds")).toString().toInt();
+            const QJsonArray thumbs = pv.value(QStringLiteral("thumbnail"))
+                                          .toObject()
+                                          .value(QStringLiteral("thumbnails"))
+                                          .toArray();
+            if (!thumbs.isEmpty())
+                v.thumbnailUrl = thumbs.last().toObject()
+                                     .value(QStringLiteral("url")).toString();
+            if (v.thumbnailUrl.isEmpty())
+                v.thumbnailUrl = webFallbackThumb(v.id);
+            if (!v.id.isEmpty())
+                videos->append(v);
+            return;
+        }
+        for (auto it = o.begin(); it != o.end(); ++it)
+            collect(it.value());
+    };
+    collect(QJsonValue(root));
 }
 
 // Cola "watch playlist" del mix RDAMVM: playlistPanelVideoRenderer de la
@@ -3551,6 +4467,154 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData)
     st->next();
 }
 
+// Selftest de los endpoints migrados de yt-dlp a Innertube: búsqueda, ficha de
+// canal, pestañas (videos/shorts/live), detalle de vídeo y playlist. Red real;
+// no toca el reproductor ni SQLite ni ficheros.
+
 } // namespace
+
+bool innertubeBrowseSelfTest()
+{
+    std::fprintf(stderr, "BROWSE SELFTEST start\n");
+    Innertube inn;
+    bool ok = true;
+
+    const auto wait = [](const std::function<bool()> &done, int timeoutMs) {
+        if (done())
+            return true;
+        QEventLoop loop;
+        QTimer poll;
+        poll.setInterval(50);
+        QObject::connect(&poll, &QTimer::timeout, &loop,
+                         [&done, &loop]() { if (done()) loop.quit(); });
+        QTimer to;
+        to.setSingleShot(true);
+        QObject::connect(&to, &QTimer::timeout, &loop, &QEventLoop::quit);
+        poll.start();
+        to.start(timeoutMs);
+        loop.exec();
+        return done();
+    };
+
+    const QString channel = QStringLiteral("UCX6OQ3DkcsbYNE6H8uQQuVA"); // MrBeast
+    const QString video = QStringLiteral("dQw4w9WgXcQ");
+
+    // 1) Búsqueda.
+    {
+        bool done = false;
+        QVector<VideoInfo> got;
+        const auto conn = QObject::connect(
+            &inn, &Innertube::searchReady, &inn,
+            [&](const QString &, const QVector<VideoInfo> &v, bool) {
+                got = v;
+                done = true;
+            });
+        inn.fetchSearch(QStringLiteral("musica"), 20);
+        const bool r = wait([&]() { return done; }, 30000);
+        QObject::disconnect(conn);
+        int empty = 0;
+        for (const VideoInfo &v : got)
+            if (v.id.isEmpty()) ++empty;
+        const bool good = r && !got.isEmpty() && empty == 0;
+        std::fprintf(stderr, "BROWSE search videos=%d idVacios=%d -> %s\n",
+                     got.size(), empty, good ? "OK" : "FAIL");
+        ok = ok && good;
+    }
+
+    // 2) Ficha de canal.
+    {
+        bool done = false;
+        ChannelInfo info;
+        const auto conn = QObject::connect(
+            &inn, &Innertube::channelInfoReady, &inn,
+            [&](const ChannelInfo &c) { info = c; done = true; });
+        inn.fetchChannelInfo(channel);
+        const bool r = wait([&]() { return done; }, 30000);
+        QObject::disconnect(conn);
+        const bool good =
+            r && !info.name.isEmpty() && info.subscriberCount > 0;
+        std::fprintf(stderr,
+                     "BROWSE channelInfo name=%s subs=%lld av=%d -> %s\n",
+                     info.name.toUtf8().constData(),
+                     static_cast<long long>(info.subscriberCount),
+                     info.avatarUrl.isEmpty() ? 0 : 1, good ? "OK" : "FAIL");
+        ok = ok && good;
+    }
+
+    // 3) Pestañas del canal: videos por VISIONOS, shorts/live por WEB.
+    const QStringList tabs{QStringLiteral("videos"), QStringLiteral("shorts"),
+                           QStringLiteral("live")};
+    for (const QString &tab : tabs) {
+        bool done = false;
+        QVector<VideoInfo> got;
+        const auto conn = QObject::connect(
+            &inn, &Innertube::channelTabReady, &inn,
+            [&](const QString &, const QString &, const QVector<VideoInfo> &v,
+                bool) { got = v; done = true; });
+        inn.fetchChannelTab(channel, tab, 25);
+        const bool r = wait([&]() { return done; }, 30000);
+        QObject::disconnect(conn);
+        int empty = 0;
+        for (const VideoInfo &v : got)
+            if (v.id.isEmpty()) ++empty;
+        // videos/shorts deben traer datos; live puede estar vacío (el canal
+        // puede no tener directos), pero no debe colgarse.
+        const bool good = r && empty == 0
+                          && (tab == QLatin1String("live") || !got.isEmpty());
+        std::fprintf(stderr,
+                     "BROWSE channelTab %s videos=%d idVacios=%d -> %s\n",
+                     tab.toUtf8().constData(), got.size(), empty,
+                     good ? "OK" : "FAIL");
+        ok = ok && good;
+    }
+
+    // 4) Detalle de vídeo.
+    {
+        bool done = false;
+        VideoInfo v;
+        QString desc;
+        qint64 likes = 0;
+        const auto conn = QObject::connect(
+            &inn, &Innertube::videoDetailReady, &inn,
+            [&](const VideoInfo &vi, const QString &d, qint64 l) {
+                v = vi; desc = d; likes = l; done = true;
+            });
+        inn.fetchVideoDetail(video);
+        const bool r = wait([&]() { return done; }, 30000);
+        QObject::disconnect(conn);
+        const bool good =
+            r && !v.title.isEmpty() && !desc.isEmpty() && likes > 0;
+        std::fprintf(stderr,
+                     "BROWSE videoDetail title=%d desc=%d likes=%lld -> %s\n",
+                     v.title.size(), desc.size(),
+                     static_cast<long long>(likes), good ? "OK" : "FAIL");
+        ok = ok && good;
+    }
+
+    // 5) Playlist.
+    {
+        bool done = false;
+        PlaylistInfo info;
+        QVector<VideoInfo> vids;
+        const auto conn = QObject::connect(
+            &inn, &Innertube::playlistReady, &inn,
+            [&](const PlaylistInfo &i, const QVector<VideoInfo> &v) {
+                info = i; vids = v; done = true;
+            });
+        inn.fetchPlaylist(QStringLiteral("PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"),
+                          50);
+        const bool r = wait([&]() { return done; }, 30000);
+        QObject::disconnect(conn);
+        const bool good = r && !info.title.isEmpty() && !vids.isEmpty();
+        std::fprintf(stderr, "BROWSE playlist title=%s videos=%d -> %s\n",
+                     info.title.toUtf8().constData(), vids.size(),
+                     good ? "OK" : "FAIL");
+        ok = ok && good;
+    }
+
+    std::fprintf(stderr, "BROWSE SELFTEST %s\n", ok ? "OK" : "FAIL");
+    return ok;
+}
+
 
 #include "yt_innertube.moc"
