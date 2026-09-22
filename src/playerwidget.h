@@ -130,6 +130,10 @@ private:
     bool m_audioAdded = false;
     bool m_redrawTimerActive = false;
     bool m_hwdecProbed = false;
+    // Veredicto del log de mpv para el stream actual: mpv dice explícitamente
+    // "Using software decoding" aunque hwdec-current reporte un backend
+    // (dispositivos de software en GPUs antiguas). Se resetea por stream.
+    bool m_hwdecLogSoftware = false;
     // hwdec-current llega vacío hasta que mpv activa el decodificador; se
     // reintenta con este timer para que la red de seguridad del perfil reciba
     // un backend resuelto ya en el primer vídeo.

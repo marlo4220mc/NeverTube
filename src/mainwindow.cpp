@@ -177,8 +177,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_yt->setVisitorStorage(&m_settings);
     // Perfil de códec de vídeo. HwProbe sondea la GPU con micro-clips offline y
     // deja un perfil persistido (av1-hw|vp9-hw|h264-hw|soft-all). Si no hay
-    // resultado se usa h264 (universal) sin persistir, y mientras se sondea no
-    // se reproduce (la petición se encola). La red de seguridad reactiva
+    // resultado se aplica soft-all (conservador) sin persistir, y mientras se
+    // sondea no se reproduce (la petición se encola). La red de seguridad reactiva
     // (streamDecodeInfoReady) corrige el perfil si el códec que éste da por HW
     // cae a software.
     const QString rawProfile = m_settings.getString(
@@ -187,7 +187,10 @@ MainWindow::MainWindow(QWidget *parent)
     if (!rawProfile.isEmpty() && savedProfile != rawProfile)
         m_settings.set(QStringLiteral("codec_profile"), savedProfile);
     if (savedProfile.isEmpty()) {
-        applyCodecProfile(QStringLiteral("h264-hw"), false);
+        // Antes de sonorizar: perfil conservador. No se asume HW (un h264-hw
+        // sin evidencia era un falso positivo en GPUs antiguas); software es
+        // lo que funciona en todas partes y se re-sondea al arrancar.
+        applyCodecProfile(QStringLiteral("soft-all"), false);
         startHwProbe();
     } else {
         applyCodecProfile(savedProfile, false);
@@ -1166,9 +1169,10 @@ void MainWindow::startHwProbe()
                     m_hwPopup = nullptr;
                 }
                 if (profile.isEmpty()) {
-                    // Indeterminado (los clips no decodifican): h264 sin
-                    // persistir; se reintentará en el próximo arranque.
-                    applyCodecProfile(QStringLiteral("h264-hw"), false);
+                    // Indeterminado (los clips no decodifican): perfil
+                    // conservador sin persistir. NO asumir HW (era el falso
+                    // positivo); se reintenta el sondeo en el próximo arranque.
+                    applyCodecProfile(QStringLiteral("soft-all"), false);
                 } else {
                     applyCodecProfile(profile, true);
                 }
