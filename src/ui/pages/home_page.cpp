@@ -177,21 +177,6 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     bodyLayout->addWidget(m_trendTitle);
     bodyLayout->addWidget(m_trendGrid);
 
-    m_banner = new QLabel(this);
-    m_banner->setWordWrap(true);
-    m_banner->setStyleSheet(
-        QStringLiteral("QLabel { background: #1F1F1F; color: #9aa2ad; "
-                       "border: 1px solid #262626; border-radius: 10px; "
-                       "padding: 16px; }"));
-    m_banner->setText(QStringLiteral(
-        "No se encontró yt-dlp en el sistema. El Home por Innertube igual "
-        "funciona (Recomendado/Descubre), pero las Tendencias y el feed de "
-        "suscripciones necesitan yt-dlp.\nInstálalo con tu gestor de "
-        "paquetes (p. ej. \"sudo pacman -S yt-dlp\" o \"pip install yt-dlp\") "
-        "y reinicia la app. También puedes definir la ruta del binario en "
-        "Ajustes."));
-    bodyLayout->addWidget(m_banner);
-
     outer->addWidget(m_scroll);
 
     // Las secciones del Home llenan todo el ancho disponible (celdas que se
@@ -262,7 +247,6 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     m_discGrid->hide();
     m_trendTitle->hide();
     m_trendGrid->hide();
-    m_banner->hide();
     m_busy->show();
 
     buildEmptyState();
@@ -401,12 +385,6 @@ void HomePage::saveSection(const QString &section,
     for (const VideoInfo &v : videos)
         ids << v.id;
     m_homeCache->saveSection(section, ids, nowMs());
-}
-
-void HomePage::setYtAvailable(bool ok)
-{
-    m_ytAvailable = ok;
-    refreshBusy();
 }
 
 void HomePage::setCurrentVideoId(const QString &id)
@@ -947,8 +925,6 @@ void HomePage::refreshBusy()
     const bool loading = m_feedBusy || m_homeBusy || m_trendBusy
         || m_discoverBusy;
     m_busy->setVisible(loading && !anyContent);
-    m_banner->setVisible(!m_ytAvailable && m_home.isEmpty()
-                         && m_trending.isEmpty());
     // Empty-state: se muestra cuando NO hay contenido personalizado del
     // usuario (historial, suscripciones, radios Descubre) — el home solo
     // tiene Recomendado y/o Tendencias, que son de red. Cubre el hueco

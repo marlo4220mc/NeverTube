@@ -51,7 +51,6 @@ public:
     void reload();
     void refreshContinueWatching();
     void refreshDynamic();
-    void setYtAvailable(bool ok);
     // Id del vídeo en reproducción: el Descubre no lo muestra (para no
     // repetir en Home el vídeo que se está viendo en la página de reproducción).
     void setCurrentVideoId(const QString &id);
@@ -150,7 +149,6 @@ private:
     QScrollArea *m_scroll;
     QWidget *m_body;
     QLabel *m_busy;
-    QLabel *m_banner;
     // Panel "Aún no hay nada para mostrar": se muestra cuando TODAS las
     // secciones están vacías (sin historial, sin suscripciones, sin radios
     // Descubre, sin caché previa). Cierra el hueco gigante que dejaban las
@@ -202,7 +200,6 @@ private:
     bool m_feedBusy = false;
     bool m_homeBusy = false;
     bool m_trendBusy = false;
-    bool m_ytAvailable = true;
     QString m_currentVideoId;
     bool m_miniVisible = false;
     QVBoxLayout *m_bodyLayout = nullptr;

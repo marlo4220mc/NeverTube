@@ -92,8 +92,33 @@ public slots:
     // Tendencias (POST /browse, browseId FEtrending) con VISIONOS. llegan por
     // trendingReady(). Hoy YouTube retira/redirige las tendencias anónimas
     // (400/redirección a la Home), así que esta fase suele quedar vacía y la
-    // app cae al fallback yt-dlp o a ocultar la sección.
+    // app oculta la sección.
     void fetchTrending();
+
+    // Búsqueda (POST /search, VISIONOS). fetchSearch() trae la primera página;
+    // fetchSearchMore() la continuación. searchReady() entrega solo la página
+    // nueva (hasta limit) y si queda continuación.
+    void fetchSearch(const QString &query, int limit = 20);
+    void fetchSearchMore(int limit = 20);
+
+    // Ficha de canal (POST /browse, pestaña "Información"): nombre, avatar,
+    // suscriptores y descripción. channelInfoReady().
+    void fetchChannelInfo(const QString &channelId);
+
+    // Pestaña de canal (videos|shorts|live). "videos" va por VISIONOS
+    // (compactVideoRenderer); shorts/live por el cliente WEB, porque VISIONOS
+    // no expone esas pestañas (devuelve la Home). channelTabReady() con la
+    // página y si hay más.
+    void fetchChannelTab(const QString &channelId, const QString &tab,
+                         int limit = 25);
+    void fetchChannelTabMore(int limit = 25);
+
+    // Detalle del vídeo (título, canal, vistas, fecha, descripción y "me
+    // gusta") desde el /next. videoDetailReady().
+    void fetchVideoDetail(const QString &videoId);
+
+    // Detalle de playlist (POST /browse, browseId VL<id>): cabecera + vídeos.
+    void fetchPlaylist(const QString &playlistId, int limit = 50);
 
     // True si la última respuesta de Home trajo un token de continuación.
     bool hasHomeContinuation() const { return !m_homeContinuation.isEmpty(); }
@@ -143,6 +168,20 @@ signals:
     void channelVideosReady(const QString &channelId,
                             const QVector<VideoInfo> &videos);
     void trendingReady(const QVector<VideoInfo> &videos);
+    // Página de resultados de búsqueda (searchReady) y de una pestaña de canal
+    // (channelTabReady). hasMore indica si YouTube emitió token de continuación.
+    void searchReady(const QString &query, const QVector<VideoInfo> &videos,
+                     bool hasMore);
+    void channelTabReady(const QString &channelId, const QString &tab,
+                         const QVector<VideoInfo> &videos, bool hasMore);
+    // Ficha del canal (nombre, avatar, suscriptores, descripción).
+    void channelInfoReady(const ChannelInfo &channel);
+    // Detalle del vídeo actual (title/description traducidos + likes) del /next.
+    void videoDetailReady(const VideoInfo &video, const QString &description,
+                          qint64 likeCount);
+    // Cabecera + vídeos de una playlist.
+    void playlistReady(const PlaylistInfo &info,
+                       const QVector<VideoInfo> &videos);
     // visitorData renovado o usado por primera vez; la app lo persiste para
     // evitar el GET sw.js_data en el siguiente arranque.
     void visitorDataReady(const QString &visitorData, qint64 expiresAt);
@@ -159,6 +198,18 @@ private:
                     bool more);
     void handleChannel(bool ok, const QString &error, const QByteArray &body);
     void handleTrending(bool ok, const QString &error, const QByteArray &body);
+    void requestSearch(bool more);
+    void handleSearch(bool ok, const QString &error, const QByteArray &body,
+                      bool more);
+    void requestChannelInfo();
+    void handleChannelInfo(bool ok, const QString &error, const QByteArray &body);
+    void requestChannelTab(bool more);
+    void handleChannelTab(bool ok, const QString &error, const QByteArray &body,
+                          bool more);
+    void requestVideoDetail();
+    void handleVideoDetail(bool ok, const QString &error, const QByteArray &body);
+    void requestPlaylist();
+    void handlePlaylist(bool ok, const QString &error, const QByteArray &body);
     void handleNext(const QString &videoId, bool ok, const QString &error,
                     const QByteArray &body);
     void handleRadio(const QString &videoId, bool ok, const QString &error,
@@ -196,6 +247,30 @@ private:
     // primer token de continuación (si aparece) en *continuation.
     QVector<VideoInfo> parseHomeBrowse(const QJsonObject &root,
                                        QString *continuation) const;
+    // Página de /search: compactVideoRenderer del sectionListRenderer +
+    // primer token de continuación. Limitado a maxCount.
+    QVector<VideoInfo> parseSearchBrowse(const QJsonObject &root, int maxCount,
+                                         QString *continuation) const;
+    // Renderers modernos del cliente WEB: shortsLockupViewModel y
+    // lockupViewModel (pestañas shorts/live del canal). Recorre el árbol sin
+    // duplicar ids; maxCount limita la página.
+    QVector<VideoInfo> collectWebLockups(const QJsonObject &root,
+                                         int maxCount) const;
+    // Ficha del canal desde el browse "Información": c4TabbedHeaderRenderer
+    // (título, avatar, suscriptores, handle) + channelAboutMetadataRenderer
+    // (descripción, país, url canónica).
+    static void parseChannelInfo(const QJsonObject &root, ChannelInfo *info);
+    // Detalle del /next: videoMetadataRenderer (título, vistas, fecha, canal,
+    // descripción) + likeButtonRenderer (me gusta).
+    static void parseVideoDetail(const QJsonObject &root, VideoInfo *video,
+                                 QString *description, qint64 *likeCount);
+    // Playlist (browse VL<id>): playlistHeaderRenderer + playlistVideoRenderer.
+    static void parsePlaylistBrowse(const QJsonObject &root, PlaylistInfo *info,
+                                    QVector<VideoInfo> *videos);
+    // Primer token de continuación que aparezca en el árbol (cualquier
+    // layout: continuationCommand / nextContinuationData /
+    // reloadContinuationData). Vacío si no hay.
+    static QString firstContinuationToken(const QJsonObject &root);
     // Devuelve hlsReady/masterReady desde la caché (firma vigente) usando el
     // generador/esperador de petición única. Si no hay caché válida o hay una
     // petición en curso para ese videoId, no hace nada y la petición en curso
@@ -321,6 +396,37 @@ private:
     bool m_trendPending = false;
     bool m_trendInFlight = false;
     bool m_trendVisitorRetried = false;
+
+    // Búsqueda (/search). Primera página y continuación; el token guardado
+    // permite fetchSearchMore().
+    bool m_searchPending = false;
+    bool m_searchInFlight = false;
+    bool m_searchVisitorRetried = false;
+    QString m_searchQuery;
+    QString m_searchContinuation;
+    // Ficha de canal (browse "Información").
+    bool m_chInfoPending = false;
+    bool m_chInfoInFlight = false;
+    bool m_chInfoVisitorRetried = false;
+    QString m_chInfoId;
+    // Pestaña de canal (videos por VISIONOS; shorts/live por WEB).
+    bool m_chTabPending = false;
+    bool m_chTabInFlight = false;
+    bool m_chTabMoreInFlight = false;
+    bool m_chTabVisitorRetried = false;
+    QString m_chTabId;
+    QString m_chTabName;
+    QString m_chTabContinuation;
+    // Detalle del vídeo (/next).
+    bool m_detailPending = false;
+    bool m_detailInFlight = false;
+    bool m_detailVisitorRetried = false;
+    QString m_detailId;
+    // Detalle de playlist (browse VL<id>).
+    bool m_plPending = false;
+    bool m_plInFlight = false;
+    bool m_plVisitorRetried = false;
+    QString m_plId;
 };
 
 // Selftest aislado de la cadena sw.js_data → visitorData → player →
@@ -342,3 +448,7 @@ bool homeBrowseSelfTest();
 // tamaño, renderers, vídeos reales (id, título, duración), orden, duplicados,
 // límite, y el comportamiento vacío/error. No toca el reproductor ni SQLite.
 bool feedsProtocolSelfTest();
+
+// Selftest de los endpoints migrados de yt-dlp a Innertube: búsqueda, ficha de
+// canal, pestañas (videos/shorts/live), detalle de vídeo y playlist.
+bool innertubeBrowseSelfTest();
