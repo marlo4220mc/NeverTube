@@ -1138,7 +1138,7 @@ void WatchPage::onAvatarReady(const QString &key)
 
 void WatchPage::onDetailFailed(const QString &videoId)
 {
-    if (!m_player->isActive() || videoId != m_player->current().id)
+    if (!isCurrentVideo(videoId))
         return;
     // Ningún cliente devolvió metadatos; no dejar "Cargando detalles…"
     // clavado. Se muestra lo que ya se conoce del elemento de la cola.
@@ -1153,7 +1153,7 @@ void WatchPage::onDetailReady(const VideoInfo &video, const QString &desc,
                               qint64 likes, const QVector<FormatInfo> &formats)
 {
     Q_UNUSED(formats);
-    if (!m_player->isActive() || video.id != m_player->current().id)
+    if (!isCurrentVideo(video.id))
         return;
     m_player->applyCurrentDetail(video);
     m_title->setText(m_player->current().title);
@@ -1184,7 +1184,7 @@ void WatchPage::onCurrentDetailReady(const QString &videoId,
 {
     NT_DEBUG("E2E currentDetail app id=%s title=%d desc=%d\n",
              videoId.toUtf8().constData(), title.size(), description.size());
-    if (!m_player->isActive() || videoId != m_player->current().id)
+    if (!isCurrentVideo(videoId))
         return;
     const QString audioLang = m_yt->audioLanguage();
     // Si el usuario pidió "original", no sobrescribir la descripción
@@ -1198,6 +1198,12 @@ void WatchPage::onCurrentDetailReady(const QString &videoId,
     }
     if (!description.isEmpty())
         applyDescription(description);
+}
+
+// True si el vídeo dado es el que está en reproducción.
+bool WatchPage::isCurrentVideo(const QString &videoId) const
+{
+    return m_player->isActive() && videoId == m_player->current().id;
 }
 
 // Pinta la descripción del vídeo como HTML enriquecido (enlaces + saltos de
@@ -1300,7 +1306,7 @@ void WatchPage::onStreamHeights(const QString &videoId,
     if (heights.isEmpty() || !m_player->isActive())
         return;
     // Solo del vídeo en reproducción: descartar resoluciones atrasadas.
-    if (m_player->current().id != videoId)
+    if (!isCurrentVideo(videoId))
         return;
     int maxH = 0;
     for (int h : heights) {

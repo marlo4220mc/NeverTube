@@ -11,6 +11,7 @@
 #include <QUrlQuery>
 
 #include "../debug.h"
+#include "../models.h"
 
 ThumbnailCache::ThumbnailCache(const QString &name, int maxBytes, QObject *parent)
     : QObject(parent)
@@ -117,10 +118,7 @@ static QString standardThumbFor(const QString &key)
 {
     if (!key.startsWith(QLatin1String("v_")))
         return QString();
-    const QString id = key.mid(2);
-    if (id.size() != 11)
-        return QString();
-    return QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg").arg(id);
+    return fallbackThumbnailUrl(key.mid(2));
 }
 
 void ThumbnailCache::request(const QString &key, const QString &url)

@@ -917,9 +917,8 @@ void MainWindow::updateMiniBar()
     m_miniTitle->setText(line);
 
     QString thumbUrl = v.thumbnailUrl;
-    if (thumbUrl.isEmpty() && v.id.size() == 11)
-        thumbUrl = QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg")
-                       .arg(v.id);
+    if (thumbUrl.isEmpty())
+        thumbUrl = fallbackThumbnailUrl(v.id);
     m_globalThumbs->request(QStringLiteral("v_%1").arg(v.id), thumbUrl);
     setMiniThumb();
     updateMiniIcons();

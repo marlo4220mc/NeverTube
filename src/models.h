@@ -50,3 +50,12 @@ struct PlaylistInfo
     QString thumbnailUrl;
     int videoCount = 0;
 };
+
+// URL de la miniatura de reserva de un vídeo, cuando la respuesta/feed no trae
+// ninguna. Solo para ids de YouTube válidos (11 caracteres); si no, vacío.
+inline QString fallbackThumbnailUrl(const QString &videoId)
+{
+    return videoId.size() == 11
+        ? QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg").arg(videoId)
+        : QString();
+}

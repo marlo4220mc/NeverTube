@@ -2282,15 +2282,6 @@ QJsonValue findFirstValue(const QJsonValue &root, const QString &key)
     return QJsonValue(QJsonValue::Undefined);
 }
 
-// Miniatura de reserva de un vídeo cuando la respuesta no trae ninguna
-// (id de YouTube de 11 caracteres).
-QString webFallbackThumb(const QString &id)
-{
-    return id.size() == 11
-        ? QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg").arg(id)
-        : QString();
-}
-
 } // namespace
 
 // compactVideoRenderer / videoRenderer → VideoInfo.
@@ -2346,7 +2337,7 @@ VideoInfo Innertube::videoFromHomeRenderer(const QJsonObject &item) const
     v.publishedAt = relativeToIso(homeTextOf(
         r->value(QStringLiteral("publishedTimeText"))));
     if (v.thumbnailUrl.isEmpty())
-        v.thumbnailUrl = webFallbackThumb(v.id);
+        v.thumbnailUrl = fallbackThumbnailUrl(v.id);
     return v;
 }
 
@@ -2580,7 +2571,7 @@ VideoInfo videoFromWebShorts(const QJsonObject &sl)
         v.thumbnailUrl = sources.last().toObject()
                              .value(QStringLiteral("url")).toString();
     if (v.thumbnailUrl.isEmpty())
-        v.thumbnailUrl = webFallbackThumb(v.id);
+        v.thumbnailUrl = fallbackThumbnailUrl(v.id);
     return v;
 }
 
@@ -2617,7 +2608,7 @@ VideoInfo videoFromWebLockup(const QJsonObject &lv)
     v.thumbnailUrl = webLockupThumb(contentImage);
     v.durationSeconds = webLockupDuration(contentImage);
     if (v.thumbnailUrl.isEmpty())
-        v.thumbnailUrl = webFallbackThumb(v.id);
+        v.thumbnailUrl = fallbackThumbnailUrl(v.id);
     return v;
 }
 
@@ -2821,7 +2812,7 @@ void Innertube::parsePlaylistBrowse(const QJsonObject &root, PlaylistInfo *info,
                 v.thumbnailUrl = thumbs.last().toObject()
                                      .value(QStringLiteral("url")).toString();
             if (v.thumbnailUrl.isEmpty())
-                v.thumbnailUrl = webFallbackThumb(v.id);
+                v.thumbnailUrl = fallbackThumbnailUrl(v.id);
             if (!v.id.isEmpty())
                 videos->append(v);
             return;
