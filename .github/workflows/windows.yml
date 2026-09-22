@@ -60,94 +60,6 @@ jobs:
           Move-Item mpv-dev\include\*.h mpv-dev\include\mpv\
           Get-ChildItem mpv-dev -Recurse -Filter *.dll | Select-Object FullName
 
-      - name: bajar yt-dlp x86 win7 (fork nicolaasjan, empaquetado como yt-dlp.exe)
-        shell: pwsh
-        run: |
-          # yt-dlp del fork nicolaasjan/yt-dlp (mantiene builds para Win7:
-          # "in-between releases" entre medio de los oficiales + Python 3.14
-          # preparado para Windows 7). yt-dlp_x86_win7.exe es el build de 32
-          # bits. Los builds OFICIALES (Python 3.10+) no cargan en la máquina de pruebas
-          # Win7 (api-ms-win-core-path + AddDllDirectory sin cubrir).
-          # Se guarda SIEMPRE como "yt-dlp.exe" para que la app lo encuentre
-          # junto a su exe (Yt::ytDlpBinary: appdir/yt-dlp.exe -> appdir/ytdlp.exe
-          # -> PATH). Empaquetarlo con OTRo nombre (el antiguo ytdlp.exe) rompía
-          # búsquedas/canales: QProcess lanza "yt-dlp" y Windows solo lo halla
-          # si el archivo se llama así.
-          curl.exe -sL -o yt-dlp.exe `
-            https://github.com/nicolaasjan/yt-dlp/releases/download/2026.08.28.073407/yt-dlp_x86_win7.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $yt = Get-Item yt-dlp.exe
-          if (-not $yt -or $yt.Length -lt 10000000) {
-            Write-Host "yt-dlp win7 no llegó ($($yt.Length) bytes)"; exit 1 }
-          & .\yt-dlp.exe --version
-          if ($LASTEXITCODE -ne 0) { Write-Host "yt-dlp win7 roto"; exit $LASTEXITCODE }
-
-      # El python314.dll del yt-dlp_x86_win7.exe (fork nicolaasjan) importa
-      # ESTÁTICAMENTE api-ms-win-core-path-l1-1-0.dll (PathCchCanonicalize/
-      # CanonicalizeEx/RemoveExtension/...), un api-set que solo existe desde
-      # Windows 8: en la Win7 el loader muere con "api-ms-win-core-path-
-      # l1-1-0.dll is missing from your computer" (verificado en máquina: el
-      # error salta al arrancar la app, en Yt::ytDlpBinary). Único arreglo:
-      # proveer un polyfill x86 de esa api-set (implementación basada en Wine,
-      # LGPL-2.1). Se usa el del repo adang1345/api-ms-win-core-path (fork
-      # actualizado de nalexandru/api-ms-win-core-path-HACK, mantenido para
-      # PythonVista): release v1.0.0. En Win7 el loader de api-sets no reconoce
-      # el nombre y cae a la búsqueda normal de DLLs → basta copiar el archivo
-      # junto a yt-dlp.exe (misma carpeta dist\). El binario x86 solo importa
-      # KERNEL32 (el gate de imports W8+ no se dispara) y exporta el set Path*
-      # completo, incluidos PathCchCanonicalize y PathCchCanonicalizeEx.
-      # Los DEMÁS imports W8+ del python314 (AddDllDirectory,
-      # GetFileInformationByHandleEx, GetFinalPathNameByHandle) los añade
-      # KB2533623, que el setup de Inno instala si kernel32 no los exporta.
-      - name: bajar polyfill api-ms-win-core-path x86 (para yt-dlp en Win7)
-        shell: pwsh
-        run: |
-          curl.exe -sL -o apiset.zip `
-            https://github.com/adang1345/api-ms-win-core-path/releases/download/v1.0.0/api-ms-win-core-path.zip
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Expand-Archive apiset.zip apiset -Force
-          $pf = 'apiset\x86\api-ms-win-core-path-l1-1-0.dll'
-          if (-not (Test-Path $pf)) { Write-Host "falta $pf"; exit 1 }
-          # Verificación rápida de que es PE32 i386 (MZ + 'PE\0\0' + machine
-          # 0x014c): si GitHub devuelve una página HTML o el x64, morir aquí.
-          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $pf).Path)
-          if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { Write-Host 'no es PE'; exit 1 }
-          $peoff = [BitConverter]::ToInt32($bytes, 0x3C)
-          $machine = [BitConverter]::ToUInt16($bytes, $peoff + 4)
-          if ($machine -ne 0x14c) { Write-Host "machine=$machine (se esperaba i386)"; exit 1 }
-          Copy-Item $pf api-ms-win-core-path-l1-1-0.dll
-          # Licencias LGPL-2.1 (Wine) para redistribuirlas con el setup junto al
-          # binario (requisito de la licencia al empaquetar un derived work).
-          foreach ($lf in 'LICENSE.txt','COPYING.LIB','LICENSE_WINE.txt') {
-            curl.exe -sL -o $lf "https://raw.githubusercontent.com/adang1345/api-ms-win-core-path/master/$lf"
-            $ok = (Test-Path $lf) -and ((Get-Item $lf).Length -ge 100)
-            if ($LASTEXITCODE -ne 0 -or -not $ok) { Write-Host "licencia $lf no llegó"; exit 1 }
-          }
-          Get-Item api-ms-win-core-path-l1-1-0.dll | Select-Object Name, Length
-
-      # KB2533623 para la máquina de pruebas SIN updates: su kernel32 no exporta
-      # AddDllDirectory / GetFileInformationByHandleEx / GetFinalPathNameByHandle
-      # (las añade KB2533623, que nunca se instaló porque la máquina de pruebas está sin
-      # actualizaciones a propósito). Es exactamente lo que importa el
-      # python314.dll del yt-dlp_x86_win7.exe: sin el KB el loader muere con
-      # "The procedure entry point AddDllDirectory could not be located in the
-      # dynamic link library KERNEL32.dll" (verificado en VMware: instalado el
-      # KB, funciona). El .msu standalone (Windows6.1-KB2533623-x86.msu, ~1,2 MB)
-      # se descarga del repo beny1226/Windows-7-KB2533623 (x86 y x64 incluidos)
-      # y el setup de Inno lo instala con wusa /quiet /norestart cuando detecta
-      # que kernel32 no exporta AddDllDirectory (GetProcAddress). Así la app
-      # sigue funcionando en Win7 sin updates.
-      - name: bajar KB2533623 x86 (.msu que el setup instala si falta AddDllDirectory)
-        shell: pwsh
-        run: |
-          curl.exe -sL -o KB2533623-x86.msu `
-            https://github.com/beny1226/Windows-7-KB2533623/raw/main/Windows6.1-KB2533623-x86.msu
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $kb = Get-Item KB2533623-x86.msu
-          if (-not $kb -or $kb.Length -lt 500000) {
-            Write-Host 'KB2533623-x86.msu no llegó'; exit 1 }
-          Write-Host "KB2533623-x86.msu $($kb.Length) bytes"
-
       # Qt 5.15.2 (msvc2019 x86) carga su backend TLS por LoadLibrary de las DLLs
       # de OpenSSL 1.1 (libssl-1_1.dll / libcrypto-1_1.dll) DESDE la
       # carpeta del exe. windeployqt NO las despliega: sin ellas, cualquier
@@ -245,7 +157,7 @@ jobs:
           choco install innosetup --yes --no-progress
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: empaquetar setup.exe instalable (windeployqt + DLLs mpv-dev + yt-dlp + iscc)
+      - name: empaquetar setup.exe instalable (windeployqt + DLLs mpv-dev + iscc)
         shell: pwsh
         run: |
           $exe = "build-win\Release\nevertube_qt2.exe"
@@ -298,24 +210,14 @@ jobs:
           Write-Host "VC_redist.x86.exe $($vr.Length) bytes"
           Get-ChildItem mpv-dev -Recurse -Filter *.dll |
             ForEach-Object { Copy-Item $_.FullName dist\ }
-          Copy-Item yt-dlp.exe dist\ -ErrorAction SilentlyContinue
           Copy-Item $exe dist\nevertube_qt2.exe
           # OpenSSL 1.1.1 = backend TLS de Qt5Network. windeployqt NO la despliega:
           # sin estas DLLs al lado del exe, todo HTTPS falla en la máquina de pruebas con
           # "TLS initialization failed" (no cargan innertube/YouTube).
           Copy-Item app\bin\libssl-1_1.dll dist\
           Copy-Item app\bin\libcrypto-1_1.dll dist\
-          # Polyfill Win7 del api-set que yt-dlp (Python 3.10+) importa
-          # estáticamente y que no existe en Win7. Sus licencias LGPL (Wine)
-          # van junto al binario para redistribución correcta.
-          Copy-Item api-ms-win-core-path-l1-1-0.dll dist\
-          Copy-Item LICENSE.txt, COPYING.LIB, LICENSE_WINE.txt dist\
-          # KB2533623: el instalador lo deja en {tmp} y lo instala con wusa
-          # solo si kernel32 no exporta AddDllDirectory (Win7 sin updates).
-          Copy-Item KB2533623-x86.msu dist\
           $missing = @('libmpv-2.dll','libssl-1_1.dll',
-            'libcrypto-1_1.dll','yt-dlp.exe','VC_redist.x86.exe',
-            'api-ms-win-core-path-l1-1-0.dll','KB2533623-x86.msu') |
+            'libcrypto-1_1.dll','VC_redist.x86.exe') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
           if ($missing) {
             Write-Host "dist incompleto: faltan $missing"
@@ -338,15 +240,6 @@ jobs:
           #  - api-ms-win-core-winrt|-winrt-error|-path|-synch (W8) y las APIs de
           #    espera por dirección (WaitOnAddress/WakeByAddress*): presentes en
           #    builds de mpv nuevos, no en Win7.
-          # OJO con dist\api-ms-win-core-path-l1-1-0.dll: ES el polyfill que viene
-          # DENTRO del paquete a propósito (yt-dlp lo importa estáticamente). El
-          # gate escanea solo los /imports de cada DLL; el polyfill importa
-          # únicamente KERNEL32 (default export:LoadLibrary etc., todos presentes
-          # en Win7), así que pasa. Su tabla de EXPORT incluye
-          # PathCchCanonicalizeEx, pero los exports no se miran: la lista negra
-          # es de símbolos IMPORTADOS porque es lo que el loader resuelve al
-          # cargar. Si el gate fallase aquí, el problema sería que el polyfill
-          # importa algo (p. ej. un build x64 o una página HTML de GitHub).
           # dumpbin /imports lista todos los entry points que importa cada DLL
           # del paquete (versión x86, carga en la máquina de pruebas; dumpbin Hostx64/x64
           # analiza igual DLLs i686, como ya hace el step de configure).
@@ -407,7 +300,7 @@ jobs:
       # producía `if ($null -ne 0) { exit $null }` → código 0 y el step se
       # daba por verde tras el PRIMER selftest, saltándose los demás. Por eso
       # cada selftest va con Start-Process -Wait -PassThru y se lee .ExitCode.
-      - name: smoke test del paquete dist (DLLs ok + TLS real + mpv init + yt-dlp + feeds + busqueda)
+      - name: smoke test del paquete dist (DLLs ok + TLS real + mpv init + feeds + busqueda)
         shell: pwsh
         run: |
           # windeployqt solo despliega qwindows.dll; el offscreen se inyecta
@@ -436,29 +329,16 @@ jobs:
           # aborta aquí con lock != NULL.
           $rc = Invoke-Selftest '--selftest-hwprobe'
           if ($rc -ne 0) { exit $rc }
-          # Gate de yt-dlp (búsquedas/canales/fallbacks): el binario debe ir
-          # empaquetado como yt-dlp.exe junto al exe y arrancar; y la ruta de
-          # búsqueda de la app debe devolver vídeos con id real
-          # (--selftest-search). Caza la regresión "yt-dlp no llega al paquete
-          # o la app no lo encuentra": en ese caso execJson responde done({}) y
-          # parseVideos({}) fabrica 1 vídeo falso 'Sin título'.
-          if (-not (Test-Path '.\dist\yt-dlp.exe')) {
-            Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
-            Write-Host "FALTA dist\yt-dlp.exe (búsquedas/canales/fallbacks rotos)"
-            exit 1 }
-          # yt-dlp.exe es de subsistema CONSOLA; Start-Process -Wait -PassThru
-          # da .ExitCode fiable igual que los selftests.
-          $p = Start-Process -FilePath '.\dist\yt-dlp.exe' -ArgumentList '--version' -Wait -PassThru -NoNewWindow
-          Write-Host "smoke yt-dlp --version exit=$($p.ExitCode)"
-          if ($p.ExitCode -ne 0) {
-            Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
-            exit $p.ExitCode }
           # qoffscreen se quita solo al final (todos los selftests lo necesitan).
+          # Búsqueda real por Innertube (antes yt-dlp): vídeos con id no vacío.
           $rc = Invoke-Selftest '--selftest-search'
           if ($rc -ne 0) { exit $rc }
-          # Cadena de feeds real (carrera de canales Innertube vs yt-dlp +
-          # trending): valida que la apertura de canal termina una sola vez, sin
-          # colgarse ni crashear, en la ruta que acelera la máquina de pruebas.
+          # Endpoints migrados de yt-dlp a Innertube: canal + pestañas
+          # (videos/shorts/live), detalle de vídeo y playlist.
+          $rc = Invoke-Selftest '--selftest-browse'
+          if ($rc -ne 0) { exit $rc }
+          # Cadena de feeds real (canal por Innertube + trending): valida que la
+          # apertura de canal termina una sola vez, sin colgarse ni crashear.
           $rc = Invoke-Selftest '--selftest-feeds'
           Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
           if ($rc -ne 0) { exit $rc }

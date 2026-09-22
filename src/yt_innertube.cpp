@@ -65,8 +65,8 @@ const char kAndroidVRUA[] =
 const char kFallbackVisitorData[] =
     "CgttN24wcmd5UzNSWSi2lvq2BjIKCgJKUBIEGgAgYQ%3D%3D";
 
-// Timeouts por fase del transporte Ipv4Https (ms). El fallback a yt-dlp y la
-// regeneración de visitorData no deben esperar el timeout largo de player.
+// Timeouts por fase del transporte Ipv4Https (ms). La regeneración de
+// visitorData no debe esperar el timeout largo de player.
 constexpr int kVisitorTimeoutMs = 10000;
 constexpr int kPlayerTimeoutMs = 12000;
 constexpr int kMasterTimeoutMs = 15000;
@@ -1430,8 +1430,8 @@ void Innertube::requestHome(const QString &continuation)
     m_http->setVisitorId(m_visitorData);
 
     // VISIONOS: el único cliente probado que devuelve el feed real del Home
-    // (62 compactVideoRenderer en la PRUEBA 1). Sin cascada: si falla/500, la
-    // app usa el fallback yt-dlp (no se regenera visitorData en bucle).
+    // (62 compactVideoRenderer en la PRUEBA 1). Sin cascada: si falla/500, se
+    // reintenta una vez con visitorData fresco (no en bucle).
     const PlayerClient &pc = kPlayerClients[0];
     const QJsonObject client = clientContext(pc, m_visitorData, m_hl);
     QJsonObject context{{QStringLiteral("client"), client}};
@@ -1673,7 +1673,6 @@ void Innertube::handleTrending(bool ok, const QString &error,
 
 void Innertube::fetchSearch(const QString &query, int limit)
 {
-    Q_UNUSED(limit);
     const QString q = query.trimmed();
     if (q.isEmpty()) {
         emit searchReady(query, QVector<VideoInfo>(), false);
@@ -1686,6 +1685,7 @@ void Innertube::fetchSearch(const QString &query, int limit)
     }
     m_searchInFlight = true;
     m_searchQuery = q;
+    m_searchLimit = limit > 0 ? limit : kSearchTake;
     m_searchContinuation.clear();
     m_searchVisitorRetried = false;
     NT_DEBUG("E2E innertube fetchSearch q=%s\n", q.toUtf8().constData());
@@ -1700,11 +1700,11 @@ void Innertube::fetchSearch(const QString &query, int limit)
 
 void Innertube::fetchSearchMore(int limit)
 {
-    Q_UNUSED(limit);
     if (m_searchContinuation.isEmpty() || m_searchInFlight) {
         NT_DEBUG("E2E innertube search more ignorada\n");
         return;
     }
+    m_searchLimit = limit > 0 ? limit : kSearchTake;
     m_searchInFlight = true;
     requestSearch(true);
 }
@@ -1770,7 +1770,7 @@ void Innertube::handleSearch(bool ok, const QString &error,
     }
     QString continuation;
     const QVector<VideoInfo> videos =
-        parseSearchBrowse(doc.object(), kSearchTake, &continuation);
+        parseSearchBrowse(doc.object(), m_searchLimit, &continuation);
     m_searchContinuation = continuation;
     if (!more && videos.isEmpty()
         && retryBrowseWithFreshVisitor(&m_searchVisitorRetried,
@@ -1861,7 +1861,6 @@ void Innertube::handleChannelInfo(bool ok, const QString &error,
 void Innertube::fetchChannelTab(const QString &channelId, const QString &tab,
                                 int limit)
 {
-    Q_UNUSED(limit);
     if (m_chTabInFlight && m_chTabId == channelId && m_chTabName == tab) {
         NT_DEBUG("E2E innertube channelTab single-flight\n");
         return;
@@ -1870,6 +1869,7 @@ void Innertube::fetchChannelTab(const QString &channelId, const QString &tab,
     m_chTabMoreInFlight = false;
     m_chTabId = channelId;
     m_chTabName = tab;
+    m_chTabLimit = limit > 0 ? limit : kChannelTabTake;
     m_chTabContinuation.clear();
     m_chTabVisitorRetried = false;
     NT_DEBUG("E2E innertube fetchChannelTab id=%s tab=%s\n",
@@ -1885,11 +1885,11 @@ void Innertube::fetchChannelTab(const QString &channelId, const QString &tab,
 
 void Innertube::fetchChannelTabMore(int limit)
 {
-    Q_UNUSED(limit);
     if (m_chTabContinuation.isEmpty() || m_chTabInFlight || m_chTabMoreInFlight) {
         NT_DEBUG("E2E innertube channelTab more ignorada\n");
         return;
     }
+    m_chTabLimit = limit > 0 ? limit : kChannelTabTake;
     m_chTabMoreInFlight = true;
     requestChannelTab(true);
 }
@@ -1973,9 +1973,9 @@ void Innertube::handleChannelTab(bool ok, const QString &error,
         if (err.error == QJsonParseError::NoError && doc.isObject()) {
             // VISIONOS (videos) usa compactVideoRenderer; WEB (shorts/live)
             // usa lockups modernos. Se prueban ambos: el que no aplica da vacío.
-            videos = collectVideoRenderers(doc.object(), kChannelTabTake);
+            videos = collectVideoRenderers(doc.object(), m_chTabLimit);
             if (videos.isEmpty())
-                videos = collectWebLockups(doc.object(), kChannelTabTake);
+                videos = collectWebLockups(doc.object(), m_chTabLimit);
             continuation = firstContinuationToken(doc.object());
         } else {
             NT_DEBUG("E2E innertube channelTab json fail size=%d\n", body.size());
@@ -2184,28 +2184,6 @@ int homeDurationOf(const QJsonArray &overlays)
     return 0;
 }
 
-int homeViewCountOf(const QString &s)
-{
-    QString t = s;
-    t.remove(QLatin1Char('.'));
-    t.remove(QLatin1Char(','));
-    t.remove(QLatin1Char(' '));
-    bool ok = false;
-    if (t.endsWith(QLatin1Char('M'))) {
-        t.chop(1);
-        return qRound(t.toDouble(&ok) * 1e6);
-    }
-    if (t.endsWith(QLatin1Char('K'))) {
-        t.chop(1);
-        return qRound(t.toDouble(&ok) * 1e3);
-    }
-    if (t.endsWith(QLatin1Char('B'))) {
-        t.chop(1);
-        return qRound(t.toDouble(&ok) * 1e9);
-    }
-    return t.toInt(&ok);
-}
-
 // "hace 3 días" / "3 giorni fa" → fecha ISO aproximada (para ordenar feeds
 // sin depender de una marca exacta). Si no reconoce el texto, devuelve vacío.
 QString relativeToIso(const QString &text)
@@ -2364,7 +2342,7 @@ VideoInfo Innertube::videoFromHomeRenderer(const QJsonObject &item) const
                              .value(QStringLiteral("url")).toString();
     v.durationSeconds = homeDurationOf(
         r->value(QStringLiteral("thumbnailOverlays")).toArray());
-    v.viewCount = homeViewCountOf(homeTextOf(r->value(QStringLiteral("viewCountText"))));
+    v.viewCount = countFromText(homeTextOf(r->value(QStringLiteral("viewCountText"))));
     v.publishedAt = relativeToIso(homeTextOf(
         r->value(QStringLiteral("publishedTimeText"))));
     if (v.thumbnailUrl.isEmpty() && v.id.size() == 11)
@@ -3800,7 +3778,7 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData);
 // (sw.js_data → visitorData fresco → POST /browse FEwhat_to_watch VISIONOS →
 // parseHomeBrowse) y, si hay token, fetchHomeMore(). No toca el reproductor.
 // Si el feed llega vacío (500/fallo de red) el selftest NO falla: ese es el
-// comportamiento por diseño (la app usa el fallback yt-dlp). Sí falla si el
+// comportamiento por diseño (la app oculta la sección). Sí falla si el
 // parser produce duplicados o pierde el id/continuación esperados.
 bool homeFeedLiveCheck()
 {
@@ -3838,8 +3816,8 @@ bool homeFeedLiveCheck()
                          gotResponse = true;
                          if (videos.isEmpty()) {
                              std::fprintf(stderr,
-                                          "HOME-FEED feed vacío: la app usa el "
-                                          "fallback yt-dlp (por diseño)\n");
+                                          "HOME-FEED feed vacío: la app oculta "
+                                          "la sección (por diseño)\n");
                              ok = true;
                              done = true;
                              QCoreApplication::exit(0);

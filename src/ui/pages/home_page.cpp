@@ -62,7 +62,7 @@ qint64 nowMs()
 }
 
 // Entradas válidas: con id y título (más robusto ante respuestas degradadas
-// de yt-dlp: "ytsearch", "Sin título", playlists rotas que se cuelan).
+// de Innertube: vídeos sin id, playlists rotas que se cuelan).
 QVector<VideoInfo> sanitizeVideos(const QVector<VideoInfo> &in)
 {
     QVector<VideoInfo> out;
@@ -552,7 +552,7 @@ void HomePage::onChannelVideos(const QVector<VideoInfo> &videos)
 {
     QVector<VideoInfo> patched = videos;
     // Los items del tab "Vídeos" del canal no llevan nombre de canal: se
-    // rellena con la suscripción pedida (Innertube y, si falta, yt-dlp).
+    // rellena con la suscripción pedida (Innertube).
     const QString cid = m_pendingIdx < m_pendingChannels.size()
                             ? m_pendingChannels.at(m_pendingIdx)
                             : QString();

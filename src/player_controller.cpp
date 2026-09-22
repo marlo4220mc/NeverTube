@@ -168,7 +168,7 @@ void PlayerController::onStreamResolved(const StreamInfo &stream)
     m_player->setAudioLanguage(m_yt->audioLanguage());
     // Reproducción directa (edge): la pista de audio es un flujo aparte que
     // mpv fusiona con --audio-file (duración exacta + seek fiable, sin el HLS
-    // de segmento único). Vacío limpia la opción para el flujo clásico/yt-dlp.
+    // de segmento único). Vacío limpia la opción para el flujo clásico.
     m_player->setAudioFile(stream.audioUrl);
     NT_DEBUG("E2E playIndex=%d from=%.1f resumeMs=0 audioUrl=%d\n", m_index,
              from, int(!stream.audioUrl.isEmpty()));

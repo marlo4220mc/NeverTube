@@ -10,7 +10,7 @@ antes que decorar, estabilidad y bajo consumo.
 cmake -B build && cmake --build build
 ```
 
-Dependencias: Qt5 (Core Gui Widgets Network Sql), OpenGL, libmpv, yt-dlp.
+Dependencias: Qt5 (Core Gui Widgets Network Sql), OpenGL, libmpv.
 
 ## Pieza protegida (NO modificar sin razón técnica y prueba)
 
@@ -49,7 +49,9 @@ solaparse sobre otro, ni en vertical ni en horizontal.
 ./build/nevertube_qt2 --selftest-hwprobe   # sondeo HW offline (micro-clips): av1-hw|vp9-hw|h264-hw|soft-all
 ./build/nevertube_qt2 --selftest-ssl       # backend TLS (OpenSSL 1.1 junto al exe) cargado
 ./build/nevertube_qt2 --selftest-tls       # handshake TLS REAL contra hosts públicos (no solo carga)
-./build/nevertube_qt2 --selftest-search    # búsqueda yt-dlp REAL: vídeos con id no vacío (caza "yt-dlp no inicia")
+./build/nevertube_qt2 --selftest-search    # búsqueda Innertube REAL: vídeos con id no vacío
+./build/nevertube_qt2 --selftest-browse    # endpoints Innertube: canal + tabs (videos/shorts/live) + detalle + playlist
+./build/nevertube_qt2 --selftest-feeds     # canal por Innertube + trending (protocolo y cadena)
 ```
 
 El selftest del player verifica invariantes del núcleo protegido sin
@@ -203,13 +205,15 @@ tarda (>300 ms, PC básico) o si el usuario intenta reproducir mientras sondea.
 - UI, lógica y reproducción separadas. `PlayerController` (estado/cola) vs
   `PlayerWidget` (render) vs páginas (vistas).
 - Repos SQLite en `src/db/`; infraestructura reutilizable en `src/ui/`.
-- Resolución de streams: Innertube (cliente VISIONOS, `src/yt_innertube.*`) primero y yt-dlp como fallback (`Yt::resolveWithYtDlp`).
-- Carga de canales: CARRERA en paralelo (`Yt::startChannelRace`/`channelRaceLeg`): se lanzan Innertube (`fetchChannelVideos`) y yt-dlp (playlist UU) a la vez y se emite `channelVideosFinished` con el primer resultado que traiga vídeos con id no vacío (si ambos fallan, una vez, vacío). Evita que en redes donde /browse responde 400 (la máquina de pruebas) cada apertura espere las 2 rondas Innertube fallidas antes del fallback (~segundos de más vs Linux). Un leg con 0 vídeos de id no vacío no cuenta como datos (parseVideos({}) fabrica 1 vídeo falso "Sin título").
-- Empaquetado Windows (Win7 x86): la UCRT NO se copia app-local desde la Windows SDK — esa versión importa `GetSystemTimePreciseAsFileTime` (W8+) y ucrtbase no carga en Win7. En su lugar el setup empaqueta `VC_redist.x86.exe` (descargado en CI) y lo instala con `Exec` (`/install /quiet /norestart`, códigos 0/1638/3010 aceptados) con `PrivilegesRequired=admin`. El CRT (msvcp140/vcruntime140) sí va junto al exe (`windeployqt --compiler-runtime` + copia de `Microsoft.VC*.CRT`). ORDEN del setup: 1) app completa → 2) iconos (menú + acceso directo al escritorio, casilla `[Tasks] desktopicon` marcada por defecto) → 3) `InstallVcRedist` y 4) `InstallKb2533623`, ambos disparados desde `CurStepChanged` → `ssPostInstall` (no en `AfterInstall` de un `[Files]`, que correría en mitad de la copia).
-- yt-dlp en Win7: TODO este mecanismo es SOLO para la máquina de pruebas Windows 7 (en
-  versiones superiores W8/W10 entran los mpv/yt-dlp OFICIALES; el setup solo
-  toca el KB en Win7, `IsWindows7` en dist.iss). Se usa el fork
-  `nicolaasjan/yt-dlp` (`yt-dlp_x86_win7.exe`, build x86 con Python 3.14 preparado para Win7; los builds oficiales con Python 3.10+ no cargan). Su `python314.dll` importa estáticamente `api-ms-win-core-path-l1-1-0.dll` (solo existe desde W8) → el setup incluye el polyfill x86 de `adang1345/api-ms-win-core-path` (basado en Wine, LGPL-2.1) junto a `yt-dlp.exe` (en Win7 el loader de api-sets cae a la búsqueda normal). También importa `AddDllDirectory`/`GetFileInformationByHandleEx`/`GetFinalPathNameByHandle` (las añade KB2533623): como la máquina de pruebas está SIN updates (no tiene el KB), el setup de Inno detecta en caliente si `kernel32` exporta `AddDllDirectory` (GetProcAddress) y, si no (y solo en Win7), avisa al usuario con un cartel explicativo ("falta la actualización necesaria") e instala con `wusa /quiet /norestart` el `Windows6.1-KB2533623-x86.msu` que lleva empaquetado (repo `beny1226/Windows-7-KB2533623`, x86 y x64; verificado en VMware). La instalación del KB va AL FINAL de la instalación (`CurStepChanged` → `ssPostInstall`), con la app ya completa en disco y los iconos creados, porque wusa pide reiniciar (suele devolver 3010); no corre en AfterInstall de un `[Files]` (medio de la copia) para que un reinicio no deje la instalación a medias. NO confundir el polyfill con el gate `$win7poison` del CI: el gate escanea solo `/imports` de cada DLL y ese polyfill solo importa KERNEL32 (su export de `PathCchCanonicalizeEx` es legítimo: ningún otro runtime del paquete puede importarlo). El yt-dlp win7 tampoco aparece en el gate: su cerebro (`python314.dll`) va DENTRO del exe PyInstaller (no es un .dll suelto de `dist\`), y los símbolos que le faltan los cubre el KB + el polyfill.
+- Resolución de streams: Innertube (cliente VISIONOS, `src/yt_innertube.*`) como única vía; si falla, `Yt::resolveError`. yt-dlp ya NO se usa.
+- Carga de canales: Innertube `fetchChannelVideos` (browse pestaña "Vídeos"), sin carrera ni fallback externo. Un resultado con 0 vídeos de id no vacío cuenta como vacío.
+- Búsqueda, ficha de canal, pestañas y detalle: TODO por Innertube (`src/yt_innertube.*`):
+  - `Yt::search` → POST `/search` (paginación por `continuation`; parser `compactVideoRenderer`).
+  - `Yt::channelInfo` → browse pestaña "Información": `c4TabbedHeaderRenderer` (nombre, avatar, suscriptores) + `channelAboutMetadataRenderer` (descripción).
+  - `Yt::channelTabVideos` → browse del canal. "videos" por VISIONOS (`compactVideoRenderer`, params `EgZ2aWRlb3PyBgQKAjoA`); "shorts"/"live" por el cliente WEB con `shortsLockupViewModel`/`lockupViewModel`, porque VISIONOS no expone esas pestañas (devuelve la Home). El cliente WEB no necesita API key.
+  - `Yt::getDetail` → `/next`: `videoMetadataRenderer` (título/descripción traducidos, vistas, fecha, canal) + `likeButtonRenderer` (me gusta).
+  - `Yt::playlistDetail` → browse `VL<id>`: `playlistHeaderRenderer` + `playlistVideoRenderer`.
+- Empaquetado Windows (Win7 x86): la UCRT NO se copia app-local desde la Windows SDK — esa versión importa `GetSystemTimePreciseAsFileTime` (W8+) y ucrtbase no carga en Win7. En su lugar el setup empaqueta `VC_redist.x86.exe` (descargado en CI) y lo instala con `Exec` (`/install /passive /norestart`, códigos 0/1638/3010 aceptados) con `PrivilegesRequired=admin`. El CRT (msvcp140/vcruntime140) sí va junto al exe (`windeployqt --compiler-runtime`). ORDEN del setup: 1) app completa → 2) iconos (menú + acceso directo al escritorio, casilla `[Tasks] desktopicon` marcada por defecto) → 3) `InstallVcRedist` desde `CurStepChanged` → `ssPostInstall` (no en `AfterInstall` de un `[Files]`, que correría en mitad de la copia). El `[InstallDelete]` sigue purgando la UCRT app-local de instalaciones antiguas.
 - Overlay de los controles NO es un widget separado: vive dentro de
   `WatchPage::m_overlay`/`PlayerContainer` (src/ui/pages/watch_page.cpp).
   Cualquier cambio ahí que afecte el área de video requiere el selftest.
