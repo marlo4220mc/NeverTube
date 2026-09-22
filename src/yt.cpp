@@ -183,6 +183,32 @@ Yt::Yt(QObject *parent)
                 }
                 trendingYtDlp();
             });
+    // Alturas de vídeo disponibles del vídeo para el menú de resoluciones:
+    // llegan del master HLS (videoHeights de adaptiveFormats) y, como respaldo,
+    // del /player (formatsReady). No tocan la resolución resuelta; solo
+    // informan a la UI para que Auto no oculte calidades que el vídeo sí tiene.
+    connect(&m_innertube, &Innertube::hlsReady, this,
+            [this](const QString &videoId, const QString &,
+                   const QVector<int> &heights) {
+                if (!heights.isEmpty())
+                    emit streamHeightsReady(videoId, heights);
+            });
+    connect(&m_innertube, &Innertube::formatsReady, this,
+            [this](const QString &videoId, const QJsonArray &formats, int) {
+                QVector<int> heights;
+                for (const QJsonValue &val : formats) {
+                    const QJsonObject f = val.toObject();
+                    const QString mime =
+                        f.value(QStringLiteral("mimeType")).toString();
+                    const int h = f.value(QStringLiteral("height")).toInt(0);
+                    if (mime.startsWith(QLatin1String("video/")) && h > 0
+                        && !heights.contains(h))
+                        heights.append(h);
+                }
+                std::sort(heights.begin(), heights.end());
+                if (!heights.isEmpty())
+                    emit streamHeightsReady(videoId, heights);
+            });
 }
 
 void Yt::setVisitorStorage(SettingsRepo *settings)

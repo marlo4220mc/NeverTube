@@ -267,6 +267,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         int h = savedQ.toInt();
         m_autoHeight = (h > 0) ? h : 360;
     }
+    // El botón/índice del menú arrancan en la calidad realmente pedida (Auto =
+    // última memorizada), no en un 720p por defecto que no refleja nada.
+    m_qualityIndex = qualityIndexForHeight(m_autoHeight);
 
     auto *splitOuter = new QVBoxLayout(this);
     splitOuter->setContentsMargins(0, 0, 0, 0);
@@ -363,7 +366,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     });
     btnRow->addWidget(m_ovSubsBtn);
 
-    m_quality = new QPushButton(QStringLiteral("720p"), m_ctrlBar);
+    m_quality = new QPushButton(
+        QStringLiteral("%1p").arg(idxToQuality(m_qualityIndex)), m_ctrlBar);
     m_quality->setObjectName(QStringLiteral("iconBtn"));
     m_quality->setFixedWidth(98);
     m_quality->setCursor(Qt::PointingHandCursor);
@@ -695,6 +699,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // "click inerte" para el usuario).
     connect(playerWidget, &PlayerWidget::qualityLimitsChanged, this,
             &WatchPage::applyQualityLimits);
+    // Alturas reales del vídeo (Innertube): si Auto pidió 360 de un vídeo 1080,
+    // el menú debe seguir ofreciendo 1080 aunque el stream cargado sea 360.
+    connect(m_yt, &Yt::streamHeightsReady, this, &WatchPage::onStreamHeights);
     connect(m_yt, &Yt::detailReady, this, &WatchPage::onDetailReady);
     connect(m_yt, &Yt::detailFailed, this, &WatchPage::onDetailFailed);
     connect(m_yt, &Yt::relatedReady, this, &WatchPage::onRelatedReady);
@@ -768,6 +775,9 @@ void WatchPage::onCurrentChanged()
         m_title->setText(QStringLiteral("Reproduciendo…"));
         return;
     }
+    // Nuevo vídeo: el techo de calidades disponibles se recalcula con su
+    // streamHeightsReady; hasta entonces no se arrastra el del anterior.
+    m_availableMaxH = 0;
     m_title->setText(m_player->current().title);
     m_liked = m_favs->isFavorite(m_player->current().id);
     m_disliked = false;
@@ -1232,16 +1242,11 @@ void WatchPage::onPhaseChanged(const QString &phase)
         showOverlayControls();
     else
         hideOverlayControls();
-    // Auto v1: recordar última resolución usada sin cambiar en caliente
-    if (m_autoQuality && phase == QLatin1String("ended")) {
-        // No se modifica setMaxHeight; solo se guarda el valor efectivo
-        // ya registrado por applyAutoFromVideoSize.
-    }
+    // Auto: la memoria (quality_auto) solo cambia con una elección explícita
+    // del menú (ver onQualityChanged); al terminar un vídeo no se toca el
+    // reproductor ni se sube resolución en caliente.
     NT_DEBUG("E2E overlay visible=%d idx=%d\n", m_overlay->isVisible(),
              m_overlay->currentIndex());
-    if (phase == QLatin1String("ended") && m_autoQuality) {
-        stepAutoUpIfPlaying();
-    }
     const QPoint qp = m_quality->mapToGlobal(QPoint(0, 0));
     NT_DEBUG("E2E combo geo global=(%d,%d) %dx%d\n", qp.x(), qp.y(),
              m_quality->width(), m_quality->height());
@@ -1267,44 +1272,60 @@ void WatchPage::onQualityChanged(int index)
 {
     static const int qualities[] = {360, 480, 720, 1080, 1440, 2160};
     const int height = qualities[index];
-    NT_DEBUG("E2E qualityChanged index=%d -> %dp\n", index, height);
+    NT_DEBUG("E2E qualityChanged index=%d -> %dp auto=%d\n", index, height,
+             m_autoQuality ? 1 : 0);
     m_player->setMaxHeight(height);
-    if (m_settings)
+    if (m_autoQuality) {
+        // En Auto el menú no sale de modo: la elección pasa a ser la ÚLTIMA
+        // resolución memorizada (quality_auto) y el siguiente vídeo la reusa.
+        m_autoHeight = height;
+        if (m_settings)
+            m_settings->set(QStringLiteral("quality_auto"),
+                            QString::number(height));
+    } else if (m_settings) {
+        // Calidad fija: se persiste como valor explícito (sale de Auto).
         m_settings->set(QStringLiteral("quality"), QString::number(height));
+    }
     if (m_player->isActive())
         m_player->reloadCurrent();
 }
-bool WatchPage::applyAutoFromVideoSize(int height)
+
+// Alturas reales del vídeo (adaptiveFormats de Innertube) para el vídeo en
+// reproducción. Con Auto el stream va capado a la calidad memorizada (p.ej.
+// 360) y el archivo cargado no trae las pistas superiores, así que el techo del
+// stream no sirve para el menú; este dato sí refleja lo que el vídeo ofrece.
+void WatchPage::onStreamHeights(const QString &videoId,
+                                const QVector<int> &heights)
 {
-    if (height <= 0)
-        return false;
-    // Auto v1: recordar la última resolución realmente usada sin
-    // cambiar resolución en caliente (no tocar reproductor).
-    m_autoHeight = height;
-    if (m_settings)
-        m_settings->set(QStringLiteral("quality_auto"),
-                        QString::number(m_autoHeight));
-    return true;
+    if (heights.isEmpty() || !m_player->isActive())
+        return;
+    // Solo del vídeo en reproducción: descartar resoluciones atrasadas.
+    if (m_player->current().id != videoId)
+        return;
+    int maxH = 0;
+    for (int h : heights) {
+        if (h > maxH)
+            maxH = h;
+    }
+    if (maxH <= 0)
+        return;
+    m_availableMaxH = maxH;
+    NT_DEBUG("E2E streamHeights video=%s max=%d n=%d\n",
+             videoId.toUtf8().constData(), maxH, int(heights.size()));
+    // Reaplicar con el techo real del vídeo (no el del stream filtrado).
+    applyQualityLimits(m_availableMaxH);
 }
 
-void WatchPage::stepAutoUpIfPlaying()
-{
-    // Auto v1: sin subida activa durante reproducción; solo recordar.
-    Q_UNUSED(this);
-}
-
-// Oculta los ítems del menú de resoluciones por encima del techo real del
-// archivo cargado (p.ej. clip de 720p → 1080p/1440p/2160p invisibles).
-// Si maxHeight <= 0 (consulta fallida o FILE_LOADED sin tracks aún), deja
-// el menú como está. Los ítems se ocultan (no se quitan) para preservar
-// los índices de idxToQuality().
-// Oculta los ítems del menú por encima del techo REAL de pistas del archivo
-// (p.ej. clip de 720p → 1080p/1440p/2160p invisibles). El menú solo conoce
-// {360,480,720,1080,1440,2160}; para vídeos sub-360p (p.ej. "Me at the zoo"
-// a 240p) quedan todos ocultos — el botón muestra la altura real del vídeo
-// (ver onVideoSizeChanged) en lugar de la calidad más cercana al menú.
+// Oculta los ítems del menú de resoluciones por encima del techo real: el del
+// vídeo (m_availableMaxH de Innertube) si se conoce; si no, el del archivo
+// cargado. Los ítems se ocultan (no se quitan) para preservar los índices de
+// idxToQuality(); un valor <= 0 (consulta fallida o FILE_LOADED sin pistas) no
+// toca el menú. Para clips sub-360p quedan todos ocultos y el botón muestra la
+// altura real (ver onVideoSizeChanged).
 void WatchPage::applyQualityLimits(int maxVideoHeight)
 {
+    if (m_availableMaxH > 0)
+        maxVideoHeight = m_availableMaxH;
     if (maxVideoHeight <= 0 || m_qualityItems.isEmpty())
         return;
     NT_DEBUG("E2E qualityLimits apply max=%d items=%d\n",
