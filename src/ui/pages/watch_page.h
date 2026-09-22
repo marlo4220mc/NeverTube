@@ -111,6 +111,9 @@ private:
     // el vídeo (adaptiveFormats) para que Auto no oculte calidades reales que
     // el stream cargado no trae (p.ej. Auto pide 360 de un vídeo 1080).
     void onStreamHeights(const QString &videoId, const QVector<int> &heights);
+    // Pinta la descripción del vídeo como HTML enriquecido (enlaces + saltos
+    // de línea) y guarda el texto plano. Vacía = oculta la descripción.
+    void applyDescription(const QString &description);
     void showPlaylistMenu();
     // Popup estilado "Nueva playlist" (mismo popupDialog que Biblioteca):
     // tras crearla, si hay vídeo pendiente se añade a la playlist nueva.

@@ -186,6 +186,23 @@ QJsonObject webClientContext(const QString &visitorData, const QString &hl)
     };
 }
 
+// Cuerpo de una respuesta de youtubei/v1 → QJsonObject. Quita el prefijo
+// anti-XSSI (")]}'") que YouTube antepone a algunas respuestas y tolera
+// cuerpos no-JSON (errores/HTML). Devuelve false si no hay objeto JSON.
+bool parseJsonObject(const QByteArray &body, QJsonObject *root)
+{
+    QByteArray json = body.trimmed();
+    if (json.startsWith(")]}'"))
+        json.remove(0, 4);
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject())
+        return false;
+    if (root)
+        *root = doc.object();
+    return true;
+}
+
 QString visitorDataFromSwJsData(const QByteArray &body)
 {
     QByteArray raw = body;
@@ -712,8 +729,7 @@ void Innertube::fetchHls(const QString &videoId, int preferredClient,
     m_hlsStartMs = QDateTime::currentMSecsSinceEpoch();
     NT_DEBUG("E2E innertube fetchHls id=%s client=%s\n",
              videoId.toUtf8().constData(), kPlayerClients[m_clientIndex].name);
-    if (m_visitorData.isEmpty()
-        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+    if (!hasFreshVisitor()) {
         m_playerPending = true;
         fetchVisitorData();
     } else
@@ -888,6 +904,12 @@ bool Innertube::retryBrowseWithFreshVisitor(bool *retried, bool *pending)
     return true;
 }
 
+bool Innertube::hasFreshVisitor() const
+{
+    return !m_visitorData.isEmpty()
+        && QDateTime::currentSecsSinceEpoch() < m_visitorExpiresAt;
+}
+
 void Innertube::fetchNext(const QString &videoId)
 {
     if (m_nextInFlight && m_nextVideoId == videoId) {
@@ -900,8 +922,7 @@ void Innertube::fetchNext(const QString &videoId)
     m_nextClientIndex = 0;
     m_bestNext.clear();
     NT_DEBUG("E2E innertube fetchNext id=%s\n", videoId.toUtf8().constData());
-    if (m_visitorData.isEmpty()
-        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+    if (!hasFreshVisitor()) {
         m_nextPending = true;
         fetchVisitorData();
         return;
@@ -920,8 +941,7 @@ void Innertube::fetchCurrentDetail(const QString &videoId)
     m_currentDetailVideoId = videoId;
     NT_DEBUG("E2E innertube fetchCurrentDetail id=%s\n",
              videoId.toUtf8().constData());
-    if (m_visitorData.isEmpty()
-        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+    if (!hasFreshVisitor()) {
         m_currentDetailPending = true;
         fetchVisitorData();
         return;
@@ -938,13 +958,10 @@ void Innertube::requestCurrentDetail()
         QString title;
         QString description;
         if (status == 200) {
-            QJsonParseError err;
-            QByteArray json = body.trimmed();
-            if (json.startsWith(")]}'"))
-                json.remove(0, 4);
-            const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
-            if (err.error == QJsonParseError::NoError && doc.isObject()) {
-                parseCurrentDetail(doc.object(), &title, &description);
+            QJsonObject jsonRoot;
+            const bool jsonOk = parseJsonObject(body, &jsonRoot);
+            if (jsonOk) {
+                parseCurrentDetail(jsonRoot, &title, &description);
             }
         }
         m_currentDetailInFlight = false;
@@ -1150,12 +1167,9 @@ void Innertube::handleNext(const QString &videoId, bool ok,
         m_bestNext.clear();
         return;
     }
-    QJsonParseError err;
-    QByteArray json = body.trimmed();
-    if (json.startsWith(")]}'"))
-        json.remove(0, 4);
-    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
-    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+    QJsonObject jsonRoot;
+    const bool jsonOk = parseJsonObject(body, &jsonRoot);
+    if (!jsonOk) {
         NT_DEBUG("E2E innertube next json fail size=%d prefix=%s\n", body.size(),
                  body.left(120).constData());
         if (tryNextClient())
@@ -1164,7 +1178,7 @@ void Innertube::handleNext(const QString &videoId, bool ok,
         m_bestNext.clear();
         return;
     }
-    const QVector<VideoInfo> related = parseRelated(doc.object());
+    const QVector<VideoInfo> related = parseRelated(jsonRoot);
     NT_DEBUG("E2E innertube next ok id=%s relacionados=%d\n",
              videoId.toUtf8().constData(), related.size());
     // Seleccionar la mejor respuesta: quedarse con la lista más larga y seguir
@@ -1199,8 +1213,7 @@ void Innertube::fetchRadio(const QString &videoId)
     m_radioFallback.clear();
     m_radioClientIndex = 0;
     NT_DEBUG("E2E innertube fetchRadio id=%s\n", videoId.toUtf8().constData());
-    if (m_visitorData.isEmpty()
-        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+    if (!hasFreshVisitor()) {
         m_radioPending = true;
         fetchVisitorData();
         return;
@@ -1295,12 +1308,9 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
         emit radioReady(videoId, QVector<VideoInfo>());
         return;
     }
-    QJsonParseError err;
-    QByteArray json = body.trimmed();
-    if (json.startsWith(")]}'"))
-        json.remove(0, 4);
-    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
-    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+    QJsonObject jsonRoot;
+    const bool jsonOk = parseJsonObject(body, &jsonRoot);
+    if (!jsonOk) {
         NT_DEBUG("E2E innertube radio json fail size=%d prefix=%s\n",
                  body.size(), body.left(120).constData());
         if (tryNextClient())
@@ -1311,14 +1321,14 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
 
     QVector<VideoInfo> videos;
     QString continuation;
-    parseWatchQueue(doc.object(), &videos, &continuation);
+    parseWatchQueue(jsonRoot, &videos, &continuation);
     if (videos.isEmpty()) {
         // El mix RDAMVM solo trae panel (playlistPanelVideoRenderer) para
         // vídeos con edición de música; para el resto el /next responde la
         // mezcla como recomendaciones (compactVideoRenderer). Se guarda la
         // primera mezcla vista y se sigue cascadeando por si otro cliente
         // trae el panel real; si ninguno lo trae, se emite la mezcla.
-        const QVector<VideoInfo> fb = parseRelated(doc.object());
+        const QVector<VideoInfo> fb = parseRelated(jsonRoot);
         // Cliente principal (VISIONOS): si ya responde mezcla de
         // recomendaciones, es la misma que emitiría el final de la cascada,
         // así que se entrega de inmediato. Ahorra hasta 4 peticiones secuenciales
@@ -1403,8 +1413,7 @@ void Innertube::fetchHome()
     // el refresh una vez por sesión (gana una RTT en el arranque). Si el
     // browse responde 500/vacío, handleHome refresca visitorData UNA vez y
     // reintenta (m_homeVisitorRetried) sin bucle.
-    if (m_visitorData.isEmpty()
-        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+    if (!hasFreshVisitor()) {
         m_homePending = true;
         fetchVisitorData();
         return;
@@ -1478,12 +1487,9 @@ void Innertube::handleHome(bool ok, const QString &error,
             emit homeReady(QVector<VideoInfo>());
         return;
     }
-    QJsonParseError err;
-    QByteArray json = body.trimmed();
-    if (json.startsWith(")]}'"))
-        json.remove(0, 4);
-    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
-    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+    QJsonObject jsonRoot;
+    const bool jsonOk = parseJsonObject(body, &jsonRoot);
+    if (!jsonOk) {
         NT_DEBUG("E2E innertube home json fail size=%d\n", body.size());
         if (more)
             emit homeMoreReady(QVector<VideoInfo>());
@@ -1496,7 +1502,7 @@ void Innertube::handleHome(bool ok, const QString &error,
     }
     QString continuation;
     const QVector<VideoInfo> videos =
-        parseHomeBrowse(doc.object(), &continuation);
+        parseHomeBrowse(jsonRoot, &continuation);
     m_homeContinuation = continuation;
     NT_DEBUG("E2E innertube home ok videos=%d cont=%s\n", videos.size(),
              continuation.isEmpty() ? "no" : "si");
@@ -1524,8 +1530,7 @@ void Innertube::fetchChannelVideos(const QString &channelId)
     m_channelVisitorRetried = false;
     NT_DEBUG("E2E innertube fetchChannelVideos id=%s\n",
              channelId.toUtf8().constData());
-    if (m_visitorData.isEmpty()
-        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+    if (!hasFreshVisitor()) {
         m_channelPending = true;
         fetchVisitorData();
         return;
@@ -1572,12 +1577,9 @@ void Innertube::handleChannel(bool ok, const QString &error,
         emit channelVideosReady(m_channelId, QVector<VideoInfo>());
         return;
     }
-    QJsonParseError err;
-    QByteArray json = body.trimmed();
-    if (json.startsWith(")]}'"))
-        json.remove(0, 4);
-    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
-    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+    QJsonObject jsonRoot;
+    const bool jsonOk = parseJsonObject(body, &jsonRoot);
+    if (!jsonOk) {
         NT_DEBUG("E2E innertube channel json fail size=%d\n", body.size());
         if (retryBrowseWithFreshVisitor(&m_channelVisitorRetried,
                                         &m_channelPending))
@@ -1586,7 +1588,7 @@ void Innertube::handleChannel(bool ok, const QString &error,
         return;
     }
     QVector<VideoInfo> videos =
-        collectVideoRenderers(doc.object(), kChannelTake);
+        collectVideoRenderers(jsonRoot, kChannelTake);
     if (videos.isEmpty()
         && retryBrowseWithFreshVisitor(&m_channelVisitorRetried,
                                        &m_channelPending))
@@ -1604,8 +1606,7 @@ void Innertube::fetchTrending()
     m_trendInFlight = true;
     m_trendVisitorRetried = false;
     NT_DEBUG("E2E innertube fetchTrending\n");
-    if (m_visitorData.isEmpty()
-        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+    if (!hasFreshVisitor()) {
         m_trendPending = true;
         fetchVisitorData();
         return;
@@ -1650,12 +1651,9 @@ void Innertube::handleTrending(bool ok, const QString &error,
         emit trendingReady(QVector<VideoInfo>());
         return;
     }
-    QJsonParseError err;
-    QByteArray json = body.trimmed();
-    if (json.startsWith(")]}'"))
-        json.remove(0, 4);
-    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
-    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+    QJsonObject jsonRoot;
+    const bool jsonOk = parseJsonObject(body, &jsonRoot);
+    if (!jsonOk) {
         NT_DEBUG("E2E innertube trending json fail size=%d\n", body.size());
         if (retryBrowseWithFreshVisitor(&m_trendVisitorRetried,
                                         &m_trendPending))
@@ -1664,7 +1662,7 @@ void Innertube::handleTrending(bool ok, const QString &error,
         return;
     }
     QVector<VideoInfo> videos =
-        collectVideoRenderers(doc.object(), kTrendingTake);
+        collectVideoRenderers(jsonRoot, kTrendingTake);
     if (videos.isEmpty()
         && retryBrowseWithFreshVisitor(&m_trendVisitorRetried,
                                        &m_trendPending))
@@ -1696,8 +1694,7 @@ void Innertube::fetchSearch(const QString &query, int limit)
     m_searchContinuation.clear();
     m_searchVisitorRetried = false;
     NT_DEBUG("E2E innertube fetchSearch q=%s\n", q.toUtf8().constData());
-    if (m_visitorData.isEmpty()
-        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+    if (!hasFreshVisitor()) {
         m_searchPending = true;
         fetchVisitorData();
         return;
@@ -1761,12 +1758,9 @@ void Innertube::handleSearch(const QString &query, bool ok,
         emit searchReady(query, QVector<VideoInfo>(), false);
         return;
     }
-    QJsonParseError err;
-    QByteArray json = body.trimmed();
-    if (json.startsWith(")]}'"))
-        json.remove(0, 4);
-    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
-    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+    QJsonObject jsonRoot;
+    const bool jsonOk = parseJsonObject(body, &jsonRoot);
+    if (!jsonOk) {
         NT_DEBUG("E2E innertube search json fail size=%d\n", body.size());
         if (!more
             && retryBrowseWithFreshVisitor(&m_searchVisitorRetried,
@@ -1777,7 +1771,7 @@ void Innertube::handleSearch(const QString &query, bool ok,
     }
     QString continuation;
     const QVector<VideoInfo> videos =
-        parseSearchBrowse(doc.object(), m_searchLimit, &continuation);
+        parseSearchBrowse(jsonRoot, m_searchLimit, &continuation);
     m_searchContinuation = continuation;
     if (!more && videos.isEmpty()
         && retryBrowseWithFreshVisitor(&m_searchVisitorRetried,
@@ -1800,8 +1794,7 @@ void Innertube::fetchChannelInfo(const QString &channelId)
     m_chInfoVisitorRetried = false;
     NT_DEBUG("E2E innertube fetchChannelInfo id=%s\n",
              channelId.toUtf8().constData());
-    if (m_visitorData.isEmpty()
-        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+    if (!hasFreshVisitor()) {
         m_chInfoPending = true;
         fetchVisitorData();
         return;
@@ -1842,13 +1835,10 @@ void Innertube::handleChannelInfo(const QString &channelId, bool ok,
     ChannelInfo info;
     info.id = channelId;
     if (ok) {
-        QJsonParseError err;
-        QByteArray json = body.trimmed();
-        if (json.startsWith(")]}'"))
-            json.remove(0, 4);
-        const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
-        if (err.error == QJsonParseError::NoError && doc.isObject())
-            parseChannelInfo(doc.object(), &info);
+        QJsonObject jsonRoot;
+        const bool jsonOk = parseJsonObject(body, &jsonRoot);
+        if (jsonOk)
+            parseChannelInfo(jsonRoot, &info);
         else
             NT_DEBUG("E2E innertube channelInfo json fail size=%d\n", body.size());
     } else {
@@ -1883,8 +1873,7 @@ void Innertube::fetchChannelTab(const QString &channelId, const QString &tab,
     st.limit = limit > 0 ? limit : kChannelTabTake;
     NT_DEBUG("E2E innertube fetchChannelTab id=%s tab=%s\n",
              channelId.toUtf8().constData(), tab.toUtf8().constData());
-    if (m_visitorData.isEmpty()
-        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+    if (!hasFreshVisitor()) {
         st.pending = true;
         m_tabStates.insert(key, st);
         fetchVisitorData();
@@ -1968,18 +1957,15 @@ void Innertube::handleChannelTab(const QString &channelId, const QString &tab,
         NT_DEBUG("E2E innertube channelTab HTTP err: %s\n",
                  error.toUtf8().constData());
     } else {
-        QJsonParseError err;
-        QByteArray json = body.trimmed();
-        if (json.startsWith(")]}'"))
-            json.remove(0, 4);
-        const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
-        if (err.error == QJsonParseError::NoError && doc.isObject()) {
+        QJsonObject jsonRoot;
+        const bool jsonOk = parseJsonObject(body, &jsonRoot);
+        if (jsonOk) {
             // Las tres pestañas van por el cliente WEB (lockups modernos); el
             // parser clásico queda como respaldo por si el layout cambia.
-            videos = collectWebLockups(doc.object(), st.limit);
+            videos = collectWebLockups(jsonRoot, st.limit);
             if (videos.isEmpty())
-                videos = collectVideoRenderers(doc.object(), st.limit);
-            continuation = firstContinuationToken(doc.object());
+                videos = collectVideoRenderers(jsonRoot, st.limit);
+            continuation = firstContinuationToken(jsonRoot);
         } else {
             NT_DEBUG("E2E innertube channelTab json fail size=%d\n", body.size());
         }
@@ -2011,8 +1997,7 @@ void Innertube::fetchVideoDetail(const QString &videoId)
     m_detailVisitorRetried = false;
     NT_DEBUG("E2E innertube fetchVideoDetail id=%s\n",
              videoId.toUtf8().constData());
-    if (m_visitorData.isEmpty()
-        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+    if (!hasFreshVisitor()) {
         m_detailPending = true;
         fetchVisitorData();
         return;
@@ -2058,13 +2043,10 @@ void Innertube::handleVideoDetail(const QString &videoId, bool ok,
         NT_DEBUG("E2E innertube videoDetail HTTP err: %s\n",
                  error.toUtf8().constData());
     } else {
-        QJsonParseError err;
-        QByteArray json = body.trimmed();
-        if (json.startsWith(")]}'"))
-            json.remove(0, 4);
-        const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
-        if (err.error == QJsonParseError::NoError && doc.isObject())
-            parseVideoDetail(doc.object(), &video, &description, &likeCount);
+        QJsonObject jsonRoot;
+        const bool jsonOk = parseJsonObject(body, &jsonRoot);
+        if (jsonOk)
+            parseVideoDetail(jsonRoot, &video, &description, &likeCount);
         else
             NT_DEBUG("E2E innertube videoDetail json fail size=%d\n", body.size());
     }
@@ -2088,8 +2070,7 @@ void Innertube::fetchPlaylist(const QString &playlistId, int limit)
     m_plVisitorRetried = false;
     NT_DEBUG("E2E innertube fetchPlaylist id=%s\n",
              playlistId.toUtf8().constData());
-    if (m_visitorData.isEmpty()
-        || QDateTime::currentSecsSinceEpoch() >= m_visitorExpiresAt) {
+    if (!hasFreshVisitor()) {
         m_plPending = true;
         fetchVisitorData();
         return;
@@ -2133,13 +2114,10 @@ void Innertube::handlePlaylist(const QString &playlistId, bool ok,
         NT_DEBUG("E2E innertube playlist HTTP err: %s\n",
                  error.toUtf8().constData());
     } else {
-        QJsonParseError err;
-        QByteArray json = body.trimmed();
-        if (json.startsWith(")]}'"))
-            json.remove(0, 4);
-        const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
-        if (err.error == QJsonParseError::NoError && doc.isObject())
-            parsePlaylistBrowse(doc.object(), &info, &videos);
+        QJsonObject jsonRoot;
+        const bool jsonOk = parseJsonObject(body, &jsonRoot);
+        if (jsonOk)
+            parsePlaylistBrowse(jsonRoot, &info, &videos);
         else
             NT_DEBUG("E2E innertube playlist json fail size=%d\n", body.size());
     }
@@ -2304,6 +2282,15 @@ QJsonValue findFirstValue(const QJsonValue &root, const QString &key)
     return QJsonValue(QJsonValue::Undefined);
 }
 
+// Miniatura de reserva de un vídeo cuando la respuesta no trae ninguna
+// (id de YouTube de 11 caracteres).
+QString webFallbackThumb(const QString &id)
+{
+    return id.size() == 11
+        ? QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg").arg(id)
+        : QString();
+}
+
 } // namespace
 
 // compactVideoRenderer / videoRenderer → VideoInfo.
@@ -2358,9 +2345,8 @@ VideoInfo Innertube::videoFromHomeRenderer(const QJsonObject &item) const
     v.viewCount = countFromText(homeTextOf(r->value(QStringLiteral("viewCountText"))));
     v.publishedAt = relativeToIso(homeTextOf(
         r->value(QStringLiteral("publishedTimeText"))));
-    if (v.thumbnailUrl.isEmpty() && v.id.size() == 11)
-        v.thumbnailUrl = QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg")
-                             .arg(v.id);
+    if (v.thumbnailUrl.isEmpty())
+        v.thumbnailUrl = webFallbackThumb(v.id);
     return v;
 }
 
@@ -2570,13 +2556,6 @@ int webLockupDuration(const QJsonObject &contentImage)
         }
     }
     return 0;
-}
-
-QString webFallbackThumb(const QString &id)
-{
-    return id.size() == 11
-        ? QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg").arg(id)
-        : QString();
 }
 
 // shortsLockupViewModel: id en entityId="shorts-shelf-item-<id>", título y
@@ -2864,18 +2843,6 @@ void Innertube::parseWatchQueue(const QJsonObject &root, QVector<VideoInfo> *out
     const QJsonObject contents =
         root.value(QStringLiteral("contents")).toObject();
 
-    auto textOf = [](const QJsonValue &val) {
-        const QJsonObject o = val.toObject();
-        const QJsonValue simple = o.value(QStringLiteral("simpleText"));
-        if (simple.isString())
-            return simple.toString();
-        const QJsonArray runs = o.value(QStringLiteral("runs")).toArray();
-        QString t;
-        for (const QJsonValue &r : runs)
-            t += r.toObject().value(QStringLiteral("text")).toString();
-        return t;
-    };
-
     auto grabContinuation = [continuation](const QJsonObject &panel) {
         if (!continuation->isEmpty())
             return;
@@ -2930,8 +2897,8 @@ void Innertube::parseWatchQueue(const QJsonObject &root, QVector<VideoInfo> *out
                 v.id = pvr.value(QStringLiteral("videoId")).toString();
             if (v.id.isEmpty())
                 continue;
-            v.title = textOf(pvr.value(QStringLiteral("title")));
-            v.channel = textOf(pvr.value(QStringLiteral("longBylineText")));
+            v.title = homeTextOf(pvr.value(QStringLiteral("title")));
+            v.channel = homeTextOf(pvr.value(QStringLiteral("longBylineText")));
             const QJsonArray thumbs = pvr.value(QStringLiteral("thumbnail"))
                                           .toObject()
                                           .value(QStringLiteral("thumbnails"))
@@ -2940,12 +2907,12 @@ void Innertube::parseWatchQueue(const QJsonObject &root, QVector<VideoInfo> *out
                 v.thumbnailUrl = thumbs.last().toObject()
                                      .value(QStringLiteral("url")).toString();
             QString durationText =
-                textOf(pvr.value(QStringLiteral("lengthText")));
+                homeTextOf(pvr.value(QStringLiteral("lengthText")));
             if (durationText.isEmpty()) {
                 const QJsonArray overlays =
                     pvr.value(QStringLiteral("thumbnailOverlays")).toArray();
                 for (const QJsonValue &over : overlays) {
-                    durationText = textOf(
+                    durationText = homeTextOf(
                         over.toObject()
                             .value(QStringLiteral("thumbnailOverlayTimeStatusRenderer"))
                             .toObject()
@@ -2964,7 +2931,7 @@ void Innertube::parseWatchQueue(const QJsonObject &root, QVector<VideoInfo> *out
                                     + parts.at(2).toInt();
             }
             v.viewCount =
-                textOf(pvr.value(QStringLiteral("viewCountText"))).toInt();
+                homeTextOf(pvr.value(QStringLiteral("viewCountText"))).toInt();
             out->append(v);
         }
     };
@@ -3020,24 +2987,12 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
     QVector<VideoInfo> out;
 
     // Texto de un nodo de texto (runs o simpleText).
-    auto textOf = [](const QJsonValue &val) {
-        const QJsonObject o = val.toObject();
-        const QJsonValue simple = o.value(QStringLiteral("simpleText"));
-        if (simple.isString())
-            return simple.toString();
-        const QJsonArray runs = o.value(QStringLiteral("runs")).toArray();
-        QString t;
-        for (const QJsonValue &r : runs)
-            t += r.toObject().value(QStringLiteral("text")).toString();
-        return t;
-    };
-
-    auto durationSecondsOf = [textOf](const QJsonArray &overlays) {
+    auto durationSecondsOf = [](const QJsonArray &overlays) {
         for (const QJsonValue &val : overlays) {
             const QJsonObject o = val.toObject();
             if (!o.contains(QStringLiteral("thumbnailOverlayTimeStatusRenderer")))
                 continue;
-            const QString t = textOf(o.value(
+            const QString t = homeTextOf(o.value(
                 QStringLiteral("thumbnailOverlayTimeStatusRenderer"))
                     .toObject()
                     .value(QStringLiteral("text")));
@@ -3089,7 +3044,7 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
                    .toString();
         if (v.id.isEmpty())
             return;
-        v.title = textOf(r->value(QStringLiteral("title")));
+        v.title = homeTextOf(r->value(QStringLiteral("title")));
         const QJsonArray ownerRuns =
             r->value(QStringLiteral("ownerText")).toObject()
                 .value(QStringLiteral("runs")).toArray();
@@ -3103,7 +3058,7 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
                               .value(QStringLiteral("browseId"))
                               .toString();
         } else {
-            v.channel = textOf(r->value(QStringLiteral("longBylineText")));
+            v.channel = homeTextOf(r->value(QStringLiteral("longBylineText")));
         }
         const QJsonArray thumbs = r->value(QStringLiteral("thumbnail"))
                                       .toObject()
@@ -3114,7 +3069,7 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
                                  .value(QStringLiteral("url")).toString();
         v.durationSeconds = durationSecondsOf(
             r->value(QStringLiteral("thumbnailOverlays")).toArray());
-        v.viewCount = viewCountOf(textOf(r->value(QStringLiteral("viewCountText"))));
+        v.viewCount = viewCountOf(homeTextOf(r->value(QStringLiteral("viewCountText"))));
         out.append(v);
     };
 
@@ -3251,19 +3206,15 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
         fail(error.isEmpty() ? QStringLiteral("player HTTP err") : error);
         return;
     }
-    QJsonParseError err;
-    QByteArray json = body.trimmed();
-    if (json.startsWith(")]}'"))
-        json.remove(0, 4);
-    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
-    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
-        NT_DEBUG("E2E innertube player json fail err=%s size=%d prefix=%s\n",
-                 err.errorString().toUtf8().constData(), body.size(),
-                 body.left(120).constData());
+    QJsonObject jsonRoot;
+    const bool jsonOk = parseJsonObject(body, &jsonRoot);
+    if (!jsonOk) {
+        NT_DEBUG("E2E innertube player json fail size=%d prefix=%s\n",
+                 body.size(), body.left(120).constData());
         fail(QStringLiteral("respuesta player no es JSON válido"));
         return;
     }
-    const QJsonObject root = doc.object();
+    const QJsonObject root = jsonRoot;
     const QJsonObject playability =
         root.value(QStringLiteral("playabilityStatus")).toObject();
     const QString status = playability.value(QStringLiteral("status")).toString();
@@ -4069,14 +4020,11 @@ bool feedsProtocolSelfTest()
                                                       const QByteArray &body) {
                 st.chanStatus = status;
                 st.chanDiagSize = body.size();
-                QJsonParseError err;
-                QByteArray json = body.trimmed();
-                if (json.startsWith(")]}'"))
-                    json.remove(0, 4);
-                const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+                QJsonObject jsonRoot;
+                const bool jsonOk = parseJsonObject(body, &jsonRoot);
                 const QString renderers =
-                    (err.error == QJsonParseError::NoError && doc.isObject())
-                        ? countRenderers(doc.object())
+                    (jsonOk)
+                        ? countRenderers(jsonRoot)
                         : QStringLiteral("(sin json)");
                 std::fprintf(stderr,
                              "FEEDS-PROTO channel HTTP status=%d size=%d "
@@ -4112,14 +4060,11 @@ bool feedsProtocolSelfTest()
                                                       const QByteArray &body) {
                 st.trendStatus = status;
                 st.trendDiagSize = body.size();
-                QJsonParseError err;
-                QByteArray json = body.trimmed();
-                if (json.startsWith(")]}'"))
-                    json.remove(0, 4);
-                const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+                QJsonObject jsonRoot;
+                const bool jsonOk = parseJsonObject(body, &jsonRoot);
                 const QString renderers =
-                    (err.error == QJsonParseError::NoError && doc.isObject())
-                        ? countRenderers(doc.object())
+                    (jsonOk)
+                        ? countRenderers(jsonRoot)
                         : QStringLiteral("(sin json)");
                 std::fprintf(stderr,
                              "FEEDS-PROTO trending HTTP status=%d size=%d "
