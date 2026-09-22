@@ -33,10 +33,12 @@ const ClipSpec kClips[] = {
 constexpr int kClipCount = 3;
 
 constexpr int kPollMs = 10;
-// 3 s por clip es de sobra para un archivo local de 512x288 incluso con
-// decodificador software; si expira no hay conclusión fiable y se prefiere
-// abortar (default h264) antes que asumir SW.
-constexpr qint64 kClipTimeoutMs = 3000;
+// 8 s por clip (con un reintento) es de sobra para un clip local de 512x288.
+// En máquinas virtuales/runners el PRIMER init del decodificador por hardware
+// (DXVA/VAAPI) puede tardar varios segundos y el clip expiraba a los 3 s; si
+// tras el reintento tampoco hay veredicto, no hay conclusión fiable y se
+// prefiere abortar (default conservador) antes que asumir SW.
+constexpr qint64 kClipTimeoutMs = 8000;
 
 } // namespace
 
@@ -120,6 +122,7 @@ void HwProbe::start()
     mpv_request_log_messages(m_mpv, "v");
 
     m_index = 0;
+    m_clipRetried = false;
     m_clipTimer.start();
     loadCurrent();
 
@@ -160,6 +163,7 @@ void HwProbe::advance(bool hardware)
         mpv_command(m_mpv, stop);
     }
     ++m_index;
+    m_clipRetried = false;
     m_clipTimer.restart();
     loadCurrent();
 }
@@ -234,6 +238,20 @@ void HwProbe::poll()
     }
 
     if (m_clipTimer.elapsed() > kClipTimeoutMs) {
+        if (!m_clipRetried) {
+            // Un reintento por clip: en VMs/runners el primer intento de hwdec
+            // puede tardar (init del decodificador DXVA/VAAPI) más que el
+            // timeout. El reintento reinicia el veredicto del clip.
+            m_clipRetried = true;
+            NT_DEBUG("E2E hwprobe retry clip=%s\n", kClips[m_index].file);
+            if (m_mpv) {
+                const char *stop[] = { "stop", nullptr };
+                mpv_command(m_mpv, stop);
+            }
+            m_clipTimer.restart();
+            loadCurrent();
+            return;
+        }
         NT_DEBUG("E2E hwprobe timeout clip=%s hwdec=%s\n", kClips[m_index].file,
                  hwdec.toUtf8().constData());
         finish(QString());
