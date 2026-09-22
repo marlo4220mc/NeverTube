@@ -78,16 +78,16 @@ public slots:
     // shelfRenderer/verticalListRenderer) con un visitorData fresco; un
     // visitorData persistido antiguo devuelve HTTP 500. Por eso fetchHome()
     // fuerza un sw.js_data fresco (una vez por sesión) antes del POST. Los
-    // resultados llegan por homeReady(); vacíos = hay que usar el fallback
-    // (el Home actual por yt-dlp se mantiene). fetchHomeMore() pide la
-    // continuación (homeMoreReady). Sin reintentos ni regeneraciones en bucle.
+    // resultados llegan por homeReady(); vacíos = sin feed. fetchHomeMore()
+    // pide la continuación (homeMoreReady). Sin reintentos ni regeneraciones
+    // en bucle.
     void fetchHome();
     void fetchHomeMore();
 
     // Vídeos del canal suscrito (POST /browse, browseId del canal + params de
     // la pestaña "Vídeos") con el cliente VISIONOS. Reutiliza el mismo parser
     // compactVideoRenderer del Home; llegan por channelVideosReady(). Vacíos =
-    // el feed cae al fallback yt-dlp (pestaña UU de uploads).
+    // sin vídeos.
     void fetchChannelVideos(const QString &channelId);
     // Tendencias (POST /browse, browseId FEtrending) con VISIONOS. llegan por
     // trendingReady(). Hoy YouTube retira/redirige las tendencias anónimas
@@ -160,11 +160,11 @@ signals:
                             const QString &description);
     // Feed del Home (browse FEwhat_to_watch). Vacío = el endpoint no devolvió
     // vídeos (500 con visitorData antiguo, cambio de layout, sin feed
-    // disponible); la app usa entonces el fallback yt-dlp.
+    // disponible).
     void homeReady(const QVector<VideoInfo> &videos);
     void homeMoreReady(const QVector<VideoInfo> &videos);
     // Vídeos de un canal (browse "Vídeos" tab) y Tendencias (browse
-    // FEtrending). Vacíos = usar el fallback yt-dlp.
+    // FEtrending). Vacíos = sin resultados.
     void channelVideosReady(const QString &channelId,
                             const QVector<VideoInfo> &videos);
     void trendingReady(const QVector<VideoInfo> &videos);
@@ -392,7 +392,7 @@ private:
     bool m_channelVisitorRetried = false;
 
     // Petición de Tendencias (browse FEtrending). Independiente; si falla/
-    // vacía, la app cae al fallback yt-dlp o a ocultar la sección.
+    // responde vacía, la app oculta la sección.
     bool m_trendPending = false;
     bool m_trendInFlight = false;
     bool m_trendVisitorRetried = false;
@@ -404,6 +404,7 @@ private:
     bool m_searchVisitorRetried = false;
     QString m_searchQuery;
     QString m_searchContinuation;
+    int m_searchLimit = 20;
     // Ficha de canal (browse "Información").
     bool m_chInfoPending = false;
     bool m_chInfoInFlight = false;
@@ -417,6 +418,7 @@ private:
     QString m_chTabId;
     QString m_chTabName;
     QString m_chTabContinuation;
+    int m_chTabLimit = 25;
     // Detalle del vídeo (/next).
     bool m_detailPending = false;
     bool m_detailInFlight = false;

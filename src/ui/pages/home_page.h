@@ -29,12 +29,12 @@ class Yt;
 //   3. ✨ Recomendado YouTube   : browse FEwhat_to_watch VISIONOS (≤3×8, TTL 60 min)
 //   4. 🎲 Descubre             : ≤5 vídeos de radios GUARDADAS (1-2 por radio,
 //                                fuente persistente SQLite, TTL 60 min)
-//   5. 🔥 Tendencias           : ≤8, reutiliza el trending yt-dlp (TTL 2 h)
+//   5. 🔥 Tendencias           : ≤8, trending por Innertube (TTL 2 h)
 // Caché en memoria con TTL: al entrar Home se muestra lo cached al momento y si
 // caducó se refresca UNA vez en segundo plano (single-flight, sin polling). Si
 // la actualización falla o devuelve vacío se CONSERVA la sección cacheada
 // anterior (memoria y UI; no se oculta ni se reemplaza por vacío ni se refresca
-// fetched_at). El fallback yt-dlp (feed de suscripciones + tendencias) nunca
+// fetched_at). El feed de suscripciones y las tendencias (Innertube) nunca
 // desaparece: si esas secciones se quedan vacías tras fallar todo, se mantiene
 // lo persistido en home_cache. Lo persistido en BD se reemplaza solo cuando
 // llega una respuesta de red VÁLIDA (nunca por un fallo).

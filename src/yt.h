@@ -63,8 +63,8 @@ public:
     void radioVideos(const QString &videoId);
     void radioMore();
     // Home real por Innertube (browse FEwhat_to_watch). Los resultados llegan
-    // por homeReady(); vacíos = usar el fallback (el Home por yt-dlp se
-    // mantiene). homeMore() pide la continuación si la respuesta la trajo.
+    // por homeReady(); vacíos = sin feed. homeMore() pide la continuación si
+    // la respuesta la trajo.
     void home();
     void homeMore();
     bool homeHasContinuation() const;
@@ -124,8 +124,8 @@ signals:
     void channelInfoReady(const ChannelInfo &channel);
     void detailReady(const VideoInfo &video, const QString &description,
                      qint64 likeCount, const QVector<FormatInfo> &formats);
-    // Todos los intentos de getDetail fallaron para este vídeo (ningún
-    // cliente yt-dlp devolvió metadatos válidos).
+    // getDetail no obtuvo metadatos válidos del /next (vídeo no disponible o
+    // respuesta vacía).
     void detailFailed(const QString &videoId);
     void playlistDetailReady(const PlaylistInfo &info,
                              const QVector<VideoInfo> &videos);
@@ -141,8 +141,8 @@ signals:
     void relatedReady(const QString &videoId, const QVector<VideoInfo> &videos);
     void radioReady(const QString &videoId, const QVector<VideoInfo> &videos);
     // Detalle traducido del vídeo actual (título y descripción) del /next
-    // normal, en el idioma "hl" solicitado. WatchPage lo usa para sobrescribir
-    // el título/desc en inglés que trae getDetail (yt-dlp, no traduce).
+    // normal, en el idioma "hl" solicitado. WatchPage lo usa solo cuando el
+    // idioma de audio es explícito (es/en/pt).
     void currentDetailReady(const QString &videoId, const QString &title,
                             const QString &description);
     void homeReady(const QVector<VideoInfo> &videos);
@@ -204,15 +204,13 @@ private:
     QHash<QString, int> m_winningClient;
 };
 
-// Selftest de la cadena real del feed en Yt: relay Innertube → fallback
-// yt-dlp → señal channelVideosFinished/trendingFinished. Verifica que llega un
-// resultado dentro de un plazo (Innertube o fallback) sin cuelgues, y registra
-// qué fuente respondió. No toca el reproductor ni SQLite.
+// Selftest de la cadena real del feed en Yt: canal por Innertube + trending →
+// señales channelVideosFinished/trendingFinished. Verifica que llega un
+// resultado dentro de un plazo, sin cuelgues. No toca el reproductor ni SQLite.
 bool feedsChainSelfTest();
 
-// Selftest de la ruta de búsqueda yt-dlp de la app (Yt::search → execJson):
-// lanza una búsqueda real (red) y exige vídeos con id no vacío. Falla si el
-// binario yt-dlp no inicia (parseVideos({}) → 1 vídeo falso "Sin título").
+// Selftest de la BÚSQUEDA por Innertube (Yt::search): lanza una búsqueda real
+// (red) y exige vídeos con id no vacío.
 bool searchSelfTest();
 
 // Selftest offline del HLS sintético de AV1: valida la playlist generada

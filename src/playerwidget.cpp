@@ -402,7 +402,7 @@ void PlayerWidget::setAudioFile(const QString &url)
     m_pendingAudioFile = url;
     if (!m_mpv)
         return;
-    // Flujo clásico/yt-dlp: nada que añadir; además limpia la pista externa
+    // Flujo clásico: nada que añadir; además limpia la pista externa
     // de un vídeo anterior con audio-file merodeando en mpv.
     if (url.isEmpty()) {
         const char *drop[] = { "audio-file-remove", "auto", nullptr };

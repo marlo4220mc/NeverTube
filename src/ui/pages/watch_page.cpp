@@ -1185,8 +1185,8 @@ void WatchPage::onDetailReady(const VideoInfo &video, const QString &desc,
 
 // Detalle traducido del vídeo actual (/next): título y descripción en el
 // idioma "hl" solicitado. Se aplica si coincide el vídeo y el idioma no es
-// "original" (cuando es original, el detail yt-dlp ya muestra lo que YouTube
-// entrega por defecto y no queremos sobrescribir).
+// "original" (cuando es original, el detail de Innertube ya muestra lo que
+// YouTube entrega por defecto y no queremos sobrescribir).
 void WatchPage::onCurrentDetailReady(const QString &videoId,
                                      const QString &title,
                                      const QString &description)
