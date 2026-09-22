@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "../../db/repositories.h"
+#include "../../debug.h"
 #include "../../yt.h"
 #include "../icons.h"
 #include "../theme.h"
@@ -86,6 +87,7 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
         m_lists.append(list);
         m_videos.append(QVector<VideoInfo>());
         m_tabKeys.append(keys.at(i));
+        m_tabLoaded.append(0);
         tabLayout->addWidget(list, 1);
         auto *more = new QPushButton(QStringLiteral("Mostrar más"), tabWrap);
         more->setObjectName(QStringLiteral("primary"));
@@ -111,6 +113,9 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     connect(m_yt, &Yt::channelInfoReady, this, &ChannelPage::onChannelInfo);
     connect(m_yt, &Yt::channelTabVideosFinished, this,
             &ChannelPage::onTabVideos);
+    // Carga perezosa: la pestaña que el usuario abre se pide en ese momento.
+    connect(m_tabs, &QTabWidget::currentChanged, this,
+            [this](int index) { loadTab(index); });
     connect(m_thumbs, &ThumbnailCache::ready, this,
             &ChannelPage::onAvatarReady);
     connect(m_subscribeBtn, &QPushButton::clicked, this, [this]() {
@@ -147,9 +152,25 @@ void ChannelPage::openChannel(const QString &channelId)
         button->setEnabled(true);
     }
     m_yt->channelInfo(channelId);
-    m_yt->channelTabVideos(channelId, QStringLiteral("videos"), 25);
-    m_yt->channelTabVideos(channelId, QStringLiteral("shorts"), 25);
-    m_yt->channelTabVideos(channelId, QStringLiteral("live"), 25);
+    // Carga perezosa: solo se piden los vídeos al abrir; shorts/directos al
+    // entrar en su pestaña (cada respuesta pesa ~400-500 KB).
+    m_tabLoaded.fill(0);
+    m_tabs->setCurrentIndex(0);
+    loadTab(0);
+}
+
+void ChannelPage::loadTab(int index)
+{
+    if (index < 0 || index >= m_tabKeys.size() || m_channelId.isEmpty())
+        return;
+    if (index < m_tabLoaded.size() && m_tabLoaded.at(index))
+        return;
+    if (index < m_tabLoaded.size())
+        m_tabLoaded[index] = 1;
+    NT_DEBUG("E2E channel loadTab id=%s tab=%s\n",
+             m_channelId.toUtf8().constData(),
+             m_tabKeys.at(index).toUtf8().constData());
+    m_yt->channelTabVideos(m_channelId, m_tabKeys.at(index), 25);
 }
 
 void ChannelPage::onChannelInfo(const ChannelInfo &channel)
