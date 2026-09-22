@@ -245,6 +245,12 @@ jobs:
           #  - api-ms-win-core-winrt|-winrt-error|-path|-synch (W8) y las APIs de
           #    espera por dirección (WaitOnAddress/WakeByAddress*): presentes en
           #    builds de mpv nuevos, no en Win7.
+          #  - AddDllDirectory / SetDefaultDllDirectories (KB2533623 en Win7):
+          #    el instalador YA NO instala el KB (era para yt-dlp/Python, ya
+          #    fuera). Si alguna DLL del paquete lo importara, la app no
+          #    arrancaría en la máquina de pruebas sin esa update; este gate lo detecta.
+          #    (GetFileInformationByHandleEx y GetFinalPathNameByHandle* son
+          #    Vista+, no hacen falta aquí.)
           # dumpbin /imports lista todos los entry points que importa cada DLL
           # del paquete (versión x86, carga en la máquina de pruebas; dumpbin Hostx64/x64
           # analiza igual DLLs i686, como ya hace el step de configure).
@@ -257,7 +263,8 @@ jobs:
             'GetSystemMetricsForDpi','GetDpiForMonitor','PathCchCanonicalizeEx',
             'SetThreadDpiAwarenessContext','SetProcessDpiAwarenessContext',
             'WaitOnAddress','WakeByAddressAll','WakeByAddressSingle',
-            'RoGetActivationFactory','RoOriginateLanguageException')
+            'RoGetActivationFactory','RoOriginateLanguageException',
+            'AddDllDirectory','SetDefaultDllDirectories')
           Get-ChildItem dist -Recurse -Filter *.dll | ForEach-Object {
             $imp = & $dumpbin /imports $_.FullName
             if ($LASTEXITCODE -ne 0) {
