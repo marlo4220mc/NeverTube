@@ -2324,19 +2324,30 @@ VideoInfo Innertube::videoFromHomeRenderer(const QJsonObject &item) const
     if (v.id.isEmpty())
         return VideoInfo{};
     v.title = homeTextOf(r->value(QStringLiteral("title")));
-    const QJsonArray ownerRuns =
-        r->value(QStringLiteral("ownerText")).toObject()
-            .value(QStringLiteral("runs")).toArray();
-    if (!ownerRuns.isEmpty()) {
-        const QJsonObject o0 = ownerRuns.at(0).toObject();
-        v.channel = o0.value(QStringLiteral("text")).toString();
-        v.channelId = o0.value(QStringLiteral("navigationEndpoint"))
-                          .toObject().value(QStringLiteral("browseEndpoint"))
-                          .toObject().value(QStringLiteral("browseId"))
-                          .toString();
-    } else {
-        v.channel = homeTextOf(r->value(QStringLiteral("longBylineText")));
+    // El canal va en ownerText (Home/canal) o longBylineText/shortBylineText
+    // (search): el primer run con browseEndpoint.browseId da nombre e id.
+    for (const char *key : {"ownerText", "longBylineText", "shortBylineText"}) {
+        const QJsonArray runs = r->value(QString::fromLatin1(key)).toObject()
+                                    .value(QStringLiteral("runs")).toArray();
+        for (const QJsonValue &rv : runs) {
+            const QJsonObject o = rv.toObject();
+            const QString id = o.value(QStringLiteral("navigationEndpoint"))
+                                   .toObject()
+                                   .value(QStringLiteral("browseEndpoint"))
+                                   .toObject()
+                                   .value(QStringLiteral("browseId"))
+                                   .toString();
+            if (!id.isEmpty()) {
+                v.channel = o.value(QStringLiteral("text")).toString();
+                v.channelId = id;
+                break;
+            }
+        }
+        if (!v.channelId.isEmpty())
+            break;
     }
+    if (v.channel.isEmpty())
+        v.channel = homeTextOf(r->value(QStringLiteral("longBylineText")));
     const QJsonArray thumbs = r->value(QStringLiteral("thumbnail"))
                                   .toObject().value(QStringLiteral("thumbnails"))
                                   .toArray();
