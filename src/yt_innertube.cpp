@@ -1723,10 +1723,10 @@ void Innertube::requestSearch(bool more)
     m_http->setResult([this, query, more](int status, const QByteArray &body) {
         NT_DEBUG("E2E innertube search HTTP status=%d size=%d\n", status,
                  body.size());
-        handleSearch(status == 200, QString(), body, more);
+        handleSearch(query, status == 200, QString(), body, more);
     });
-    m_http->setError([this, more](const QString &reason) {
-        handleSearch(false, reason, QByteArray(), more);
+    m_http->setError([this, query, more](const QString &reason) {
+        handleSearch(query, false, reason, QByteArray(), more);
     });
     m_http->setTimeoutMs(kPlayerTimeoutMs);
     m_http->setVisitorId(m_visitorData);
@@ -1747,11 +1747,11 @@ void Innertube::requestSearch(bool more)
                  nullptr, nullptr, nullptr);
 }
 
-void Innertube::handleSearch(bool ok, const QString &error,
-                             const QByteArray &body, bool more)
+void Innertube::handleSearch(const QString &query, bool ok,
+                             const QString &error, const QByteArray &body,
+                             bool more)
 {
     m_searchInFlight = false;
-    const QString query = m_searchQuery;
     if (!ok) {
         NT_DEBUG("E2E innertube search HTTP err: %s\n",
                  error.toUtf8().constData());
@@ -1816,10 +1816,10 @@ void Innertube::requestChannelInfo()
     m_http->setResult([this, channelId](int status, const QByteArray &body) {
         NT_DEBUG("E2E innertube channelInfo HTTP status=%d size=%d id=%s\n",
                  status, body.size(), channelId.toUtf8().constData());
-        handleChannelInfo(status == 200, QString(), body);
+        handleChannelInfo(channelId, status == 200, QString(), body);
     });
-    m_http->setError([this](const QString &reason) {
-        handleChannelInfo(false, reason, QByteArray());
+    m_http->setError([this, channelId](const QString &reason) {
+        handleChannelInfo(channelId, false, reason, QByteArray());
     });
     m_http->setTimeoutMs(kPlayerTimeoutMs);
     m_http->setVisitorId(m_visitorData);
@@ -1836,11 +1836,10 @@ void Innertube::requestChannelInfo()
                  nullptr, nullptr, nullptr);
 }
 
-void Innertube::handleChannelInfo(bool ok, const QString &error,
-                                  const QByteArray &body)
+void Innertube::handleChannelInfo(const QString &channelId, bool ok,
+                                  const QString &error, const QByteArray &body)
 {
     m_chInfoInFlight = false;
-    const QString channelId = m_chInfoId;
     ChannelInfo info;
     info.id = channelId;
     if (ok) {
@@ -2028,10 +2027,10 @@ void Innertube::requestVideoDetail()
     m_http->setResult([this, videoId](int status, const QByteArray &body) {
         NT_DEBUG("E2E innertube videoDetail HTTP status=%d size=%d\n", status,
                  body.size());
-        handleVideoDetail(status == 200, QString(), body);
+        handleVideoDetail(videoId, status == 200, QString(), body);
     });
-    m_http->setError([this](const QString &reason) {
-        handleVideoDetail(false, reason, QByteArray());
+    m_http->setError([this, videoId](const QString &reason) {
+        handleVideoDetail(videoId, false, reason, QByteArray());
     });
     m_http->setTimeoutMs(kPlayerTimeoutMs);
     m_http->setVisitorId(m_visitorData);
@@ -2049,11 +2048,10 @@ void Innertube::requestVideoDetail()
                  nullptr, nullptr, nullptr);
 }
 
-void Innertube::handleVideoDetail(bool ok, const QString &error,
-                                  const QByteArray &body)
+void Innertube::handleVideoDetail(const QString &videoId, bool ok,
+                                  const QString &error, const QByteArray &body)
 {
     m_detailInFlight = false;
-    const QString videoId = m_detailId;
     VideoInfo video;
     QString description;
     qint64 likeCount = 0;
@@ -2106,10 +2104,10 @@ void Innertube::requestPlaylist()
     m_http->setResult([this, playlistId](int status, const QByteArray &body) {
         NT_DEBUG("E2E innertube playlist HTTP status=%d size=%d id=%s\n",
                  status, body.size(), playlistId.toUtf8().constData());
-        handlePlaylist(status == 200, QString(), body);
+        handlePlaylist(playlistId, status == 200, QString(), body);
     });
-    m_http->setError([this](const QString &reason) {
-        handlePlaylist(false, reason, QByteArray());
+    m_http->setError([this, playlistId](const QString &reason) {
+        handlePlaylist(playlistId, false, reason, QByteArray());
     });
     m_http->setTimeoutMs(kPlayerTimeoutMs);
     m_http->setVisitorId(m_visitorData);
@@ -2125,11 +2123,10 @@ void Innertube::requestPlaylist()
                  nullptr, nullptr, nullptr);
 }
 
-void Innertube::handlePlaylist(bool ok, const QString &error,
-                               const QByteArray &body)
+void Innertube::handlePlaylist(const QString &playlistId, bool ok,
+                               const QString &error, const QByteArray &body)
 {
     m_plInFlight = false;
-    const QString playlistId = m_plId;
     PlaylistInfo info;
     info.id = playlistId;
     QVector<VideoInfo> videos;
