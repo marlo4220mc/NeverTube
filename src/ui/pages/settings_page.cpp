@@ -23,10 +23,12 @@ static const char *kMiniVideoKey = "mini_video";
 static QStringList qualityOptions(bool noHw = false)
 {
     if (noHw)
-        return {QStringLiteral("Auto"), QStringLiteral("360p"),
+        return {QStringLiteral("Auto"), QStringLiteral("144p"),
+                QStringLiteral("240p"), QStringLiteral("360p"),
                 QStringLiteral("480p"), QStringLiteral("720p"),
                 QStringLiteral("1080p")};
-    return {QStringLiteral("Auto"), QStringLiteral("360p"),
+    return {QStringLiteral("Auto"), QStringLiteral("144p"),
+            QStringLiteral("240p"), QStringLiteral("360p"),
             QStringLiteral("480p"), QStringLiteral("720p"),
             QStringLiteral("1080p"), QStringLiteral("1440p"),
             QStringLiteral("2160p")};

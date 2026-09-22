@@ -571,6 +571,10 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
 
 QString Yt::qualityName(int height)
 {
+    if (height <= 144)
+        return QStringLiteral("144");
+    if (height <= 240)
+        return QStringLiteral("240");
     if (height <= 360)
         return QStringLiteral("360");
     if (height <= 480)
