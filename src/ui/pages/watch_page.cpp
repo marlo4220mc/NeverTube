@@ -39,6 +39,16 @@
 #include "../thumbnail_cache.h"
 #include "../video_list_view.h"
 
+// Resoluciones del menú del reproductor, de menor a mayor. Fuente ÚNICA de
+// verdad: los índices del menú (m_qualityItems), idxToQuality,
+// qualityIndexForHeight y la altura pedida a Yt salen de aquí. Debe coincidir
+// con las opciones de calidad de Ajustes (settings_page.cpp).
+namespace {
+const int kQualityHeights[] = {144, 240, 360, 480, 720, 1080, 1440, 2160};
+constexpr int kQualityCount =
+    static_cast<int>(sizeof(kQualityHeights) / sizeof(kQualityHeights[0]));
+} // namespace
+
 class PlayerContainer : public QWidget
 {
 public:
@@ -404,20 +414,19 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // ofrecer 1440p/2160p: el menú los oculta para que el usuario no elija una
     // resolución que un CPU puro no puede mover. Los índices se mantienen
     // alineados con idxToQuality(): solo se ocultan, no se quitan.
-    static const int kQualities[] = {360, 480, 720, 1080, 1440, 2160};
     const bool softAll = m_settings
         && m_settings->getString(QStringLiteral("codec_profile"),
                                  QStringLiteral("av1-hw"))
                == QStringLiteral("soft-all");
-    m_qualityItems.reserve(6);
-    for (int i = 0; i < 6; ++i) {
+    m_qualityItems.reserve(kQualityCount);
+    for (int i = 0; i < kQualityCount; ++i) {
         auto *item = new QPushButton(
-            QStringLiteral("%1p").arg(kQualities[i]), m_qualityMenu);
+            QStringLiteral("%1p").arg(kQualityHeights[i]), m_qualityMenu);
         item->setFixedWidth(90);
         // soft-all: CPU solo, no se ofrecen 1440p/2160p. Cada item se
         // guarda en m_qualityItems para ocultarlo en caliente si el mpv
         // emite un techo real inferior (ver applyQualityLimits).
-        item->setVisible(!(softAll && (i == 4 || i == 5)));
+        item->setVisible(!(softAll && kQualityHeights[i] >= 1440));
         const int idx = i;
         connect(item, &QPushButton::clicked, this, [this, idx]() {
             setQualityIndex(idx);
@@ -1270,8 +1279,7 @@ void WatchPage::onPositionChanged(double position, double duration)
 
 void WatchPage::onQualityChanged(int index)
 {
-    static const int qualities[] = {360, 480, 720, 1080, 1440, 2160};
-    const int height = qualities[index];
+    const int height = idxToQuality(index);
     NT_DEBUG("E2E qualityChanged index=%d -> %dp auto=%d\n", index, height,
              m_autoQuality ? 1 : 0);
     m_player->setMaxHeight(height);
@@ -1330,23 +1338,20 @@ void WatchPage::applyQualityLimits(int maxVideoHeight)
         return;
     NT_DEBUG("E2E qualityLimits apply max=%d items=%d\n",
              maxVideoHeight, int(m_qualityItems.size()));
-    static const int kQualities[] = {360, 480, 720, 1080, 1440, 2160};
     for (int i = 0; i < int(m_qualityItems.size()); ++i) {
         QPushButton *b = m_qualityItems.at(i);
         if (!b)
             continue;
-        b->setVisible(kQualities[i] <= maxVideoHeight);
+        b->setVisible(kQualityHeights[i] <= maxVideoHeight);
     }
     m_qualityMenu->adjustSize();
 }
 
 int WatchPage::qualityIndexForHeight(int height) const
 {
-    static const int qualities[] = {360, 480, 720, 1080, 1440, 2160};
-    constexpr int n = 6;
     int best = 0;
-    for (int i = 0; i < n; ++i) {
-        if (qualities[i] <= height)
+    for (int i = 0; i < kQualityCount; ++i) {
+        if (kQualityHeights[i] <= height)
             best = i;
         else
             break;
@@ -1370,9 +1375,8 @@ void WatchPage::onVideoSizeChanged(int width, int height)
 
 int WatchPage::idxToQuality(int idx) const
 {
-    static const int qualities[] = {360, 480, 720, 1080, 1440, 2160};
-    if (idx >= 0 && idx < 6)
-        return qualities[idx];
+    if (idx >= 0 && idx < kQualityCount)
+        return kQualityHeights[idx];
     return 720;
 }
 
