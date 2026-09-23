@@ -81,6 +81,12 @@ signals:
     // La posición se estancó > 5 s reproduciendo (sin pausa de usuario ni
     // buffer inicial). El controlador re-resuelve con URLs frescas y reanuda.
     void streamStalled();
+    // Interrupción de la reproducción distinta de un atasco de posición:
+    // EOF prematuro (posición << duración del vídeo) o pista de audio externa
+    // que nunca abrió (p.ej. 403 de YouTube sobre las URLs de la sesión: el
+    // vídeo avanza en silencio hasta que los segmentos también mueren). El
+    // controlador re-resuelve con URLs frescas y reanuda en la posición.
+    void streamInterrupted();
 
 protected:
     void initializeGL() override;
@@ -110,6 +116,10 @@ private:
     // oculta por encima del techo real para no ofrecer resoluciones que el
     // mpv no puede seleccionar.
     int probeMaxVideoHeight() const;
+    // true si mpv tiene una pista de audio activa (propiedad "audio-params").
+    // false => el stream se está reproduciendo sin audio (p.ej. audio externo
+    // rechazado por YouTube con 403): señal de sesión con URLs gateadas.
+    bool hasActiveAudio() const;
 
     mpv_handle *m_mpv = nullptr;
     mpv_render_context *m_rctx = nullptr;
@@ -147,6 +157,11 @@ private:
     QTimer *m_stallTimer = nullptr;
     qint64 m_lastProgressMs = 0;
     bool m_paused = false;
+    // El stream actual trae audio externo (audio-files aparte, flujo
+    // edge/AV1-HLS): si la posición avanza pero no hay pista de audio activa,
+    // el audio fue rechazado (403) y conviene re-resolver en vez de dejar el
+    // vídeo mudo hasta el EOF de los segmentos.
+    bool m_expectsExternalAudio = false;
     // Detección de "vídeo sin datos": con audio externo la posición avanza
     // aunque la pista de vídeo no cargue (queda el último frame del vídeo
     // anterior). m_cacheOk pasa a true cuando el demuxer cachea contenido.

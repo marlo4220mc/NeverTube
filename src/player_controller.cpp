@@ -39,8 +39,11 @@ void PlayerController::ensurePlayerConnections()
     disconnect(m_durConn);
     disconnect(m_errConn);
     disconnect(m_stallConn);
+    disconnect(m_interruptConn);
     m_stallConn = connect(m_player, &PlayerWidget::streamStalled, this,
                           &PlayerController::onStreamStalled);
+    m_interruptConn = connect(m_player, &PlayerWidget::streamInterrupted, this,
+                              &PlayerController::onStreamInterrupted);
     m_stateConn = connect(m_player, &PlayerWidget::stateChanged, this,
                           &PlayerController::onPlayerState);
     m_posConn = connect(m_player, &PlayerWidget::positionChanged, this,
@@ -413,6 +416,37 @@ void PlayerController::onStreamStalled()
              m_player->position());
     m_player->seek(m_player->position());
     return;
+}
+
+// Interrupción de la reproducción (EOF prematuro por sesión de URLs gateada
+// con 403, o pista de audio externa que nunca abrió): a diferencia del atasco
+// (micro-seek local, barato) aquí el stream ya se terminó o va sin audio, así
+// que la recuperación es re-resolver con URLs frescas y reanudar en la
+// posición actual. Acotado por el mismo presupuesto de intentos.
+void PlayerController::onStreamInterrupted()
+{
+    if (m_index < 0)
+        return;
+    // Reproducción estable el rato suficiente: reinicia el contador de
+    // intentos (una interrupción puntual cada muchos segundos no debe
+    // agotar el presupuesto acumulado de cortes anteriores).
+    if (m_stableSince.isValid() && m_stableSince.elapsed() > 60000)
+        m_recoverAttempts = 0;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    // Recaída rápida (<8s desde el último intento) o presupuesto agotado:
+    // la sesión de URLs sigue gateada -> se abandona y se muestra el error.
+    if (m_recoverAttempts >= 3 || (m_lastRecoverMs > 0
+                                   && now - m_lastRecoverMs < 8000)) {
+        setPhase(QStringLiteral("error"));
+        m_errorMessage = QStringLiteral(
+            "La reproducción se interrumpió y no se pudo recuperar.");
+        return;
+    }
+    m_lastRecoverMs = now;
+    ++m_recoverAttempts;
+    NT_DEBUG("E2E streamInterrupted -> reloadCurrent intento=%d pos=%.1f\n",
+             m_recoverAttempts, m_player->position());
+    reloadCurrent();
 }
 
 void PlayerController::stop()
