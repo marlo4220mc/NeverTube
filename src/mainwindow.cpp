@@ -616,7 +616,10 @@ bool MainWindow::handleShortcut(QKeyEvent *event)
     case Qt::Key_Up:
         if (!m_player.isActive())
             return false;
-        m_player.setVolume(qMin(m_player.volume() + 5.0, 100.0));
+        // Respetar volume_max (150/175/200 con boost): capar a 100 haría BAJAR
+        // el volumen si ya estamos por encima de 100 mientas se sube.
+        m_player.setVolume(qMin(m_player.volume() + 5.0,
+                                double(m_player.volumeMax())));
         persistVolume();
         updateMiniIcons();
         return true;
@@ -1242,6 +1245,13 @@ void MainWindow::openWatchResume(const QVector<VideoInfo> &videos,
 void MainWindow::openWatchAt(const QVector<VideoInfo> &videos, int startIndex,
                              qlonglong startPositionMs)
 {
+    // Guarda defensiva: datos procedentes de red/BD no deben poder crashear
+    // por un índice inválido (vector vacío o startIndex fuera de rango).
+    if (startIndex < 0 || startIndex >= videos.size()) {
+        NT_DEBUG("E2E openWatchAt rechazado startIndex=%d size=%d\n",
+                 startIndex, (int)videos.size());
+        return;
+    }
     // Sondeo de hardware en curso: no se puede reproducir todavía. Se encola la
     // petición (con su posición de reanudación) y se muestra el cartel, que se
     // cierra al terminar el sondeo, momento en que se abre el vídeo.

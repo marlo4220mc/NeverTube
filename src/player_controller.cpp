@@ -393,15 +393,25 @@ void PlayerController::onStreamStalled()
     if (m_stableSince.isValid() && m_stableSince.elapsed() > 60000)
         m_recoverAttempts = 0;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    // (1) Recaída rápida (<8s desde el último intento): el micro-seek local no
+    // Recaída rápida (<8s desde el último intento): el micro-seek local no
     // bastó -> síntoma de red real (URL caducada/cortada). Aquí sí se consume
-    // el presupuesto y se re-resuelve con URLs frescas vía reloadCurrent().
-    // (2) Presupuesto agotado: se abandona.
-    if (m_recoverAttempts >= 3 || (m_lastRecoverMs > 0
-                                   && now - m_lastRecoverMs < 8000)) {
-        setPhase(QStringLiteral("error"));
-        m_errorMessage = QStringLiteral(
-            "La reproducción se interrumpió y no se pudo recuperar.");
+    // el presupuesto y se re-resuelve con URLs frescas vía reloadCurrent();
+    // solo se abandona cuando el presupuesto se agota.
+    const bool rapidRelapse = m_lastRecoverMs > 0
+                              && now - m_lastRecoverMs < 8000;
+    if (rapidRelapse) {
+        if (m_recoverAttempts >= 3) {
+            // Presupuesto agotado: se abandona.
+            setPhase(QStringLiteral("error"));
+            m_errorMessage = QStringLiteral(
+                "La reproducción se interrumpió y no se pudo recuperar.");
+            return;
+        }
+        ++m_recoverAttempts;
+        m_lastRecoverMs = now;
+        NT_DEBUG("E2E streamStalled -> reloadCurrent intento=%d pos=%.1f\n",
+                 m_recoverAttempts, m_player->position());
+        reloadCurrent();
         return;
     }
     // Primer atasco detectado: el audio-buffer de mpv se agotó pero el vídeo
@@ -409,8 +419,8 @@ void PlayerController::onStreamStalled()
     // revive la pista al instante sin re-resolver red (reloadCurrent() hubiera
     // tardado 8-25s re-bajando URLs). Es local y barato: no cuenta contra el
     // presupuesto de intentos de red. mpv puede emitir streamStalled repetido
-    // mientras el demuxer se re-prima; si recae antes de 8s el bloque (1)
-    // decide que es red real.
+    // mientras el demuxer se re-prima; si recae antes de 8s la rama anterior
+    // decide que es red real y re-resuelve consumiendo presupuesto.
     m_lastRecoverMs = now;
     NT_DEBUG("E2E streamStalled -> micro-seek local pos=%.1f\n",
              m_player->position());
