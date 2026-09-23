@@ -35,12 +35,63 @@ constexpr int kClipCount = 3;
 constexpr int kPollMs = 10;
 // 8 s por clip (con un reintento) es de sobra para un clip local de 512x288.
 // En máquinas virtuales/runners el PRIMER init del decodificador por hardware
-// (DXVA/VAAPI) puede tardar varios segundos y el clip expiraba a los 3 s; si
-// tras el reintento tampoco hay veredicto, no hay conclusión fiable y se
-// prefiere abortar (default conservador) antes que asumir SW.
+// (DXVA/VAAPI) puede tardar varios segundos; si tras el reintento tampoco hay
+// veredicto, el clip queda indeterminado y se continúa con el siguiente códec.
 constexpr qint64 kClipTimeoutMs = 8000;
+// Gracia tras el primer frame: el veredicto del decodificador (log y errores
+// de ffmpeg) se encola 1-10 ms DESPUÉS del primer video-params. Decidir sin
+// esperarlo es lo que producía falsos positivos (av1-hw en i5 con qsv-copy:
+// los errores "av1_qsv: unsupported" llegaban 5 ms después del veredicto).
+constexpr qint64 kGraceMs = 400;
+
+// El códec del clip actual, p.ej. "av1-hw" -> "av1".
+QByteArray codecOf(int index)
+{
+    const QString profile = QLatin1String(kClips[index].profile);
+    const int dash = profile.indexOf(QLatin1Char('-'));
+    return profile.left(dash).toUtf8();
+}
+
+// Error del intento de HW del códec en el log de ffmpeg/vd: el intento falló
+// pero el clip puede seguir decodificándose por software. Es la señal que
+// desmiente un hwdec-current = "<api>-copy" activo (i5/HD4600, av1_qsv).
+bool hwAttemptFailed(const QString &prefix, const QString &text,
+                     const QByteArray &codec)
+{
+    if (!(prefix.contains(QLatin1String("ffmpeg"))
+          || prefix.contains(QLatin1String("vd"))
+          || prefix.contains(QLatin1String("hwdec"))))
+        return false;
+    if (!text.contains(QLatin1String(codec.constData()), Qt::CaseInsensitive))
+        return false;
+    static const char *kErrors[] = { "error", "unsupported", "invalid",
+                                     "failed", "could not",  "cannot" };
+    for (const char *e : kErrors) {
+        if (text.contains(QLatin1String(e), Qt::CaseInsensitive))
+            return true;
+    }
+    return false;
+}
 
 } // namespace
+
+namespace hwprobe {
+
+QString clipVerdict(bool sawHwLog, bool sawSwLog, bool sawHwFailed,
+                    const QString &hwdecCurrent)
+{
+    if (hwdecCurrent == QLatin1String("no"))
+        return QStringLiteral("SW");
+    if (sawSwLog || sawHwFailed)
+        return QStringLiteral("SW");
+    if (sawHwLog)
+        return QStringLiteral("HW");
+    if (!hwdecCurrent.isEmpty())
+        return QStringLiteral("HW"); // respaldo: backend activo, nada en contra
+    return QString();
+}
+
+} // namespace hwprobe
 
 HwProbe::HwProbe(QObject *parent)
     : QObject(parent)
@@ -106,9 +157,11 @@ void HwProbe::start()
     mpv_set_option_string(m_mpv, "config", "no");
     mpv_set_option_string(m_mpv, "load-scripts", "no");
     mpv_set_option_string(m_mpv, "terminal", "no");
-    // vd=v para capturar el veredicto real del decodificador:
-    //   "Using hardware decoding (<api>)" (info) / "Using software decoding" (verbose).
-    mpv_set_option_string(m_mpv, "msg-level", "all=no,vd=v");
+    // vd=v (veredicto del decodificador: "Using hardware decoding (...)" /
+    // "Using software decoding") + ffmpeg=v (errores del intento HW, p.ej.
+    // "av1_qsv: Error ... unsupported (-3)"). El módulo ffmpeg estaba en "no"
+    // y por eso el probe no veía que el intento HW había fallado.
+    mpv_set_option_string(m_mpv, "msg-level", "all=no,vd=v,ffmpeg=v");
     mpv_set_option_string(m_mpv, "keep-open", "yes");
     mpv_set_option_string(m_mpv, "force-window", "no");
     if (mpv_initialize(m_mpv) < 0) {
@@ -123,6 +176,7 @@ void HwProbe::start()
 
     m_index = 0;
     m_clipRetried = false;
+    m_swVerdicts = 0;
     m_clipTimer.start();
     loadCurrent();
 
@@ -138,24 +192,24 @@ void HwProbe::loadCurrent()
         return;
     const QByteArray p = m_clipPaths[m_index].toUtf8();
     const char *cmd[] = { "loadfile", p.constData(), "replace", nullptr };
-    // Nuevo clip, nuevo veredicto: el log del decodificador anterior no cuenta.
+    // Nuevo clip, nuevo veredicto: ni el log ni el estado de decode anteriores
+    // cuentan para este clip.
     m_sawHwLog = false;
     m_sawSwLog = false;
+    m_sawHwFailed = false;
+    m_decoded = false;
     mpv_command(m_mpv, cmd);
     NT_DEBUG("E2E hwprobe load %d=%s\n", m_index, p.constData());
 }
 
-void HwProbe::advance(bool hardware)
+// Siguiente códec de la escalera (o fin). Un clip "indeterminado" también
+// avanza: abortar dejaba al i5-4590 sin llegar a H.264, su perfil real.
+void HwProbe::advance()
 {
     if (m_done)
         return;
-    if (hardware) {
-        finish(QString::fromLatin1(kClips[m_index].profile));
-        return;
-    }
-    // Software en este códec: pasar al siguiente (o soft-all si era h264).
     if (m_index >= kClipCount - 1) {
-        finish(QStringLiteral("soft-all"));
+        endOfLadder();
         return;
     }
     if (m_mpv) {
@@ -168,10 +222,43 @@ void HwProbe::advance(bool hardware)
     loadCurrent();
 }
 
+void HwProbe::endOfLadder()
+{
+    // H.264 sin HW: si algún códec dio un SW decisivo real, "soft-all" es un
+    // veredicto (se persiste); si todo fue indeterminado, vacío (no persistir,
+    // reintentar al arrancar).
+    if (m_swVerdicts > 0) {
+        finish(QStringLiteral("soft-all"));
+    } else {
+        NT_DEBUG("E2E hwprobe todo indeterminado -> no persistir\n");
+        finish(QString());
+    }
+}
+
 void HwProbe::poll()
 {
     if (!m_mpv || m_done)
         return;
+
+    // Veredicto de un clip. Requiere frames decodificados (m_decoded) y que la
+    // ventana de gracia haya pasado para que lleguen los mensajes del
+    // decodificador (veredicto del log y errores del intento HW). HW solo si
+    // el log lo confirma; SW y UNKNOWN avanzan en la escalera.
+    const auto decide = [this](const QString &hwdec) {
+        const QString verdict = hwprobe::clipVerdict(
+            m_sawHwLog, m_sawSwLog, m_sawHwFailed, hwdec);
+        NT_DEBUG("E2E hwprobe %s hwdec=%s log(hw=%d sw=%d fail=%d) -> %s\n",
+                 kClips[m_index].file, hwdec.toUtf8().constData(),
+                 m_sawHwLog ? 1 : 0, m_sawSwLog ? 1 : 0,
+                 m_sawHwFailed ? 1 : 0, verdict.toUtf8().constData());
+        if (verdict == QLatin1String("HW")) {
+            finish(QString::fromLatin1(kClips[m_index].profile));
+            return;
+        }
+        if (verdict == QLatin1String("SW"))
+            ++m_swVerdicts;
+        advance();
+    };
 
     bool ended = false;
     while (true) {
@@ -184,7 +271,6 @@ void HwProbe::poll()
                 && end->reason != MPV_END_FILE_REASON_STOP)
                 ended = true;
         } else if (event->event_id == MPV_EVENT_LOG_MESSAGE) {
-            // Veredicto real del decodificador (ver header de hwprobe.h).
             auto *lm = static_cast<mpv_event_log_message *>(event->data);
             if (lm && lm->text) {
                 const QString text = QString::fromUtf8(lm->text);
@@ -192,6 +278,9 @@ void HwProbe::poll()
                     m_sawHwLog = true;
                 else if (text.contains(QLatin1String("Using software decoding")))
                     m_sawSwLog = true;
+                else if (hwAttemptFailed(QString::fromUtf8(lm->prefix), text,
+                                         codecOf(m_index)))
+                    m_sawHwFailed = true;
             }
         }
     }
@@ -206,42 +295,27 @@ void HwProbe::poll()
 
     int64_t h = 0;
     mpv_get_property(m_mpv, "video-params/h", MPV_FORMAT_INT64, &h);
-    const bool decoded = h > 0;
+    if (h > 0 && !m_decoded) {
+        m_decoded = true;
+        m_decodedTimer.restart();
+    }
 
-    // Solo concluimos con dato real: el clip decodificó (h>0) y mpv resolvió
-    // hwdec-current (lo deja vacío hasta activar el decodificador). Un
-    // END_FILE por error (sin llegar a decodificar) es INDETERMINADO, no
-    // "software": un fallo de decode no implica falta de soporte HW. En ese
-    // caso se aborta el sondeo y el llamante aplica un perfil conservador
-    // (soft-all) sin persistir, reintentando el sondeo al arrancar.
-    //
-    // El veredicto de HW manda desde el LOG de mpv. Si mpv dijo "Using software
-    // decoding" es software aunque hwdec-current reporte un backend (GPUs
-    // antiguas con dispositivo de software, p.ej. GMA 950). Solo si mpv no
-    // emitió ninguna de las dos líneas se usa hwdec-current como respaldo.
-    if (decoded && !hwdec.isEmpty()) {
-        const bool logVerdict = m_sawHwLog || m_sawSwLog;
-        const bool hardware = logVerdict ? (m_sawHwLog && !m_sawSwLog)
-                                         : (hwdec != QLatin1String("no"));
-        NT_DEBUG("E2E hwprobe %s hwdec=%s log(hw=%d sw=%d) -> %s\n",
-                 kClips[m_index].file, hwdec.toUtf8().constData(),
-                 m_sawHwLog ? 1 : 0, m_sawSwLog ? 1 : 0,
-                 hardware ? "HW" : "SW");
-        advance(hardware);
+    // 1) Primer frame decodificado + fin de la gracia -> decidir.
+    if (m_decoded && m_decodedTimer.elapsed() >= kGraceMs) {
+        decide(hwdec);
         return;
     }
-    if (ended) {
-        NT_DEBUG("E2E hwprobe %s decode-error -> indeterminado\n",
+    // 2) El clip terminó por error SIN llegar a decodificar: indeterminado.
+    if (ended && !m_decoded) {
+        NT_DEBUG("E2E hwprobe %s decode-error -> siguiente códec\n",
                  kClips[m_index].file);
-        finish(QString());
+        advance();
         return;
     }
-
+    // 3) Timeout del clip (init del decodificador lento en VMs): un reintento,
+    // y si tampoco, indeterminado (avanza a siguiente códec).
     if (m_clipTimer.elapsed() > kClipTimeoutMs) {
         if (!m_clipRetried) {
-            // Un reintento por clip: en VMs/runners el primer intento de hwdec
-            // puede tardar (init del decodificador DXVA/VAAPI) más que el
-            // timeout. El reintento reinicia el veredicto del clip.
             m_clipRetried = true;
             NT_DEBUG("E2E hwprobe retry clip=%s\n", kClips[m_index].file);
             if (m_mpv) {
@@ -252,9 +326,9 @@ void HwProbe::poll()
             loadCurrent();
             return;
         }
-        NT_DEBUG("E2E hwprobe timeout clip=%s hwdec=%s\n", kClips[m_index].file,
-                 hwdec.toUtf8().constData());
-        finish(QString());
+        NT_DEBUG("E2E hwprobe timeout clip=%s hwdec=%s\n",
+                 kClips[m_index].file, hwdec.toUtf8().constData());
+        advance();
     }
 }
 

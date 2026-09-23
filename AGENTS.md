@@ -146,32 +146,55 @@ El perfil que decide qué códec se pide a YouTube (`settings.codec_profile`)
 **no** se adivina durante la reproducción: se sondea **al arranque** con
 `HwProbe` (`src/hwprobe.*`), que reproduce en headless (`vo=null`,
 `hwdec=auto-copy`, sin audio ni config) tres micro-clips embebidos en
-`resources/clips/` (AV1, VP9, H.264) en ese orden y lee `hwdec-current` tras el
-primer frame decodificado. Perfiles: `av1-hw` > `vp9-hw` > `h264-hw` >
-`soft-all` (los tres caen a software). `MainWindow::applyCodecProfile` traduce el
+`resources/clips/` (AV1, VP9, H.264) en ese orden. Perfiles: `av1-hw` >
+`vp9-hw` > `h264-hw` > `soft-all`. `MainWindow::applyCodecProfile` traduce el
 perfil a `Yt::CodecProfile` (Modern/Vp9/Legacy), espera inicial de buffer y, en
-`soft-all`, `m_noHw` + tope 1080p. Mientras se sondea se usa `h264-hw` sin
-persistir y **no se reproduce**: la petición se encola (`m_hasPendingWatch`) y se
-lanza al terminar. El cartel "Detectando hardware" solo aparece si el sondeo
-tarda (>300 ms, PC básico) o si el usuario intenta reproducir mientras sondea.
+`soft-all`, `m_noHw` + tope 1080p. Mientras se sondea no se reproduce: la
+petición se encola (`m_hasPendingWatch`) y se lanza al terminar. El cartel
+"Detectando hardware" solo aparece si el sondeo tarda (>300 ms, PC básico) o
+si el usuario intenta reproducir mientras sondea.
 
-- Un `END_FILE` por error o un timeout **no** significa "software": es
-  indeterminado y se conserva el default sin persistir (se reintenta al
-  arrancar). Solo `decoded && hwdec-current != vacío` concluye.
+**Veredicto por clip (el log de mpv manda; `hwdec-current` solo corrobora):**
+con `msg-level=all=no,vd=v,ffmpeg=v` se capturan la línea del decodificador
+(`Using hardware/software decoding`), los errores del intento HW (`av1_qsv:
+unsupported`, `Error initializing…` → `sawHwFailed`) y los decodificadores
+software. **Gracia de 400 ms tras el primer frame** (`video-params/h > 0`):
+el veredicto del decodificador se encola 1–10 ms DESPUÉS del primer frame y
+decidir antes era el origen del falso positivo `av1-hw` en i5/HD4600 (QSV
+reporta `qsv-copy` pero no decodifica AV1; los errores llegaban 5 ms después
+del veredicto). `hwprobe::clipVerdict` (función pura, testeada con 9 casos
+offline en `--selftest-hwprobe`): `HW` solo con log de HW limpio y sin señales
+en contra; `SW` con log de SW, intento HW fallido o `hwdec-current == "no"`;
+`""` (indeterminado) si no hay señal → se **avanza a la siguiente códec** en
+vez de abortar (así el i5 llega a H.264, que sí decodifica por HW). Un
+`END_FILE` por error o un timeout sin frames también avanza como indeterminado.
+
+- Persistencia: primer códec con veredicto `HW` → ese perfil (se persiste);
+  si al final no hay HW pero hubo ≥1 `SW` decisivo → `soft-all` (veredicto
+  real, se persiste); si todo fue indeterminado → perfil vacío (soft-all
+  transitorio SIN persistir, se reintenta al arrancar). Solo
+  `decoded && veredicto` concluye.
+- Re-sondeo único al actualizar: la lógica del sondeo se versiona en
+  `settings.codec_probe_v` (`kCodecProbeVersion`). Si el valor persistido es de
+  una versión anterior (p.ej. un `av1-hw` falso positivo grabado por code viejo)
+  o no existe, se re-sondea UNA vez al arrancar **usando el valor guardado como
+  fallback** y el veredicto fresco lo reemplaza; al completarse se marca la
+  versión y los arranques siguientes son rápidos (no se re-sondea en cada boot,
+  crítico en la máquina de pruebas). Ajustes → "Volver a detectar hardware" borra
+  `codec_profile` y relanza `HwProbe` en caliente.
 - Nombres antiguos migrados al arrancar: `modern→av1-hw`, `vp9→vp9-hw`,
   `legacy→h264-hw`, `nohw→soft-all`.
-- Red de seguridad reactiva (`PlayerWidget::streamDecodeInfoReady`): si el
-  códec que el perfil da por HW se decodifica con `hwdec-current=no`, degrada la
-  escalera (`av1-hw→vp9-hw→h264-hw→soft-all`) y persiste. `PlayerWidget` reintenta
-  leer `hwdec-current` (llega vacío en el primer `video-params`) con un `QTimer`.
+- Red reactiva (`PlayerWidget::streamDecodeInfoReady`): **solo traza de
+  diagnóstico** (`codec_profile reactivo: ...`). El perfil se decide en el
+  arranque (HwProbe) y NO se degrada ni persiste en caliente.
 - `Yt::codecRankedScore(altura, mime) = rank*100000 + altura`: la preferencia de
   códec pesa más que la altura, así el códec que la GPU decodifica gana aunque su
   variante sea más baja (p. ej. `h264-hw` prefiere h264 1080 antes que VP9 2160,
   que iría a software). Se usa en `edgeHeight`, `buildEdgeMaster` y
   `buildFilteredMaster`. El HLS sintético AV1 (`buildAv1Hls`) solo se genera con
   perfil `Modern` (`av1-hw`).
-- Ajustes → "Volver a detectar hardware" borra `codec_profile` y relanza
-  `HwProbe` en caliente. El selftest `--selftest-hwprobe` imprime el perfil
+- El selftest `--selftest-hwprobe` verifica primero la tabla de decisión
+  offline (9 casos, regresión determinista en CI) y luego imprime el perfil
   detectado (dependiente de la GPU; no es un assert fijo).
 
 ## Puntos de entrada CLI

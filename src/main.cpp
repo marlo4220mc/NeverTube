@@ -122,6 +122,59 @@ static bool tlsHandshakeSelfTest(QString *outDetail)
     return false;
 }
 
+// Tabla de decisión del perfil HW probada offline (independiente de la GPU de
+// este equipo): reemplaza medidas los casos reales observados en máquinas que
+// no tenemos aquí (i5-4590/HD4600 con fallo av1_qsv -> SW; GMA 950 -> SW;
+// GPUs con HW real -> HW). Regresión determinista para CI.
+static bool hwprobeVerdictSelfTests()
+{
+    struct Case
+    {
+        bool hw;
+        bool sw;
+        bool fail;
+        const char *hwdec;
+        const char *want;
+    };
+    const Case cases[] = {
+        // GPU real: AV1 por Vulkan (p. ej. este equipo Linux).
+        { true, false, false, "vulkan-copy", "HW" },
+        // GPU real: D3D11.
+        { true, false, false, "d3d11va-copy", "HW" },
+        // Respaldo: backend activo sin señales en contra (tras la gracia).
+        { false, false, false, "dxva2-copy", "HW" },
+        // GMA 950: mpv confirmó software aunque haya un dispositivo WARP.
+        { false, true, false, "warp", "SW" },
+        // i5-4590/HD4600: el intento av1_qsv falló (unsupported) -> SW, aunque
+        // hwdec-current reporte qsv-copy (el falso positivo original).
+        { false, false, true, "qsv-copy", "SW" },
+        // i5: tras el fallo QSV hwdec-current termina en "no" -> SW.
+        { false, false, true, "no", "SW" },
+        // Log de software domina aunque antes hubiera una línea HW (cambio de
+        // decoder durante la gracia) -> SW.
+        { true, true, false, "vulkan-copy", "SW" },
+        // hwdec-current == "no" es decisivo aunque hubiera línea HW -> SW.
+        { true, false, false, "no", "SW" },
+        // Sin ninguna señal: indeterminado -> continuar la escalera.
+        { false, false, false, "", "" },
+    };
+    for (const Case &c : cases) {
+        const QString got =
+            hwprobe::clipVerdict(c.hw, c.sw, c.fail,
+                                 QString::fromUtf8(c.hwdec));
+        if (got != QLatin1String(c.want)) {
+            std::fprintf(stderr,
+                         "SELFTEST hwprobe verify FAIL hw=%d sw=%d fail=%d "
+                         "hwdec=%s want=%s got=%s\n",
+                         c.hw ? 1 : 0, c.sw ? 1 : 0, c.fail ? 1 : 0, c.hwdec,
+                         c.want, got.toUtf8().constData());
+            return false;
+        }
+    }
+    std::fprintf(stderr, "SELFTEST hwprobe verify -> ok (9 casos)\n");
+    return true;
+}
+
 int main(int argc, char *argv[])
 {
 #ifdef Q_OS_WIN
@@ -169,6 +222,11 @@ int main(int argc, char *argv[])
     }
 
     if (args.contains(QLatin1String("--selftest-hwprobe"))) {
+        // Offline: la tabla de decisión con los casos REALES observados
+        // (i5/HD4600 con fallo av1_qsv, GMA 950 software, GPU con HW) no
+        // depende de la GPU de este equipo; es una regresión CI determinista.
+        if (!hwprobeVerdictSelfTests())
+            return 1;
         // Diagnóstico dependiente de la GPU: imprime el perfil detectado
         // (av1-hw/vp9-hw/h264-hw/soft-all) o INDETERMINADO. No es un assert
         // fijo, sino una comprobación de que el sondeo concluye.
