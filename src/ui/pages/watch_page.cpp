@@ -321,6 +321,16 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     auto *btnRow = new QHBoxLayout;
     btnRow->setSpacing(6);
 
+    m_ovPrevBtn = new QPushButton(m_ctrlBar);
+    m_ovPrevBtn->setObjectName(QStringLiteral("iconBtn"));
+    m_ovPrevBtn->setCursor(Qt::PointingHandCursor);
+    m_ovPrevBtn->setIcon(nt::icon(nt::Icon::Prev, nt::kText, 20));
+    connect(m_ovPrevBtn, &QPushButton::clicked, this, [this]() {
+        if (m_player->hasPrevious())
+            m_player->previous();
+    });
+    btnRow->addWidget(m_ovPrevBtn);
+
     m_ovPlayBtn = new QPushButton(m_ctrlBar);
     m_ovPlayBtn->setObjectName(QStringLiteral("iconBtn"));
     m_ovPlayBtn->setCursor(Qt::PointingHandCursor);
@@ -1583,6 +1593,10 @@ void WatchPage::updateOverlayIcons()
         nt::kText, 22));
     m_ovNextBtn->setEnabled(m_player->hasNext());
     m_ovNextBtn->setIcon(nt::icon(nt::Icon::Next, nt::kText, 20));
+    if (m_ovPrevBtn) {
+        m_ovPrevBtn->setEnabled(m_player->hasPrevious());
+        m_ovPrevBtn->setIcon(nt::icon(nt::Icon::Prev, nt::kText, 20));
+    }
     m_ovMuteBtn->setIcon(nt::icon(
         m_player->muted() ? nt::Icon::Unmute : nt::Icon::Mute,
         nt::kText, 18));
