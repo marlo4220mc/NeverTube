@@ -47,6 +47,13 @@ namespace {
 const int kQualityHeights[] = {144, 240, 360, 480, 720, 1080, 1440, 2160};
 constexpr int kQualityCount =
     static_cast<int>(sizeof(kQualityHeights) / sizeof(kQualityHeights[0]));
+// Altura máxima del área de vídeo (PlayerContainer). El stretch de página
+// (3:1, vídeo vs. descripción+"A continuación") crecería el vídeo 3/4 de la
+// pantalla en ventanas maximizadas y dejaría el contenido SIN hueco. Este tope
+// solo muerde cuando el stretch ya supera los 560 px (ventanas grandes): en
+// ventana pequeña/mitad de pantalla el cap por aspecto (width/aspect) manda y
+// no cambia nada. Layout puro: no toca render ni el timer de 33 ms.
+constexpr int kMaxPlayerHeight = 560;
 } // namespace
 
 class PlayerContainer : public QWidget
@@ -118,12 +125,18 @@ private:
     {
         if (m_aspect <= 0.0)
             return;
+        // El vídeo mantiene su proporción y además nunca excede el tope
+        // absoluto: en pantallas grandes/maximizadas el stretch (3:1) haría
+        // crecer el área 3/4 de la ventana y descripción + "A continuación"
+        // se quedarían sin espacio. En ventanas pequeñas el cap por aspecto
+        // (width/aspect) es el que manda y este tope no cambia nada.
         const int h = qRound(width() / m_aspect);
+        const int capped = qMin(h, kMaxPlayerHeight);
         NT_DEBUG("E2E pc aspect=%.3f width=%d maxH=%d curMax=%d\n",
-                 m_aspect, width(), h, maximumHeight());
-        if (h == maximumHeight())
+                 m_aspect, width(), capped, maximumHeight());
+        if (capped == maximumHeight())
             return;
-        setMaximumHeight(h);
+        setMaximumHeight(capped);
     }
 
     QWidget *m_overlay;
