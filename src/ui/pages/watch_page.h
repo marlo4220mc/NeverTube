@@ -207,6 +207,7 @@ private:
     QWidget *m_ctrlBar = nullptr;
     QPushButton *m_ovPlayBtn = nullptr;
     QPushButton *m_ovNextBtn = nullptr;
+    QPushButton *m_ovPrevBtn = nullptr;
     SeekSlider *m_ovSeek = nullptr;
     QLabel *m_ovTime = nullptr;
     QPushButton *m_ovMuteBtn = nullptr;

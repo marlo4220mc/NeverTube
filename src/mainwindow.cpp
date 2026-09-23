@@ -613,6 +613,32 @@ bool MainWindow::handleShortcut(QKeyEvent *event)
             return false;
         m_player.seek(m_player.position() + 5.0);
         return true;
+    case Qt::Key_J:
+        // -10 s (estilo YouTube).
+        if (!m_player.isActive())
+            return false;
+        m_player.seek(m_player.position() - 10.0);
+        return true;
+    case Qt::Key_L:
+        // +10 s (estilo YouTube).
+        if (!m_player.isActive())
+            return false;
+        m_player.seek(m_player.position() + 10.0);
+        return true;
+    case Qt::Key_N:
+        // Siguiente vídeo de la cola.
+        if (!m_player.isActive())
+            return false;
+        if (m_player.hasNext())
+            m_player.next();
+        return true;
+    case Qt::Key_P:
+        // Vídeo anterior de la cola.
+        if (!m_player.isActive())
+            return false;
+        if (m_player.hasPrevious())
+            m_player.previous();
+        return true;
     case Qt::Key_Up:
         if (!m_player.isActive())
             return false;
