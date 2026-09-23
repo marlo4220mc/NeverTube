@@ -12,6 +12,7 @@
 #include <QWidget>
 
 #include "../../db/repositories.h"
+#include "../theme.h"
 
 static const char *kQualityKey = "quality";
 static const char *kQualityAutoKey = "quality_auto";
@@ -19,6 +20,7 @@ static const char *kNextModeKey = "next_mode";
 static const char *kAudioLangKey = "audio_language";
 static const char *kGridDensityKey = "grid_density";
 static const char *kMiniVideoKey = "mini_video";
+static const char *kAccentKey = "ui_accent";
 
 static QStringList qualityOptions(bool noHw = false)
 {
@@ -159,6 +161,34 @@ static QString gridDensityFromValue(const QString &val)
                                           : QStringLiteral("Cómoda");
 }
 
+// Color de acento de la app. La paleta (labels + hex) vive en la FUENTE ÚNICA
+// nt::accentOptions() (src/ui/theme.h); aquí solo se traduce label<->hex
+// contra ella y se persiste con kAccentKey. El defecto es el rojo NeverTube
+// histórico (primer elemento de la paleta).
+static QStringList accentOptions()
+{
+    QStringList out;
+    for (const nt::AccentOption &o : nt::accentOptions())
+        out << o.label;
+    return out;
+}
+
+static QString valueFromAccent(const QString &text)
+{
+    for (const nt::AccentOption &o : nt::accentOptions())
+        if (o.label == text)
+            return o.hex;
+    return nt::accentOptions().value(0).hex;
+}
+
+static QString accentFromValue(const QString &val)
+{
+    for (const nt::AccentOption &o : nt::accentOptions())
+        if (o.hex == val)
+            return o.label;
+    return nt::accentOptions().value(0).label;
+}
+
 // Texto legible del perfil detectado por HwProbe (codec_profile).
 static QString codecProfileText(const QString &val)
 {
@@ -183,6 +213,21 @@ void SettingsPage::updateCodecProfile(const QString &profile)
 {
     if (m_codecProfileLabel)
         m_codecProfileLabel->setText(codecProfileText(profile));
+}
+
+void SettingsPage::applyAccent()
+{
+    if (m_resetBtn) {
+        // Mismo estilo base que makeActionButton (padding 7/14) cambiando solo
+        // borde y color al acento vigente; consistente con el resto de botones
+        // de acción y sin cambio de tamaño al re-aplicar.
+        m_resetBtn->setStyleSheet(
+            QStringLiteral("font-size:12px; padding:7px 14px;"
+                           " background-color:#1F1F1F;"
+                           " border-radius:8px;"
+                           " border:1px solid %1; color:%1;"
+                           " font-weight:600;").arg(nt::accentHex()));
+    }
 }
 
 QPushButton *SettingsPage::makeActionButton(const QString &text)
@@ -569,8 +614,9 @@ void SettingsPage::buildUI()
     // Nunca toca archivos personales ni vídeos descargados.
     QPushButton *resetBtn = addActionButton(
         QStringLiteral("Restablecer aplicación"),
-        QStringLiteral("border:1px solid #FF0033; color:#FF0033;"
-                       " font-weight:600;"));
+        QStringLiteral("border:1px solid %1; color:%1;"
+                       " font-weight:600;").arg(nt::accentHex()));
+    m_resetBtn = resetBtn;
     connect(resetBtn, &QPushButton::clicked, this, [this]() {
         showConfirmPopup(
             QStringLiteral("Restablecer aplicación"),
@@ -587,6 +633,24 @@ void SettingsPage::buildUI()
 
     // --- INTERFAZ ---
     addSectionTitle(QStringLiteral("INTERFAZ"));
+
+    // Color de acento: tono de los elementos interactivos (sliders, barra de
+    // progreso, botón primario, selección, nav activa, iconos activos de la
+    // barra inferior). Se aplica en caliente (MainWindow re-genera el
+    // stylesheet global y re-tiñe los iconos de la nav al recibir
+    // accentChanged).
+    addOptionRow(
+        QStringLiteral("Color de acento"), accentOptions(),
+        m_settings->getString(QLatin1String(kAccentKey),
+                              QStringLiteral("#FF0033")),
+        QStringLiteral("#FF0033"), accentFromValue,
+        [this](const QString &text) {
+            const QString hex = valueFromAccent(text);
+            m_settings->set(QLatin1String(kAccentKey), hex);
+            emit accentChanged(hex);
+        },
+        QStringLiteral("Se aplica al instante: sliders, progreso, botones "
+                       "resaltados, selección de texto e iconos activos."));
 
     // Densidad de cuadrícula: tamaño de las celdas de vídeo. Cómoda (normal)
     // o Compacta (celdas algo más pequeñas para ver más en pantalla).

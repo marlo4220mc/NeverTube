@@ -217,10 +217,18 @@ void ChannelPage::updateSubscribeButton(bool subscribed)
                            "QPushButton:hover { background:#333333; }"));
     else
         m_subscribeBtn->setStyleSheet(
-            QStringLiteral("QPushButton { background:#FF0033;"
+            QStringLiteral("QPushButton { background:%1;"
                            " border-radius:18px; padding:0 18px;"
                            " color:white; font-weight:600; font-size:13px; }"
-                           "QPushButton:hover { background:#FF1A47; }"));
+                           "QPushButton:hover { background:%2; }")
+                .arg(nt::accentHex(), nt::accentHoverHex()));
+}
+
+// Re-aplica el botón Suscribirse con el acento vigente (llamada desde
+// MainWindow al cambiar el color de acento en Ajustes).
+void ChannelPage::applyAccent()
+{
+    updateSubscribeButton(m_subs->isSubscribed(m_channelId));
 }
 
 void ChannelPage::onTabVideos(const QString &channelId, const QString &tab,

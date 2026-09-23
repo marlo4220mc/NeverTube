@@ -232,6 +232,31 @@ vez de abortar (así el i5 llega a H.264, que sí decodifica por HW). Un
   `--selftest-innertube` / `--selftest-discover` / `--selftest-home` /
   `--selftest-feeds` / `--selftest-av1hls` / `--selftest-hwprobe` / `--selftest-search` → pruebas
 
+## Color de acento configurable
+
+El acento (`settings.ui_accent`, por defecto rojo NeverTube `#FF0033`) se cambia
+en caliente desde Ajustes (Interfaz → Color de acento) y se persiste.
+
+- Fuente única de la paleta: `nt::accentOptions()` en `src/ui/theme.*`
+  (label visible + hex canónico + sufijo de fichero). `accentHex()`,
+  `accentHoverHex()` (mezcla ~10% blanco, el `#FF1A47` histórico) y
+  `accentPressedHex()` (`darker(115)`) se leen en CADA llamada: nada `static`
+  que congele el acento al primer uso.
+- El QSS global se genera con placeholders `@ACCENT@`/`@ACCENT_PRESSED@`
+  sustituidos por llamada (`nt::styleSheet()`), así el re-polish en caliente
+  repinta slider/progreso/primary/selección/scrollbar con el color nuevo.
+- La navegación inferior usa **PNGs pre-pintados por acento**
+  (`nav/<key>_<state>_<suffix>.png`), NO retint en runtime: el retint era el
+  origen de dos bugs (cuadrado negro por `QColor(QRgb)` que forzaba alpha=255,
+  y acento congelado por cachear el color en un `static`). NUEVO COLOR DE
+  ACENTO: añadirlo a `nt::accentOptions()` y regenerar los PNG con
+  `tools/gen_nav_accent.cpp` (el sufijo `rojo` se copia byte-idéntico de los
+  PNG originales; el resto re-tinta preservando luminosidad y alfa).
+- `MainWindow::accentChanged` aplica en caliente: stylesheet global, re-elección
+  de iconos de la nav (solo re-evalúa el sufijo), repintado de `VideoListView`
+  y `applyAccent()` en watch/channel/home/settings (suscribirse, acciones
+  activas, enlaces de la descripción, empty state, botón reset).
+
 ## Caché de miniaturas y suscripciones
 
 - `ThumbnailCache::pixmap()` **cae a disco** si el LRU desalojó la imagen de

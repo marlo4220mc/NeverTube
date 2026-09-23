@@ -298,11 +298,13 @@ void HomePage::buildEmptyState()
     emptyRow->setSpacing(8);
     emptyRow->addStretch(1);
     auto *goSearch = new QPushButton(QStringLiteral("Ir a Buscar"), emptyBox);
+    m_goSearchBtn = goSearch;
     goSearch->setCursor(Qt::PointingHandCursor);
     goSearch->setStyleSheet(
         QStringLiteral("font-size:12px; padding:8px 18px;"
-                       " background-color:#FF0033; color:#FFFFFF;"
-                       " border:none; border-radius:8px;"));
+                       " background-color:%1; color:#FFFFFF;"
+                       " border:none; border-radius:8px;")
+            .arg(nt::accentHex()));
     connect(goSearch, &QPushButton::clicked, this,
             [this]() { emit navigateToSearchRequested(); });
     emptyRow->addWidget(goSearch);
@@ -408,6 +410,19 @@ void HomePage::refreshDynamic()
     loadContinueWatching();
     maybeInvalidateFeed();
     buildDiscoverSelection();
+}
+
+// Re-aplica el botón del empty state con el acento vigente (MainWindow lo
+// llama al cambiar el color de acento en Ajustes; el botón conserva su estado).
+void HomePage::applyAccent()
+{
+    if (m_goSearchBtn) {
+        m_goSearchBtn->setStyleSheet(
+            QStringLiteral("font-size:12px; padding:8px 18px;"
+                           " background-color:%1; color:#FFFFFF;"
+                           " border:none; border-radius:8px;")
+                .arg(nt::accentHex()));
+    }
 }
 
 QString HomePage::currentSubsSignature() const

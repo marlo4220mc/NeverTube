@@ -7,6 +7,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPixmap>
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
@@ -57,14 +58,20 @@ constexpr int kCodecProbeVersion = 2;
 // Botón de la barra de navegación inferior. Usa los PNG adjuntos por estado
 // (inicio/buscar/biblioteca/ajustes × inactivo/activo/hover/presionado/
 // deshabilitado). El QSS no puede cambiar qproperty-icon dinámicamente, así
-// que el icono se elige aquí según el estado real del botón.
+// que el icono se elige aquí según el estado real del botón. Los estados de
+// acento (activo/hover/presionado) usan PNGs pre-pintados por color de acento
+// (nav/<key>_<state>_<suffix>.png, generados en tools/gen_nav_accent.cpp): sin
+// retint en runtime — el cambio de acento en caliente solo re-evalúa el
+// sufijo, y la clase de bugs del retint (alfa del "cuadrado negro", acento
+// congelado en estático) no puede existir. Inactivo y deshabilitado usan sus
+// grises nativos del PNG.
 class NavButton : public QToolButton
 {
 public:
     using QToolButton::QToolButton;
 
     // Estado visible (prioridad alta→baja): disabled > pressed > hover >
-    // checked > normal. El rojo NeverTube está en los propios PNG.
+    // checked > normal. El color de acento se aplica en los estados activos.
     void updateIcon()
     {
         const QString key = property("navKey").toString();
@@ -79,8 +86,16 @@ public:
             state = QStringLiteral("hover");
         else if (isChecked())
             state = QStringLiteral("active");
-        setIcon(QIcon(
-            QStringLiteral(":/nav/%1_%2.png").arg(key, state)));
+        // Estados de acento: PNG pre-pintado por sufijo del acento vigente;
+        // inactivo/deshabilitado usan sus grises nativos sin sufijo.
+        const bool accentState = state == QLatin1String("active")
+                                 || state == QLatin1String("hover")
+                                 || state == QLatin1String("pressed");
+        const QString path = accentState
+            ? QStringLiteral(":/nav/%1_%2_%3.png")
+                  .arg(key, state, nt::accentSuffix())
+            : QStringLiteral(":/nav/%1_%2.png").arg(key, state);
+        setIcon(QIcon(path));
         setIconSize(QSize(33, 33));
     }
 
@@ -268,6 +283,17 @@ MainWindow::MainWindow(QWidget *parent)
     if (m_yt)
         m_yt->setAudioLanguage(savedAL);
 
+    // Color de acento persistido. Se aplica ANTES de generar el stylesheet
+    // global (setStyleSheet(nt::styleSheet()) al final del constructor), así
+    // que el QSS ya nace con el acento elegido.
+    {
+        const QString savedAccent = m_settings.getString(
+            QStringLiteral("ui_accent"), QStringLiteral("#FF0033"));
+        const QColor accent(savedAccent);
+        if (accent.isValid())
+            nt::setAccent(accent);
+    }
+
     // Modo de generación de cola
     const QString savedNext = m_settings.getString(
         QStringLiteral("next_mode"), QStringLiteral("radio"));
@@ -375,6 +401,33 @@ MainWindow::MainWindow(QWidget *parent)
                 for (VideoListView *l : lists)
                     if (l)
                         l->setDensity(density);
+            });
+    // Color de acento: se aplica en caliente. Se re-genera el stylesheet
+    // global (sliders, botón primario, selección, nav activa, scrollbar…), se
+    // re-tiñen los iconos de la nav y se repintan las vistas que dibujan con
+    // kAccent (barra de progreso de miniaturas, borde "Reproduciendo"). Las
+    // páginas re-aplican además sus estilos inline que dependen del acento
+    // (botón Suscribirse, acciones activas, enlaces de descripción, empty
+    // state y botón reset de Ajustes).
+    connect(m_settingsPage, &SettingsPage::accentChanged,
+            this, [this](const QString &hex) {
+                const QColor accent(hex);
+                if (!accent.isValid())
+                    return;
+                nt::setAccent(accent);
+                setStyleSheet(nt::styleSheet());
+                const auto navButtons = m_nav->findChildren<NavButton *>();
+                for (NavButton *b : navButtons)
+                    if (b)
+                        b->updateIcon();
+                const auto lists = m_pages->findChildren<VideoListView *>();
+                for (VideoListView *l : lists)
+                    if (l)
+                        l->update();
+                m_watch->applyAccent();
+                m_channel->applyAccent();
+                m_home->applyAccent();
+                m_settingsPage->applyAccent();
             });
     connect(m_settingsPage, &SettingsPage::clearThumbsRequested,
             this, [this]() {

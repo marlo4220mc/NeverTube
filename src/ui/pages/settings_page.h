@@ -20,6 +20,9 @@ public:
 
     // Refresca la fila "Aceleración de vídeo" con el perfil vigente.
     void updateCodecProfile(const QString &profile);
+    // Re-aplica el botón "Restablecer aplicación" con el acento vigente
+    // (MainWindow lo llama al cambiar el color de acento en Ajustes).
+    void applyAccent();
 
 signals:
     void qualityChanged(const QString &value);
@@ -28,6 +31,7 @@ signals:
     void audioLanguageChanged(const QString &code);
     void volumeMaxChanged(const QString &value);
     void gridDensityChanged(const QString &density);
+    void accentChanged(const QString &hex);
     void clearThumbsRequested();
     void resetRequested();
     void redetectHwRequested();
@@ -66,6 +70,9 @@ private:
 
     SettingsRepo *m_settings;
     QLabel *m_codecProfileLabel = nullptr;
+    // Botón "Restablecer aplicación": su borde/texto usan el acento, se guarda
+    // el puntero para re-aplicarlo al cambiar el color de acento (applyAccent).
+    QPushButton *m_resetBtn = nullptr;
     QFrame *m_confirmPopup = nullptr;
     QLabel *m_confirmTitle = nullptr;
     QLabel *m_confirmText = nullptr;
