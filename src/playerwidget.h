@@ -157,11 +157,6 @@ private:
     QTimer *m_stallTimer = nullptr;
     qint64 m_lastProgressMs = 0;
     bool m_paused = false;
-    // El stream actual trae audio externo (audio-files aparte, flujo
-    // edge/AV1-HLS): si la posición avanza pero no hay pista de audio activa,
-    // el audio fue rechazado (403) y conviene re-resolver en vez de dejar el
-    // vídeo mudo hasta el EOF de los segmentos.
-    bool m_expectsExternalAudio = false;
     // Detección de "vídeo sin datos": con audio externo la posición avanza
     // aunque la pista de vídeo no cargue (queda el último frame del vídeo
     // anterior). m_cacheOk pasa a true cuando el demuxer cachea contenido.

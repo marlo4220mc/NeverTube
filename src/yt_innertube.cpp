@@ -688,6 +688,24 @@ void Innertube::setHl(const QString &hl)
     m_hl = clean;
 }
 
+void Innertube::rotateSession()
+{
+    // El gate de YouTube es de SESIÓN, no de URL: descartar el visitorData
+    // vigente (aunque no haya caducado) fuerza sw.js_data -> visitorData nuevo.
+    m_visitorData.clear();
+    m_visitorExpiresAt = 0;
+    m_retryingVisitor = false;
+    // URLs firmadas cacheadas de la sesión anterior: todas potencialmente
+    // gateadas. Descartarlas todas (no solo el vídeo en curso, por si el usuario
+    // reproduce otro con esa caché) para que el siguiente fetchHls repita el
+    // POST /player con el visitorData nuevo.
+    if (!m_hlsCache.isEmpty()) {
+        m_hlsCache.clear();
+        saveHlsCacheToDisk();
+    }
+    NT_DEBUG("E2E innertube sesión rotada (visitorData + URLs descartados)\n");
+}
+
 void Innertube::fetchHls(const QString &videoId, int preferredClient,
                          bool forceRefresh)
 {
