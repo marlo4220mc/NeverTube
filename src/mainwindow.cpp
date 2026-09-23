@@ -197,6 +197,17 @@ MainWindow::MainWindow(QWidget *parent)
 {
     m_db.open();
     m_yt->setVisitorStorage(&m_settings);
+    // Auto-reinicio por sesión gateada: si esta instancia vino de un reinicio
+    // de recuperación (guard armado en settings), el último vídeo debe reanudar
+    // donde se cortó. El guard NO se desarma al abrir: solo cuando la
+    // reproducción se estabiliza 5 min (recoveryHealthy) o al agotar sin éxito
+    // (onRecoveryExhausted), para que un reinicio nunca encadene otro.
+    if (m_settings.getInt(QStringLiteral("gate_restart_armed"), 0) == 1)
+        m_gateResumeMs = m_settings.getInt(QStringLiteral("gate_restart_pos"), 0);
+    connect(&m_player, &PlayerController::recoveryExhausted, this,
+            &MainWindow::onRecoveryExhausted);
+    connect(&m_player, &PlayerController::recoveryHealthy, this,
+            &MainWindow::onRecoveryHealthy);
     // Perfil de códec de vídeo. HwProbe sondea la GPU con micro-clips offline y
     // deja un perfil persistido (av1-hw|vp9-hw|h264-hw|soft-all). Si no hay
     // resultado se aplica soft-all (conservador) sin persistir, y mientras se
@@ -1398,7 +1409,66 @@ void MainWindow::playVideo(const QString &url)
         return;
     VideoInfo v;
     v.id = id;
+    // Instancia nueva tras un reinicio por sesión gateada: reanuda donde se
+    // cortó (un solo vídeo: la cola no se restaura).
+    if (m_gateResumeMs > 0) {
+        openWatchResume(QVector<VideoInfo>{v}, 0, m_gateResumeMs);
+        m_gateResumeMs = 0;
+        return;
+    }
     openWatch(QVector<VideoInfo>{v}, 0);
+}
+
+void MainWindow::onRecoveryExhausted()
+{
+    // Único auto-reinicio de la app y SOLO en este error (recuperación de
+    // sesión gateada agotada): relanza con el último vídeo, porque reiniciar
+    // sale de la sesión gateada (verificación del usuario: al reiniciar se
+    // arregla el audio). Guard en memoria: el mismo episodio no reinicia dos
+    // veces (PlayerController puede reemitir la señal en una cascada de EOF).
+    if (m_gateRestarting)
+        return;
+    m_gateRestarting = true;
+    // Guard en settings: si esta instancia YA venía de un reinicio (armed=1),
+    // la sesión nueva también está gateada -> se muestra el error y se desarma
+    // el guard para no encadenar reinicios en bucle.
+    if (m_settings.getInt(QStringLiteral("gate_restart_armed"), 0) == 1) {
+        NT_DEBUG("E2E gate reinicio ya intentado -> error (sin 2º reinicio)\n");
+        m_settings.set(QStringLiteral("gate_restart_armed"),
+                       QStringLiteral("0"));
+        m_settings.set(QStringLiteral("gate_restart_vid"), QString());
+        m_settings.set(QStringLiteral("gate_restart_pos"), QStringLiteral("0"));
+        return;
+    }
+    const VideoInfo v = m_player.current();
+    if (v.id.isEmpty() || v.id.size() != 11) {
+        NT_DEBUG("E2E gate reinicio sin vídeo válido -> error\n");
+        return;
+    }
+    const QString url = QStringLiteral("https://www.youtube.com/watch?v=") + v.id;
+    m_settings.set(QStringLiteral("gate_restart_vid"), v.id);
+    m_settings.set(QStringLiteral("gate_restart_pos"),
+                   QString::number(qRound64(m_player.position() * 1000.0)));
+    m_settings.set(QStringLiteral("gate_restart_armed"), QStringLiteral("1"));
+    NT_DEBUG("E2E gate reinicio -> relanzar %s pos=%.1fs\n",
+             url.toUtf8().constData(), m_player.position());
+    QProcess::startDetached(QCoreApplication::applicationFilePath(),
+                            QStringList() << url, QDir::currentPath());
+    // La instancia nueva arranca "http://..." -> playVideo reanuda el último
+    // vídeo (ver gate_restart_armed en el constructor).
+    QTimer::singleShot(200, this, [this]() { qApp->quit(); });
+}
+
+void MainWindow::onRecoveryHealthy()
+{
+    // Reproducción estable ≥5 min tras el reinicio: el episodio terminó y la
+    // próxima sesión gateada podrá volver a reiniciar.
+    if (m_settings.getInt(QStringLiteral("gate_restart_armed"), 0) != 1)
+        return;
+    NT_DEBUG("E2E gate guard desarmado (reproducción estable)\n");
+    m_settings.set(QStringLiteral("gate_restart_armed"), QStringLiteral("0"));
+    m_settings.set(QStringLiteral("gate_restart_vid"), QString());
+    m_settings.set(QStringLiteral("gate_restart_pos"), QStringLiteral("0"));
 }
 
 void MainWindow::openChannel(const QString &channelId)

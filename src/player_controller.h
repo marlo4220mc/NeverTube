@@ -77,6 +77,16 @@ signals:
     void currentChanged();
     void queueChanged();
     void metadataChanged();
+    // Recuperación de la sesión gateada AGOTADA (≥3 intentos): el stream no se
+    // pudo recuperar en la misma sesión. MainWindow la escucha para reiniciar
+    // la app con el último vídeo (reiniciar SÍ sale del gate: estado del
+    // proceso nuevo). Se emite SOLO al agotar esta recuperación, no en otro
+    // fallo.
+    void recoveryExhausted();
+    // Reproducción estable ≥5 min: el episodio de recuperación terminó.
+    // MainWindow la escucha para desarmar el reinicio automático (que no debe
+    // repetirse sin agotar antes otra recuperación).
+    void recoveryHealthy();
 
 private slots:
     void onPlayerState();

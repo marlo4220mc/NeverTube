@@ -68,13 +68,46 @@ sesiones). La app ahora se recupera sola re-resolviendo con URLs frescas:
 
 - `PlayerWidget::streamInterrupted()` se emite en dos casos: **EOF prematuro**
   (EOF no-natural con `duration > 0`, que no es final de vídeo ni live) y
-  **audio externo que nunca abrió** (audio-files esperado, `position > 2s` y
-  `audio-params` de mpv ausente tras ~4-6s). NO toca el render ni el timer de
-  33 ms: es lógica de eventos y del watchdog de `checkStall` (audio).
+  **sin pista de audio activa** (~10 s reproduciendo con `audio-params` de mpv
+  ausente y `position > 2s`; `kAudioDetectMs`). El watchdog de audio NO depende
+  del modo: con el gate también en HLS muxed mpv queda mudo (`audio=eof`), así
+  que se dispara a los ~10 s (antes solo vigilaba el audio EXTERNO y el HLS
+  agotaba ~60 s mudos por intento hasta el EOF). NO toca el render ni el timer
+  de 33 ms: es lógica de eventos y del watchdog de `checkStall` (audio).
 - `PlayerController::onStreamInterrupted()` re-resuelve (como el atasco):
   `reloadCurrent()` con `m_recoverAttempts` (≤3, recaída <8s corta y estabilidad
-  >60s reinicia). En `soft-all`/HW el coste es un tramo de "loading" acotado;
-  en funcionamiento normal ningún código nuevo corre por frame.
+  >5 min reinicia; NO 60 s: el gate muere a los ~60 s y con 60 s el reinicio
+  borraba el presupuesto justo antes de cada muerte → reload → 60 s → reload…
+  bucle sin fin). Con el watchdog a ~10 s cada intento cuesta ~10-16 s
+  (resolución + espera): 3 intentos ≈ 40-50 s antes del último recurso. En
+  `soft-all`/HW el coste es un tramo de "loading" acotado; en funcionamiento
+  normal ningún código nuevo corre por frame.
+- **Rotación de sesión en la recuperación**: el gate es de SESIÓN, no de URL —
+  re-resolver con `forceRefresh` pide un pot nuevo DENTRO de la misma sesión
+  gateada y vuelve a fallar. Por eso `onStreamInterrupted()` y la recaída de
+  `onStreamStalled()` llaman `Yt::rotateStreamSession()` (→
+  `Innertube::rotateSession()`: descarta visitorData vigente + URLs firmadas
+  cacheadas) ANTES de `reloadCurrent()`: la re-resolución sale de la sesión
+  gateada con un visitorData nuevo (~9/10 de no estar gateada). Sigue acotado
+  por el presupuesto: si la sesión nueva también muere, en ≤3 intentos se
+  agota. Solo rota en la ruta de fallo.
+- **Último recurso: reinicio de la app con el último vídeo.** Al AGOTAR la
+  recuperación (`recoveryExhausted()` de `PlayerController`, tanto en el
+  `streamInterrupted` como en la recaída del atasco) `MainWindow::onRecoveryExhausted`
+  reinicia la app con el último vídeo: reiniciar SÍ sale del gate (estado del
+  proceso nuevo — verificado por el usuario: al reiniciar se arregla el audio).
+  Es el ÚNICO auto-reinicio de la app y SOLO en este error: relanza con la URL
+  del último vídeo únicamente (la cola NO se restaura) y reanuda la posición.
+  Guards anti-bucle: (1) en memoria `m_gateRestarting` — un mismo episodio no
+  relanza dos veces (PlayerController puede reemitir en una cascada de EOF);
+  (2) en settings `gate_restart_armed` — si la instancia YA vino de un
+  reinicio y sigue gateada, se muestra el error y se desarma el guard (nunca
+  se encadenan reinicios). El guard se desarma solo con
+  `PlayerController::recoveryHealthy()` (≥5 min de reproducción estable, emit
+  desde el `m_flushTimer`): tras un reinicio que funcionó, la próxima sesión
+  gateada podrá volver a reiniciar. Claves: `gate_restart_vid`,
+  `gate_restart_pos` (ms), `gate_restart_armed` (1/0). La instancia nueva
+  arranca con `http://...` → `MainWindow::playVideo` (leído en el constructor).
 - `hasActiveAudio()` consulta `audio-params` de mpv (`MPV_FORMAT_NODE`). Con
   audio sano la pista está activa y la detección no se dispara (verificado:
   tanda normal con `AO: [pipewire]` sin falsos `streamInterrupted`).

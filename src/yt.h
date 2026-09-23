@@ -51,6 +51,11 @@ public:
     // sesión del vídeo (URLs firmadas frescas; ver Innertube::fetchHls).
     void resolveStream(const QString &videoId, int maxHeight,
                        bool forceRefresh = false);
+    // Rota la sesión Innertube (visitorData + URLs firmadas cacheadas): la
+    // siguiente resolveStream se hará con una sesión de YouTube NUEVA. La usa
+    // PlayerController en la recuperación tras una sesión gateada (403 a mitad
+    // de reproducción), donde re-resolver dentro de la misma sesión no sirve.
+    void rotateStreamSession();
     // Dispara la carga de los relacionados ("A continuación") del vídeo por
     // Innertube /next. Los resultados llegan por relatedReady().
     void relatedVideos(const QString &videoId);

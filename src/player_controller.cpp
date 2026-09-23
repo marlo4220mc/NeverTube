@@ -11,6 +11,15 @@
 
 namespace {
 constexpr int kPositionFlushMs = 60000;
+// Ventana de reproducción "estable" que reinicia el presupuesto de intentos de
+// recuperación (una interrupción puntual tras un tramo largo sano no debe
+// agotar lo acumulado). 5 min y NO 60 s: la sesión gateada de YouTube muere a
+// los ~60 s de carga (EOF prematuro a ~1:03) y con 60 s el reinicio borraba el
+// presupuesto justo antes de cada muerte → reload → 60 s → reload… bucle sin
+// fin. Con 5 min el gate nunca llega a reiniciar y el presupuesto se agota
+// (máx. 3 intentos → error claro); las interrupciones genuinamente raras
+// (pasados 5 min de reproducción sana) siguen sin gastar presupuesto.
+constexpr qint64 kRecoverBudgetResetMs = 300000;
 }
 
 PlayerController::PlayerController(Yt *yt, PlayerWidget *player,
@@ -24,7 +33,18 @@ PlayerController::PlayerController(Yt *yt, PlayerWidget *player,
     ensurePlayerConnections();
     m_flushTimer = new QTimer(this);
     m_flushTimer->setInterval(kPositionFlushMs);
-    connect(m_flushTimer, &QTimer::timeout, this, [this] { savePosition(); });
+    connect(m_flushTimer, &QTimer::timeout, this, [this] {
+        savePosition();
+        // Reproducción estable ≥5 min seguidos: cierra el episodio de
+        // recuperación (MainWindow desarma el reinicio automático por sesión
+        // gateada; sin esto, tras un reinicio que funcionó, la próxima sesión
+        // gateada ya no podría reiniciar).
+        if (m_phase == QLatin1String("playing") && m_stableSince.isValid()
+            && m_stableSince.elapsed() > kRecoverBudgetResetMs) {
+            m_stableSince.restart();
+            emit recoveryHealthy();
+        }
+    });
     if (QCoreApplication *app = QCoreApplication::instance())
         connect(app, &QCoreApplication::aboutToQuit, this,
                 [this] { savePosition(); });
@@ -390,25 +410,32 @@ void PlayerController::onStreamStalled()
     // Un atasco con la reproducción estabilizada el rato suficiente no cuenta
     // contra el límite de intentos (caso normal: presupuesto de URL agotado
     // tras un tramo largo).
-    if (m_stableSince.isValid() && m_stableSince.elapsed() > 60000)
+    if (m_stableSince.isValid() && m_stableSince.elapsed() > kRecoverBudgetResetMs)
         m_recoverAttempts = 0;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     // Recaída rápida (<8s desde el último intento): el micro-seek local no
-    // bastó -> síntoma de red real (URL caducada/cortada). Aquí sí se consume
-    // el presupuesto y se re-resuelve con URLs frescas vía reloadCurrent();
-    // solo se abandona cuando el presupuesto se agota.
+    // bastó -> síntoma de red real (URL caducada/cortada/sesión gateada). Aquí
+    // sí se consume el presupuesto y se re-resuelve con URLs frescas vía
+    // reloadCurrent(); solo se abandona cuando el presupuesto se agota.
     const bool rapidRelapse = m_lastRecoverMs > 0
                               && now - m_lastRecoverMs < 8000;
     if (rapidRelapse) {
         if (m_recoverAttempts >= 3) {
-            // Presupuesto agotado: se abandona.
+            // Presupuesto agotado: se abandona. La app reinicia con el último
+            // vídeo (lo escucha MainWindow) porque reiniciar sale de la sesión
+            // gateada.
             setPhase(QStringLiteral("error"));
             m_errorMessage = QStringLiteral(
                 "La reproducción se interrumpió y no se pudo recuperar.");
+            emit recoveryExhausted();
             return;
         }
         ++m_recoverAttempts;
         m_lastRecoverMs = now;
+        // Recaída con síntomas de sesión gateada: rotar la sesión (visitorData
+        // nuevo) antes de re-resolver, o la re-resolución dentro de la misma
+        // sesión vuelve a fallar (el gate es de sesión, no de URL).
+        m_yt->rotateStreamSession();
         NT_DEBUG("E2E streamStalled -> reloadCurrent intento=%d pos=%.1f\n",
                  m_recoverAttempts, m_player->position());
         reloadCurrent();
@@ -431,29 +458,38 @@ void PlayerController::onStreamStalled()
 // Interrupción de la reproducción (EOF prematuro por sesión de URLs gateada
 // con 403, o pista de audio externa que nunca abrió): a diferencia del atasco
 // (micro-seek local, barato) aquí el stream ya se terminó o va sin audio, así
-// que la recuperación es re-resolver con URLs frescas y reanudar en la
-// posición actual. Acotado por el mismo presupuesto de intentos.
+// que la recuperación es rotar la sesión (el gate es de sesión, no de URL) y
+// re-resolver con URLs frescas en una sesión NUEVA, reanudando en la posición
+// actual. Acotado por el mismo presupuesto de intentos.
 void PlayerController::onStreamInterrupted()
 {
     if (m_index < 0)
         return;
     // Reproducción estable el rato suficiente: reinicia el contador de
     // intentos (una interrupción puntual cada muchos segundos no debe
-    // agotar el presupuesto acumulado de cortes anteriores).
-    if (m_stableSince.isValid() && m_stableSince.elapsed() > 60000)
+    // agotar el presupuesto acumulado de cortes anteriores). 5 min, NO 60 s:
+    // la sesión gateada muere a los ~60 s y con 60 s el reinicio borraba el
+    // presupuesto justo antes de cada muerte → bucle de reload sin fin.
+    if (m_stableSince.isValid() && m_stableSince.elapsed() > kRecoverBudgetResetMs)
         m_recoverAttempts = 0;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     // Recaída rápida (<8s desde el último intento) o presupuesto agotado:
-    // la sesión de URLs sigue gateada -> se abandona y se muestra el error.
+    // la sesión sigue gateada -> se abandona (MainWindow escucha la señal y
+    // reinicia la app con el último vídeo: reiniciar sale de la sesión).
     if (m_recoverAttempts >= 3 || (m_lastRecoverMs > 0
                                    && now - m_lastRecoverMs < 8000)) {
         setPhase(QStringLiteral("error"));
         m_errorMessage = QStringLiteral(
             "La reproducción se interrumpió y no se pudo recuperar.");
+        emit recoveryExhausted();
         return;
     }
     m_lastRecoverMs = now;
     ++m_recoverAttempts;
+    // Rotar la sesión ANTES de re-resolver: con el visitorData nuevo la
+    // re-resolución sale de la sesión gateada (si la sesión nueva tampoco
+    // respira, el presupuesto se agota en ≤3 intentos y se muestra el error).
+    m_yt->rotateStreamSession();
     NT_DEBUG("E2E streamInterrupted -> reloadCurrent intento=%d pos=%.1f\n",
              m_recoverAttempts, m_player->position());
     reloadCurrent();

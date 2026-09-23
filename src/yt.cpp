@@ -361,6 +361,11 @@ void Yt::resolveStream(const QString &videoId, int maxHeight,
     resolveViaInnertube(videoId, maxHeight, winning, forceRefresh);
 }
 
+void Yt::rotateStreamSession()
+{
+    m_innertube.rotateSession();
+}
+
 void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                              int preferredClient, bool forceRefresh)
 {

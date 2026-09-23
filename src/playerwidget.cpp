@@ -21,6 +21,12 @@ static void *getProcAddress(void *ctx, const char *name)
     return glc ? reinterpret_cast<void *>(glc->getProcAddress(name)) : nullptr;
 }
 
+// Tiempo de reproducción sin pista de audio activa que declara el stream
+// gateado (audio 403 de YouTube) y dispara la re-resolución temprana
+// (checkStall). ~10 s por intento en lugar de esperar el EOF prematuro de los
+// ~60 s del HLS maestro. Ver PlayerWidget::checkStall.
+static constexpr qint64 kAudioDetectMs = 10000;
+
 // Construye un mpv_node de tipo string con el valor indicado. El buffer lo
 // asigna el llamador y lo libera con mpv_nodeFreeStr().
 static void mpvNodeSetStr(mpv_node *n, const QByteArray &s)
@@ -275,10 +281,6 @@ void PlayerWidget::playUrl(const QString &url, double startAt)
         return;
     m_position = 0.0;
     m_duration = 0.0;
-    // El stream actual espera audio externo (audio-files aparte): con este
-    // flag checkStall detecta un audio rechazado (403) aunque la posición
-    // avance, y dispara la re-resolución temprana.
-    m_expectsExternalAudio = !m_pendingAudioFile.isEmpty();
     // Preferencia de idioma de audio ("alang"): solo con preferencia explícita
     // mpv elige un doblaje (aunque tenga DEFAULT=NO) en lugar de la pista
     // marcada DEFAULT=YES por YouTube (normalmente el audio original).
@@ -351,7 +353,6 @@ void PlayerWidget::playYtdl(const QString &watchUrl, int maxHeight)
 
 void PlayerWidget::stop()
 {
-    m_expectsExternalAudio = false;
     if (!m_mpv)
         return;
     const char *cmd[] = { "stop", nullptr };
@@ -549,12 +550,16 @@ void PlayerWidget::checkStall()
         emit streamStalled();
         return;
     }
-    // (a.2) Audio externo esperado pero ninguna pista de audio activa: YouTube
-    // rechazó el audio-file (403 de una sesión gateada) y el vídeo va mudo
-    // hasta que los segmentos del HLS también mueran. Re-resolver temprano
-    // (con URLs frescas) en vez de esperar al EOF prematuro de los 60 s.
-    if (m_expectsExternalAudio && !hasActiveAudio()
-        && now - m_videoLoadMs > 4000 && m_position > 2.0) {
+    // (a.2) Ninguna pista de audio activa tras ~10 s de reproducción: YouTube
+    // rechazó el audio (403 de una sesión gateada) y el vídeo va mudo. No
+    // depende del modo (audio externo o muxed): con HLS muxed el gate también
+    // deja a mpv sin audio (audio=eof) y antes solo el audio EXTERNO se
+    // vigilaba aquí, así que el HLS agotaba ~60 s mudos por intento hasta el
+    // EOF prematuro. Re-resolver temprano (con URLs frescas) en vez de esperar
+    // un minuto; con duración >0 (todas arriba) los streams sin audio real
+    // (silencio) no existen en la práctica.
+    if (!hasActiveAudio() && now - m_videoLoadMs > kAudioDetectMs
+        && m_position > 2.0) {
         m_videoLoadMs = now; // no disparar en bucle mientras se recupera
         NT_DEBUG("E2E streamInterrupted sin-audio pos=%.2f dur=%.2f\n",
                  m_position, m_duration);

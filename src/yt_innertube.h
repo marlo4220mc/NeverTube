@@ -48,6 +48,15 @@ public:
     void setHl(const QString &hl);
     QString hl() const { return m_hl; }
 
+    // Invalida la sesión vigente (visitorData + URLs firmadas cacheadas) para
+    // que la siguiente petición player se haga con un visitorData NUEVO (sesión
+    // de YouTube distinta). Es la recuperación de la sesión "gateada" (403 a
+    // mitad de reproducción en audio y/o segmentos HLS): una re-resolución
+    // normal con forceRefresh pide un pot nuevo pero DENTRO de la misma sesión
+    // gateada y vuelve a fallar; rotar el visitorData es lo único que sale de
+    // la sesión. No toca peticiones en curso ni el transporte.
+    void rotateSession();
+
 public slots:
     // forceRefresh=true ignora y descarta la caché de sesión del vídeo y repite
     // el POST /player: las URLs firmadas de videoplayback traen un presupuesto

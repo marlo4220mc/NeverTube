@@ -65,6 +65,11 @@ private slots:
     void onNavButton(int index);
     void onRadioReadyDiscover(const QString &videoId,
                               const QVector<VideoInfo> &videos);
+    // Recuperación de sesión gateada agotada: reinicia la app con el último
+    // vídeo (reiniciar sale de la sesión gateada). Único auto-reinicio de la
+    // app, acotado a este error y con guard anti-bucle.
+    void onRecoveryExhausted();
+    void onRecoveryHealthy();
 
 private:
     void setupNav();
@@ -113,6 +118,12 @@ private:
     PlaylistsRepo m_playlists{m_db};
     SettingsRepo m_settings{m_db};
     HomeCacheRepo m_homeCache{m_db};
+
+    // Auto-reinicio por sesión gateada: guard en memoria contra dobles
+    // reinicios del mismo episodio, y posición (ms) a reanudar en la instancia
+    // nueva (leída de settings al arrancar; ver onRecoveryExhausted).
+    bool m_gateRestarting = false;
+    qlonglong m_gateResumeMs = 0;
 
     // Semillas de vídeo reproduciéndose para las que ya se pidió su radio (y
     // aún no llegó) desde el hook de reproducción confirmada: evita re-pedir la
