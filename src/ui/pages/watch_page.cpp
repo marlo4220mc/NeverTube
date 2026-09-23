@@ -540,10 +540,13 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_subscribeBtn->setCursor(Qt::PointingHandCursor);
     m_subscribeBtn->setMinimumHeight(36);
     m_subscribeBtn->setStyleSheet(
-        QStringLiteral("QPushButton { background:#FF0033;"
+        QStringLiteral(// Acento vivo (no suscrito). El hover es una versión
+                       // más clara del acento para que siga el color elegido.
+                       "QPushButton { background:%1;"
                        " border-radius:18px; padding:0 18px;"
                        " color:white; font-weight:600; font-size:13px; }"
-                       "QPushButton:hover { background:#FF1A47; }"));
+                       "QPushButton:hover { background:%2; }")
+            .arg(nt::accentHex(), nt::accentHoverHex()));
 
     auto *channelRow = new QHBoxLayout;
     channelRow->setSpacing(8);
@@ -960,10 +963,11 @@ void WatchPage::updateSubscribeButton(bool subscribed)
     } else {
         m_subscribeBtn->setProperty("subscribed", false);
         m_subscribeBtn->setStyleSheet(
-            QStringLiteral("QPushButton { background:#FF0033;"
+            QStringLiteral("QPushButton { background:%1;"
                            " border-radius:18px; padding:0 18px;"
                            " color:white; font-weight:600; font-size:13px; }"
-                           "QPushButton:hover { background:#FF1A47; }"));
+                           "QPushButton:hover { background:%2; }")
+                .arg(nt::accentHex(), nt::accentHoverHex()));
     }
 }
 
@@ -980,15 +984,16 @@ void WatchPage::updateSubscription(const VideoInfo &v, bool subscribe)
 void WatchPage::updateActionButtons()
 {
     auto paint = [this](QPushButton *b, nt::Icon icon, bool active) {
-        b->setIcon(nt::icon(icon, active ? QColor(QStringLiteral("#FF0033"))
+        b->setIcon(nt::icon(icon, active ? QColor(nt::accentHex())
                                          : nt::kMuted, 20));
         b->setIconSize(QSize(20, 20));
         if (active)
             b->setStyleSheet(
                 QStringLiteral("QPushButton { background:#262626;"
                                " border-radius:16px; padding:7px 14px;"
-                               " color:#FF0033; font-weight:600; font-size:13px; }"
-                               "QPushButton:hover { background:#333333; }"));
+                               " color:%1; font-weight:600; font-size:13px; }"
+                               "QPushButton:hover { background:#333333; }")
+                    .arg(nt::accentHex()));
         else
             b->setStyleSheet(
                 QStringLiteral("QPushButton { background:#1F1F1F;"
@@ -1230,7 +1235,7 @@ void WatchPage::applyDescription(const QString &description)
     rich.replace(QLatin1Char('\n'), QStringLiteral("<br>"));
     const QRegularExpression urlRe(QStringLiteral(R"((https?://[^\s<]+))"));
     rich.replace(urlRe, QStringLiteral(
-        "<a href=\"\\1\" style=\"color:#FF0033;\">\\1</a>"));
+        "<a href=\"\\1\" style=\"color:%1;\">\\1</a>").arg(nt::accentHex()));
     m_descLabel->setText(QStringLiteral(
         "<style>a { text-decoration:none; }</style>") + rich);
     m_descLabel->setMaximumHeight(60);
@@ -1602,7 +1607,7 @@ void WatchPage::updateOverlayIcons()
         nt::kText, 18));
     m_ovSubsBtn->setIcon(nt::icon(
         nt::Icon::Subtitles,
-        m_subsVisible ? QColor("#FF0033") : nt::kText, 18));
+        m_subsVisible ? QColor(nt::accentHex()) : nt::kText, 18));
     QSignalBlocker block(m_ovVolume);
     m_ovVolume->setValue(qRound(m_player->volume()));
 }
@@ -1616,4 +1621,29 @@ void WatchPage::refreshVolumeSlider()
     m_ovVolume->setRange(0, m_player->volumeMax());
     // El volumen actual puede haber quedado capeado por el nuevo tope.
     m_ovVolume->setValue(qRound(m_player->volume()));
+}
+
+void WatchPage::applyAccent()
+{
+    // Botón Suscribirse: repinta con el estado (suscrito / acento vivo) y el
+    // color de acento vigente.
+    if (m_subscribeBtn)
+        updateSubscribeButton(
+            m_subscribeBtn->property("subscribed").toBool());
+    // Acciones (like/dislike/estrella/ver después): el icono y el texto del
+    // estado activo usan el acento.
+    updateActionButtons();
+    // Descripción: los enlaces se pintaron con el color de acento anterior;
+    // regenera el texto enriquecido conservando el estado expandido.
+    if (!m_description.isEmpty()) {
+        const bool expanded = m_descExpanded;
+        applyDescription(m_description);
+        if (expanded) {
+            m_descLabel->setMaximumHeight(16777215);
+            m_descToggle->setText(QStringLiteral("Ver menos"));
+            m_descExpanded = true;
+        }
+    }
+    // Overlay: el icono de subtítulos activo usa el acento.
+    updateOverlayIcons();
 }

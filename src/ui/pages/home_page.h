@@ -67,6 +67,9 @@ public:
     // radios). Se llama cuando cambia el historial (p. ej. al borrar vídeos):
     // Descubre no debe seguir mostrando selecciones de radios eliminadas.
     void invalidateDiscover();
+    // Re-aplica el botón del empty state con el acento vigente (MainWindow lo
+    // llama al cambiar el color de acento en Ajustes, sin reconstruir).
+    void applyAccent();
 
 signals:
     void openRequested(const QVector<VideoInfo> &videos, int startIndex);
@@ -154,6 +157,9 @@ private:
     // Descubre, sin caché previa). Cierra el hueco gigante que dejaban las
     // secciones hide() y le dice al usuario qué hacer para empezar.
     QWidget *m_emptyState = nullptr;
+    // Botón "Ir a Buscar" del empty state: su fondo usa el acento, así que se
+    // guarda el puntero para re-aplicarlo al cambiar el color de acento.
+    QPushButton *m_goSearchBtn = nullptr;
 
     QLabel *m_contTitle;
     VideoListView *m_contGrid;

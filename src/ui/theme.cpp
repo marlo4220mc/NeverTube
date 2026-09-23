@@ -1,10 +1,46 @@
 #include "theme.h"
 
+#include <QColor>
+
 namespace nt {
+
+// Fuente única de la paleta de acentos (labels de Ajustes, hex persistido y
+// sufijo de los PNG pre-pintados de la navegación). El defecto es el rojo
+// NeverTube histórico (#FF0033). Mantener en sync con tools/gen_nav_accent.cpp
+// solo en el sentido de que regenerar los PNG tras cambiar AQUÍ es obligatorio.
+QVector<AccentOption> accentOptions()
+{
+    return {
+        {QStringLiteral("Rojo (por defecto)"), QStringLiteral("#FF0033"),
+         QStringLiteral("rojo")},
+        {QStringLiteral("Azul"), QStringLiteral("#1E88E5"),
+         QStringLiteral("azul")},
+        {QStringLiteral("Verde"), QStringLiteral("#22C55E"),
+         QStringLiteral("verde")},
+        {QStringLiteral("Naranja"), QStringLiteral("#F97316"),
+         QStringLiteral("naranja")},
+        {QStringLiteral("Púrpura"), QStringLiteral("#A855F7"),
+         QStringLiteral("purpura")},
+        {QStringLiteral("Cian"), QStringLiteral("#22D3EE"),
+         QStringLiteral("cian")},
+        {QStringLiteral("Rosa"), QStringLiteral("#EC4899"),
+         QStringLiteral("rosa")},
+    };
+}
+
+QString accentSuffix()
+{
+    const QString cur = kAccent.name(); // "#rrggbb" minúscula
+    const auto opts = accentOptions();
+    for (const AccentOption &o : opts)
+        if (QColor(o.hex).name() == cur)
+            return o.suffix;
+    return opts.value(0).suffix;
+}
 
 QString styleSheet()
 {
-    return QStringLiteral(R"QSS(
+    QString qss = QStringLiteral(R"QSS(
 QWidget {
     background-color: transparent;
     color: #ECECEC;
@@ -19,8 +55,9 @@ QWidget#navBottom {
 }
 
 /* Botones de la barra de navegación inferior. Los iconos (PNG) los gestiona
-   NavButton por estado; aquí solo se colorean texto y fondo. El rojo
-   NeverTube aparece únicamente en estados activos o de interacción. */
+   NavButton por estado; aquí solo se colorean texto y fondo. El acento
+   (rojo NeverTube por defecto) aparece únicamente en estados activos o de
+   interacción. */
 QToolButton#navBtn {
     background: transparent;
     border: none;
@@ -30,9 +67,9 @@ color: #8F8F8F;
     font-size: 12px;
 }
 QToolButton#navBtn:hover { color: #ECECEC; }
-QToolButton#navBtn:pressed { color: #E0002E; }
-QToolButton#navBtn:checked { color: #FF0033; }
-QToolButton#navBtn:checked:hover { color: #FF0033; }
+QToolButton#navBtn:pressed { color: @ACCENT_PRESSED@; }
+QToolButton#navBtn:checked { color: @ACCENT@; }
+QToolButton#navBtn:checked:hover { color: @ACCENT@; }
 QToolButton#navBtn:disabled { color: #6a6a6a; }
 
 QLabel { background: transparent; }
@@ -50,23 +87,23 @@ QPushButton {
 QPushButton:hover { background-color: #2A2A2A; }
 QPushButton:pressed { background-color: #232323; }
 QPushButton:disabled { color: #6a6a6a; }
-QPushButton#primary { background-color: #FF0033; border-color: #FF0033; color: #FFFFFF; font-weight: 600; }
-QPushButton#primary:hover { background-color: #E0002E; }
+QPushButton#primary { background-color: @ACCENT@; border-color: @ACCENT@; color: #FFFFFF; font-weight: 600; }
+QPushButton#primary:hover { background-color: @ACCENT_PRESSED@; }
 QPushButton#ghost { background: transparent; border: 1px solid #2A2A2A; border-radius: 6px; }
 QPushButton#ghost:hover { background: #1F1F1F; }
 QPushButton#iconBtn { background: transparent; border: none; border-radius: 6px; padding: 6px; }
 QPushButton#iconBtn:hover { background: #232323; }
-QPushButton#danger { color: #FF0033; }
+QPushButton#danger { color: @ACCENT@; }
 
 QLineEdit, QComboBox {
     background-color: #1F1F1F;
     border: 1px solid #2A2A2A;
     border-radius: 10px;
     padding: 8px 12px;
-    selection-background-color: #FF0033;
+    selection-background-color: @ACCENT@;
     color: #ECECEC;
 }
-QLineEdit:focus, QComboBox:focus { border-color: #FF0033; }
+QLineEdit:focus, QComboBox:focus { border-color: @ACCENT@; }
 
 /* Popover no modal (p. ej. crear playlist): panel flotante que no bloquea
    el resto de la página. */
@@ -104,15 +141,15 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical,
 QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
 
 QSlider::groove:horizontal { height: 4px; background: #2F2F2F; border-radius: 2px; }
-QSlider::sub-page:horizontal { background: #FF0033; border-radius: 2px; }
+QSlider::sub-page:horizontal { background: @ACCENT@; border-radius: 2px; }
 QSlider::handle:horizontal {
     width: 12px; height: 12px; margin: -4px 0;
     background: #FFFFFF; border-radius: 6px;
 }
-QSlider::handle:horizontal:hover { background: #FF0033; }
+QSlider::handle:horizontal:hover { background: @ACCENT@; }
 
 QProgressBar { border: none; background: #2A2A2A; border-radius: 3px; text-align: center; color: transparent; }
-QProgressBar::chunk { background: #FF0033; border-radius: 3px; }
+QProgressBar::chunk { background: @ACCENT@; border-radius: 3px; }
 
 QToolButton { background: transparent; border: none; border-radius: 6px; padding: 5px; }
 QToolButton:hover { background: #232323; }
@@ -135,6 +172,10 @@ QWidget#miniBar { background-color: #181818; border-top: 1px solid #262626; }
 QWidget#watchBody { background-color: #0F0F0F; }
 QWidget#cardPanel { background-color: #181818; border: 1px solid #262626; border-radius: 10px; }
 )QSS");
+    // Los placeholders se sustituyen en CADA llamada: un cambio de acento en
+    // caliente (Ajustes → Color de acento) regenera el stylesheet al momento.
+    return qss.replace(QStringLiteral("@ACCENT@"), accentHex())
+              .replace(QStringLiteral("@ACCENT_PRESSED@"), accentPressedHex());
 }
 
 } // namespace nt

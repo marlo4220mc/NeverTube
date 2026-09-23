@@ -89,6 +89,11 @@ public slots:
     // Reaplica el rango/valor del slider del overlay desde el controlador
     // (p.ej. al cambiar el ajuste "Volumen máximo" en Ajustes).
     void refreshVolumeSlider();
+    // Re-aplica los estilos/los iconos que dependen del color de acento
+    // (botón Suscribirse, acciones activas, enlaces de la descripción, icono
+    // de subs del overlay). Se llama desde MainWindow cuando cambia el acento
+    // en Ajustes, para que todo siga el color sin reconstruir la página.
+    void applyAccent();
 
 private:
     void updateQueue();

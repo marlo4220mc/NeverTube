@@ -24,6 +24,9 @@ public:
                          QWidget *parent = nullptr);
 
     void openChannel(const QString &channelId);
+    // Re-aplica el botón Suscribirse con el acento vigente (MainWindow lo
+    // llama al cambiar el color de acento en Ajustes, sin reconstruir).
+    void applyAccent();
 
 signals:
     void backRequested();
