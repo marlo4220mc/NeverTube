@@ -47,6 +47,13 @@
 
 namespace {
 
+// Versión de la lógica del sondeo HW (HwProbe). Al subir esta versión la app
+// re-sondea la GPU UNA vez al arrancar, aunque haya un perfil persistido: así
+// un falso positivo escrito por una versión antigua (p.ej. av1-hw del i5 con
+// qsv-copy) se autocorrige sin tener que re-sondear en cada arranque (algo que
+// penalizaría la máquina de pruebas, donde el sondeo es lento).
+constexpr int kCodecProbeVersion = 2;
+
 // Botón de la barra de navegación inferior. Usa los PNG adjuntos por estado
 // (inicio/buscar/biblioteca/ajustes × inactivo/activo/hover/presionado/
 // deshabilitado). El QSS no puede cambiar qproperty-icon dinámicamente, así
@@ -178,19 +185,28 @@ MainWindow::MainWindow(QWidget *parent)
     // Perfil de códec de vídeo. HwProbe sondea la GPU con micro-clips offline y
     // deja un perfil persistido (av1-hw|vp9-hw|h264-hw|soft-all). Si no hay
     // resultado se aplica soft-all (conservador) sin persistir, y mientras se
-    // sondea no se reproduce (la petición se encola). La red de seguridad reactiva
-    // (streamDecodeInfoReady) corrige el perfil si el códec que éste da por HW
-    // cae a software.
+    // sondea no se reproduce (la petición se encola). El perfil se decide y
+    // persiste SOLO en el arranque: la red reactiva (streamDecodeInfoReady)
+    // queda como traza de diagnóstico y ya NO degrada el perfil en caliente
+    // (la detección correcta al inicio es responsabilidad de HwProbe).
     const QString rawProfile = m_settings.getString(
         QStringLiteral("codec_profile"), QString());
     const QString savedProfile = normalizeCodecProfile(rawProfile);
     if (!rawProfile.isEmpty() && savedProfile != rawProfile)
         m_settings.set(QStringLiteral("codec_profile"), savedProfile);
-    if (savedProfile.isEmpty()) {
-        // Antes de sonorizar: perfil conservador. No se asume HW (un h264-hw
-        // sin evidencia era un falso positivo en GPUs antiguas); software es
-        // lo que funciona en todas partes y se re-sondea al arrancar.
-        applyCodecProfile(QStringLiteral("soft-all"), false);
+    // El perfil se re-sondea al arranque si no hay valor persistido o si fue
+    // escrito por otra versión del sondeo (codec_probe_v). El valor guardado
+    // se usa como fallback mientras se sondea; el veredicto fresco lo
+    // reemplaza. No se reproduce hasta tener el veredicto (cola pendiente).
+    const int probeVersion = m_settings
+                                 .getString(QStringLiteral("codec_probe_v"),
+                                            QString())
+                                 .toInt();
+    if (probeVersion != kCodecProbeVersion || savedProfile.isEmpty()) {
+        if (!savedProfile.isEmpty())
+            applyCodecProfile(savedProfile, false);
+        else
+            applyCodecProfile(QStringLiteral("soft-all"), false);
         startHwProbe();
     } else {
         applyCodecProfile(savedProfile, false);
@@ -199,45 +215,18 @@ MainWindow::MainWindow(QWidget *parent)
             [this](const QString &codec, const QString &hwdecBackend) {
                 // hwdec-current llega "vacío" en el primer video-params (mpv
                 // aún no activó el decodificador) y "no" cuando el decoder se
-                // sabe en software. Solo "no" es software real y dispara la
-                // corrección: vacío = todavía indeterminado.
-                if (hwdecBackend != QLatin1String("no")) {
-                    NT_DEBUG("E2E codec hw=%s cod=%s\n",
-                             hwdecBackend.toUtf8().constData(),
-                             codec.toUtf8().constData());
+                // sabe en software. El perfil se decide y persiste SOLO en el
+                // sondeo de arranque (HwProbe, sin "degradaciones luego"); la
+                // red reactiva ya no cambia el perfil: esta traza sirve para
+                // verificar que el perfil del arranque acertó.
+                if (hwdecBackend != QLatin1String("no"))
                     return;
-                }
-                const QString profile = normalizeCodecProfile(m_settings.getString(
-                    QStringLiteral("codec_profile"), QString()));
-                const bool av1 = codec.contains(QLatin1String("AV1"),
-                                                Qt::CaseInsensitive);
-                const bool vp9 = codec.contains(QLatin1String("VP9"),
-                                               Qt::CaseInsensitive);
-                const bool h264 = codec.contains(QLatin1String("avc"),
-                                                 Qt::CaseInsensitive)
-                    || codec.contains(QLatin1String("h264"),
-                                      Qt::CaseInsensitive);
-                // Escalera completa de degradación: el perfil daba por HW el
-                // códec que en realidad decodifica la CPU.
-                if (profile == QLatin1String("av1-hw") && av1) {
-                    NT_DEBUG("E2E codec_profile downgrade av1-hw->vp9-hw "
-                             "cod=%s hw=%s\n",
-                             codec.toUtf8().constData(),
-                             hwdecBackend.toUtf8().constData());
-                    applyCodecProfile(QStringLiteral("vp9-hw"), true);
-                } else if (profile == QLatin1String("vp9-hw") && vp9) {
-                    NT_DEBUG("E2E codec_profile downgrade vp9-hw->h264-hw "
-                             "cod=%s hw=%s\n",
-                             codec.toUtf8().constData(),
-                             hwdecBackend.toUtf8().constData());
-                    applyCodecProfile(QStringLiteral("h264-hw"), true);
-                } else if (profile == QLatin1String("h264-hw") && h264) {
-                    NT_DEBUG("E2E codec_profile downgrade h264-hw->soft-all "
-                             "cod=%s hw=%s\n",
-                             codec.toUtf8().constData(),
-                             hwdecBackend.toUtf8().constData());
-                    applyCodecProfile(QStringLiteral("soft-all"), true);
-                }
+                const QString activeProfile = m_settings.getString(
+                    QStringLiteral("codec_profile"), QString());
+                NT_DEBUG("E2E codec_profile reactivo: perfil=%s cod=%s hw=no "
+                         "(sin degradación: decide HwProbe)\n",
+                         activeProfile.toUtf8().constData(),
+                         codec.toUtf8().constData());
             });
     m_elapsed.start();
     m_player.setPlayer(m_playerWidget);
@@ -1170,10 +1159,15 @@ void MainWindow::startHwProbe()
                 if (profile.isEmpty()) {
                     // Indeterminado (los clips no decodifican): perfil
                     // conservador sin persistir. NO asumir HW (era el falso
-                    // positivo); se reintenta el sondeo en el próximo arranque.
+                    // positivo); se reintenta el sondeo en el próximo arranque
+                    // (no se marca la versión del sondeo).
                     applyCodecProfile(QStringLiteral("soft-all"), false);
                 } else {
                     applyCodecProfile(profile, true);
+                    // Sondeo de esta versión completado: no se repite en cada
+                    // arranque (crítico en GPUs lentas).
+                    m_settings.set(QStringLiteral("codec_probe_v"),
+                                   QString::number(kCodecProbeVersion));
                 }
                 if (m_hasPendingWatch) {
                     const QVector<VideoInfo> v = m_pendingWatch;
