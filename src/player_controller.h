@@ -85,6 +85,10 @@ private slots:
     // Atasco de reproducción (sin avance de posición) durante la reproducción:
     // re-resuelve con URLs firmadas frescas y reanuda en la posición actual.
     void onStreamStalled();
+    // Interrupción: EOF prematuro o audio externo que nunca abrió (sesión de
+    // URLs gateada por YouTube, 403). Re-resuelve con URLs frescas, acotado
+    // por el mismo presupuesto de intentos que el atasco.
+    void onStreamInterrupted();
 
 private:
     void startResolve(bool forceRefresh);
@@ -123,6 +127,7 @@ private:
     qint64 m_lastRecoverMs = 0;
     QElapsedTimer m_stableSince;
     QMetaObject::Connection m_stallConn;
+    QMetaObject::Connection m_interruptConn;
     QMetaObject::Connection m_resolveConn;
     QMetaObject::Connection m_resolveErrConn;
     QMetaObject::Connection m_stateConn;

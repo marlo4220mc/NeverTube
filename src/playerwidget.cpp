@@ -275,6 +275,10 @@ void PlayerWidget::playUrl(const QString &url, double startAt)
         return;
     m_position = 0.0;
     m_duration = 0.0;
+    // El stream actual espera audio externo (audio-files aparte): con este
+    // flag checkStall detecta un audio rechazado (403) aunque la posición
+    // avance, y dispara la re-resolución temprana.
+    m_expectsExternalAudio = !m_pendingAudioFile.isEmpty();
     // Preferencia de idioma de audio ("alang"): solo con preferencia explícita
     // mpv elige un doblaje (aunque tenga DEFAULT=NO) en lugar de la pista
     // marcada DEFAULT=YES por YouTube (normalmente el audio original).
@@ -347,6 +351,7 @@ void PlayerWidget::playYtdl(const QString &watchUrl, int maxHeight)
 
 void PlayerWidget::stop()
 {
+    m_expectsExternalAudio = false;
     if (!m_mpv)
         return;
     const char *cmd[] = { "stop", nullptr };
@@ -544,6 +549,18 @@ void PlayerWidget::checkStall()
         emit streamStalled();
         return;
     }
+    // (a.2) Audio externo esperado pero ninguna pista de audio activa: YouTube
+    // rechazó el audio-file (403 de una sesión gateada) y el vídeo va mudo
+    // hasta que los segmentos del HLS también mueran. Re-resolver temprano
+    // (con URLs frescas) en vez de esperar al EOF prematuro de los 60 s.
+    if (m_expectsExternalAudio && !hasActiveAudio()
+        && now - m_videoLoadMs > 4000 && m_position > 2.0) {
+        m_videoLoadMs = now; // no disparar en bucle mientras se recupera
+        NT_DEBUG("E2E streamInterrupted sin-audio pos=%.2f dur=%.2f\n",
+                 m_position, m_duration);
+        emit streamInterrupted();
+        return;
+    }
     // (b) Posición congelada reproduciendo.
     if (m_lastProgressMs <= 0 || now - m_lastProgressMs < 5000)
         return;
@@ -616,6 +633,21 @@ int PlayerWidget::probeMaxVideoHeight() const
     return maxH;
 }
 
+// true si mpv tiene una pista de audio activa ("audio-params"). Con el audio
+// externo (audio-files) rechazado por YouTube (403), mpv reproduce el vídeo
+// sin ninguna pista de audio; "audio-params" no existe / queda vacío.
+bool PlayerWidget::hasActiveAudio() const
+{
+    if (!m_mpv)
+        return false;
+    mpv_node node{};
+    if (mpv_get_property(m_mpv, "audio-params", MPV_FORMAT_NODE, &node) < 0)
+        return false;
+    const bool ok = node.format == MPV_FORMAT_NODE_MAP;
+    mpv_free_node_contents(&node);
+    return ok;
+}
+
 void PlayerWidget::poll()
 {
     if (!m_mpv)
@@ -682,6 +714,21 @@ void PlayerWidget::handleEvent(mpv_event *event)
             const bool naturalEnd =
                 m_duration > 0.0 && m_position >= m_duration - 3.0;
             if (!naturalEnd) {
+                if (m_duration > 0.0) {
+                    // EOF prematuro con duración conocida: YouTube gateó la
+                    // sesión (403 en audio y/o segmentos) y el demuxer se
+                    // quedó sin datos. El controlador re-resuelve con URLs
+                    // frescas y retoma en la posición (streamInterrupted).
+                    // Sin duración fiable (live) se mantiene el error clásico.
+                    if (m_state != QLatin1String("error")) {
+                        m_state = QStringLiteral("error");
+                        emit stateChanged();
+                    }
+                    NT_DEBUG("E2E EOF prematuro pos=%.2f dur=%.2f\n",
+                             m_position, m_duration);
+                    emit streamInterrupted();
+                    return;
+                }
                 if (m_state != QLatin1String("error")) {
                     m_state = QStringLiteral("error");
                     emit stateChanged();

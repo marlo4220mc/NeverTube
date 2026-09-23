@@ -58,6 +58,31 @@ El selftest del player verifica invariantes del núcleo protegido sin
 reproducir ningún archivo. Ejecutar ambos antes de considerar estable un
 cambio que toque el reproductor.
 
+## Recuperación ante sesión gateada (403 de YouTube)
+
+YouTube puede "gatear" una sesión de URLs (audio `>403` y segmentos HLS `>403`
+desde un punto concreto): mpv abre el vídeo mudo (`audio=eof`, sin `AO:`/sink)
+y los segmentos a partir de ~1:00 fallan → EOF prematuro a la ~1:03 con
+`Cache: 0.0s` y error, sin sonido durante todo el vídeo. Intermitente (~1/10
+sesiones). La app ahora se recupera sola re-resolviendo con URLs frescas:
+
+- `PlayerWidget::streamInterrupted()` se emite en dos casos: **EOF prematuro**
+  (EOF no-natural con `duration > 0`, que no es final de vídeo ni live) y
+  **audio externo que nunca abrió** (audio-files esperado, `position > 2s` y
+  `audio-params` de mpv ausente tras ~4-6s). NO toca el render ni el timer de
+  33 ms: es lógica de eventos y del watchdog de `checkStall` (audio).
+- `PlayerController::onStreamInterrupted()` re-resuelve (como el atasco):
+  `reloadCurrent()` con `m_recoverAttempts` (≤3, recaída <8s corta y estabilidad
+  >60s reinicia). En `soft-all`/HW el coste es un tramo de "loading" acotado;
+  en funcionamiento normal ningún código nuevo corre por frame.
+- `hasActiveAudio()` consulta `audio-params` de mpv (`MPV_FORMAT_NODE`). Con
+  audio sano la pista está activa y la detección no se dispara (verificado:
+  tanda normal con `AO: [pipewire]` sin falsos `streamInterrupted`).
+- Sin sonido + vídeo que "se va" a ~1:00 = síntoma de sesión gateada, no del
+  sink de audio ni de la pieza protegida. Verificar con el log `E2E`
+  (`NEVERTUBE_DEBUG=1`): `audio=eof`, `HTTP error 403` en segmentos, y
+  `E2E streamInterrupted -> reloadCurrent`.
+
 ## Logging de depuración
 
 El logging `E2E ...` está activado por variable de entorno (no imprime por
