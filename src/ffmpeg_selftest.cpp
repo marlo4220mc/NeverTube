@@ -1,5 +1,11 @@
 #include "ffmpeg_selftest.h"
 
+// <cstdio> es necesario en AMBAS ramas del guard: el cuerpo del selftest usa
+// std::snprintf/std::fprintf y la rama de skip (#else) usa std::fprintf. Estaba
+// dentro del #ifdef y MSVC (a diferencia de libstdc++) no lo incluye de forma
+// transitiva -> C2039 en builds sin FFmpeg (p.ej. Windows x64).
+#include <cstdio>
+
 #ifdef NEVERTUBE_HAS_FFMPEG_BACKEND
 
 // Selftest offline del FfmpegBackend (Fases 2-4): decodifica en modo banco los
@@ -17,8 +23,6 @@
 #include <QSize>
 #include <QTemporaryDir>
 #include <QTimer>
-
-#include <cstdio>
 
 #include "ffmpeg_backend.h"
 

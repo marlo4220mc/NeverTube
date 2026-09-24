@@ -41,6 +41,12 @@ QString lowerProfile(const QString &profile);
 
 } // namespace hwprobe
 
+// La maquinaria de sondeo usa mpv (clips headless): la clase solo existe en
+// builds con mpv. En el build x86 (NEVERTUBE_NO_MPV) el perfil se decide por
+// plataforma (DXVA2 -> h264-hw) sin HwProbe; sin este guard, AUTOMOC genera el
+// Q_OBJECT con el slot poll() y el enlazado falla (LNK2019: poll sin definir).
+#ifndef NEVERTUBE_NO_MPV
+
 // Sondeo de capacidades de decodificación por hardware al arranque. Reproduce
 // en headless (vo=null, hwdec=auto-copy) un micro-clip por códec en orden
 // AV1 -> VP9 -> H.264 desde resources/clips.
@@ -104,5 +110,7 @@ private:
     // Un reintento por clip si expira el timeout (init de hw lento en VMs).
     bool m_clipRetried = false;
 };
+
+#endif // NEVERTUBE_NO_MPV
 
 #endif
