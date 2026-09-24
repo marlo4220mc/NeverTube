@@ -59,6 +59,9 @@ add_executable(nevertube_qt2
   src/hls_server.h
   src/hwprobe.cpp
   src/hwprobe.h
+  src/playback_backend.h
+  src/mpv_backend.cpp
+  src/mpv_backend.h
   src/playerwidget.cpp
   src/playerwidget.h
   src/player_controller.cpp

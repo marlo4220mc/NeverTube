@@ -5,9 +5,16 @@
 #include <QOpenGLWidget>
 #include <QTimer>
 
-#include <mpv/client.h>
-#include <mpv/render.h>
+#include "playback_backend.h"
 
+// Superficie de vídeo + política de reproducción. Todo acceso al motor va por
+// la interfaz PlaybackBackend (en esta fase, MpvBackend; la x86 con FFmpeg
+// llega en fases posteriores): el widget NO conoce mpv. Aquí viven el estado
+// (posición/duración/state), el watchdog de atasco y de sesión gateada
+// (checkStall), la red de seguridad del perfil de códec (hwdec probe/retry y
+// corrección por log), y la espera inicial de buffer en alta resolución — que
+// es la pieza protegida (QOpenGLWidget, timer de 33 ms en initializeGL
+// forzando QWidget::update(), render directo al FBO en paintGL).
 class PlayerWidget : public QOpenGLWidget
 {
     Q_OBJECT
@@ -25,12 +32,12 @@ public:
     double speed() const;
 
     // Acceso de solo lectura para selftest --selftest-player.
-    QString hwdec() const { return m_hwdec; }
+    QString hwdec() const;
     int redrawIntervalMs() const { return m_redrawTimerActive ? 33 : 0; }
-    // Backend de decodificación por hardware que mpv está usando de verdad
-    // para el stream actual, o "no"/vacío si decodifica en software.
+    // Backend de decodificación por hardware que el motor está usando de
+    // verdad para el stream actual, o "no"/vacío si decodifica en software.
     QString hwdecCurrent() const;
-    // Códec que mpv está decodificando de verdad para el stream actual
+    // Códec que el motor está decodificando de verdad para el stream actual
     // ("h264", "vp9", "av1", …).
     QString videoCodec() const;
 
@@ -41,8 +48,9 @@ public slots:
     void setPaused(bool paused);
     void seek(double seconds);
     void setVolume(double volume);
-    // Tope máximo del volumen de mpv (mpv "volume-max"). Default 100; el ajuste
-    // "Volumen máximo" de Ajustes puede subirlo a 150/175/200 para dar headroom.
+    // Tope máximo del volumen del motor (mpv "volume-max"). Default 100; el
+    // ajuste "Volumen máximo" de Ajustes puede subirlo a 150/175/200 para dar
+    // headroom.
     void setVolumeMax(double maxPercent);
     void setSubVisibility(bool visible);
     void setAudioLanguage(const QString &lang);
@@ -67,7 +75,7 @@ signals:
     void videoAspectChanged(double aspect);
     void videoSizeChanged(int width, int height);
     // Se emite al empezar a decodificar cada stream real: el códec y el backend
-    // de decodificación por hardware que mpv usa de verdad (hwdec-current,
+    // de decodificación por hardware que el motor usa de verdad (hwdec-current,
     // p.ej. "vaapi"/"vulkan-copy"; "no"/vacío = software). MainWindow lo usa
     // como red de seguridad del perfil de códec detectado por HwProbe: si el
     // códec que el perfil da por HW cae a software, degrada el perfil.
@@ -93,41 +101,32 @@ protected:
     void paintGL() override;
 
 private slots:
-    void poll();
+    // Backend ::frameReady: hay un frame nuevo (o cambio de estado) que pintar.
     void onFrameReady();
+    // Backend ::fileLoaded: el archivo principal terminó de cargar.
+    void onFileLoaded();
+    // Backend ::streamStart: empieza un stream nuevo (re-armar el probe).
+    void onStreamStart();
+    // Backend ::endFile: fin de archivo con su razón y mensaje de error.
+    void onEndFile(PlaybackBackend::EndReason reason, const QString &errorText);
+    void onPositionUpdated(double seconds);
+    void onDurationUpdated(double seconds);
+    void onVideoWidth(qint64 width);
+    void onVideoHeight(qint64 height);
+    void onPauseUpdated(bool paused);
+    void onCacheTime(double seconds);
+    void onLogMessage(const QString &prefix, const QString &text);
     void checkInitialBuffer();
     void checkStall();
     void retryHwdec();
 
 private:
-    static void mpvWakeup(void *ctx);
-    static void mpvUpdate(void *ctx);
-    void handleEvent(mpv_event *event);
     void emitAspectIfReady();
-    void addAudioFileNow();
-    // single loadfile de vídeo+audio externo juntos: mpv abre y sincroniza
-    // ambas pistas desde el arranque (opción per-file "audio-files" en el
-    // comando loadfile). Devuelve el código del comando; <0 -> fallback
-    // audio-add posterior (addAudioFileNow en FILE_LOADED).
-    int loadFileWithAudio(const QByteArray &videoUrl);
-    // Lee mpv "track-list" y devuelve la altura máxima entre las pistas de
-    // vídeo. Devuelve 0 si el archivo aún no cargó (FILE_LOADED no llegó) o
-    // si la consulta falló. La lista de calidades del menú (WatchPage) se
-    // oculta por encima del techo real para no ofrecer resoluciones que el
-    // mpv no puede seleccionar.
-    int probeMaxVideoHeight() const;
-    // true si mpv tiene una pista de audio activa (propiedad "audio-params").
-    // false => el stream se está reproduciendo sin audio (p.ej. audio externo
-    // rechazado por YouTube con 403): señal de sesión con URLs gateadas.
-    bool hasActiveAudio() const;
 
-    mpv_handle *m_mpv = nullptr;
-    mpv_render_context *m_rctx = nullptr;
-    int m_logFrames = 0;
+    PlaybackBackend *m_backend = nullptr;
     double m_position = 0.0;
     double m_duration = 0.0;
     QString m_state;
-    QString m_hwdec;
     int64_t m_videoW = 0;
     int64_t m_videoH = 0;
     // Altura máxima real entre las pistas de vídeo del archivo cargado
@@ -135,16 +134,18 @@ private:
     // filtrar el menú de resoluciones.
     int m_videoMaxH = 0;
     double m_aspect = 0.0;
-    QString m_audioLang;
+    // URL de audio externo pendiente de adjuntar (edge/AV1-HLS): se consume en
+    // el próximo playUrl (audio-files) o, como respaldo, tras el archivo
+    // cargado (attachAudio en fileLoaded).
     QString m_pendingAudioFile;
-    bool m_audioAdded = false;
     bool m_redrawTimerActive = false;
     bool m_hwdecProbed = false;
-    // Veredicto del log de mpv para el stream actual: mpv dice explícitamente
-    // "Using software decoding" aunque hwdec-current reporte un backend
-    // (dispositivos de software en GPUs antiguas). Se resetea por stream.
+    // Veredicto del log del motor para el stream actual: el motor dice
+    // explícitamente "Using software decoding" aunque hwdec-current reporte un
+    // backend (dispositivos de software en GPUs antiguas). Se resetea por
+    // stream.
     bool m_hwdecLogSoftware = false;
-    // hwdec-current llega vacío hasta que mpv activa el decodificador; se
+    // hwdec-current llega vacío hasta que el motor activa el decodificador; se
     // reintenta con este timer para que la red de seguridad del perfil reciba
     // un backend resuelto ya en el primer vídeo.
     QTimer *m_hwdecRetry = nullptr;
