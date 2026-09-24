@@ -126,8 +126,6 @@ MpvBackend::MpvBackend(QObject *parent)
 
     mpv_set_option_string(m_mpv, "vo", "libmpv");
     mpv_set_option_string(m_mpv, "hwdec", "auto");
-    mpv_set_option_string(m_mpv, "keep-open", "no");
-    mpv_set_option_string(m_mpv, "terminal", "no");
     // vd=v: el veredicto real del decodificador ("Using hardware/software
     // decoding") es verbose y es lo que valida la red de seguridad del perfil.
     mpv_set_option_string(m_mpv, "message-level",
@@ -137,13 +135,15 @@ MpvBackend::MpvBackend(QObject *parent)
     // los picos del decodificador software y el throttle de descarga de YouTube
     // sin disparar la RAM (150 MiB era el default de mpv, demasiado para una
     // máquina débil/x64; 64 MiB original quedaba corto en las
-    // micro-pausas de arranque).
+    // micro-pausas de arranque). Con el cache activo este tope es además el
+    // límite REAL del readahead: cache-secs default es "muy alto" y
+    // demuxer-readahead-secs queda "mostly ignored" (manual de mpv), así que
+    // no hace falta fijar un readahead en segundos.
     mpv_set_option_string(m_mpv, "demuxer-max-bytes", "96MiB");
     // Amortiguación al arranque: sin esto, con el throttle de YouTube la primera
     // decena de segundos reproduce "en seco" y mpv hace micro-pausas a los ~6 y
     // ~10 s hasta que la descarga paralela (http_multiple) se estabiliza.
     mpv_set_option_string(m_mpv, "cache-initial", "3MiB");
-    mpv_set_option_string(m_mpv, "demuxer-readahead-secs", "20");
     // Hilos del decodificador SOFTWARE (vd=lavc -> h264/vp9/av1 paralelizan por
     // frame-threading). Ideal = nº de núcleos con tope 4: subir más en CPUs de
     // 2 núcleos es sobresuscripción de hilos. Con hwdec activo no interviene
@@ -152,10 +152,13 @@ MpvBackend::MpvBackend(QObject *parent)
     const QByteArray lavcThreads = QByteArray::number(qMin(cores, 4));
     mpv_set_option_string(m_mpv, "vd-lavc-threads", lavcThreads.constData());
     mpv_set_option_string(m_mpv, "audio-buffer", "2.0");
-    mpv_set_option_string(m_mpv, "video-sync", "audio");
 
     if (mpv_initialize(m_mpv) < 0) {
         qWarning("player: mpv_initialize fallo");
+        // Handle inservible: al anularlo isValid() devuelve false y ningún
+        // comando posterior toca un mpv muerto.
+        mpv_destroy(m_mpv);
+        m_mpv = nullptr;
         return;
     }
 
@@ -279,8 +282,7 @@ bool MpvBackend::playUrl(const QString &url, double startAt,
     // ffmpeg descarga por rangos en paralelo ("http_multiple") y los Range
     // cortos no están estrangulados (35 MB/s) -> acaba con el throttle.
     // Solo para URLs externas: el master HLS local no soporta Range requests.
-    if (url.startsWith(QLatin1String("http://127.0.0.1"))
-        || url.startsWith(QLatin1String("http://localhost")))
+    if (isLocalStreamUrl(url))
         mpv_set_option_string(m_mpv, "stream-lavf-o", "");
     else
         mpv_set_option_string(m_mpv, "stream-lavf-o", "http_multiple=1");
@@ -395,11 +397,10 @@ void MpvBackend::dropExternalAudio()
     if (!m_mpv)
         return;
     // Flujo clásico: nada que añadir; además limpia la pista externa
-    // de un vídeo anterior con audio-file merodeando en mpv.
+    // de un vídeo anterior con audio-file merodeando en mpv. El rc se ignora:
+    // MPV_ERROR_COMMAND (sin pista que quitar) no es un fallo para nosotros.
     const char *drop[] = { "audio-file-remove", "auto", nullptr };
-    if (mpv_command(m_mpv, drop) < 0 && !m_audioAdded) {
-        // Sin pista externa previa no hay nada que quitar.
-    }
+    mpv_command(m_mpv, drop);
     m_audioAdded = false;
 }
 
@@ -541,8 +542,6 @@ void MpvBackend::handleEvent(mpv_event *event)
             emit videoHeightUpdated(*static_cast<int64_t *>(prop->data));
         } else if (std::strcmp(n, "pause") == 0 && prop->data) {
             emit pauseUpdated(*static_cast<int *>(prop->data) != 0);
-        } else if (std::strcmp(n, "volume") == 0) {
-            // Consume el cambio para no dejar eventos pendientes.
         } else if (std::strcmp(n, "paused-for-cache") == 0 && prop->data) {
             const int v = *static_cast<int *>(prop->data);
             NT_DEBUG("E2E mpv paused-for-cache=%d\n", v);
