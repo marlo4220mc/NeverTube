@@ -13,11 +13,13 @@
 //   - pausa cortando el sink (pa_simple_cork / QAudioOutput suspend);
 //   - seek con flush de decodificadores y reinicio del reloj maestro.
 //
-// Reloj maestro: wall-time con corrección por pausa/seek. Con audio, el write
-// bloqueante del sink pacea el bucle (el vídeo se descarta si va demasiado
-// adelantado); sin audio, el propio vídeo pacea durmiendo hasta su pts.
-// Position = muestras de audio escritas / 48000 (lo que se ha oído), o el pts
-// del último frame mostrado si no hay audio.
+// Reloj maestro: con pista de audio, el reloj es el propio AUDIO (muestras
+// escritas al sink desde la base de cada seek), NO wall-time: el vídeo se
+// ajusta a la pista descartando frames adelantados (>0.35 s) y saltando
+// frames muy atrasados (>0.5 s, catch-up con audio externo lento). Sin audio,
+// el propio vídeo pacea durmiendo hasta su pts (wall-time con corrección por
+// pausa/seek). Position = reloj de audio (lo que se ha oído) o pts del último
+// frame mostrado si no hay audio; pausa/seek no revierten la posición.
 
 #include <QDebug>
 #include <QOpenGLBuffer>
@@ -49,6 +51,10 @@ extern "C" {
 #include <pulse/error.h>
 #include <pulse/simple.h>
 #endif
+#if defined(Q_OS_WIN)
+#include <QAudio>
+#include <QAudioOutput>
+#endif
 
 #include "debug.h"
 
@@ -56,9 +62,15 @@ extern "C" {
 // Constantes
 
 // Tolerancia de "frame en el futuro" frente al reloj maestro antes de
-// descartarlo (el audio pacea con su propio ritmo; aquí solo se evita que el
-// vídeo se adelante más de ~0.35 s).
+// descartarlo (el vídeo nunca se adelanta más de ~0.35 s al audio).
 static constexpr double kFrameAheadToleranceSec = 0.35;
+
+// Tolerancia de "frame muy atrasado" frente al reloj maestro: con audio como
+// reloj, si la pista de vídeo va más de ~0.5 s POR DETRÁS del audio (p. ej.
+// decode SW lento, audio externo de YouTube por delante), se saltan frames
+// para alcanzar a la pista de audio (mpv hace lo mismo). Sin salto, el vídeo
+// se atrasa indefinidamente y el audio sigue avanzando.
+static constexpr double kFrameBehindToleranceSec = 0.5;
 
 // ---------------------------------------------------------------------------
 // Estado publicado por el hilo de decode y leído por el GUI.
@@ -175,7 +187,11 @@ public:
 
     void writeSamples(const int16_t *data, int frames) override
     {
-        if (!m_pa || frames <= 0)
+        // Si el server murió (m_failed), no insistir con syscalls: el bucle
+        // sigue contando muestras y el vídeo continúa mudo, SIN disparar el
+        // watchdog de audio de la app en falso (la pista sigue activa en el
+        // demux; es el sink el que no suena).
+        if (!m_pa || m_failed || frames <= 0)
             return;
         const size_t bytes = static_cast<size_t>(frames) * 4u;
         if (pa_simple_write(m_pa, data, bytes, nullptr) < 0)
@@ -259,6 +275,11 @@ public:
     void writeSamples(const int16_t *data, int frames) override
     {
         if (!m_out || frames <= 0)
+            return;
+        // Device caído (cable/sink): no escribir, seguir contando muestras
+        // (vídeo mudo pero la pista sigue activa para el watchdog de la app).
+        if (m_out->error() != QAudio::NoError ||
+            m_out->state() == QAudio::StoppedState)
             return;
         const qint64 bytes = static_cast<qint64>(frames) * 4;
         for (int i = 0; i < 4000; ++i) {
@@ -650,16 +671,25 @@ static void runLoop(FfmpegBackend::Impl *m)
     int64_t pauseStartUs = 0;
     bool wasPaused = false;
     int64_t audioSamples = 0; // muestras estéreo escritas (posición de audio)
+    // Base del reloj de AUDIO: con pista de audio, el reloj maestro es el
+    // propio audio (lo que se ha escrito al sink), NO wall-time — así pausas,
+    // seeks y atascos del vídeo no desincronizan HD: el vídeo se ajusta a la
+    // pista. Base = posición del contenido en el momento de (re)arrancar la
+    // cuenta (startAt / destino del seek), porque audioSamples cuenta desde 0
+    // tras cada seek.
+    double audioClockBase = m->startAt;
     double lastVideoPtsShown = 0.0;
     bool audioActiveOnce = false;
     int64_t lastPosEmitUs = 0;
 
-    auto masterClock = [&]() {
-        return static_cast<double>(av_gettime_relative() - t0 - pausedUs) /
-               1e6;
-    };
     auto audioPos = [&]() {
         return static_cast<double>(audioSamples) / 48000.0;
+    };
+    auto masterClock = [&]() {
+        if (ac)
+            return audioClockBase + audioPos();
+        return static_cast<double>(av_gettime_relative() - t0 - pausedUs) /
+               1e6;
     };
     auto setPosition = [&](double p, bool force) {
         {
@@ -720,6 +750,10 @@ static void runLoop(FfmpegBackend::Impl *m)
         if (!draining && f->pts != AV_NOPTS_VALUE &&
             pts > wall + kFrameAheadToleranceSec)
             return; // demasiado en el futuro (el audio pacea) -> descartar
+        if (!draining && ac && f->pts != AV_NOPTS_VALUE &&
+            pts < wall - kFrameBehindToleranceSec)
+            return; // muy ATRASADO frente al audio: saltar para alcanzar la
+                    // pista de audio (decode SW lento / audio externo)
         if (!ac && !draining) {
             // sin audio: el reloj es el propio vídeo; dormir hasta su pts.
             const double d = pts - wall;
@@ -744,7 +778,7 @@ static void runLoop(FfmpegBackend::Impl *m)
             }
             ++m->snap.framesDecoded;
         }
-        setPosition(ac ? audioPos() : pts, false);
+        setPosition(ac ? audioClockBase + audioPos() : pts, false);
     };
 
     auto handleAudioFrame = [&](AVFrame *f) {
@@ -806,6 +840,7 @@ static void runLoop(FfmpegBackend::Impl *m)
             vReadDone = false;
             aReadDone = false;
             audioSamples = 0;
+            audioClockBase = sec;
             rebaseClock(sec);
             setPosition(sec, true);
             emitPost(be, EvCache, 1.0, 0, 0, QString());
@@ -930,7 +965,8 @@ static void runLoop(FfmpegBackend::Impl *m)
             }
             if (sink)
                 sink->drain();
-            const double finalPos = ac ? audioPos() : lastVideoPtsShown;
+            const double finalPos = ac ? audioClockBase + audioPos()
+                                 : lastVideoPtsShown;
             {
                 QMutexLocker l(&m->snapMtx);
                 m->snap.cacheIdle = true;
