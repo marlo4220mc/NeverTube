@@ -12,6 +12,7 @@
 #include "db/repositories.h"
 #include "hwprobe.h"
 #include "player_selftest.h"
+#include "ffmpeg_selftest.h"
 #include "yt.h"
 #include "yt_innertube.h"
 
@@ -244,6 +245,12 @@ int main(int argc, char *argv[])
 
     if (args.contains(QLatin1String("--selftest-av1hls"))) {
         return av1HlsSelfTest() ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-ffmpeg"))) {
+        // Fase 2: FfmpegBackend offline (clips embebidos, modo banco). Sin
+        // FFmpeg en el build es un skip, no un fallo.
+        return ffmpegSelfTest() ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-hwprobe"))) {

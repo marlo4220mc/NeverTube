@@ -145,3 +145,9 @@ signals:
     // de estado): el widget hace pollEvents() + update().
     void frameReady();
 };
+
+// Crea el motor por defecto para la plataforma actual: mpv en x64 (pieza
+// protegida) y, cuando el build lo encienda (NEVERTUBE_HAS_FFMPEG_BACKEND),
+// el FfmpegBackend en la x86 de Windows (Win7). Para desarrollo y
+// verificación se puede forzar con NEVERTUBE_BACKEND=mpv|ffmpeg.
+PlaybackBackend *createPlaybackBackend(QObject *parent);

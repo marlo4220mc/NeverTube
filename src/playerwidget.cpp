@@ -8,7 +8,7 @@
 #include <cmath>
 
 #include "debug.h"
-#include "mpv_backend.h"
+#include "playback_backend.h"
 
 // Tiempo de reproducción sin pista de audio activa que declara el stream
 // gateado (audio 403 de YouTube) y dispara la re-resolución temprana
@@ -19,10 +19,10 @@ static constexpr qint64 kAudioDetectMs = 10000;
 PlayerWidget::PlayerWidget(QWidget *parent)
     : QOpenGLWidget(parent)
 {
-    // Fase 1: único backend es mpv (x64, pieza protegida). La x86 con FFmpeg
-    // (FfmpegBackend) llega en fases posteriores; aquí solo cambia la clase
-    // instanciada, el resto del widget no conoce el motor.
-    m_backend = new MpvBackend(this);
+    // La fábrica elige el motor por plataforma: mpv en x64 (pieza protegida,
+    // Fase 1: toda la integración mpv vive en MpvBackend) o FfmpegBackend en
+    // la x86 (sin libmpv). El resto del widget solo conoce la interfaz.
+    m_backend = createPlaybackBackend(this);
 
     connect(m_backend, &PlaybackBackend::fileLoaded, this,
             &PlayerWidget::onFileLoaded);
