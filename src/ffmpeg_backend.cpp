@@ -445,8 +445,17 @@ static AVCodecContext *openDecoder(const AVCodecParameters *par,
         avcodec_free_context(&cc);
         return nullptr;
     }
-    if (hwDevice)
+    if (hwDevice) {
         cc->hw_device_ctx = av_buffer_ref(hwDevice);
+    } else {
+        // Decodificación SOFTWARE (target x86, h264 a 1 solo hilo por defecto):
+        // h264/vp9/av1 paralelizan por frame-threading. min(núcleos, 4) como
+        // tope para no sobresuscribir CPUs de 2 núcleos. NO se toca con
+        // hwDevice activo (DXVA2/VAAPI ya decodifica; esos hwaccels no se
+        // mezclan con frame-threading).
+        const int cores = qMax(1, QThread::idealThreadCount());
+        cc->thread_count = qMin(cores, 4);
+    }
     if (avcodec_open2(cc, codec, nullptr) < 0) {
         avcodec_free_context(&cc);
         return nullptr;
