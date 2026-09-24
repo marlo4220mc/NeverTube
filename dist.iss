@@ -84,10 +84,10 @@ Name: "{autodesktop}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"; Tasks:
 function InitializeSetup(): Boolean;
 begin
   if IsWin64 and (GetWindowsVersion >= $0A000000) then begin
-    MsgBox('Este instalador es de 32 bits y es para el equipo objetivo (Windows de ' +
-           '32 bits).' + #13#10 + #13#10 +
-           'Tu equipo es un Windows de 64 bits: usa el build x64 ' +
-           '(aprovecha VP9/AV1 por hardware y 4K).' + #13#10 + #13#10 +
+    MsgBox('Este instalador es solo para Windows 7 de 32 bits.' +
+           #13#10 + #13#10 +
+           'Tu equipo no es un Windows 7 de 32 bits.' +
+           #13#10 + #13#10 +
            'Instalacion cancelada.', mbCriticalError, MB_OK);
     Result := False;
   end else
