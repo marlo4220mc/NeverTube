@@ -172,6 +172,31 @@ static bool hwprobeVerdictSelfTests()
         }
     }
     std::fprintf(stderr, "SELFTEST hwprobe verify -> ok (9 casos)\n");
+
+    // Escalera de descenso de perfil (hwprobe::lowerProfile), regresión pura.
+    struct LadderCase
+    {
+        const char *in;
+        const char *want;
+    };
+    const LadderCase ladder[] = {
+        { "av1-hw", "vp9-hw" },
+        { "vp9-hw", "h264-hw" },
+        { "h264-hw", "soft-all" },
+        { "soft-all", "" },    // suelo: no procede
+        { "", "" },            // sin perfil: no procede
+        { "desconocido", "" }, // perfil raro: no se toca
+    };
+    for (const LadderCase &c : ladder) {
+        const QString got = hwprobe::lowerProfile(QString::fromUtf8(c.in));
+        if (got != QLatin1String(c.want)) {
+            std::fprintf(stderr,
+                         "SELFTEST hwprobe ladder FAIL in=%s want='%s' got='%s'\n",
+                         c.in, c.want, got.toUtf8().constData());
+            return false;
+        }
+    }
+    std::fprintf(stderr, "SELFTEST hwprobe ladder -> ok (6 casos)\n");
     return true;
 }
 

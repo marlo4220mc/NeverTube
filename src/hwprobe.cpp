@@ -91,6 +91,18 @@ QString clipVerdict(bool sawHwLog, bool sawSwLog, bool sawHwFailed,
     return QString();
 }
 
+QString lowerProfile(const QString &profile)
+{
+    if (profile == QLatin1String("av1-hw"))
+        return QStringLiteral("vp9-hw");
+    if (profile == QLatin1String("vp9-hw"))
+        return QStringLiteral("h264-hw");
+    if (profile == QLatin1String("h264-hw"))
+        return QStringLiteral("soft-all");
+    // soft-all es el suelo; un perfil desconocido no se toca.
+    return QString();
+}
+
 } // namespace hwprobe
 
 HwProbe::HwProbe(QObject *parent)

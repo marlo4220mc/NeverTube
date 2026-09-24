@@ -242,9 +242,22 @@ vez de abortar (así el i5 llega a H.264, que sí decodifica por HW). Un
   `codec_profile` y relanza `HwProbe` en caliente.
 - Nombres antiguos migrados al arrancar: `modern→av1-hw`, `vp9→vp9-hw`,
   `legacy→h264-hw`, `nohw→soft-all`.
-- Red reactiva (`PlayerWidget::streamDecodeInfoReady`): **solo traza de
-  diagnóstico** (`codec_profile reactivo: ...`). El perfil se decide en el
-  arranque (HwProbe) y NO se degrada ni persiste en caliente.
+- Escalera de descenso (`PlayerWidget::streamDecodeInfoReady` → `MainWindow`,
+  `hwprobe::lowerProfile`): el perfil se decide en el arranque (HwProbe) y, si la
+  reproducción demuestra que el perfil promete HW para el códec que suena pero
+  mpv decodifica en **software**, se baja un peldaño
+  (`av1-hw → vp9-hw → h264-hw → soft-all`) y se **re-resuelve** con el perfil
+  nuevo (`reloadCurrent`, SIN rotar sesión: un problema de códec no es de red).
+  Reglas duras: **solo evidencia de códec/HW, NUNCA por red** (un 403, un
+  visitorData vencido o un atasco de caché no cambian `hwdec-current`; la señal
+  solo existe con frames decodificados en software); `soft-all` es el suelo;
+  presupuesto propio y separado del de sesión (`kDescendMaxPerSession=3`) con
+  anti-rebote (`kDescendCooldownMs=15 s`) y reinicio del presupuesto con una
+  racha decodificada en HW. El descenso es **EFÍMERO** (no se persiste): un fallo
+  puntual no "condena" la máquina; "Volver a detectar hardware" restaura. La
+  comparación usa el perfil **activo en memoria** (`m_activeProfile`), no
+  `settings`, o tras un descenso efímero volvería a bajar en falso.
+  `--selftest-hwprobe` cubre la tabla offline de `hwprobe::lowerProfile`.
 - `Yt::codecRankedScore(altura, mime) = rank*100000 + altura`: la preferencia de
   códec pesa más que la altura, así el códec que la GPU decodifica gana aunque su
   variante sea más baja (p. ej. `h264-hw` prefiere h264 1080 antes que VP9 2160,
