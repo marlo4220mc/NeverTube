@@ -117,6 +117,15 @@ jobs:
           # 2015-2019, que provee msvcp140/vcruntime140/UCRT en la máquina de pruebas).
           Remove-Item dist\vc_redist -Recurse -Force -ErrorAction SilentlyContinue
 
+          # PURGA del plugin de audio WASAPI (qtaudio_wasapi.dll): Qt5
+          # Multimedia lo despliega junto a qtaudio_windows.dll, pero importa
+          # RoGetActivationFactory (W8+) — el loader de Win7 ni siquiera carga
+          # la DLL, y el gate de abajo (correctamente) aborta. En la máquina de pruebas el
+          # audio de QAudioOutput va por qtaudio_windows.dll (WaveOut), plugin
+          # de la era Win7. Misma filosofía que la purga de UCRT: no empaquetar
+          # nada con imports W8+.
+          Remove-Item dist\audio\qtaudio_wasapi.dll -Force -ErrorAction SilentlyContinue
+
           # PURGA de la UCRT app-local: windeployqt --compiler-runtime copia
           # junto al exe la UCRT del SDK (ucrtbase.dll + api-ms-win-crt-*.dll)
           # que importa GetSystemTimePreciseAsFileTime (W8+) y muere en Win7 con
