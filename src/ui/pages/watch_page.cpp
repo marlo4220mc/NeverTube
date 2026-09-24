@@ -110,6 +110,17 @@ public:
         updateMaxHeight();
     }
 
+    // Pantalla completa de solo-vídeo: el tope absoluto de altura NO aplica (o
+    // el vídeo se quedaría en 560 px con la pantalla llena de negro); manda solo
+    // el cap por aspecto, que era el comportamiento original.
+    void setFullscreen(bool fullscreen)
+    {
+        if (m_fullscreen == fullscreen)
+            return;
+        m_fullscreen = fullscreen;
+        updateMaxHeight();
+    }
+
 protected:
     void resizeEvent(QResizeEvent *event) override
     {
@@ -130,8 +141,10 @@ private:
         // crecer el área 3/4 de la ventana y descripción + "A continuación"
         // se quedarían sin espacio. En ventanas pequeñas el cap por aspecto
         // (width/aspect) es el que manda y este tope no cambia nada.
+        // En PANTALLA COMPLETA no aplica el tope: el vídeo debe llenar la
+        // pantalla (solo lo limita su aspecto).
         const int h = qRound(width() / m_aspect);
-        const int capped = qMin(h, kMaxPlayerHeight);
+        const int capped = m_fullscreen ? h : qMin(h, kMaxPlayerHeight);
         NT_DEBUG("E2E pc aspect=%.3f width=%d maxH=%d curMax=%d\n",
                  m_aspect, width(), capped, maximumHeight());
         if (capped == maximumHeight())
@@ -143,6 +156,8 @@ private:
     PlayerWidget *m_player;
     QVBoxLayout *m_lay = nullptr;
     double m_aspect = 0.0;
+    // Pantalla completa (solo vídeo): desactiva el tope kMaxPlayerHeight.
+    bool m_fullscreen = false;
 };
 
 // Deslizador de búsqueda: click en cualquier punto del track busca ahí y el
@@ -1478,6 +1493,8 @@ void WatchPage::enterFullscreen()
     if (m_inFullscreen)
         return;
     m_inFullscreen = true;
+    if (m_playerContainer)
+        m_playerContainer->setFullscreen(true);
     if (m_belowWidget)
         m_belowWidget->hide();
     if (m_overlay->currentIndex() == 0)
@@ -1491,6 +1508,8 @@ void WatchPage::leaveFullscreen()
     if (!m_inFullscreen)
         return;
     m_inFullscreen = false;
+    if (m_playerContainer)
+        m_playerContainer->setFullscreen(false);
     if (m_belowWidget)
         m_belowWidget->show();
     emit fullscreenToggled(false);
