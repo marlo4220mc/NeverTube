@@ -172,9 +172,10 @@ jobs:
           Get-ChildItem dist | Select-Object Name, Length
 
       # Smoke test desde dist\ (con todo su maquetillaje de DLLs): TLS real (que
-      # OpenSSL x64 carga y hace handshake), db, mpv init + micro-clips (aquí se
-      # cazaría el abort "lock != NULL" del OpenSSL roto), búsqueda Innertube,
-      # navegación de canal/detalle/playlist y cadena de feeds.
+      # OpenSSL x64 carga y hace handshake), db, búsqueda Innertube, navegación
+      # de canal/detalle/playlist y cadena de feeds. SIN --selftest-hwprobe: la
+      # VM de GitHub no tiene GPU, así que el sondeo de hardware se valida en
+      # la máquina x64 de pruebas, no aquí (en el runner solo daría un veredicto software).
       - name: smoke test (offscreen) desde dist
         shell: pwsh
         run: |
@@ -186,7 +187,7 @@ jobs:
             Write-Host "smoke $flag exit=$($p.ExitCode)"
             return $p.ExitCode
           }
-          foreach ($t in @('--selftest-tls', '--selftest-db', '--selftest-hwprobe',
+          foreach ($t in @('--selftest-tls', '--selftest-db',
                            '--selftest-search', '--selftest-browse', '--selftest-feeds')) {
             $rc = Invoke-Selftest $t
             if ($rc -ne 0) {

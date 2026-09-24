@@ -24,9 +24,30 @@
 #include <QTemporaryDir>
 #include <QTimer>
 
+#include <cstring>
+
 #include "ffmpeg_backend.h"
 
+extern "C" {
+#include <libavcodec/avcodec.h>
+}
+
 namespace {
+
+// ¿Este build puede decodificar AV1 en SOFTWARE? El decoder NATIVO `av1` de
+// FFmpeg 9 NO decodifica por software: sin un hwaccel av1 activo aborta el
+// clip entero con ENOSYS ("Your platform doesn't support hardware accelerated
+// AV1 decoding", av1dec.c). El paquete i686 vendorizado no trae libdav1d ni
+// libaom (sw) ni hwaccel av1 -> AV1 es imposible en x86, y la app x86 nunca lo
+// pide (perfil h264-hw): el clip se salta en vez de fallar. Donde SÍ hay
+// decoder sw de AV1 (Linux/x64 con libdav1d/libaom) se verifica igual que el
+// resto. (Un build sin sw pero con hwaccel av1 usable quedaría fuera de esta
+// heurística; los paquetes de distro traen libdav1d de todos modos.)
+bool av1SoftwareDecodable()
+{
+    return avcodec_find_decoder_by_name("libdav1d") != nullptr ||
+           avcodec_find_decoder_by_name("libaom-av1") != nullptr;
+}
 
 struct Clip {
     const char *resource;
@@ -126,6 +147,15 @@ bool ffmpegSelfTest()
 
     // --- caso base por clip (cadena demux->decode->swscale) ---
     for (const Clip &clip : kClips) {
+        // AV1 en builds sin decoder de software (paquete i686): imposible de
+        // decodificar (ver av1SoftwareDecodable). En x86 la app no lo usa.
+        if (std::strcmp(clip.codec, "av1") == 0 && !av1SoftwareDecodable()) {
+            std::fprintf(stderr,
+                         "SELFTEST ffmpeg %-22s -> skip (sin decoder AV1 de "
+                         "software en este build)\n",
+                         clip.file);
+            continue;
+        }
         const QString outPath = extractClip(tmp, clip.resource, clip.file);
         if (outPath.isEmpty()) {
             std::fprintf(stderr, "SELFTEST ffmpeg -> falta %s\n",
