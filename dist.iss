@@ -26,6 +26,11 @@ SolidCompression=yes
 ; El equipo objetivo es Windows x86: el payload es de 32 bits y el instalador
 ; se instala como 32 bits siempre ({autopf}=Program Files en x86 / Program
 ; Files (x86) en una máquina de 64 bits). Sin ArchitecturesInstallIn64BitMode.
+; GUARD de arquitectura: en un Windows de 64 bits (10/11) lo correcto es el
+; build x64 (mpv + HwProbe: VP9/AV1 por hardware, 4K); el x86 ahí queda capado
+; a h264 HW + VP9 software y sin AV1. Ver InitializeSetup en [Code]: cancela
+; con aviso. Se permite en Windows de 32 bits y en 64 bits anterior a 10 (donde
+; el build x64/mpv moderno no corre).
 ; admin: necesario para que ssPostInstall instale VC_redist.x86.exe (UCRT + CRT
 ; de Microsoft, la única UCRT con la variante compatible con Win7 — la UCRT de
 ; la Windows SDK importa GetSystemTimePreciseAsFileTime, W8+, y no carga en la
@@ -71,6 +76,24 @@ Name: "{group}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"
 Name: "{autodesktop}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"; Tasks: desktopicon
 
 [Code]
+// GUARD de arquitectura (antes de tocar disco): este setup es del build x86
+// (Win7 de 32 bits). En un Windows de 64 bits 10/11 se cancela y se
+// dirige al build x64. GetWindowsVersion: Major shl 24 | Minor shl 16 | Build
+// -> Win10/Win11 = $0A000000. Se permite en 32 bits y en 64 bits < 10 (donde
+// el build x64 con mpv moderno no correría).
+function InitializeSetup(): Boolean;
+begin
+  if IsWin64 and (GetWindowsVersion >= $0A000000) then begin
+    MsgBox('Este instalador es de 32 bits y es para el equipo objetivo (Windows de ' +
+           '32 bits).' + #13#10 + #13#10 +
+           'Tu equipo es un Windows de 64 bits: usa el build x64 ' +
+           '(aprovecha VP9/AV1 por hardware y 4K).' + #13#10 + #13#10 +
+           'Instalacion cancelada.', mbCriticalError, MB_OK);
+    Result := False;
+  end else
+    Result := True;
+end;
+
 // UCRT + CRT de Microsoft para el equipo objetivo (Win7 SP1): la UCRT de la Windows
 // SDK importa GetSystemTimePreciseAsFileTime (W8+) y no carga; la variante del
 // redist sí es compatible con Win7. /install /passive /norestart evita
