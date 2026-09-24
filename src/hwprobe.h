@@ -29,6 +29,16 @@ namespace hwprobe {
 QString clipVerdict(bool sawHwLog, bool sawSwLog, bool sawHwFailed,
                     const QString &hwdecCurrent);
 
+// Escalera de descenso de perfiles (degradación por reproducción). Devuelve el
+// perfil inmediatamente inferior al dado, o vacío si no procede.
+//
+// Se usa SOLO con evidencia de códec/HW: el perfil activo promete hardware para
+// el códec que se está reproduciendo y mpv decodifica en SOFTWARE. La red no
+// puede producir esa señal (un 403, un visitorData vencido o un atasco de caché
+// no cambian hwdec-current), así que la escalera NUNCA degrada por red.
+//   av1-hw -> vp9-hw -> h264-hw -> soft-all -> (vacío: es el suelo)
+QString lowerProfile(const QString &profile);
+
 } // namespace hwprobe
 
 // Sondeo de capacidades de decodificación por hardware al arranque. Reproduce

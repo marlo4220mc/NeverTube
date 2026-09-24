@@ -19,6 +19,7 @@
 #include <QVBoxLayout>
 #include <QMouseEvent>
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFrame>
@@ -54,6 +55,13 @@ namespace {
 // qsv-copy) se autocorrige sin tener que re-sondear en cada arranque (algo que
 // penalizaría la máquina de pruebas, donde el sondeo es lento).
 constexpr int kCodecProbeVersion = 2;
+
+// Anti-rebote y presupuesto de la escalera de descenso de perfil (evidencia de
+// códec/HW). Un mismo episodio no debe degradar varias veces seguidas (el
+// decoder puede emitir "software" repetido); y como mucho se descienden 3
+// peldaños por sesión (av1-hw -> vp9-hw -> h264-hw -> soft-all).
+constexpr qint64 kDescendCooldownMs = 15000;
+constexpr int kDescendMaxPerSession = 3;
 
 // Botón de la barra de navegación inferior. Usa los PNG adjuntos por estado
 // (inicio/buscar/biblioteca/ajustes × inactivo/activo/hover/presionado/
@@ -241,18 +249,48 @@ MainWindow::MainWindow(QWidget *parent)
             [this](const QString &codec, const QString &hwdecBackend) {
                 // hwdec-current llega "vacío" en el primer video-params (mpv
                 // aún no activó el decodificador) y "no" cuando el decoder se
-                // sabe en software. El perfil se decide y persiste SOLO en el
-                // sondeo de arranque (HwProbe, sin "degradaciones luego"); la
-                // red reactiva ya no cambia el perfil: esta traza sirve para
-                // verificar que el perfil del arranque acertó.
-                if (hwdecBackend != QLatin1String("no"))
+                // sabe en software; el widget reintenta hasta tenerlo resuelto.
+                //
+                // Escalera de descenso: si el perfil ACTIVO promete hardware y
+                // mpv decodifica en SOFTWARE, el veredicto del arranque no se
+                // sostiene en la reproducción -> se baja un peldaño y se
+                // RE-RESUELVE con el perfil nuevo (reloadCurrent sin rotar
+                // sesión: un problema de códec no es de sesión).
+                //
+                // Regla dura: NUNCA por red. Un 403, un visitorData vencido o
+                // un atasco de caché no cambian hwdec-current; esta señal solo
+                // existe con frames decodificados en software. Sin evidencia de
+                // códec/HW (arriba: hwdecBackend != "no") no se toca nada.
+                if (hwdecBackend != QLatin1String("no")) {
+                    // Decodifica en hardware: el perfil acertó -> una racha
+                    // sana reinicia el presupuesto del descenso.
+                    m_descendAttempts = 0;
                     return;
-                const QString activeProfile = m_settings.getString(
-                    QStringLiteral("codec_profile"), QString());
+                }
+                const QString lower = hwprobe::lowerProfile(m_activeProfile);
                 NT_DEBUG("E2E codec_profile reactivo: perfil=%s cod=%s hw=no "
-                         "(sin degradación: decide HwProbe)\n",
-                         activeProfile.toUtf8().constData(),
-                         codec.toUtf8().constData());
+                         "-> bajar=%s\n",
+                         m_activeProfile.toUtf8().constData(),
+                         codec.toUtf8().constData(),
+                         lower.isEmpty() ? "(nada)" : lower.toUtf8().constData());
+                // soft-all es el suelo; un perfil desconocido tampoco se toca.
+                if (lower.isEmpty())
+                    return;
+                if (m_descendAttempts >= kDescendMaxPerSession)
+                    return;
+                const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                if (m_lastDescendMs > 0
+                    && now - m_lastDescendMs < kDescendCooldownMs)
+                    return; // anti-rebote: el mismo episodio no baja varias veces
+                ++m_descendAttempts;
+                m_lastDescendMs = now;
+                // Efímero: se aplica EN MEMORIA (persist=false). Un fallo
+                // puntual no debe "condenar" la máquina a un perfil menor
+                // (Ajustes -> "Volver a detectar" lo restaura).
+                applyCodecProfile(lower, /*persist=*/false);
+                NT_DEBUG("E2E codec_profile descenso=%s intento=%d -> reload\n",
+                         lower.toUtf8().constData(), m_descendAttempts);
+                m_player.reloadCurrent();
             });
     m_elapsed.start();
     m_player.setPlayer(m_playerWidget);
@@ -1156,6 +1194,8 @@ void MainWindow::showPreviousTab()
 
 void MainWindow::applyCodecProfile(const QString &profile, bool persist)
 {
+    // Perfil activo en memoria (la escalera compara contra este; ver m_activeProfile).
+    m_activeProfile = profile;
     if (persist)
         m_settings.set(QStringLiteral("codec_profile"), profile);
     m_noHw = profile == QLatin1String("soft-all");

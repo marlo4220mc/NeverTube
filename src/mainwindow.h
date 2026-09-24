@@ -165,6 +165,19 @@ private:
     bool m_noHw = false;
     QElapsedTimer m_elapsed;
 
+    // Escalera de descenso de perfil por reproducción (evidencia de códec/HW,
+    // nunca red): presupuesto propio, separado del de la recuperación de sesión,
+    // y anti-rebote para que un mismo episodio no baje varias veces. El descenso
+    // es EFÍMERO (no se persiste): un fallo puntual no debe "condenar" la
+    // máquina a un perfil menor (Ajustes -> "Volver a detectar" lo restaura).
+    int m_descendAttempts = 0;
+    qint64 m_lastDescendMs = 0;
+    // Perfil ACTIVO en memoria (puede diferir del persistido si la escalera
+    // bajó de forma efímera). La escalera compara contra este, no contra
+    // settings: si no, tras un descenso en memoria seguiría viendo el perfil
+    // viejo y volvería a bajar en falso.
+    QString m_activeProfile;
+
     // Sondeo de hardware de vídeo (HwProbe) y su cartel. Mientras m_hwProbing
     // está activo no se reproduce: la petición se encola y se ejecuta al acabar.
     HwProbe *m_hwProbe = nullptr;
