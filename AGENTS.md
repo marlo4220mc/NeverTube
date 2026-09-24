@@ -28,6 +28,16 @@ por defecto al paquete vendorizado. En x86 la app usa `Qt5 Multimedia`
 settings/factory). En x64/Linux todo queda como estaba (mpv). Detalles y
 verificación: `third_party/ffmpeg-win32/README.md` y `BUILD_WINDOWS.md`.
 
+El `FfmpegBackend` decide si adjunta el `hw_device_ctx` a un decodificador con
+`codecSupportsHw` (`avcodec_get_hw_config`): SOLO si el códec tiene un hwaccel
+compilado para ese device (el paquete i686 solo trae `h264_dxva2`). Es
+obligatorio no adjuntarlo a AV1: el decoder nativo de FFmpeg 9 aborta el clip
+entero con `ENOSYS` ("Your platform doesn't support hardware accelerated AV1
+decoding", av1dec.c) si ve el device pero no logra un hwaccel — en lugar de
+caer a software como hace h264. Con device activo (p.ej. la VM de CI, sin
+GPU) el clip av1 fallaba con 0 frames; sin device (Linux sin VAAPI, Wine) el
+mismo clip pasa por software.
+
 ## Pieza protegida (NO modificar sin razón técnica y prueba)
 
 El reproductor funcional es una pieza protegida. Los siguientes elementos NO
