@@ -108,7 +108,6 @@ struct FfmpegBackend::Impl
         qint64 vw = 0;
         qint64 vh = 0;
         int maxVideoH = 0;
-        double cacheSecs = 0.0;
         bool cacheIdle = false;
         bool audioActive = false;
         QString codec;           // códec del vídeo ("h264"/"vp9"/"av1", …)
@@ -303,7 +302,8 @@ public:
         if (!m_out)
             return;
         m_out->stop();
-        m_out->start();
+        // start() arranca el sink y devuelve el QIODevice: solo hace falta
+        // llamarlo una vez (la llamada previa duplicada se descartaba).
         m_dev = m_out->start();
     }
 
@@ -381,16 +381,12 @@ static std::unique_ptr<Sink> makeSink()
 // ---------------------------------------------------------------------------
 // Helpers
 
-// URL local (servidor HLS de la propia app): sin opciones de throttle.
-static bool isLocalUrl(const char *url)
+// Callback de interrupción de avformat: hace que stop() corte los reads de
+// red al instante (sin él, av_read_frame puede bloquear segundos).
+static int interruptCb(void *ctx)
 {
-    const QByteArray u(url);
-    return u.contains("127.0.0.1") || u.contains("localhost");
-}
-
-int FfmpegBackend::interruptCb(void *ctx)
-{
-    const Impl *m = static_cast<const Impl *>(ctx);
+    const FfmpegBackend::Impl *m =
+        static_cast<const FfmpegBackend::Impl *>(ctx);
     return m->stop.load() ? 1 : 0;
 }
 
@@ -403,9 +399,11 @@ static bool openFormat(AVFormatContext **out, const QString &url, void *ictx)
     if (url.isEmpty())
         return false;
     *out = avformat_alloc_context();
-    (*out)->interrupt_callback = { FfmpegBackend::interruptCb, ictx };
+    if (!*out) // OOM: sin contexto no hay donde colgar el callback
+        return false;
+    (*out)->interrupt_callback = { interruptCb, ictx };
     AVDictionary *opts = nullptr;
-    if (!isLocalUrl(url.toUtf8().constData()))
+    if (!isLocalStreamUrl(url))
         av_dict_set(&opts, "http_multiple", "1", 0);
     const int rc =
         avformat_open_input(out, url.toUtf8().constData(), nullptr, &opts);
@@ -565,6 +563,10 @@ static void runLoop(FfmpegBackend::Impl *m)
     bool extAudio = false;           // ac proviene de aFmt
     int muxAudioIdx = -1;            // pista de audio muxed en vFmt (si ac vive ahí)
     int extAudioIdx = -1;
+    // Device HW (Fase 4): la referencia se libera SIEMPRE aquí (también en las
+    // rutas de error posteriores a su creación). openDecoder hace un
+    // av_buffer_ref() propio, así que este unref no toca a los codec contexts.
+    AVBufferRef *hwDevice = nullptr;
 
     auto cleanup = [&]() {
         if (ac)
@@ -575,6 +577,8 @@ static void runLoop(FfmpegBackend::Impl *m)
             avformat_close_input(&aFmt);
         if (vFmt)
             avformat_close_input(&vFmt);
+        if (hwDevice)
+            av_buffer_unref(&hwDevice);
         NT_DEBUG("E2E ffmpeg hilo finalizado\n");
     };
     auto fail = [&](const QString &msg) {
@@ -608,7 +612,6 @@ static void runLoop(FfmpegBackend::Impl *m)
     // --- Fase 4: device de aceleración por hardware (si existe) ---
     // Windows x86: DXVA2 (H.264 de la iGPU del target x86). Linux: VAAPI.
     // Si no se puede crear, se decodifica en software (el flujo manda).
-    AVBufferRef *hwDevice = nullptr;
     const char *hwName = nullptr;
 #if defined(Q_OS_WIN)
     hwName = "dxva2";
@@ -1075,8 +1078,6 @@ static void runLoop(FfmpegBackend::Impl *m)
     av_free(abuf);
     if (swr)
         swr_free(&swr);
-    if (hwDevice)
-        av_buffer_unref(&hwDevice);
     cleanup();
 }
 
@@ -1267,6 +1268,12 @@ bool FfmpegBackend::playUrl(const QString &url, double startAt,
     m->audioUrl = audioUrl;
     m->startAt = std::max(0.0, startAt);
     m->pause = false;
+    // Reset del seek pendiente: sin esto, un seek hecho en el vídeo anterior
+    // (seekTick != 0) se reaplicaba al arrancar el siguiente, porque runLoop
+    // parte con appliedSeekTick=0 y el primer ciclo ve tick distintos. El hilo
+    // viejo ya está joineado aquí, así que no hay carrera con el reset.
+    m->seekTick = 0;
+    m->seekSec = 0.0;
     // Device HW solicitado para configuredhwdec() (lo que de verdad se usa
     // se resuelve con el primer frame -> hwdecCurrent()).
     m->reqHwdec = QLatin1String(
@@ -1345,7 +1352,11 @@ bool FfmpegBackend::hasActiveAudio() const
 
 double FfmpegBackend::cacheDuration() const
 {
-    return m->readSnap().cacheSecs;
+    // Este backend no tiene modelo de "cache" medible: el demuxer lee directo
+    // del socket y no mantiene un colchón propio (cacheIdle es siempre true).
+    // Se devuelve 0.0 como mpv con colchón vacío; el watchdog de la app no
+    // depende de este valor en este motor.
+    return 0.0;
 }
 
 bool FfmpegBackend::cacheIdle() const { return m->readSnap().cacheIdle; }
