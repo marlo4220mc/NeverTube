@@ -491,6 +491,7 @@ void SettingsPage::buildUI()
         m_codecProfileLabel->setStyleSheet(QStringLiteral("color:#8F8F8F;"));
         row->addWidget(m_codecProfileLabel);
         row->addStretch(1);
+#ifndef NEVERTUBE_NO_MPV
         auto *btn = makeActionButton(QStringLiteral("Volver a detectar"));
         connect(btn, &QPushButton::clicked, this, [this]() {
             m_settings->set(QStringLiteral("codec_profile"), QString());
@@ -498,6 +499,7 @@ void SettingsPage::buildUI()
             emit redetectHwRequested();
         });
         row->addWidget(btn);
+#endif
         scrollLay->addLayout(row);
     }
 

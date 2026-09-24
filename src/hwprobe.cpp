@@ -5,12 +5,20 @@
 #include <QTemporaryDir>
 #include <QTimer>
 
+#ifndef NEVERTUBE_NO_MPV
 #include <mpv/client.h>
+#endif
 
 #include <clocale>
 
 #include "debug.h"
 
+// Toda la maquinaria de sondeo con clips usa mpv: solo existe en builds con
+// mpv. En el build x86 sin mpv (NEVERTUBE_NO_MPV, Fase 5) el perfil de códec
+// se decide por plataforma (DXVA2 -> h264-hw como tope) y la escalera
+// reactiva de streamDecodeInfoReady cubre a las máquinas sin HW; aquí solo
+// quedan los helpers puros (hwprobe::clipVerdict / lowerProfile) de abajo.
+#ifndef NEVERTUBE_NO_MPV
 namespace {
 
 // Orden deliberado: si AV1 tiene HW, es el mejor códec y no hace falta probar
@@ -74,6 +82,7 @@ bool hwAttemptFailed(const QString &prefix, const QString &text,
 }
 
 } // namespace
+#endif // NEVERTUBE_NO_MPV
 
 namespace hwprobe {
 
@@ -104,6 +113,8 @@ QString lowerProfile(const QString &profile)
 }
 
 } // namespace hwprobe
+
+#ifndef NEVERTUBE_NO_MPV
 
 HwProbe::HwProbe(QObject *parent)
     : QObject(parent)
@@ -362,3 +373,5 @@ void HwProbe::finish(const QString &profile)
         NT_DEBUG("E2E hwprobe profile=%s\n", profile.toUtf8().constData());
     emit finished(profile);
 }
+
+#endif // NEVERTUBE_NO_MPV

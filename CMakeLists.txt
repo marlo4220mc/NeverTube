@@ -26,7 +26,17 @@ find_package(OpenGL REQUIRED)
 # target_link_libraries no dependa de la plataforma. Esta máquina (Linux)
 # compila/verifica la rama else(); la if(WIN32) es build-config y el build
 # final de Windows corre en el equipo/CI del usuario.
-if(WIN32)
+#
+# Fase 5: el build x86 de Windows (Win7) NO enlaza mpv — su único
+# motor es el FfmpegBackend (FFMPEG_DEV_DIR + Qt5 Multimedia, más abajo).
+# Todo lo demás (Linux y Windows x64) conserva mpv exactamente como estaba.
+if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+  set(NEVERTUBE_X86_FFMPEG_BUILD ON)
+else()
+  set(NEVERTUBE_X86_FFMPEG_BUILD OFF)
+endif()
+
+if(WIN32 AND NOT NEVERTUBE_X86_FFMPEG_BUILD)
   set(MPV_DEV_DIR "" CACHE PATH "Directorio del paquete mpv-dev de Windows (include/ + lib/ + dll)")
   if(NOT MPV_DEV_DIR)
     message(FATAL_ERROR "WIN32 necesita -DMPV_DEV_DIR=<ruta a mpv-dev> (BUILD_WINDOWS.md)")
@@ -40,7 +50,7 @@ if(WIN32)
   set_target_properties(MPV::MPV PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${MPV_INCLUDE_DIR}"
     INTERFACE_LINK_LIBRARIES "${MPV_LIBRARY}")
-else()
+elseif(NOT WIN32)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
   add_library(MPV::MPV INTERFACE IMPORTED)
@@ -61,8 +71,6 @@ add_executable(nevertube_qt2
   src/hwprobe.h
   src/playback_backend.h
   src/backend_factory.cpp
-  src/mpv_backend.cpp
-  src/mpv_backend.h
   src/ffmpeg_selftest.cpp
   src/ffmpeg_selftest.h
   src/playerwidget.cpp
@@ -113,6 +121,14 @@ add_executable(nevertube_qt2
   resources/resources.qrc
 )
 
+# mpv_backend solo se compila donde mpv enlaza (Linux y Windows x64); el
+# build x86 (NEVERTUBE_X86_FFMPEG_BUILD) usa solo el FfmpegBackend.
+if(NOT NEVERTUBE_X86_FFMPEG_BUILD)
+  target_sources(nevertube_qt2 PRIVATE
+    src/mpv_backend.cpp
+    src/mpv_backend.h)
+endif()
+
 target_link_libraries(nevertube_qt2 PRIVATE
   Qt5::Core
   Qt5::Gui
@@ -120,8 +136,10 @@ target_link_libraries(nevertube_qt2 PRIVATE
   Qt5::Network
   Qt5::Sql
   OpenGL::GL
-  MPV::MPV
 )
+if(NOT NEVERTUBE_X86_FFMPEG_BUILD)
+  target_link_libraries(nevertube_qt2 PRIVATE MPV::MPV)
+endif()
 
 # --- FfmpegBackend (reproductor barato, Fases 2-5) ---
 # La x64 usa mpv SIEMPRE en runtime (pieza protegida); el FfmpegBackend se
@@ -130,9 +148,39 @@ target_link_libraries(nevertube_qt2 PRIVATE
 #     swresample + pulse-simple). Aquí se compila y se valida con
 #     --selftest-ffmpeg; el runtime por defecto sigue siendo mpv
 #     (NEVERTUBE_BACKEND=ffmpeg solo para pruebas de desarrollo).
-#   - Windows x86 (Win7): se activa en la Fase 5 (FFMPEG_DEV_DIR +
-#     Qt5 Multimedia); el build x64 actual NO se toca.
-if(NOT WIN32)
+#   - Windows x86 (Win7, Fase 5): el ÚNICO motor del build. Se enlaza
+#     contra el dev-package FFmpeg Win32 (FFMPEG_DEV_DIR: include/ + lib/ +
+#     DLLs) y Qt5 Multimedia (QAudioSink del backend). El build x64 NO se toca.
+if(NEVERTUBE_X86_FFMPEG_BUILD)
+  # ---- Windows x86 (Win7): FFmpeg dev por FFMPEG_DEV_DIR ----
+  # Dev-package Win32 (headers *.h + import-libs *.lib + DLLs), misma mecánica
+  # que MPV_DEV_DIR. Sin pkg-config en Windows: find_path/find_library.
+  set(FFMPEG_DEV_DIR "" CACHE PATH "Directorio del dev-package FFmpeg Win32 (include/ + lib/ + DLLs)")
+  if(NOT FFMPEG_DEV_DIR)
+    message(FATAL_ERROR "WIN32 x86 necesita -DFFMPEG_DEV_DIR=<ruta a ffmpeg-dev> (BUILD_WINDOWS.md)")
+  endif()
+  find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h PATHS "${FFMPEG_DEV_DIR}" PATH_SUFFIXES include NO_DEFAULT_PATH)
+  find_library(FFMPEG_AVCODEC_LIB NAMES avcodec.lib avcodec PATHS "${FFMPEG_DEV_DIR}" PATH_SUFFIXES lib "" NO_DEFAULT_PATH)
+  find_library(FFMPEG_AVFORMAT_LIB NAMES avformat.lib avformat PATHS "${FFMPEG_DEV_DIR}" PATH_SUFFIXES lib "" NO_DEFAULT_PATH)
+  find_library(FFMPEG_AVUTIL_LIB NAMES avutil.lib avutil PATHS "${FFMPEG_DEV_DIR}" PATH_SUFFIXES lib "" NO_DEFAULT_PATH)
+  find_library(FFMPEG_SWSCALE_LIB NAMES swscale.lib swscale PATHS "${FFMPEG_DEV_DIR}" PATH_SUFFIXES lib "" NO_DEFAULT_PATH)
+  find_library(FFMPEG_SWRESAMPLE_LIB NAMES swresample.lib swresample PATHS "${FFMPEG_DEV_DIR}" PATH_SUFFIXES lib "" NO_DEFAULT_PATH)
+  if(NOT FFMPEG_INCLUDE_DIR OR NOT FFMPEG_AVCODEC_LIB OR NOT FFMPEG_AVFORMAT_LIB OR NOT FFMPEG_AVUTIL_LIB OR NOT FFMPEG_SWSCALE_LIB OR NOT FFMPEG_SWRESAMPLE_LIB)
+    message(FATAL_ERROR "ffmpeg-dev incompleto en '${FFMPEG_DEV_DIR}': falta include/libavcodec/avcodec.h (got '${FFMPEG_INCLUDE_DIR}') o las .lib avcodec/avformat/avutil/swscale/swresample. Revisa BUILD_WINDOWS.md")
+  endif()
+  add_library(FFMPEG::AV INTERFACE IMPORTED)
+  set_target_properties(FFMPEG::AV PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${FFMPEG_INCLUDE_DIR}"
+    INTERFACE_LINK_LIBRARIES "${FFMPEG_AVCODEC_LIB};${FFMPEG_AVFORMAT_LIB};${FFMPEG_AVUTIL_LIB};${FFMPEG_SWSCALE_LIB};${FFMPEG_SWRESAMPLE_LIB}")
+  find_package(Qt5 REQUIRED COMPONENTS Multimedia)
+  target_sources(nevertube_qt2 PRIVATE
+    src/ffmpeg_backend.cpp
+    src/ffmpeg_backend.h)
+  target_compile_definitions(nevertube_qt2 PRIVATE
+    NEVERTUBE_HAS_FFMPEG_BACKEND=1
+    NEVERTUBE_NO_MPV=1)
+  target_link_libraries(nevertube_qt2 PRIVATE FFMPEG::AV Qt5::Multimedia)
+elseif(NOT WIN32)
   find_package(PkgConfig QUIET)
   if(PkgConfig_FOUND)
     pkg_check_modules(AV QUIET IMPORTED_TARGET

@@ -228,6 +228,20 @@ MainWindow::MainWindow(QWidget *parent)
     const QString savedProfile = normalizeCodecProfile(rawProfile);
     if (!rawProfile.isEmpty() && savedProfile != rawProfile)
         m_settings.set(QStringLiteral("codec_profile"), savedProfile);
+#ifdef NEVERTUBE_NO_MPV
+    // Build x86 sin mpv (Fase 5): no hay HwProbe (sondea con mpv). El perfil
+    // se decide por plataforma — el target x86 va por DXVA2, H.264 es el techo; los
+    // av1/vp9 irán a SW y la escalera reactiva (streamDecodeInfoReady ->
+    // hwdecCurrent()=="no") ya los descendería en caliente. Sin valor
+    // guardado = h264-hw, persistido para que Ajustes lo muestre.
+    if (savedProfile.isEmpty()) {
+        m_settings.set(QStringLiteral("codec_profile"),
+                       QStringLiteral("h264-hw"));
+        applyCodecProfile(QStringLiteral("h264-hw"), false);
+    } else {
+        applyCodecProfile(savedProfile, false);
+    }
+#else
     // El perfil se re-sondea al arranque si no hay valor persistido o si fue
     // escrito por otra versión del sondeo (codec_probe_v). El valor guardado
     // se usa como fallback mientras se sondea; el veredicto fresco lo
@@ -245,6 +259,7 @@ MainWindow::MainWindow(QWidget *parent)
     } else {
         applyCodecProfile(savedProfile, false);
     }
+#endif
     connect(m_playerWidget, &PlayerWidget::streamDecodeInfoReady, this,
             [this](const QString &codec, const QString &hwdecBackend) {
                 // hwdec-current llega "vacío" en el primer video-params (mpv
@@ -1269,6 +1284,7 @@ void MainWindow::centerHwPopup()
 
 void MainWindow::startHwProbe()
 {
+#ifndef NEVERTUBE_NO_MPV
     if (m_hwProbing)
         return;
     // HwProbe es de un solo uso (m_done): re-crearlo en cada re-detección, si no
@@ -1322,6 +1338,7 @@ void MainWindow::startHwProbe()
     }
     m_hwPopupTimer->start(300);
     m_hwProbe->start();
+#endif // NEVERTUBE_NO_MPV
 }
 
 void MainWindow::openWatch(const QVector<VideoInfo> &videos, int startIndex)
