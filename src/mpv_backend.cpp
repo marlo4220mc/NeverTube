@@ -3,6 +3,8 @@
 #include <QMetaObject>
 #include <QOpenGLContext>
 #include <QString>
+#include <QThread>
+#include <QtGlobal>
 
 #include <clocale>
 #include <cstdlib>
@@ -131,13 +133,24 @@ MpvBackend::MpvBackend(QObject *parent)
     mpv_set_option_string(m_mpv, "message-level",
                           "all=warn,vo=info,vd=v,cache=info,stream=info,network=info");
     mpv_set_option_string(m_mpv, "cache", "yes");
-    mpv_set_option_string(m_mpv, "demuxer-max-bytes", "64MiB");
+    // Colchón de demux (estilo Chrome, versión contenida): 96 MiB para absorber
+    // los picos del decodificador software y el throttle de descarga de YouTube
+    // sin disparar la RAM (150 MiB era el default de mpv, demasiado para una
+    // máquina débil/x64; 64 MiB original quedaba corto en las
+    // micro-pausas de arranque).
+    mpv_set_option_string(m_mpv, "demuxer-max-bytes", "96MiB");
     // Amortiguación al arranque: sin esto, con el throttle de YouTube la primera
     // decena de segundos reproduce "en seco" y mpv hace micro-pausas a los ~6 y
     // ~10 s hasta que la descarga paralela (http_multiple) se estabiliza.
     mpv_set_option_string(m_mpv, "cache-initial", "3MiB");
     mpv_set_option_string(m_mpv, "demuxer-readahead-secs", "20");
-    mpv_set_option_string(m_mpv, "vd-lavc-threads", "2");
+    // Hilos del decodificador SOFTWARE (vd=lavc -> h264/vp9/av1 paralelizan por
+    // frame-threading). Ideal = nº de núcleos con tope 4: subir más en CPUs de
+    // 2 núcleos es sobresuscripción de hilos. Con hwdec activo no interviene
+    // (decodifica el HW, no lavc).
+    const int cores = qMax(1, QThread::idealThreadCount());
+    const QByteArray lavcThreads = QByteArray::number(qMin(cores, 4));
+    mpv_set_option_string(m_mpv, "vd-lavc-threads", lavcThreads.constData());
     mpv_set_option_string(m_mpv, "audio-buffer", "2.0");
     mpv_set_option_string(m_mpv, "video-sync", "audio");
 
