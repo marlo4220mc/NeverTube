@@ -12,6 +12,22 @@ cmake -B build && cmake --build build
 
 Dependencias: Qt5 (Core Gui Widgets Network Sql), OpenGL, libmpv.
 
+### Build x86 de Windows (Win7 de 32 bits, doble motor)
+
+La app tiene **dos motores** (`src/playback_backend.h`): `MpvBackend` (mpv,
+Linux y Windows **x64**, pieza protegida intacta) y `FfmpegBackend`
+(FFmpeg/libav sin libmpv, el **único** motor del build **x86** de Windows —
+`NEVERTUBE_X86_FFMPEG_BUILD`). No existe build público de FFmpeg para Win32
+(gyan/BtbN solo win64, MSYS2 retiró i686): el dev-package i686 se cross-compila
+una vez y está **vendorizado** en `third_party/ffmpeg-win32/` (LGPL v2.1+,
+schannel, DXVA2 h264, imports Win7-limpios, sin libwinpthread/libgcc). Receta
+reproducible: `tools/build_ffmpeg_i686.sh`. El CMake resuelve `FFMPEG_DEV_DIR`
+por defecto al paquete vendorizado. En x86 la app usa `Qt5 Multimedia`
+(`QAudioOutput`) para el audio y el perfil de códec se fija a `h264-hw`
+(techo DXVA2) sin `HwProbe` (guards `NEVERTUBE_NO_MPV` en hwprobe/mainwindow/
+settings/factory). En x64/Linux todo queda como estaba (mpv). Detalles y
+verificación: `third_party/ffmpeg-win32/README.md` y `BUILD_WINDOWS.md`.
+
 ## Pieza protegida (NO modificar sin razón técnica y prueba)
 
 El reproductor funcional es una pieza protegida. Los siguientes elementos NO

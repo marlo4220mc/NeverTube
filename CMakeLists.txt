@@ -155,9 +155,13 @@ if(NEVERTUBE_X86_FFMPEG_BUILD)
   # ---- Windows x86 (Win7): FFmpeg dev por FFMPEG_DEV_DIR ----
   # Dev-package Win32 (headers *.h + import-libs *.lib + DLLs), misma mecánica
   # que MPV_DEV_DIR. Sin pkg-config en Windows: find_path/find_library.
-  set(FFMPEG_DEV_DIR "" CACHE PATH "Directorio del dev-package FFmpeg Win32 (include/ + lib/ + DLLs)")
-  if(NOT FFMPEG_DEV_DIR)
-    message(FATAL_ERROR "WIN32 x86 necesita -DFFMPEG_DEV_DIR=<ruta a ffmpeg-dev> (BUILD_WINDOWS.md)")
+  # El paquete vendorizado (i686, LGPL + schannel + DXVA2, cross-compilado con
+  # tools/build_ffmpeg_i686.sh) vive en third_party/ffmpeg-win32/ y es el valor
+  # por defecto; -DFFMPEG_DEV_DIR permite apuntar a otro.
+  set(FFMPEG_DEV_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg-win32"
+      CACHE PATH "Directorio del dev-package FFmpeg Win32 (include/ + lib/ + DLLs)")
+  if(NOT EXISTS "${FFMPEG_DEV_DIR}/include/libavcodec/avcodec.h")
+    message(FATAL_ERROR "ffmpeg-dev no hallado en '${FFMPEG_DEV_DIR}': falta include/libavcodec/avcodec.h. Genera el paquete con tools/build_ffmpeg_i686.sh o pasa -DFFMPEG_DEV_DIR=<ruta> (BUILD_WINDOWS.md)")
   endif()
   find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h PATHS "${FFMPEG_DEV_DIR}" PATH_SUFFIXES include NO_DEFAULT_PATH)
   find_library(FFMPEG_AVCODEC_LIB NAMES avcodec.lib avcodec PATHS "${FFMPEG_DEV_DIR}" PATH_SUFFIXES lib "" NO_DEFAULT_PATH)
