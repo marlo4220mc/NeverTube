@@ -427,11 +427,35 @@ static bool isHwPixelFormat(AVPixelFormat fmt)
     return d && (d->flags & AV_PIX_FMT_FLAG_HWACCEL);
 }
 
-// Abre un decodificador a partir de codecpar. Si hay un device HW creado
-// (Fase 4) se lo pedimos a FFmpeg: él decide por códec si el hwaccel aplica
-// (h264 en DXVA2/VAAPI; av1/vp9 sin HW en la máquina de pruebas -> software igual).
+// ¿El códec expone un hwaccel usable con el device que creamos?
+// (avcodec_get_hw_config refleja SOLO lo compilado en el paquete). Si NO hay
+// hwaccel, no se adjunta el hw_device_ctx — el decoder va a software PURO:
+//   - h264 (dxva2 en el build i686) -> con device -> DXVA2 en la máquina de pruebas; en
+//     una máquina sin GPU el hwaccel no inicia y h264 cae a software solo;
+//   - av1/vp9/aac/opus... (sin hwaccel compilado) -> software. Es OBLIGATORIO
+//     para av1: el decoder nativo de FFmpeg 9 aborta todo el clip con ENOSYS
+//     ("Your platform doesn't support hardware accelerated AV1 decoding",
+//     av1dec.c) si ve el hw_device_ctx pero no logra un hwaccel, en lugar de
+//     caer a software como h264.
+static bool codecSupportsHw(const AVCodec *codec, AVHWDeviceType type)
+{
+    for (int i = 0;; ++i) {
+        const AVCodecHWConfig *cfg = avcodec_get_hw_config(codec, i);
+        if (!cfg)
+            break;
+        if ((cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) &&
+            cfg->device_type == type)
+            return true;
+    }
+    return false;
+}
+
+// Abre un decodificador a partir de codecpar. Solo se adjunta el device HW si
+// el códec tiene un hwaccel compilado para él (codecSupportsHw); si no, la
+// cadena es la misma pero en software (av1/vp9 en el target x86, y el audio).
 static AVCodecContext *openDecoder(const AVCodecParameters *par,
-                                   AVBufferRef *hwDevice)
+                                   AVBufferRef *hwDevice,
+                                   AVHWDeviceType hwType)
 {
     const AVCodec *codec = avcodec_find_decoder(par->codec_id);
     if (!codec)
@@ -443,7 +467,7 @@ static AVCodecContext *openDecoder(const AVCodecParameters *par,
         avcodec_free_context(&cc);
         return nullptr;
     }
-    if (hwDevice) {
+    if (hwDevice && codecSupportsHw(codec, hwType)) {
         cc->hw_device_ctx = av_buffer_ref(hwDevice);
     } else {
         // Decodificación SOFTWARE (target x86, h264 a 1 solo hilo por defecto):
@@ -613,13 +637,16 @@ static void runLoop(FfmpegBackend::Impl *m)
     // Windows x86: DXVA2 (H.264 de la iGPU del target x86). Linux: VAAPI.
     // Si no se puede crear, se decodifica en software (el flujo manda).
     const char *hwName = nullptr;
+    AVHWDeviceType hwType = AV_HWDEVICE_TYPE_NONE;
 #if defined(Q_OS_WIN)
     hwName = "dxva2";
+    hwType = AV_HWDEVICE_TYPE_DXVA2;
     if (av_hwdevice_ctx_create(&hwDevice, AV_HWDEVICE_TYPE_DXVA2, nullptr,
                                nullptr, 0) < 0)
         hwDevice = nullptr;
 #else
     hwName = "vaapi";
+    hwType = AV_HWDEVICE_TYPE_VAAPI;
     if (av_hwdevice_ctx_create(&hwDevice, AV_HWDEVICE_TYPE_VAAPI, nullptr,
                                nullptr, 0) < 0) {
         // Sin display X11 (headless/CI): intentar el render node por defecto.
@@ -634,7 +661,7 @@ static void runLoop(FfmpegBackend::Impl *m)
     NT_DEBUG("E2E ffmpeg hw device -> %s\n",
              hwDevice ? hwName : "(no disponible, SW)");
 
-    vc = openDecoder(vFmt->streams[vs]->codecpar, hwDevice);
+    vc = openDecoder(vFmt->streams[vs]->codecpar, hwDevice, hwType);
     if (!vc) {
         fail(QStringLiteral("Sin decodificador de vídeo para el códec %1")
                  .arg(QString::fromUtf8(
@@ -667,7 +694,7 @@ static void runLoop(FfmpegBackend::Impl *m)
                 av_find_best_stream(aFmt, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
             if (extAudioIdx >= 0)
                 ac = openDecoder(aFmt->streams[extAudioIdx]->codecpar,
-                                 hwDevice);
+                                 hwDevice, hwType);
         }
         if (!ac && aFmt) {
             avformat_close_input(&aFmt);
@@ -679,7 +706,8 @@ static void runLoop(FfmpegBackend::Impl *m)
         muxAudioIdx =
             av_find_best_stream(vFmt, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
         if (muxAudioIdx >= 0)
-            ac = openDecoder(vFmt->streams[muxAudioIdx]->codecpar, hwDevice);
+            ac = openDecoder(vFmt->streams[muxAudioIdx]->codecpar, hwDevice,
+                             hwType);
     }
 
     // Sink (solo reproducción real; el banco decodifica sin sonido).
