@@ -60,8 +60,11 @@ add_executable(nevertube_qt2
   src/hwprobe.cpp
   src/hwprobe.h
   src/playback_backend.h
+  src/backend_factory.cpp
   src/mpv_backend.cpp
   src/mpv_backend.h
+  src/ffmpeg_selftest.cpp
+  src/ffmpeg_selftest.h
   src/playerwidget.cpp
   src/playerwidget.h
   src/player_controller.cpp
@@ -119,6 +122,40 @@ target_link_libraries(nevertube_qt2 PRIVATE
   OpenGL::GL
   MPV::MPV
 )
+
+# --- FfmpegBackend (reproductor barato, Fases 2-5) ---
+# La x64 usa mpv SIEMPRE en runtime (pieza protegida); el FfmpegBackend se
+# COMPILA cuando hay FFmpeg para poder desarrollarlo/verificarlo:
+#   - Linux: detección por pkg-config (libavformat/codec/util/swscale/
+#     swresample + pulse-simple). Aquí se compila y se valida con
+#     --selftest-ffmpeg; el runtime por defecto sigue siendo mpv
+#     (NEVERTUBE_BACKEND=ffmpeg solo para pruebas de desarrollo).
+#   - Windows x86 (Win7): se activa en la Fase 5 (FFMPEG_DEV_DIR +
+#     Qt5 Multimedia); el build x64 actual NO se toca.
+if(NOT WIN32)
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(AV QUIET IMPORTED_TARGET
+      libavformat libavcodec libavutil libswscale libswresample)
+    pkg_check_modules(PULSE QUIET IMPORTED_TARGET libpulse-simple)
+  endif()
+  if(TARGET PkgConfig::AV)
+    message(STATUS "FFmpeg encontrado: compilando FfmpegBackend (Fase 2)")
+    target_sources(nevertube_qt2 PRIVATE
+      src/ffmpeg_backend.cpp
+      src/ffmpeg_backend.h)
+    target_compile_definitions(nevertube_qt2 PRIVATE
+      NEVERTUBE_HAS_FFMPEG_BACKEND=1)
+    target_link_libraries(nevertube_qt2 PRIVATE PkgConfig::AV)
+    if(TARGET PkgConfig::PULSE)
+      message(STATUS "pulse-simple encontrado: audio del FfmpegBackend")
+      target_compile_definitions(nevertube_qt2 PRIVATE NEVERTUBE_HAS_PULSE=1)
+      target_link_libraries(nevertube_qt2 PRIVATE PkgConfig::PULSE)
+    endif()
+  else()
+    message(STATUS "FFmpeg no encontrado: sin FfmpegBackend (solo mpv)")
+  endif()
+endif()
 
 if(WIN32)
   set_target_properties(nevertube_qt2 PROPERTIES WIN32_EXECUTABLE TRUE)
