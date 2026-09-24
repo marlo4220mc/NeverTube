@@ -25,6 +25,21 @@ bool playerSelfTest()
     timeout.setSingleShot(true);
 
     auto check = [&]() {
+#ifdef NEVERTUBE_NO_MPV
+        // Build x86 sin mpv (Fase 5): el núcleo protegido (hwdec=auto de mpv)
+        // no vive aquí — el motor es el FfmpegBackend y su gate real es
+        // --selftest-ffmpeg. Se verifica lo que sí aplica: el timer de
+        // redibujado de 33 ms y que el backend esté vivo.
+        if (player->redrawIntervalMs() != 33) {
+            std::fprintf(stderr,
+                         "SELFTEST FAIL: timer redibujado esperado 33 ms, "
+                         "obtenido %d ms\n",
+                         player->redrawIntervalMs());
+            return false;
+        }
+        std::fprintf(stderr,
+                     "SELFTEST OK (backend ffmpeg, timer=33ms)\n");
+#else
         if (player->hwdec() != QStringLiteral("auto")) {
             std::fprintf(stderr,
                          "SELFTEST FAIL: hwdec esperado 'auto', obtenido '%s'\n",
@@ -38,14 +53,13 @@ bool playerSelfTest()
                          player->redrawIntervalMs());
             return false;
         }
+        std::fprintf(stderr, "SELFTEST OK (hwdec=auto, timer=33ms)\n");
+#endif
         return true;
     };
 
     QObject::connect(&timeout, &QTimer::timeout, &host, [&]() {
-        if (check()) {
-            std::fprintf(stderr, "SELFTEST OK (hwdec=auto, timer=33ms)\n");
-            ok = true;
-        }
+        ok = check();
         QCoreApplication::exit(ok ? 0 : 1);
     });
 

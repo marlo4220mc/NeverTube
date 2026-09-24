@@ -259,6 +259,7 @@ int main(int argc, char *argv[])
         // depende de la GPU de este equipo; es una regresión CI determinista.
         if (!hwprobeVerdictSelfTests())
             return 1;
+#ifndef NEVERTUBE_NO_MPV
         // Diagnóstico dependiente de la GPU: imprime el perfil detectado
         // (av1-hw/vp9-hw/h264-hw/soft-all) o INDETERMINADO. No es un assert
         // fijo, sino una comprobación de que el sondeo concluye.
@@ -284,6 +285,16 @@ int main(int argc, char *argv[])
         probe.start();
         app.exec();
         return rc;
+#else
+        // Build x86 sin mpv (Fase 5): el sondeo vivo usa mpv y no existe en
+        // este build. La tabla de decisión ya corrió arriba; el gate de HW
+        // real del x86 es --selftest-ffmpeg (y la escalera reactiva cubre a
+        // las máquinas sin HW sin necesidad de HwProbe).
+        std::fprintf(stderr,
+                     "SELFTEST hwprobe -> (sin mpv en este build: tabla de "
+                     "decisión OK, sondeo vivo no disponible)\n");
+        return 0;
+#endif
     }
 
     if (args.contains(QLatin1String("--selftest-home"))) {

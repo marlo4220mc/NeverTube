@@ -47,3 +47,38 @@ El selftest del player verifica el núcleo protegido (hwdec + timer 33ms + rende
 **sin reproducir archivos**. En Windows, el render va por `vo=libmpv` en un
 `QOpenGLWidget` igual que en Linux; el watchdog de atasco usa micro-seek local
 (idéntico al fix de `watch_page`).
+
+## Fase 5: build x86 SIN mpv (FfmpegBackend)
+
+Desde la Fase 5 el build x86 de Windows (32 bits, Win7) NO enlaza
+libmpv: su único motor es el `FfmpegBackend` (FFmpeg/libav, mucho más ligero).
+El CMake lo detecta solo (`WIN32` + puntero de 32 bits) y exige `FFMPEG_DEV_DIR`
+en vez de `MPV_DEV_DIR`, enlazando además `Qt5 Multimedia` (el `QAudioSink`
+del backend). El build x64 (mpv) queda exactamente como arriba (`-A x64` +
+`MPV_DEV_DIR`).
+
+```sh
+cmake -B build -DCMAKE_PREFIX_PATH="C:/Qt/5.15.2/msvc2019" \
+      -DFFMPEG_DEV_DIR="C:/ffmpeg-dev-win32" \
+      -G "Visual Studio 17 2022" -A Win32
+cmake --build build --config Release
+```
+
+`FFMPEG_DEV_DIR` debe contener `include/libavcodec/avcodec.h` (y los headers de
+avformat/avutil/swscale/swresample), las import-libs `avcodec.lib`,
+`avformat.lib`, `avutil.lib`, `swscale.lib`, `swresample.lib` y las DLLs
+correspondientes. Al empaquetar NO se copia libmpv-2.dll: en su lugar van las
+DLLs de FFmpeg (avcodec/avformat/avutil/swscale/swresample + dependencias).
+
+Qué cambia en x86 respecto a las secciones de mpv de este documento:
+
+- `--selftest-player` verifica solo el timer de 33 ms y que el backend esté
+  vivo (no hay `hwdec=auto` sin mpv); el gate de reproducción real es
+  `--selftest-ffmpeg` (clips embebidos: demux → decode → swscale offline, con
+  DXVA2 para el h264 si la iGPU lo tiene).
+- `--selftest-hwprobe` corre solo la tabla de decisión offline (el sondeo vivo
+  usa mpv); en x86 el perfil de códec se decide por plataforma (`h264-hw`,
+  DXVA2 es el techo del target) y la escalera reactiva
+  (`streamDecodeInfoReady` → `hwdecCurrent()=="no"`) cubre a las máquinas sin
+  HW.
+- Ajustes → "Volver a detectar" no aparece (no hay sondeo que relanzar).
