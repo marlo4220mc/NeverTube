@@ -7,7 +7,11 @@ on:
 
 jobs:
   windows:
-    runs-on: windows-latest
+    # windows-2022 (VS2022 17.x + toolset v142/14.29): la máquina de pruebas es Win7 y su
+    # CRT ha de ser el de VS2015-2019. windows-latest ya es VS2026 (14.5x) y su
+    # runtime NO es Win7-compatible (imports W8+); además el binario 14.5x no
+    # enlaza contra el redist vs/16. Por eso se fija imagen Y toolset (-T v142).
+    runs-on: windows-2022
     env:
       NEVERTUBE_DEBUG: 1
     steps:
@@ -78,6 +82,7 @@ jobs:
           cmake -S . -B build-win `
             -DCMAKE_BUILD_TYPE=Release `
             -A Win32 `
+            -T v142 `
             -DCMAKE_PREFIX_PATH="$env:Qt5_DIR" `
             "-DFFMPEG_DEV_DIR=$((Get-Location).Path)\third_party\ffmpeg-win32"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -150,7 +155,7 @@ jobs:
           # dist.iss (/install /passive /norestart, PrivilegesRequired=admin,
           # con comprobación del código de salida). /passive: muestra barra de
           # progreso al usuario en lugar de instalar en silencio.
-          Invoke-WebRequest -Uri 'https://aka.ms/vs/15/release/vc_redist.x86.exe' `
+          Invoke-WebRequest -Uri 'https://aka.ms/vs/16/release/vc_redist.x86.exe' `
             -OutFile 'dist\VC_redist.x86.exe'
           $vr = Get-Item 'dist\VC_redist.x86.exe' -ErrorAction SilentlyContinue
           if (-not $vr -or $vr.Length -lt 1000000) {
