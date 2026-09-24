@@ -38,6 +38,16 @@ texto fijo` (hueco 8 + título 34 + línea de canal). NO usar un ratio fijo
 escala y un vídeo tapa el nombre del canal del siguiente. Ningún vídeo debe
 solaparse sobre otro, ni en vertical ni en horizontal.
 
+## Altura del área de vídeo (WatchPage/PlayerContainer)
+
+`PlayerContainer::updateMaxHeight()` capa el área del vídeo con
+`min(width/aspect, kMaxPlayerHeight=560)` para que descripción + "A
+continuación" no se queden sin espacio en ventanas grandes/maximizadas. Ese
+tope absoluto **NO aplica en pantalla completa** (`setFullscreen(true)` →
+`capped = width/aspect`): si se re-aplica el 560 en fullscreen el vídeo queda
+en 560 px con la pantalla llena de negro (regresión vista y revertida). El
+tope sí debe seguir aplicando en ventana normal y maximizada.
+
 ## Pruebas de regresión
 
 ```sh
