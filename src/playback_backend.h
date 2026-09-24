@@ -3,6 +3,18 @@
 #include <QObject>
 #include <QString>
 
+// Compartida por MpvBackend y FfmpegBackend: ¿es la URL del servidor HLS
+// local de la propia app (http://127.0.0.1:<port>/... o http://localhost)?
+// Los dos motores la tratan distinto de una URL de red remota (el HLS local
+// no soporta Range requests: sin http_multiple, con timings de localhost).
+// Comparar SOLO por prefijo: un "contains" casaría URLs remotas que lleven
+// "localhost"/"127.0.0.1" en mitad de la ruta.
+inline bool isLocalStreamUrl(const QString &url)
+{
+    return url.startsWith(QLatin1String("http://127.0.0.1"))
+        || url.startsWith(QLatin1String("http://localhost"));
+}
+
 // Interfaz neutra del motor de reproducción. PlayerWidget (política: estado,
 // watchdog, escalera de códec, espera de buffer) y sus clientes
 // (PlayerController, MainWindow, WatchPage) dependen de esta interfaz, NO del
