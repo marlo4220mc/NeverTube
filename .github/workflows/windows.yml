@@ -246,12 +246,15 @@ jobs:
       # ("OpenSSL internal error, assertion failed: lock != NULL", visto en
       # Windows de 32 bits) pasaba de verde en CI y reventaba solo en la
       # máquina de pruebas al arrancar (primera petición HTTPS del feed).
-      # --selftest-ffmpeg es el gate del FfmpegBackend (x86): demux + decode +
-      # swscale en modo banco (offline) con los micro-clips h264/vp9/av1
-      # embebidos; imprime el hwaccel (hw=dxva2|no). La reproducción REAL se
-      # verifica aparte en el equipo de pruebas/VM y el gate de imports W8+ fija la
-      # compatibilidad Win7. --selftest-hwprobe ya no aplica en x86 (sondea con
-      # mpv, que no está en este build; su tabla offline sigue en Linux/x64).
+      # --selftest-ffmpeg (gate del FfmpegBackend/hw) NO se corre en CI: la VM
+      # de GitHub no tiene GPU y el clip AV1 del banco es imposible con el
+      # paquete i686 (el decoder nativo av1 de FFmpeg 9 exige un hwaccel y el
+      # paquete no trae libdav1d/libaom). Ese gate se corre en la máquina de pruebas; la
+      # compatibilidad Win7 la fija el gate de imports W8+ de arriba (y la
+      # presencia/carga de las DLL de FFmpeg la valida la tabla de imports del
+      # propio exe: si falta avcodec-63.dll, ningún selftest arranca).
+      # --selftest-hwprobe tampoco aplica en x86 (sondea con mpv, que no está
+      # en este build; su tabla offline sigue en Linux/x64).
       #
       # ¡OJO con el exit code! nevertube_qt2.exe es de SUBSISTEMA GUI: al
       # lanzarlo con `&` PowerShell NO espera a que termine NI fija
@@ -259,7 +262,7 @@ jobs:
       # producía `if ($null -ne 0) { exit $null }` → código 0 y el step se
       # daba por verde tras el PRIMER selftest, saltándose los demás. Por eso
       # cada selftest va con Start-Process -Wait -PassThru y se lee .ExitCode.
-      - name: smoke test del paquete dist (DLLs ok + TLS real + FfmpegBackend + feeds + busca)
+      - name: smoke test del paquete dist (DLLs ok + TLS real + feeds + busca)
         shell: pwsh
         run: |
           # windeployqt solo despliega qwindows.dll; el offscreen se inyecta
@@ -283,11 +286,6 @@ jobs:
           if ($rc -ne 0) {
             Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
             exit $rc }
-          # Gate del FfmpegBackend (x86): demux + decode + swscale de los
-          # micro-clips en modo banco (offline). Si las DLLs de FFmpeg faltan o
-          # no cargan, falla aquí (no en la máquina de pruebas).
-          $rc = Invoke-Selftest '--selftest-ffmpeg'
-          if ($rc -ne 0) { exit $rc }
           # qoffscreen se quita solo al final (todos los selftests lo necesitan).
           # Búsqueda real por Innertube: vídeos con id (y canal) no vacíos.
           $rc = Invoke-Selftest '--selftest-search'

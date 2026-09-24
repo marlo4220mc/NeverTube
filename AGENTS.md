@@ -31,12 +31,18 @@ verificación: `third_party/ffmpeg-win32/README.md` y `BUILD_WINDOWS.md`.
 El `FfmpegBackend` decide si adjunta el `hw_device_ctx` a un decodificador con
 `codecSupportsHw` (`avcodec_get_hw_config`): SOLO si el códec tiene un hwaccel
 compilado para ese device (el paquete i686 solo trae `h264_dxva2`). Es
-obligatorio no adjuntarlo a AV1: el decoder nativo de FFmpeg 9 aborta el clip
-entero con `ENOSYS` ("Your platform doesn't support hardware accelerated AV1
-decoding", av1dec.c) si ve el device pero no logra un hwaccel — en lugar de
-caer a software como hace h264. Con device activo (p.ej. la VM de CI, sin
-GPU) el clip av1 fallaba con 0 frames; sin device (Linux sin VAAPI, Wine) el
-mismo clip pasa por software.
+obligatorio no adjuntarlo a AV1: con device adjunto, `ff_get_format` se invoca
+y, sin un hwaccel av1, el decoder nativo de FFmpeg 9 aborta el clip entero con
+`ENOSYS` ("Your platform doesn't support hardware accelerated AV1 decoding",
+av1dec.c). Aviso (regla dura): el decoder NATIVO `av1` de FFmpeg 9 **no
+decodifica AV1 por software en ningún caso** (el propio código dice "the av1
+decoder doesn't support native decode"; con o sin device). El software AV1 de
+FFmpeg lo dan `libdav1d`/`libaom`, que el paquete i686 NO trae → **en x86 AV1
+es imposible** (ni HW ni SW); el build x86 fija el perfil `h264-hw` y nunca pide
+AV1, así que no afecta a la reproducción. Por eso `--selftest-ffmpeg` salta el
+clip av1 cuando no hay decoder sw de AV1 (`av1SoftwareDecodable`): en x86 se
+salta; en Linux/x64 con libdav1d se sigue verificando (ahí `hw=no` es
+libdav1d en software, no el nativo).
 
 ## Pieza protegida (NO modificar sin razón técnica y prueba)
 
@@ -301,8 +307,13 @@ vez de abortar (así el i5 llega a H.264, que sí decodifica por HW). Un
   `buildFilteredMaster`. El HLS sintético AV1 (`buildAv1Hls`) solo se genera con
   perfil `Modern` (`av1-hw`).
 - El selftest `--selftest-hwprobe` verifica primero la tabla de decisión
-  offline (9 casos, regresión determinista en CI) y luego imprime el perfil
-  detectado (dependiente de la GPU; no es un assert fijo).
+  offline (9 casos, regresión determinista) y luego imprime el perfil
+  detectado (dependiente de la GPU; no es un assert fijo). NO se corre en el
+  CI: el runner de GitHub no tiene GPU, así que el sondeo HW se valida en la
+  máquinas de pruebas (x86/x64). Por el mismo motivo `--selftest-ffmpeg` (gate del
+  FfmpegBackend) tampoco va en el smoke de CI: la VM no puede ejercitar AV1/
+  DXVA2 (av1 es imposible en x86, ver arriba); se corre en la máquina de pruebas, donde
+  salta el clip av1 si no hay decoder sw.
 
 ## Puntos de entrada CLI
 
