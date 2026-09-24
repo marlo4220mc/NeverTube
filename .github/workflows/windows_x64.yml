@@ -1,1 +1,202 @@
+name: Windows x64 (mpv moderno — Win10+)
 
+# Workflow de PRUEBA (x64), para descartar que el problema de la máquina x64 de pruebas sea el
+# libmpv i686 de 2021 (pin de Win7). Aquí NO hay restricción Win7: mpv moderno,
+# Qt x64 y target Win10+. Se dispara a mano y, además, al tocar este fichero.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows_x64.yml'
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    env:
+      NEVERTUBE_DEBUG: 1
+      # Build de mpv x86_64 (baseline, sin el sufijo 'v3': la máquina x64 de
+      # no tiene AVX2). Si el smoke test falla con abort/"lock != NULL" al
+      # inicializar mpv (OpenSSL 3 roto de shinchiro >= may-2026), cambia estas
+      # dos a un build anterior (tag + nombre del asset del release).
+      MPV_TAG: '20260924'
+      MPV_ASSET: 'mpv-dev-x86_64-20260924-git-2a4eb8067c.7z'
+    steps:
+      - uses: actions/checkout@v4
+
+      # Qt 5.15.2 MSVC2019 x64. Los targets x64 son Win10+ (sin restricción Win7).
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2019_64'
+          cache: true
+
+      # libmpv x64 MODERNO. El paquete ya trae `libmpv-2.dll` con el nombre
+      # correcto e `include/mpv/*.h` (a diferencia del i686 de 2021, no hay que
+      # renombrar ni reordenar cabeceras). NO trae import-lib MSVC (su
+      # `libmpv.dll.a` es MinGW) -> se genera con dumpbin/lib en configure.
+      - name: bajar mpv-dev x86_64 (moderno)
+        shell: pwsh
+        run: |
+          $url = "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/$env:MPV_TAG/$env:MPV_ASSET"
+          Write-Host "mpv: $url"
+          curl.exe -sL -o mpv-dev.7z $url
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:ProgramFiles/7-Zip/7z.exe" x -y -ompv-dev mpv-dev.7z
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem mpv-dev -Recurse -File | Select-Object FullName
+
+      # vulkan-1.dll: el libmpv x64 la importa ESTÁTICAMENTE (el i686 de 2021 no
+      # lo hacía). En Win10 suele venir con el driver de la GPU, pero se
+      # empaqueta para no depender de ello (runtime oficial de LunarG, sin
+      # instalar nada en el runner).
+      - name: bajar vulkan-1.dll (runtime LunarG x64)
+        shell: pwsh
+        run: |
+          curl.exe -sL -o vulkan-rt.zip `
+            https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime-components.zip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:ProgramFiles/7-Zip/7z.exe" x -y -ovulkan-rt vulkan-rt.zip | Out-Null
+          $vk = Get-ChildItem vulkan-rt -Recurse -Filter vulkan-1.dll |
+            Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+          if (-not $vk) { Write-Host 'vulkan-1.dll x64 no encontrada'; exit 1 }
+          Copy-Item $vk.FullName vulkan-1.dll
+          Get-Item vulkan-1.dll | Select-Object Name, Length
+
+      # OpenSSL 1.1.1w x64: Qt5Network (msvc2019_64) carga su backend TLS por
+      # LoadLibrary de libssl-1_1-x64.dll / libcrypto-1_1-x64.dll junto al exe.
+      # windeployqt NO las despliega: sin ellas, cualquier HTTPS falla.
+      - name: extraer OpenSSL 1.1.1w x64 (DLLs TLS de Qt5Network)
+        shell: pwsh
+        run: |
+          curl.exe -sL -o innoextract.zip `
+            https://github.com/dscharrer/innoextract/releases/download/1.9/innoextract-1.9-windows.zip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Expand-Archive innoextract.zip innoextract-tool -Force
+          curl.exe -sL -o openssl-111.exe `
+            https://slproweb.com/download/Win64OpenSSL_Light-1_1_1w.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\innoextract-tool\innoextract.exe openssl-111.exe | Out-Null
+          $ssl = Get-ChildItem . -Recurse -Filter 'libssl-1_1-x64.dll' | Select-Object -First 1
+          $cry = Get-ChildItem . -Recurse -Filter 'libcrypto-1_1-x64.dll' | Select-Object -First 1
+          if (-not $ssl -or -not $cry) {
+            Write-Host 'OpenSSL x64 no extraído (libssl/libcrypto -x64)'; exit 1 }
+          Copy-Item $ssl.FullName libssl-1_1-x64.dll
+          Copy-Item $cry.FullName libcrypto-1_1-x64.dll
+          Get-Item libssl-1_1-x64.dll, libcrypto-1_1-x64.dll | Select-Object Name, Length
+
+      # Import-lib MSVC x64 desde la DLL: dumpbin /exports -> .def ->
+      # lib /machine:x64 -> mpv-2.lib (y libmpv-2.lib, por si el find_library
+      # del CMake busca el otro nombre). Luego configure con -A x64.
+      - name: configure (x64 + MPV_DEV_DIR + import-lib MSVC)
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { Write-Host "vswhere no está"; exit 1 }
+          $vspath = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $vspath) { Write-Host "VS con toolset VC no hallado"; exit 1 }
+          $msvc = Get-ChildItem (Join-Path $vspath 'VC\Tools\MSVC') -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+          $bindir = Join-Path $msvc.FullName 'bin\Hostx64\x64'
+          $dumpbin = Join-Path $bindir 'dumpbin.exe'
+          $libexe  = Join-Path $bindir 'lib.exe'
+          if (-not (Test-Path $dumpbin) -or -not (Test-Path $libexe)) {
+            Write-Host "dumpbin/lib no hallados en $bindir"; exit 1 }
+
+          $dll = (Get-ChildItem mpv-dev -Recurse -Filter libmpv-2.dll |
+            Select-Object -First 1).FullName
+          if (-not $dll) { Write-Host "libmpv-2.dll no está en mpv-dev"; exit 1 }
+          $def = Join-Path $env:RUNNER_TEMP 'libmpv.def'
+          Set-Content -Encoding ASCII $def 'LIBRARY libmpv-2.dll'
+          Add-Content -Encoding ASCII $def 'EXPORTS'
+          $exports = & $dumpbin /exports $dll
+          if ($LASTEXITCODE -ne 0) { Write-Host "dumpbin falló"; exit $LASTEXITCODE }
+          foreach ($l in $exports) {
+            if ($l -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(mpv_\w*)\s*$') {
+              $Matches[1] | Add-Content -Encoding ASCII $def
+            }
+          }
+          $dir = (Resolve-Path mpv-dev).Path
+          foreach ($n in @('mpv-2.lib', 'libmpv-2.lib')) {
+            & $libexe /machine:x64 /def:$def "/out:$dir\$n" *> libmpv-lib.log
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "lib falló ($n):"; Get-Content libmpv-lib.log; exit $LASTEXITCODE }
+          }
+          cmake -S . -B build-win `
+            -DCMAKE_BUILD_TYPE=Release `
+            -A x64 `
+            -DCMAKE_PREFIX_PATH="$env:Qt5_DIR" `
+            "-DMPV_DEV_DIR=$dir"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: build Release (x64)
+        shell: pwsh
+        run: |
+          cmake --build build-win --config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem build-win/Release -ErrorAction SilentlyContinue |
+            Select-Object Name, Length
+
+      # Paquete PORTÁTIL (zip): x64 sin instalador (para probar rápido en la
+      # máquina x64 de pruebas). Incluye Qt (windeployqt), libmpv + vulkan + OpenSSL y el
+      # VC_redist.x64.exe por si al equipo le falta el runtime VC++.
+      - name: empaquetar portátil (windeployqt x64 + mpv + vulkan + openssl)
+        shell: pwsh
+        run: |
+          $exe = "build-win\Release\nevertube_qt2.exe"
+          if (-not (Test-Path $exe)) { Write-Host "no está $exe"; exit 1 }
+          Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
+          $qtroot = Split-Path (Split-Path $env:Qt5_DIR)
+          & "$qtroot\bin\windeployqt.exe" --release --no-translations `
+            --compiler-runtime $exe -dir dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item $exe dist\nevertube_qt2.exe
+          Copy-Item (Get-ChildItem mpv-dev -Recurse -Filter libmpv-2.dll |
+            Select-Object -First 1).FullName dist\
+          Copy-Item vulkan-1.dll dist\
+          Copy-Item libssl-1_1-x64.dll dist\
+          Copy-Item libcrypto-1_1-x64.dll dist\
+          curl.exe -sL -o dist\VC_redist.x64.exe `
+            https://aka.ms/vs/17/release/vc_redist.x64.exe
+          if ($LASTEXITCODE -ne 0) { Write-Host 'VC_redist.x64 no bajó'; exit 1 }
+          $missing = @('libmpv-2.dll', 'vulkan-1.dll', 'libssl-1_1-x64.dll',
+            'libcrypto-1_1-x64.dll', 'VC_redist.x64.exe') |
+            Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
+          if ($missing) { Write-Host "dist incompleto: faltan $missing"; exit 1 }
+          Compress-Archive -Path dist\* -DestinationPath nevertube-x64-portable.zip -Force
+          Get-ChildItem dist | Select-Object Name, Length
+
+      # Smoke test desde dist\ (con todo su maquetillaje de DLLs): TLS real (que
+      # OpenSSL x64 carga y hace handshake), db, mpv init + micro-clips (aquí se
+      # cazaría el abort "lock != NULL" del OpenSSL roto), búsqueda Innertube,
+      # navegación de canal/detalle/playlist y cadena de feeds.
+      - name: smoke test (offscreen) desde dist
+        shell: pwsh
+        run: |
+          $qtsrc = Split-Path (Split-Path $env:Qt5_DIR)
+          Copy-Item "$qtsrc\plugins\platforms\qoffscreen.dll" dist\platforms\ -Force
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          function Invoke-Selftest([string]$flag) {
+            $p = Start-Process -FilePath '.\dist\nevertube_qt2.exe' -ArgumentList $flag -Wait -PassThru -NoNewWindow
+            Write-Host "smoke $flag exit=$($p.ExitCode)"
+            return $p.ExitCode
+          }
+          foreach ($t in @('--selftest-tls', '--selftest-db', '--selftest-hwprobe',
+                           '--selftest-search', '--selftest-browse', '--selftest-feeds')) {
+            $rc = Invoke-Selftest $t
+            if ($rc -ne 0) {
+              Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
+              exit $rc }
+          }
+          Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nevertube-windows-x64-portable
+          path: nevertube-x64-portable.zip
+          retention-days: 21
