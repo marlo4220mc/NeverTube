@@ -79,11 +79,6 @@ public:
     // Tamaño del vídeo actual (0x0 si aún no hay frame).
     QSize videoSize() const;
 
-    // El callback de interrupción de avformat hace que stop() corte los reads
-    // de red al instante (sin él, av_read_frame puede bloquear segundos).
-    // Público porque openFormat (función libre del .cpp) lo referencia.
-    static int interruptCb(void *ctx);
-
 private slots:
     // Corren en el hilo GUI (invocaciones diferidas desde el hilo de decode).
     void deliverFrame(const QImage &img);
