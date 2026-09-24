@@ -19,9 +19,10 @@
 // las que emiten las señales neutras. pollEvents() es no-op: no hay cola de
 // eventos que drenar, el backend empuja.
 //
-// Fase 2: decode 100% software (hwdecCurrent()=="no"). El render es por
-// frame entregado (sin timer fijo); el timer de 33 ms del widget queda como
-// red de seguridad y es inofensivo aquí.
+// Fase 4: al abrir se solicita HW (VAAPI/DXVA2, copy-back antes de swscale);
+// hwdecCurrent() reporta el device HW real tras el primer frame ("no" en SW,
+// vacío hasta entonces). El render es por frame entregado (sin timer fijo); el
+// timer de 33 ms del widget queda como red de seguridad y es inofensivo aquí.
 
 class FfmpegBackend : public PlaybackBackend
 {

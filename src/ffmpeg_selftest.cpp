@@ -2,10 +2,12 @@
 
 #ifdef NEVERTUBE_HAS_FFMPEG_BACKEND
 
-// Selftest offline del FfmpegBackend (Fases 2-3): decodifica en modo banco los
+// Selftest offline del FfmpegBackend (Fases 2-4): decodifica en modo banco los
 // clips embebidos (av1.mkv / vp9.webm / h264.mp4, los mismos que usa hwprobe)
 // y verifica la cadena demux -> decode -> swscale:
-//   - caso base por clip: EOF natural, frames>0, códec correcto, tamaño;
+//   - caso base por clip: EOF natural, frames>0, códec correcto, tamaño
+//     (si hay VAAPI/DXVA2, el h264 sale por HW copy-back; se imprime el device
+//     en el reporte, no es un assert: depende de la GPU);
 //   - sync fino (Fase 3): SEEK en caliente (flush de decodificadores +
 //     re-base del reloj maestro: la posición final debe superar el destino)
 //     y PAUSA/reanuda (el reloj no revierte: sigue hasta EOF natural).
@@ -144,7 +146,10 @@ bool ffmpegSelfTest()
                         frames > 0 &&
                         be.videoCodec() == QLatin1String(clip.codec) &&
                         size.width() > 0 && size.height() > 0 && maxH > 0;
-        report(clip.file, ok, "");
+        char buf[96];
+        std::snprintf(buf, sizeof buf, " (hw=%s)",
+                      be.hwdecCurrent().toUtf8().constData());
+        report(clip.file, ok, buf);
         if (!ok)
             ++failures;
         be.shutdown();

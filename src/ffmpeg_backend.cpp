@@ -1,7 +1,7 @@
 #include "ffmpeg_backend.h"
 
-// FfmpegBackend — implementación (Fase 2: decode software, render GL
-// frame-driven, audio pulse-simple/QAudioOutput).
+// FfmpegBackend — implementación (Fases 2-4: decode con HW opcional
+// VAAPI/DXVA2, render GL frame-driven, audio pulse-simple/QAudioOutput).
 //
 // Construido sobre la receta probada en spike/cheapplayer (rama
 // spike/cheap-player): demux HLS/local + decode + sws -> RGB + write de audio
@@ -11,7 +11,11 @@
 //     diferidas), así las conexiones directas del widget conservan el orden;
 //   - stop() corta la red al instante (interrupt callback de avformat);
 //   - pausa cortando el sink (pa_simple_cork / QAudioOutput suspend);
-//   - seek con flush de decodificadores y reinicio del reloj maestro.
+//   - seek con flush de decodificadores y reinicio del reloj maestro;
+//   - Fase 4: al abrir se pide aceleración por hardware a FFmpeg (VAAPI en
+//     Linux / DXVA2 en Windows) con copy-back de la superficie a memoria
+//     antes de swscale; si no hay device o el códec no soporta HW, se
+//     decodifica en software (el flujo es el mismo, solo cambia el origen).
 //
 // Reloj maestro: con pista de audio, el reloj es el propio AUDIO (muestras
 // escritas al sink desde la base de cada seek), NO wall-time: el vídeo se
@@ -38,8 +42,10 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/error.h>
+#include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
+#include <libavutil/pixdesc.h>
 #include <libavutil/samplefmt.h>
 #include <libavutil/time.h>
 #include <libswresample/swresample.h>
@@ -92,6 +98,7 @@ struct FfmpegBackend::Impl
     QString url;
     QString audioUrl;
     double startAt = 0.0;
+    QString reqHwdec; // device HW pedido ("vaapi"/"dxva2") -> configuredHwdec()
 
     // ---- snapshot público (consultas thread-safe) ----
     mutable QMutex snapMtx;
@@ -414,8 +421,19 @@ static bool openFormat(AVFormatContext **out, const QString &url, void *ictx)
     return true;
 }
 
-// Abre un decodificador a partir de codecpar.
-static AVCodecContext *openDecoder(const AVCodecParameters *par)
+// ¿El frame viene de una superficie de hardware (VAAPI/DXVA2)? Esos no se
+// pueden pasar a swscale directamente: primero hay que traerlos a memoria.
+static bool isHwPixelFormat(AVPixelFormat fmt)
+{
+    const AVPixFmtDescriptor *d = av_pix_fmt_desc_get(fmt);
+    return d && (d->flags & AV_PIX_FMT_FLAG_HWACCEL);
+}
+
+// Abre un decodificador a partir de codecpar. Si hay un device HW creado
+// (Fase 4) se lo pedimos a FFmpeg: él decide por códec si el hwaccel aplica
+// (h264 en DXVA2/VAAPI; av1/vp9 sin HW en la máquina de pruebas -> software igual).
+static AVCodecContext *openDecoder(const AVCodecParameters *par,
+                                   AVBufferRef *hwDevice)
 {
     const AVCodec *codec = avcodec_find_decoder(par->codec_id);
     if (!codec)
@@ -427,6 +445,8 @@ static AVCodecContext *openDecoder(const AVCodecParameters *par)
         avcodec_free_context(&cc);
         return nullptr;
     }
+    if (hwDevice)
+        cc->hw_device_ctx = av_buffer_ref(hwDevice);
     if (avcodec_open2(cc, codec, nullptr) < 0) {
         avcodec_free_context(&cc);
         return nullptr;
@@ -575,7 +595,34 @@ static void runLoop(FfmpegBackend::Impl *m)
         fail(QStringLiteral("No se encontró pista de vídeo en el stream"));
         return;
     }
-    vc = openDecoder(vFmt->streams[vs]->codecpar);
+
+    // --- Fase 4: device de aceleración por hardware (si existe) ---
+    // Windows x86: DXVA2 (H.264 de la iGPU del target x86). Linux: VAAPI.
+    // Si no se puede crear, se decodifica en software (el flujo manda).
+    AVBufferRef *hwDevice = nullptr;
+    const char *hwName = nullptr;
+#if defined(Q_OS_WIN)
+    hwName = "dxva2";
+    if (av_hwdevice_ctx_create(&hwDevice, AV_HWDEVICE_TYPE_DXVA2, nullptr,
+                               nullptr, 0) < 0)
+        hwDevice = nullptr;
+#else
+    hwName = "vaapi";
+    if (av_hwdevice_ctx_create(&hwDevice, AV_HWDEVICE_TYPE_VAAPI, nullptr,
+                               nullptr, 0) < 0) {
+        // Sin display X11 (headless/CI): intentar el render node por defecto.
+        av_hwdevice_ctx_create(&hwDevice, AV_HWDEVICE_TYPE_VAAPI,
+                               "/dev/dri/renderD128", nullptr, 0);
+    }
+    if (!hwDevice)
+        hwName = nullptr;
+#endif
+    const QString hwNameQ =
+        hwDevice ? QString::fromLatin1(hwName) : QString();
+    NT_DEBUG("E2E ffmpeg hw device -> %s\n",
+             hwDevice ? hwName : "(no disponible, SW)");
+
+    vc = openDecoder(vFmt->streams[vs]->codecpar, hwDevice);
     if (!vc) {
         fail(QStringLiteral("Sin decodificador de vídeo para el códec %1")
                  .arg(QString::fromUtf8(
@@ -593,7 +640,10 @@ static void runLoop(FfmpegBackend::Impl *m)
         m->snap.maxVideoH = maxVideoHeight(vFmt);
         m->snap.vw = vFmt->streams[vs]->codecpar->width;
         m->snap.vh = vFmt->streams[vs]->codecpar->height;
-        m->snap.hwdec = QStringLiteral("no");
+        // hwdec se resuelve con el PRIMER frame procesado (mpv deja
+        // hwdec-current vacío hasta que el decodificador activa; el widget
+        // reintenta con retryHwdec hasta saberlo).
+        m->snap.hwdec.clear();
         m->snap.cacheIdle = true; // sin modelo de "cache": se puede tocar ya
     }
 
@@ -604,7 +654,8 @@ static void runLoop(FfmpegBackend::Impl *m)
             extAudioIdx =
                 av_find_best_stream(aFmt, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
             if (extAudioIdx >= 0)
-                ac = openDecoder(aFmt->streams[extAudioIdx]->codecpar);
+                ac = openDecoder(aFmt->streams[extAudioIdx]->codecpar,
+                                 hwDevice);
         }
         if (!ac && aFmt) {
             avformat_close_input(&aFmt);
@@ -616,7 +667,7 @@ static void runLoop(FfmpegBackend::Impl *m)
         muxAudioIdx =
             av_find_best_stream(vFmt, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
         if (muxAudioIdx >= 0)
-            ac = openDecoder(vFmt->streams[muxAudioIdx]->codecpar);
+            ac = openDecoder(vFmt->streams[muxAudioIdx]->codecpar, hwDevice);
     }
 
     // Sink (solo reproducción real; el banco decodifica sin sonido).
@@ -658,10 +709,11 @@ static void runLoop(FfmpegBackend::Impl *m)
         emitPost(be, EvVideoSize, static_cast<double>(m->snap.vw),
                  static_cast<double>(m->snap.vh), 0, QString());
     emitPost(be, EvLog, 0, 0, 0,
-             QStringLiteral("vídeo %1x%2 códec=%3 hw=no")
+             QStringLiteral("vídeo %1x%2 códec=%3 hw=%4")
                  .arg(m->snap.vw)
                  .arg(m->snap.vh)
-                 .arg(m->snap.codec));
+                 .arg(m->snap.codec)
+                 .arg(hwDevice ? hwNameQ : QStringLiteral("no")));
     emitPost(be, EvCache, 1.0, 0, 0, QString());
     emitPost(be, EvStreamStart, 0, 0, 0, QString());
 
@@ -681,6 +733,7 @@ static void runLoop(FfmpegBackend::Impl *m)
     double lastVideoPtsShown = 0.0;
     bool audioActiveOnce = false;
     int64_t lastPosEmitUs = 0;
+    bool hwdecResolved = false; // veredicto HW/SW definido con el primer frame
 
     auto audioPos = [&]() {
         return static_cast<double>(audioSamples) / 48000.0;
@@ -740,6 +793,7 @@ static void runLoop(FfmpegBackend::Impl *m)
 
     AVFrame *frame = av_frame_alloc();
     AVPacket *pkt = av_packet_alloc();
+    AVFrame *hwScratch = av_frame_alloc(); // copia SW del frame HW (copy-back)
     SwsState swsState;
     QImage outFrame;
 
@@ -760,20 +814,40 @@ static void runLoop(FfmpegBackend::Impl *m)
             if (d > 0.002)
                 av_usleep(static_cast<unsigned>(d * 1e6));
         }
-        frameToImage(f, outFrame, swsState);
+        // Fase 4: si el frame viene de una superficie HW (VAAPI/DXVA2),
+        // traerlo a memoria (copy-back) antes de swscale; un fallo aquí solo
+        // descarta ese frame.
+        AVFrame *src = f;
+        const bool hwFrame =
+            isHwPixelFormat(static_cast<AVPixelFormat>(f->format));
+        if (hwFrame) {
+            av_frame_unref(hwScratch);
+            if (av_hwframe_transfer_data(hwScratch, f, 0) < 0)
+                return;
+            src = hwScratch;
+        }
+        frameToImage(src, outFrame, swsState);
         if (outFrame.isNull())
             return;
         if (!bench)
             emitFrame(be, outFrame);
+        if (!hwdecResolved) {
+            // Primer frame procesado: veredicto HW/SW para el widget
+            // (streamDecodeInfoReady) y la escalera reactiva de códec.
+            hwdecResolved = true;
+            QMutexLocker l(&m->snapMtx);
+            m->snap.hwdec =
+                (hwDevice && hwFrame) ? hwNameQ : QStringLiteral("no");
+        }
         lastVideoPtsShown = pts;
         {
             QMutexLocker l(&m->snapMtx);
-            if (m->snap.vw != f->width || m->snap.vh != f->height) {
-                m->snap.vw = f->width;
-                m->snap.vh = f->height;
+            if (m->snap.vw != src->width || m->snap.vh != src->height) {
+                m->snap.vw = src->width;
+                m->snap.vh = src->height;
                 l.unlock();
-                emitPost(be, EvVideoSize, static_cast<double>(f->width),
-                         static_cast<double>(f->height), 0, QString());
+                emitPost(be, EvVideoSize, static_cast<double>(src->width),
+                         static_cast<double>(src->height), 0, QString());
                 l.relock();
             }
             ++m->snap.framesDecoded;
@@ -987,10 +1061,13 @@ static void runLoop(FfmpegBackend::Impl *m)
     } // while (!m->stop.load())
 
     av_frame_free(&frame);
+    av_frame_free(&hwScratch);
     av_packet_free(&pkt);
     av_free(abuf);
     if (swr)
         swr_free(&swr);
+    if (hwDevice)
+        av_buffer_unref(&hwDevice);
     cleanup();
 }
 
@@ -1181,10 +1258,19 @@ bool FfmpegBackend::playUrl(const QString &url, double startAt,
     m->audioUrl = audioUrl;
     m->startAt = std::max(0.0, startAt);
     m->pause = false;
+    // Device HW solicitado para configuredhwdec() (lo que de verdad se usa
+    // se resuelve con el primer frame -> hwdecCurrent()).
+    m->reqHwdec = QLatin1String(
+#if defined(Q_OS_WIN)
+        "dxva2"
+#else
+        "vaapi"
+#endif
+    );
     {
         QMutexLocker l(&m->snapMtx);
         m->snap = Impl::Snap{};
-        m->snap.hwdec = QStringLiteral("no");
+        m->snap.hwdec.clear(); // desconocido hasta el primer frame (mpv-style)
         m->snap.cacheIdle = true;
     }
     {
@@ -1229,7 +1315,9 @@ double FfmpegBackend::speed() const { return 1.0; }
 
 QString FfmpegBackend::configuredHwdec() const
 {
-    return QStringLiteral("no"); // sin hwdec configurado en Fase 2
+    // El device pedido para el próximo load; el que de verdad se usa tras el
+    // primer frame es hwdecCurrent() (puede acabar en SW si no hay device).
+    return m->reqHwdec.isEmpty() ? QStringLiteral("no") : m->reqHwdec;
 }
 
 QString FfmpegBackend::hwdecCurrent() const { return m->readSnap().hwdec; }
