@@ -13,6 +13,7 @@ class VideoListView;
 class Yt;
 class QTabWidget;
 class QPushButton;
+class QResizeEvent;
 
 class ChannelPage : public QWidget
 {
@@ -27,6 +28,11 @@ public:
     // Re-aplica el botón Suscribirse con el acento vigente (MainWindow lo
     // llama al cambiar el color de acento en Ajustes, sin reconstruir).
     void applyAccent();
+
+protected:
+    // Re-evalúa el tope de la descripción al cambiar el ancho de la página
+    // (el re-wrap puede hacer que el texto quepa o deje de caber).
+    void resizeEvent(QResizeEvent *event) override;
 
 signals:
     void backRequested();
@@ -44,6 +50,11 @@ private:
     // solo se piden los vídeos; shorts/directos se piden al entrar en su
     // pestaña (sus respuestas pesan ~400-500 KB cada una).
     void loadTab(int index);
+    // Tope vertical de la descripción: si el texto completo supera
+    // kDescMaxHeight se recorta a ese alto y se ofrece "Mostrar más"
+    // (toggleDescription despliega a altura natural y vuelve a colapsar).
+    void applyDescriptionCap();
+    void toggleDescription();
 
     Yt *m_yt;
     ThumbnailCache *m_thumbs;
@@ -55,6 +66,9 @@ private:
     QPushButton *m_subscribeBtn;
     QLabel *m_meta;
     QLabel *m_description;
+    // Botón "Mostrar más/ menos" de la descripción y si está desplegada.
+    QPushButton *m_descMore = nullptr;
+    bool m_descExpanded = false;
     QTabWidget *m_tabs;
     QVector<VideoListView *> m_lists;
     QStringList m_tabKeys;
