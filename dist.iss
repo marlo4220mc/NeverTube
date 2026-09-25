@@ -68,6 +68,23 @@ Source: "dist\VC_redist.x86.exe"; DestDir: "{tmp}"
 Type: files; Name: "{app}\ucrtbase.dll"
 Type: files; Name: "{app}\api-ms-win-crt-*"
 
+[UninstallDelete]
+; Desinstalar DEBE dejar la máquina sin rastro de la app: la BD local y las
+; cachés viven FUERA de {app} (Inno solo borra {app} por defecto; sin esto,
+; reinstalar devolvía una app con los datos antiguos — visto en el equipo objetivo:
+; historial/suscripciones intactos y el perfil de códec persistido).
+;   - {userdocs}\mini_tube: BD SQLite (ajustes —incluido codec_profile—,
+;     historial, suscripciones, radios) + -wal/-shm. Es UN directorio propio
+;     de la app (nunca toca otros documentos del usuario).
+;   - {localappdata}\nevertube\nevertube: caché de miniaturas (thumbs_*) y de
+;     resolución HLS (hls_resolve_cache.json).
+; {userdocs}/{localappdata} se resuelven con el perfil del usuario que lanza
+; el uninstaller aunque este corra elevado (PrivilegesRequired=admin).
+; Quien quiera borrar SOLO datos sin desinstalar sigue teniendo
+; "Restablecer aplicación" dentro de la app.
+Type: filesandordirs; Name: "{userdocs}\mini_tube"
+Type: filesandordirs; Name: "{localappdata}\nevertube\nevertube"
+
 [Icons]
 ; Icono del grupo de programas + acceso directo al escritorio (casilla
 ; marcada por defecto, ver [Tasks] desktopicon). Ambos se crean en esta fase,
