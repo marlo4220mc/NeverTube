@@ -581,6 +581,42 @@ void SettingsPage::buildUI()
 
     scrollLay->addStretch(1);
 
+    // --- INTERFAZ ---
+    addSectionTitle(QStringLiteral("INTERFAZ"));
+
+    // Color de acento: tono de los elementos interactivos (sliders, barra de
+    // progreso, botón primario, selección, nav activa, iconos activos de la
+    // barra inferior). Se aplica en caliente (MainWindow re-genera el
+    // stylesheet global y re-tiñe los iconos de la nav al recibir
+    // accentChanged).
+    addOptionRow(
+        QStringLiteral("Color de acento"), accentOptions(),
+        m_settings->getString(QLatin1String(kAccentKey),
+                              QStringLiteral("#FF0033")),
+        QStringLiteral("#FF0033"), accentFromValue,
+        [this](const QString &text) {
+            const QString hex = valueFromAccent(text);
+            m_settings->set(QLatin1String(kAccentKey), hex);
+            emit accentChanged(hex);
+        },
+        QStringLiteral("Se aplica al instante: sliders, progreso, botones "
+                       "resaltados, selección de texto e iconos activos."));
+
+    // Densidad de cuadrícula: tamaño de las celdas de vídeo. Cómoda (normal)
+    // o Compacta (celdas algo más pequeñas para ver más en pantalla).
+    addOptionRow(
+        QStringLiteral("Densidad de cuadrícula"), gridDensityOptions(),
+        m_settings->getString(QStringLiteral("grid_density"),
+                              QStringLiteral("cozy")),
+        QStringLiteral("cozy"), gridDensityFromValue,
+        [this](const QString &text) {
+            const QString val = valueFromGridDensity(text);
+            m_settings->set(QStringLiteral("grid_density"), val);
+            emit gridDensityChanged(val);
+        });
+
+    scrollLay->addStretch(3);
+
     // --- DATOS ---
     addSectionTitle(QStringLiteral("DATOS"));
 
@@ -630,44 +666,6 @@ void SettingsPage::buildUI()
                            "defecto. ¿Continuar?"),
             QStringLiteral("Restablecer"), [this]() { emit resetRequested(); });
     });
-
-    scrollLay->addStretch(1);
-
-    // --- INTERFAZ ---
-    addSectionTitle(QStringLiteral("INTERFAZ"));
-
-    // Color de acento: tono de los elementos interactivos (sliders, barra de
-    // progreso, botón primario, selección, nav activa, iconos activos de la
-    // barra inferior). Se aplica en caliente (MainWindow re-genera el
-    // stylesheet global y re-tiñe los iconos de la nav al recibir
-    // accentChanged).
-    addOptionRow(
-        QStringLiteral("Color de acento"), accentOptions(),
-        m_settings->getString(QLatin1String(kAccentKey),
-                              QStringLiteral("#FF0033")),
-        QStringLiteral("#FF0033"), accentFromValue,
-        [this](const QString &text) {
-            const QString hex = valueFromAccent(text);
-            m_settings->set(QLatin1String(kAccentKey), hex);
-            emit accentChanged(hex);
-        },
-        QStringLiteral("Se aplica al instante: sliders, progreso, botones "
-                       "resaltados, selección de texto e iconos activos."));
-
-    // Densidad de cuadrícula: tamaño de las celdas de vídeo. Cómoda (normal)
-    // o Compacta (celdas algo más pequeñas para ver más en pantalla).
-    addOptionRow(
-        QStringLiteral("Densidad de cuadrícula"), gridDensityOptions(),
-        m_settings->getString(QStringLiteral("grid_density"),
-                              QStringLiteral("cozy")),
-        QStringLiteral("cozy"), gridDensityFromValue,
-        [this](const QString &text) {
-            const QString val = valueFromGridDensity(text);
-            m_settings->set(QStringLiteral("grid_density"), val);
-            emit gridDensityChanged(val);
-        });
-
-    scrollLay->addStretch(3);
 
     // --- ACERCA DE ---
     addSectionTitle(QStringLiteral("ACERCA DE"));
