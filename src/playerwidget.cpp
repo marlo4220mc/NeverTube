@@ -5,6 +5,10 @@
 #include <QOpenGLFunctions>
 #include <QTimer>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
 #include <cmath>
 
 #include "debug.h"
@@ -54,6 +58,19 @@ PlayerWidget::PlayerWidget(QWidget *parent)
     m_stallTimer->setInterval(1000);
     connect(m_stallTimer, &QTimer::timeout, this, &PlayerWidget::checkStall);
     m_stallTimer->start();
+
+    // x86 (FfmpegBackend): si otra ventana cubre el vídeo, el motor deja de
+    // convertir y de pintar mientras dure (ahorro real de CPU/GPU; Win7/DWM no
+    // avisa de oclusión, así que lo detecta este timer lento con un recorrido
+    // del z-order). En mpv no aplica (occlusionSkipSupported()==false): parar
+    // el render ahí acumularía frames (ver AGENTS.md "Mini player").
+    if (m_backend->occlusionSkipSupported()) {
+        m_occlusionTimer = new QTimer(this);
+        m_occlusionTimer->setInterval(250);
+        connect(m_occlusionTimer, &QTimer::timeout, this,
+                &PlayerWidget::checkVideoCovered);
+        m_occlusionTimer->start();
+    }
 }
 
 PlayerWidget::~PlayerWidget()
@@ -112,6 +129,14 @@ void PlayerWidget::paintGL()
         NT_DEBUG("E2E paintGL no-rctx\n");
         return;
     }
+    // x86 (FfmpegBackend): si otra ventana cubre por completo el vídeo, no
+    // renderizar — el motor ya descartó los frames (evita subir texturas y
+    // pintar debajo de la ventana; al destaparse se muestra el frame más
+    // reciente, sin ráfaga). En mpv NO aplica (occlusionSkipSupported=false):
+    // su render debe seguir para no acumular frames (ver AGENTS.md mini
+    // player).
+    if (m_backend->occlusionSkipSupported() && m_videoOccluded)
+        return;
     QOpenGLFunctions *gl = QOpenGLContext::currentContext()->functions();
     GLint fbo = 0;
     gl->glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
@@ -465,6 +490,68 @@ void PlayerWidget::retryHwdec()
     NT_DEBUG("E2E hwdec probe retry codec=%s hw=%s\n",
              videoCodec().toUtf8().constData(), hwd.toUtf8().constData());
     emit streamDecodeInfoReady(videoCodec(), hwd);
+}
+
+// x86: drop de FPS al abrir una ventana flotante encima del vídeo en Win7. El
+// DWM no le avisa a la app de que la tapan (sigue recibiendo paint events y
+// pintando frames que nadie ve, quemando la GMA 950 justo cuando el compositor
+// compite — por eso el drop con CPU/RAM de la app bajos: el cuello de botella
+// es la presentación, no el cómputo). Este recorrido del z-order
+// (GetWindow hasta nuestra top-level) detecta si una ventana visible, no
+// transparente y distinta de la nuestra cubre el rect del vídeo por completo.
+#ifdef Q_OS_WIN
+bool PlayerWidget::occludedByTopWindow()
+{
+    QWidget *top = window();
+    if (!top)
+        return false;
+    const HWND topHwnd = static_cast<HWND>(top->winId());
+    const HWND vidHwnd = static_cast<HWND>(winId());
+    if (!topHwnd || !vidHwnd)
+        return false;
+    RECT vr;
+    if (!GetWindowRect(vidHwnd, &vr))
+        return false;
+    // La cadena de GetWindow solo lista top-level windows (los child widgets,
+    // como este QOpenGLWidget, no aparecen). Las ventanas por ENCIMA de la
+    // nuestra en el z-order son las que llegan antes de topHwnd.
+    HWND h = GetWindow(GW_HWNDFIRST);
+    for (; h && h != topHwnd; h = GetWindow(h, GW_HWNDNEXT)) {
+        if (!IsWindowVisible(h) || IsIconic(h))
+            continue;
+        // Ventanas transparentes/layered (tooltips, decorativas): no cubren
+        // contenido real.
+        const LONG_PTR ex = GetWindowLongPtr(h, GWL_EXSTYLE);
+        if (ex & WS_EX_LAYERED)
+            continue;
+        RECT wr;
+        if (!GetWindowRect(h, &wr))
+            continue;
+        if (wr.left <= vr.left && wr.top <= vr.top &&
+            wr.right >= vr.right && wr.bottom >= vr.bottom)
+            return true;
+    }
+    return false;
+}
+#endif
+
+void PlayerWidget::checkVideoCovered()
+{
+    if (!m_backend || !m_backend->occlusionSkipSupported())
+        return;
+    const bool covered =
+#ifdef Q_OS_WIN
+        occludedByTopWindow();
+#else
+        false;
+#endif
+    if (covered != m_videoOccluded) {
+        m_videoOccluded = covered;
+        m_backend->setVideoOccluded(covered);
+        NT_DEBUG("E2E vídeo %s (pipeline %s)\n",
+                 covered ? "cubierto" : "visible",
+                 covered ? "pausado" : "reanudado");
+    }
 }
 
 void PlayerWidget::checkInitialBuffer()

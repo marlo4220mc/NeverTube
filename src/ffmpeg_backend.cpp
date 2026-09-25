@@ -93,6 +93,20 @@ struct FfmpegBackend::Impl
     std::atomic<double> seekSec{0.0};
     std::atomic<double> volume{1.0}; // 1.0 = 100%
     std::atomic<bool> bench{false};
+    // Cubierto por otra ventana (lo detecta el widget, timer de 250 ms, solo en
+    // el backend x86): mientras es true, el hilo de decode NO transfiere
+    // (copy-back) ni convierte (swscale) frames y renderGL no sube texturas ni
+    // pinta. Ahorro real de CPU/GPU bajo una ventana flotante (Win7/DWM no
+    // avisa de oclusión: sin esto la app seguiría trabajando a pleno debajo de
+    // la ventana y el compositor competiría con la GMA 950).
+    std::atomic<bool> covered{false};
+    // Tamaño del surface de render (px físicos, ya con dpr), actualizado por
+    // renderGL. frameToImage escala SOLO hacia abajo hasta aquí: menos píxeles
+    // en swscale y en la subida de textura. 0 = sin surface (resolución
+    // completa, como antes). Si el surface es mayor que el frame, se queda a
+    // resolución completa (el upscale lo hace GL).
+    std::atomic<int> renderW{0};
+    std::atomic<int> renderH{0};
 
     // carga en curso (leída por el hilo al arrancar)
     QString url;
@@ -508,6 +522,8 @@ struct SwsState
     SwsContext *ctx = nullptr;
     int w = 0;
     int h = 0;
+    int tw = 0; // tamaño objetivo de conversión (surface de render); 0 = w/h
+    int th = 0;
     AVPixelFormat fmt = AV_PIX_FMT_NONE;
 
     ~SwsState()
@@ -517,26 +533,44 @@ struct SwsState
     }
 };
 
-static void frameToImage(const AVFrame *f, QImage &img, SwsState &st)
+// Convierte `f` a RGB24 en `img`. Si maxW/maxH > 0 y son menores que el frame,
+// escala SOLO hacia abajo hasta ese tamaño (surface de render, px físicos)
+// respetando el aspect del stream: menos píxeles en swscale Y en la subida de
+// textura (la iGPU de la máquina de pruebas agradece el margen de GPU cuando el DWM
+// compone ventanas encima). Si el surface es mayor que el frame, se queda a
+// resolución completa (el upscale lo hace GL, como antes).
+static void frameToImage(const AVFrame *f, QImage &img, SwsState &st,
+                         int maxW, int maxH)
 {
     const int w = f->width;
     const int h = f->height;
     const AVPixelFormat fmt = static_cast<AVPixelFormat>(f->format);
-    if (!st.ctx || st.w != w || st.h != h || st.fmt != fmt) {
+    int tw = w;
+    int th = h;
+    if (maxW > 0 && maxH > 0 && (maxW < w || maxH < h)) {
+        const double scale =
+            qMin(static_cast<double>(maxW) / w, static_cast<double>(maxH) / h);
+        tw = qMax(2, static_cast<int>(w * scale));
+        th = qMax(2, static_cast<int>(h * scale));
+    }
+    if (!st.ctx || st.w != w || st.h != h || st.fmt != fmt ||
+        st.tw != tw || st.th != th) {
         if (st.ctx)
             sws_freeContext(st.ctx);
-        st.ctx = sws_getContext(w, h, fmt, w, h, AV_PIX_FMT_RGB24,
+        st.ctx = sws_getContext(w, h, fmt, tw, th, AV_PIX_FMT_RGB24,
                                 SWS_BILINEAR, nullptr, nullptr, nullptr);
         st.w = w;
         st.h = h;
+        st.tw = tw;
+        st.th = th;
         st.fmt = fmt;
     }
     if (!st.ctx) {
         img = QImage();
         return;
     }
-    if (img.isNull() || img.width() != w || img.height() != h)
-        img = QImage(w, h, QImage::Format_RGB888);
+    if (img.isNull() || img.width() != tw || img.height() != th)
+        img = QImage(tw, th, QImage::Format_RGB888);
     uint8_t *dst[4] = { img.bits(), nullptr, nullptr, nullptr };
     int linesize[4] = { img.bytesPerLine(), 0, 0, 0 };
     sws_scale(st.ctx, f->data, f->linesize, 0, h, dst, linesize);
@@ -854,6 +888,19 @@ static void runLoop(FfmpegBackend::Impl *m)
             if (d > 0.002)
                 av_usleep(static_cast<unsigned>(d * 1e6));
         }
+        // Cubierto por otra ventana (x86): no transferir (copy-back) ni
+        // convertir ni emitir — el frame se descarta sin tocar CPU/RAM. El
+        // audio sigue y la posición se actualiza con el reloj de audio (sin
+        // esto, el watchdog de atasco del widget vería la posición congelada
+        // > 5 s con el vídeo tapado y dispararía un falso streamStalled). El
+        // decode se mantiene caliente; al destaparse se muestra el frame más
+        // reciente (frame-driven, sin ráfaga).
+        if (m->covered.load()) {
+            lastVideoPtsShown = pts;
+            if (ac)
+                setPosition(audioClockBase + audioPos(), false);
+            return;
+        }
         // Fase 4: si el frame viene de una superficie HW (VAAPI/DXVA2),
         // traerlo a memoria (copy-back) antes de swscale; un fallo aquí solo
         // descarta ese frame.
@@ -866,7 +913,8 @@ static void runLoop(FfmpegBackend::Impl *m)
                 return;
             src = hwScratch;
         }
-        frameToImage(src, outFrame, swsState);
+        frameToImage(src, outFrame, swsState, m->renderW.load(),
+                     m->renderH.load());
         if (outFrame.isNull())
             return;
         if (!bench)
@@ -1275,12 +1323,23 @@ void *FfmpegBackend::renderContextHandle() const { return nullptr; }
 
 void FfmpegBackend::renderGL(int, int width, int height)
 {
+    // El hilo de decode escala la conversión hasta el tamaño del surface (solo
+    // hacia abajo): avisarle del tamaño actual en cada paint.
+    m->renderW.store(width);
+    m->renderH.store(height);
+    if (m->covered.load())
+        return; // cubierto: el decode ya no convierte; no subir texturas ni pintar
     QImage img;
     {
         QMutexLocker l(&m->frameMtx);
         img = m->latest;
     }
     renderGLCore(m, img, width, height);
+}
+
+void FfmpegBackend::setVideoOccluded(bool occluded)
+{
+    m->covered.store(occluded);
 }
 
 bool FfmpegBackend::playUrl(const QString &url, double startAt,

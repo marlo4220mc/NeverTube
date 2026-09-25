@@ -130,6 +130,20 @@ public:
     // diferido del motor).
     virtual void pollEvents() = 0;
 
+    // --- cobertura por ventanas (solo el backend x86) ---
+    // true si el motor puede pausar su trabajo mientras otra ventana cubre por
+    // completo el área de vídeo. FfmpegBackend SÍ: parar copy-back+swscale y
+    // render bajo una ventana flotante es seguro (frame-driven, sin ráfaga al
+    // destapar) y ahorra CPU/GPU real en Win7, donde DWM no avisa de oclusión
+    // y la app seguiría pintando frames que nadie ve (síntoma: drops de FPS
+    // con CPU/RAM de la app bajos en la GMA 950). MpvBackend NO (parar el
+    // render acumula frames y produce el "salto al volver" — ver AGENTS.md
+    // "Mini player con vídeo en vivo"): el default es false.
+    virtual bool occlusionSkipSupported() const { return false; }
+    // true mientras otra ventana cubre el vídeo (lo detecta el widget con un
+    // timer lento de 250 ms). No-op si occlusionSkipSupported() es false.
+    virtual void setVideoOccluded(bool occluded) { Q_UNUSED(occluded); }
+
 signals:
     // El archivo principal terminó de cargar: momento de consultar la altura
     // máxima (probeMaxVideoHeight) y de adjuntar el audio de respaldo.
