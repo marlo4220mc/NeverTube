@@ -23,6 +23,14 @@
 // hwdecCurrent() reporta el device HW real tras el primer frame ("no" en SW,
 // vacío hasta entonces). El render es por frame entregado (sin timer fijo); el
 // timer de 33 ms del widget queda como red de seguridad y es inofensivo aquí.
+//
+// x86: el widget detecta con un timer de 250 ms si otra ventana cubre el vídeo
+// (Win7/DWM no avisa de oclusión). Mientras está cubierto, el hilo de decode NO
+// transfiere (copy-back) ni convierte (swscale) frames y renderGL no pinta:
+// ahorro real de CPU/GPU bajo una ventana flotante (el drop de FPS de la GMA
+// 950 con CPU/RAM de la app bajos es el compositor DWM compitiendo). Además,
+// frameToImage escala SOLO hacia abajo hasta el tamaño del surface de render
+// (menos píxeles en swscale y en la subida de textura; el upscale lo hace GL).
 
 class FfmpegBackend : public PlaybackBackend
 {
@@ -41,6 +49,11 @@ public:
     // --- PlaybackBackend ---
     bool initGL() override;
     void destroyRenderContext() override;
+    // x86: el widget detecta cobertura de ventanas (timer de 250 ms + z-order
+    // de Windows) y pausa el pipeline mientras esté cubierto (ver
+    // playback_backend.h occlusionSkipSupported). mpv NO lo soporta.
+    bool occlusionSkipSupported() const override { return true; }
+    void setVideoOccluded(bool occluded) override;
     void shutdown() override;
     bool isValid() const override;
     bool hasRenderContext() const override;

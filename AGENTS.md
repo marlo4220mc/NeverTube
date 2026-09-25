@@ -430,6 +430,39 @@ en caliente desde Ajustes (Interfaz → Color de acento) y se persiste.
   `WatchPage::m_overlay`/`PlayerContainer` (src/ui/pages/watch_page.cpp).
   Cualquier cambio ahí que afecte el área de video requiere el selftest.
 
+## Cobertura de ventanas y escala en x86 (FfmpegBackend)
+
+Síntoma posible (Win7 x86): **drops de FPS al abrir una ventana flotante
+encima del vídeo, con CPU/RAM de la app bajos**. Dos mecanismos:
+
+1. Con DWM (Aero *o* tema Básico, que también compone) Windows **no le avisa a
+   la app de que la tapan**: el `QOpenGLWidget` sigue recibiendo paint events y
+   el FfmpegBackend seguía decodificando+convirtiendo+pintando frames que nadie
+   ve. El cuello de botella es la **presentación** del compositor en la GMA 950
+   (blend de la región superpuesta cada frame), no el cómputo de la app — por
+   eso el CPU/RAM quedan bajos. El timer de 33 ms protegido no es el culpable.
+2. El arreglo es quirúrgico y **solo aplica a FfmpegBackend**:
+   - `PlayerWidget` arranca un timer de **250 ms** (solo si
+     `occlusionSkipSupported()`) que recorre el **z-order de Windows**
+     (`GetWindow` desde arriba hasta nuestra top-level; ventanas visibles, no
+     `WS_EX_LAYERED`, que cubran por completo el rect del widget). Cubierto →
+     `setVideoOccluded(true)` y: el hilo de decode deja de hacer copy-back y
+     `swscale` (el frame se descarta sin tocar CPU/RAM, manteniendo el decode
+     caliente y la **posición al día con el reloj de audio** — crítico: sin eso
+     el watchdog de atasco vería la posición congelada > 5 s con el vídeo
+     tapado y dispararía un falso `streamStalled`) y `paintGL` sale temprano
+     (no sube texturas ni pinta). Es frame-driven: al destapar se muestra el
+     frame más reciente, sin ráfaga. En **mpv/x64 NO aplica**: parar el render
+     ahí acumula frames y produce el "salto al volver" (ver mini player);
+     `MpvBackend` no sobreescribe los virtuales.
+   - `frameToImage` escala **solo hacia abajo** hasta el tamaño del surface de
+     render (px físicos, dados por `renderGL`), respetando el aspect del
+     stream: menos píxeles en `swscale` y en la subida de textura (win también
+     fuera del solapamiento: el mini bar 112×63 convierte casi gratis). Si el
+     surface es mayor que el stream, se queda a resolución completa (el
+     upscale lo hace GL, como antes). El guard del recorrido es `Q_OS_WIN`
+     (los child widgets no aparecen en la cadena de `GetWindow`).
+
 ## Mini player con vídeo en vivo (reparent del PlayerWidget)
 
 Al salir de la página Player con reproducción activa, el mini player muestra

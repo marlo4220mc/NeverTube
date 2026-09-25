@@ -119,9 +119,17 @@ private slots:
     void checkInitialBuffer();
     void checkStall();
     void retryHwdec();
+    // x86 (FfmpegBackend): detecta si otra ventana cubre por completo el vídeo
+    // (timer lento; Win7/DWM no avisa de oclusión). Mientras esté cubierto, el
+    // motor deja de convertir y de pintar (ahorro real de CPU/GPU).
+    void checkVideoCovered();
 
 private:
     void emitAspectIfReady();
+    // Recorrido del z-order de Windows: true si una ventana visible y no
+    // transparente (por encima de nuestra top-level) cubre el rect del vídeo.
+    // Solo Windows; en Linux/Linux no se usa (el FfmpegBackend no salta).
+    bool occludedByTopWindow();
 
     PlaybackBackend *m_backend = nullptr;
     double m_position = 0.0;
@@ -163,6 +171,11 @@ private:
     // anterior). m_cacheOk pasa a true cuando el demuxer cachea contenido.
     qint64 m_videoLoadMs = 0;
     bool m_cacheOk = false;
+    // x86: cobertura del vídeo por otra ventana. Timer lento de 250 ms +
+    // recorrido del z-order; solo FfmpegBackend (occlusionSkipSupported).
+    // En mpv/x64 esto NO aplica (parar el render acumula frames).
+    QTimer *m_occlusionTimer = nullptr;
+    bool m_videoOccluded = false;
 };
 
 #endif
