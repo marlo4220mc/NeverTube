@@ -44,6 +44,18 @@ clip av1 cuando no hay decoder sw de AV1 (`av1SoftwareDecodable`): en x86 se
 salta; en Linux/x64 con libdav1d se sigue verificando (ahí `hw=no` es
 libdav1d en software, no el nativo).
 
+**Fallback a software del open HW**: `codecSupportsHw` solo refleja lo
+COMPILADO (un hwaccel existe en el paquete), no lo que el hardware soporta.
+`av_hwdevice_ctx_create` (DXVA2 en Windows) suele funcionar aunque la GPU no
+decodifique h264 por hardware (el chequeo real ocurre al abrir el
+decodificador). Si `avcodec_open2` con device adjunto FALLA — p. ej. un
+Atom/GMA sin h264 DXVA2 — `openDecoder` devuelve `nullptr` y `runLoop` lo
+reintenta en SOFTWARE PURO antes de reportar "Sin decodificador de vídeo"
+(error fatal). Sin ese retry, en esas máquinas cada clip h264 moriría con
+error en vez de caer a SW (visto en la máquina de pruebas x86). Con el retry, el primer
+frame sale en software → hwdec="no" → la escalera reactiva baja
+`h264-hw → soft-all` (efímero) y re-resuelve.
+
 ## Pieza protegida (NO modificar sin razón técnica y prueba)
 
 El reproductor funcional es una pieza protegida. Los siguientes elementos NO

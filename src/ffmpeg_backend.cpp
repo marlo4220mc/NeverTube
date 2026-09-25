@@ -444,8 +444,9 @@ static bool isHwPixelFormat(AVPixelFormat fmt)
 // ¿El códec expone un hwaccel usable con el device que creamos?
 // (avcodec_get_hw_config refleja SOLO lo compilado en el paquete). Si NO hay
 // hwaccel, no se adjunta el hw_device_ctx — el decoder va a software PURO:
-//   - h264 (dxva2 en el build i686) -> con device -> DXVA2 en la máquina de pruebas; en
-//     una máquina sin GPU el hwaccel no inicia y h264 cae a software solo;
+//   - h264 (dxva2 en el build i686) -> con device -> DXVA2 en el target x86; si
+//     el hardware no soporta el hwaccel (un Atom/GMA sin h264 DXVA2), el open
+//     con device FALLA y runLoop reintenta el decoder en software PURO;
 //   - av1/vp9/aac/opus... (sin hwaccel compilado) -> software. Es OBLIGATORIO
 //     para av1: el decoder nativo de FFmpeg 9 aborta todo el clip con ENOSYS
 //     ("Your platform doesn't support hardware accelerated AV1 decoding",
@@ -696,6 +697,20 @@ static void runLoop(FfmpegBackend::Impl *m)
              hwDevice ? hwName : "(no disponible, SW)");
 
     vc = openDecoder(vFmt->streams[vs]->codecpar, hwDevice, hwType);
+    if (!vc && hwDevice) {
+        // El device se creó (DXVA2/VAAPI) pero el decodificador NO arranca
+        // CON él: codecSupportsHw solo refleja lo COMPILADO en el paquete,
+        // no lo que el hardware soporta — p. ej. DXVA2 de h264 en un
+        // Atom/GMA sin h264 por hardware: avcodec_open2 con el device
+        // adjunto falla. Sin este reintento en SOFTWARE PURO el clip entero
+        // moriría con "Sin decodificador de vídeo" (EvEndFile Error) en vez
+        // de caer a SW. nunca cambia el open del av1 (codecSupportsHw=no ->
+        // SW directo, sin device que revertir).
+        NT_DEBUG("E2E ffmpeg: decoder HW no inicia (%s) -> reintentando SW\n",
+                 hwName);
+        vc = openDecoder(vFmt->streams[vs]->codecpar, nullptr,
+                         AV_HWDEVICE_TYPE_NONE);
+    }
     if (!vc) {
         fail(QStringLiteral("Sin decodificador de vídeo para el códec %1")
                  .arg(QString::fromUtf8(
