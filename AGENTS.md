@@ -463,6 +463,18 @@ encima del vídeo, con CPU/RAM de la app bajos**. Dos mecanismos:
      upscale lo hace GL, como antes). El guard del recorrido es `Q_OS_WIN`
      (los child widgets no aparecen en la cadena de `GetWindow`).
 
+_Futuro (pendiente, decidido 2026-09-24):_ port de la detección de cobertura a
+**X11 para Puppy Linux** (máquina x86 como banco de pruebas del FfmpegBackend
+sin Windows): mismo timer de 250 ms + `XQueryTree` desde la raíz hasta nuestra
+top-level (`map_state == IsViewable`, geometría + `XTranslateCoordinates` a
+coordenadas de pantalla), misma regla → `setVideoOccluded`. Lo único de
+plataforma es la DETECCIÓN (`occludedByTopWindow`, hoy `#ifdef Q_OS_WIN`): el
+plumbing (timer, `setVideoOccluded`, descarte de frames del hilo) ya es neutro.
+Con CMake "inteligente" (build Linux sin mpv → `NEVERTUBE_NO_MPV` en Linux, o
+forzar `NEVERTUBE_BACKEND=ffmpeg`; el FfmpegBackend ya compila en Linux por
+pkg-config). En **Wayland NO** es posible (no hay z-order global). La escala al
+surface ya funciona en cualquier Linux sin tocar nada.
+
 ## Mini player con vídeo en vivo (reparent del PlayerWidget)
 
 Al salir de la página Player con reproducción activa, el mini player muestra
