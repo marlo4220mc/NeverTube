@@ -234,6 +234,28 @@ MainWindow::MainWindow(QWidget *parent)
     // av1/vp9 irán a SW y la escalera reactiva (streamDecodeInfoReady ->
     // hwdecCurrent()=="no") ya los descendería en caliente. Sin valor
     // guardado = h264-hw, persistido para que Ajustes lo muestre.
+#if defined(Q_OS_WIN)
+    // CLAVE x86: un perfil av1-hw/vp9-hw guardado por la era mpv (HwProbe
+    // corría ahí) pediría códecs que el paquete i686 no puede reproducir —
+    // AV1 NO decodifica ni por HW ni por SW (el decoder nativo de FFmpeg 9 no
+    // soporta decode nativo) y la escalera reactiva no lo puede bajar porque
+    // AV1 jamás produce un frame (sin streamDecodeInfoReady no hay descenso:
+    // quedaría con el error de decodificador para siempre). Los únicos
+    // perfiles x86 válidos son h264-hw (techo DXVA2) o soft-all (si DXVA2 no
+    // inicia, lo decide la escalera en caliente); cualquier otro se CLAMPA a
+    // h264-hw y se persiste. Además se prohíbe elegir AV1 en la selección de
+    // formato (Yt::codecRankedScore): el perfil Legacy puede tocar av01 de
+    // YouTube cuando el vídeo no ofrece h264, y eso también debe fallar a vp9.
+    m_yt->setNoAv1(true);
+    if (savedProfile != QLatin1String("h264-hw")
+        && savedProfile != QLatin1String("soft-all")) {
+        m_settings.set(QStringLiteral("codec_profile"),
+                       QStringLiteral("h264-hw"));
+        applyCodecProfile(QStringLiteral("h264-hw"), false);
+    } else {
+        applyCodecProfile(savedProfile, false);
+    }
+#else
     if (savedProfile.isEmpty()) {
         m_settings.set(QStringLiteral("codec_profile"),
                        QStringLiteral("h264-hw"));
@@ -241,6 +263,7 @@ MainWindow::MainWindow(QWidget *parent)
     } else {
         applyCodecProfile(savedProfile, false);
     }
+#endif
 #else
     // El perfil se re-sondea al arranque si no hay valor persistido o si fue
     // escrito por otra versión del sondeo (codec_probe_v). El valor guardado

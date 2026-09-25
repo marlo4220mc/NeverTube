@@ -119,6 +119,10 @@ public:
     enum class CodecProfile { Modern, Vp9, Legacy };
     void setCodecProfile(CodecProfile profile);
     CodecProfile codecProfile() const { return m_codecProfile; }
+    // Build x86 de Windows sin mpv (NEVERTUBE_NO_MPV): AV1 no decodifica ni
+    // por HW ni por SW en el paquete i686. Con esto codecRankedScore NUNCA lo
+    // elige: VP9 (software) siempre gana sobre un formato que falla siempre.
+    void setNoAv1(bool on);
 
 signals:
     void searchFinished(const QString &query, const QVector<VideoInfo> &videos);
@@ -203,6 +207,7 @@ private:
     int m_resolveGen = 0;
     QString m_audioLang;
     CodecProfile m_codecProfile = CodecProfile::Legacy;
+    bool m_noAv1 = false; // x86 (NEVERTUBE_NO_MPV): AV1 imposible, no elegirlo
     // Cliente Innertube que logró reproducir cada vídeo (índice >= 0). Se usa
     // para dar prioridad al cambiar de resolución (re-resolver el mismo vídeo).
     QHash<QString, int> m_winningClient;
