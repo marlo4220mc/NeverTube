@@ -207,8 +207,6 @@ private:
     // baja. 0 = indeterminado (cae al techo del stream cargado).
     int m_availableMaxH = 0;
     QLabel *m_descLabel;
-    QPushButton *m_descToggle = nullptr;
-    bool m_descExpanded = false;
     VideoListView *m_nextUpList;
 
     // Controles flotantes sobre el video (overlay).

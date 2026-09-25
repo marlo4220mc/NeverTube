@@ -625,24 +625,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_descLabel->setOpenExternalLinks(true);
     m_descLabel->setStyleSheet(
         QStringLiteral("color:#9aa2ad; font-size:12px; background:transparent;"));
-    m_descLabel->setMaximumHeight(60);
-    m_descToggle = new QPushButton(this);
-    m_descToggle->setObjectName(QStringLiteral("ghost"));
-    m_descToggle->setFixedWidth(100);
-    m_descToggle->setCursor(Qt::PointingHandCursor);
-    m_descToggle->hide();
-    auto *descRow = new QHBoxLayout;
-    descRow->setSpacing(8);
-    descRow->addWidget(m_descLabel, 1);
-    descRow->addWidget(m_descToggle, 0, Qt::AlignTop);
-    connect(m_descToggle, &QPushButton::clicked, this, [this]() {
-        m_descExpanded = !m_descExpanded;
-        m_descLabel->setMaximumHeight(m_descExpanded ? 16777215 : 60);
-        m_descToggle->setText(m_descExpanded
-                                  ? QStringLiteral("Ver menos")
-                                  : QStringLiteral("Ver más"));
-    });
-    infoLay->addLayout(descRow);
+    // La descripción del vídeo crece verticalmente: sin tope de altura y sin
+    // botón "Ver más" (no se colapsa).
+    infoLay->addWidget(m_descLabel);
     top->addWidget(infoWidget);
     top->addStretch(1);
 
@@ -773,7 +758,6 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_meta->clear();
     m_channelBtn->setText(QStringLiteral("Canal"));
     m_descLabel->hide();
-    m_descToggle->hide();
     updateActionButtons();
 }
 
@@ -854,9 +838,6 @@ void WatchPage::onCurrentChanged()
     }
     m_fetchingDetail = true;
     m_description.clear();
-    m_descExpanded = false;
-    m_descLabel->setMaximumHeight(60);
-    m_descToggle->hide();
     m_meta->setText(QStringLiteral("Cargando detalles…"));
 }
 
@@ -1190,7 +1171,6 @@ void WatchPage::onDetailFailed(const QString &videoId)
     m_fetchingDetail = false;
     m_description.clear();
     m_descLabel->hide();
-    m_descToggle->hide();
     updateInfo();
 }
 
@@ -1252,13 +1232,13 @@ bool WatchPage::isCurrentVideo(const QString &videoId) const
 }
 
 // Pinta la descripción del vídeo como HTML enriquecido (enlaces + saltos de
-// línea) y guarda el texto plano. Vacía = oculta la descripción.
+// línea) y guarda el texto plano. Crece a altura completa (sin tope ni
+// "Ver más"). Vacía = oculta la descripción.
 void WatchPage::applyDescription(const QString &description)
 {
     m_description = description;
     if (description.isEmpty()) {
         m_descLabel->hide();
-        m_descToggle->hide();
         return;
     }
     QString rich = description.toHtmlEscaped();
@@ -1268,11 +1248,7 @@ void WatchPage::applyDescription(const QString &description)
         "<a href=\"\\1\" style=\"color:%1;\">\\1</a>").arg(nt::accentHex()));
     m_descLabel->setText(QStringLiteral(
         "<style>a { text-decoration:none; }</style>") + rich);
-    m_descLabel->setMaximumHeight(60);
-    m_descExpanded = false;
-    m_descToggle->setText(QStringLiteral("Ver más"));
     m_descLabel->show();
-    m_descToggle->show();
 }
 
 void WatchPage::onPhaseChanged(const QString &phase)
@@ -1683,16 +1659,9 @@ void WatchPage::applyAccent()
     // estado activo usan el acento.
     updateActionButtons();
     // Descripción: los enlaces se pintaron con el color de acento anterior;
-    // regenera el texto enriquecido conservando el estado expandido.
-    if (!m_description.isEmpty()) {
-        const bool expanded = m_descExpanded;
+    // se regenera el texto enriquecido (siempre a altura completa).
+    if (!m_description.isEmpty())
         applyDescription(m_description);
-        if (expanded) {
-            m_descLabel->setMaximumHeight(16777215);
-            m_descToggle->setText(QStringLiteral("Ver menos"));
-            m_descExpanded = true;
-        }
-    }
     // Overlay: el icono de subtítulos activo usa el acento.
     updateOverlayIcons();
 }
