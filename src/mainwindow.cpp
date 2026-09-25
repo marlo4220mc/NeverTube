@@ -547,7 +547,6 @@ MainWindow::MainWindow(QWidget *parent)
                     showFullScreen();
                 } else {
                     m_nav->show();
-                    statusBar()->show();
                     showNormal();
                     updateMiniPlayer();
                 }
@@ -604,9 +603,10 @@ MainWindow::MainWindow(QWidget *parent)
 
     setCentralWidget(central);
     setStyleSheet(nt::styleSheet());
-    statusBar()->setStyleSheet(
-        QStringLiteral("background:#181818; color:#8F8F8F; "
-                       "border-top:1px solid #262626; font-size:11px;"));
+    // La barra de estado de QMainWindow no muestra ningún mensaje: se oculta
+    // para que la barra de navegación inferior toque el borde inferior de la
+    // ventana (sin la franja vacía con borde que quedaba debajo).
+    statusBar()->hide();
 
     // Densidad de cuadrícula guardada (Cómoda/Compacta)
     {
