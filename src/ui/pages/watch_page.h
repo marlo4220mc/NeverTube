@@ -69,6 +69,9 @@ private slots:
     void onQueueChanged();
     void onPhaseChanged(const QString &phase);
     void onPositionChanged(double position, double duration);
+    // El volumen/silencio cambió por cualquier vía (teclado, slider, botón de
+    // silencio, ajuste): sincroniza el slider del overlay en caliente.
+    void onVolumeChanged();
     void onDetailReady(const VideoInfo &video, const QString &desc,
                        qint64 likes, const QVector<FormatInfo> &formats);
     void onDetailFailed(const QString &videoId);
