@@ -28,17 +28,17 @@ bool playerSelfTest()
 #ifdef NEVERTUBE_NO_MPV
         // Build x86 sin mpv (Fase 5): el núcleo protegido (hwdec=auto de mpv)
         // no vive aquí — el motor es el FfmpegBackend y su gate real es
-        // --selftest-ffmpeg. Se verifica lo que sí aplica: el timer de
-        // redibujado de 33 ms y que el backend esté vivo.
-        if (player->redrawIntervalMs() != 33) {
+        // --selftest-ffmpeg. Se verifica lo que sí aplica: que la superficie
+        // GL del widget quedó lista (initializeGL) y el backend vivo. El
+        // redibujado es por eventos (frameReady por frame del motor), sin
+        // timer de poll.
+        if (!player->renderContextReady()) {
             std::fprintf(stderr,
-                         "SELFTEST FAIL: timer redibujado esperado 33 ms, "
-                         "obtenido %d ms\n",
-                         player->redrawIntervalMs());
+                         "SELFTEST FAIL: contexto de render no creado\n");
             return false;
         }
         std::fprintf(stderr,
-                     "SELFTEST OK (backend ffmpeg, timer=33ms)\n");
+                     "SELFTEST OK (backend ffmpeg, redibujado por eventos)\n");
 #else
         if (player->hwdec() != QStringLiteral("auto")) {
             std::fprintf(stderr,
@@ -46,14 +46,17 @@ bool playerSelfTest()
                          player->hwdec().toUtf8().constData());
             return false;
         }
-        if (player->redrawIntervalMs() != 33) {
+        // initializeGL crea el render context Y instala el update callback
+        // (mpv_render_context_create + set_update_callback van juntos en
+        // MpvBackend::initGL): renderContextReady() true tras mostrar la
+        // ventana prueba que la ruta de redibujado por eventos está activa.
+        if (!player->renderContextReady()) {
             std::fprintf(stderr,
-                         "SELFTEST FAIL: timer redibujado esperado 33 ms, "
-                         "obtenido %d ms\n",
-                         player->redrawIntervalMs());
+                         "SELFTEST FAIL: contexto de render no creado\n");
             return false;
         }
-        std::fprintf(stderr, "SELFTEST OK (hwdec=auto, timer=33ms)\n");
+        std::fprintf(
+            stderr, "SELFTEST OK (hwdec=auto, redibujado por eventos)\n");
 #endif
         return true;
     };

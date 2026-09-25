@@ -50,8 +50,14 @@ El reproductor funcional es una pieza protegida. Los siguientes elementos NO
 se deben tocar sin una razón técnica respaldada por una prueba concreta:
 
 - `QOpenGLWidget` (clase `PlayerWidget`) como superficie de video
-- `QTimer` de redibujado a **33 ms** forzando `QWidget::update()`
-  (`initializeGL`)
+- **Redibujado dirigido por eventos**: el motor notifica `frameReady` cuando
+  hay un frame nuevo (update callback de mpv instalado en
+  `MpvBackend::initGL` / `frameReady` por frame del FfmpegBackend) y
+  `PlayerWidget::onFrameReady` fuerza `QWidget::update()`. NO hay timer de
+  poll: en reposo (pausa, buffering, cubierto) no se repinta nada. Fue
+  sustituido por el antiguo `QTimer` de 33 ms, que quedó redundante al
+  existir la ruta de eventos (verificado: reproducción real + overlay
+  presente/auto-ocultado con capturas de pantalla, selftest-player).
 - `vo=libmpv` + `hwdec=auto` (funciona con y sin aceleración de hardware)
 - Renderizado directo a FBO (`mpv_render_context_render`) en `paintGL`
 - Cualquier cambio a la integración mpv (libmpv / mpv_render_context)
@@ -84,7 +90,7 @@ tope sí debe seguir aplicando en ventana normal y maximizada.
 
 ```sh
 ./build/nevertube_qt2 --selftest-db        # repos/SQLite
-./build/nevertube_qt2 --selftest-player    # hwdec=auto + timer=33ms + render ok
+./build/nevertube_qt2 --selftest-player    # hwdec=auto + redibujado por eventos + render ok
 ./build/nevertube_qt2 --selftest-innertube # sw.js_data→visitorData→player→hlsManifestUrl
 ./build/nevertube_qt2 --selftest-discover  # radios guardadas: guardar/recuperar/re-seleccionar/persistencia/descarte
 ./build/nevertube_qt2 --selftest-av1hls    # HLS sintético AV1 (offline): MAP/BYTERANGE, /seg.mp4, &nt único
@@ -114,8 +120,8 @@ sesiones). La app ahora se recupera sola re-resolviendo con URLs frescas:
   ausente y `position > 2s`; `kAudioDetectMs`). El watchdog de audio NO depende
   del modo: con el gate también en HLS muxed mpv queda mudo (`audio=eof`), así
   que se dispara a los ~10 s (antes solo vigilaba el audio EXTERNO y el HLS
-  agotaba ~60 s mudos por intento hasta el EOF). NO toca el render ni el timer
-  de 33 ms: es lógica de eventos y del watchdog de `checkStall` (audio).
+  agotaba ~60 s mudos por intento hasta el EOF). NO toca el render ni el
+  redibujado: es lógica de eventos y del watchdog de `checkStall` (audio).
 - `PlayerController::onStreamInterrupted()` re-resuelve (como el atasco):
   `reloadCurrent()` con `m_recoverAttempts` (≤3, recaída <8s corta y estabilidad
   >5 min reinicia; NO 60 s: el gate muere a los ~60 s y con 60 s el reinicio
@@ -161,7 +167,7 @@ sesiones). La app ahora se recupera sola re-resolviendo con URLs frescas:
 ## Logging de depuración
 
 El logging `E2E ...` está activado por variable de entorno (no imprime por
-defecto, evitando ruido en el bucle de 33 ms):
+defecto, evitando ruido en el bucle de eventos del reproductor):
 
 ```sh
 NEVERTUBE_DEBUG=1 ./build/nevertube_qt2
@@ -356,7 +362,8 @@ build x86, que sale por `NEVERTUBE_NO_MPV`):
   `init` del driver falla y mpv sigue con `d3d11va-copy`: ni mejora ni rompe.
   ANGLE usa WARP solo si la GPU no llega a D3D11 FL9_3 (la Apollo Lake de la
   máquina x64 de pruebas es FL11_1: hardware). Si el modo ANGLE diera parpadeo/negro en el
-  widget, el timer de 33 ms (protegido) fuerza el repintado; aún así, el modo
+  widget, el redibujado por eventos (update callback) fuerza el repintado al
+  llegar cada frame; aún así, el modo
   es reversible quitando la variable.
 - En Linux el guard `Q_OS_WIN` lo deja todo como estaba (GL de escritorio;
   allí el zero-copy ya es posible por VAAPI/EGL sin ANGLE, ver `hwdec-current`).
@@ -440,7 +447,8 @@ encima del vídeo, con CPU/RAM de la app bajos**. Dos mecanismos:
    el FfmpegBackend seguía decodificando+convirtiendo+pintando frames que nadie
    ve. El cuello de botella es la **presentación** del compositor en la GMA 950
    (blend de la región superpuesta cada frame), no el cómputo de la app — por
-   eso el CPU/RAM quedan bajos. El timer de 33 ms protegido no es el culpable.
+   eso el CPU/RAM quedan bajos. El redibujado del reproductor no es el
+   culpable.
 2. El arreglo es quirúrgico y **solo aplica a FfmpegBackend**:
    - `PlayerWidget` arranca un timer de **250 ms** (solo si
      `occlusionSkipSupported()`) que recorre el **z-order de Windows**

@@ -13,8 +13,9 @@
 // (posición/duración/state), el watchdog de atasco y de sesión gateada
 // (checkStall), la red de seguridad del perfil de códec (hwdec probe/retry y
 // corrección por log), y la espera inicial de buffer en alta resolución — que
-// es la pieza protegida (QOpenGLWidget, timer de 33 ms en initializeGL
-// forzando QWidget::update(), render directo al FBO en paintGL).
+// es la pieza protegida (QOpenGLWidget, redibujado por eventos: el motor
+// notifica frameReady cuando hay un frame nuevo y onFrameReady fuerza
+// QWidget::update(); render directo al FBO en paintGL).
 class PlayerWidget : public QOpenGLWidget
 {
     Q_OBJECT
@@ -31,9 +32,15 @@ public:
     QString state() const { return m_state; }
     double speed() const;
 
-    // Acceso de solo lectura para selftest --selftest-player.
+    // Configuración de decodificación por hardware del motor (mpv "hwdec");
+    // verificado por --selftest-player como "auto".
     QString hwdec() const;
-    int redrawIntervalMs() const { return m_redrawTimerActive ? 33 : 0; }
+
+    // Acceso de solo lectura para selftest --selftest-player: true cuando el
+    // contexto de render del motor quedó creado (initializeGL corrió). En mpv
+    // ese mismo initGL instala el update callback, así que implica que la
+    // ruta de redibujado por eventos está activa (sin timer de poll).
+    bool renderContextReady() const { return m_backend && m_backend->hasRenderContext(); }
     // Backend de decodificación por hardware que el motor está usando de
     // verdad para el stream actual, o "no"/vacío si decodifica en software.
     QString hwdecCurrent() const;
@@ -146,7 +153,6 @@ private:
     // el próximo playUrl (audio-files) o, como respaldo, tras el archivo
     // cargado (attachAudio en fileLoaded).
     QString m_pendingAudioFile;
-    bool m_redrawTimerActive = false;
     bool m_hwdecProbed = false;
     // Veredicto del log del motor para el stream actual: el motor dice
     // explícitamente "Using software decoding" aunque hwdec-current reporte un

@@ -111,16 +111,12 @@ void PlayerWidget::initializeGL()
         qWarning("player: fallo mpv_render_context_create");
         return;
     }
-
-    // PROTEGIDO (AGENTS.md): timer de redibujado a 33 ms forzando
-    // QWidget::update(). Sin él mpv no llega a repintar en algunos
-    // controladores/plataformas; NO cambiar el intervalo.
-    auto redrawTimer = new QTimer(this);
-    redrawTimer->setInterval(33);
-    connect(redrawTimer, &QTimer::timeout, this,
-            qOverload<>(&QWidget::update));
-    redrawTimer->start();
-    m_redrawTimerActive = true;
+    // Redibujado dirigido por eventos (AGENTS.md): el motor notifica cuando
+    // hay un frame nuevo que pintar (update callback de mpv instalado en
+    // MpvBackend::initGL / frameReady por frame del FfmpegBackend) y
+    // onFrameReady() fuerza QWidget::update(). Sin poll de repintado: en
+    // reposo (pausa, buffering, cubierto) no se repinta nada. Sustituye al
+    // antiguo timer de 33 ms, redundante desde que existe la ruta de eventos.
 }
 
 void PlayerWidget::paintGL()

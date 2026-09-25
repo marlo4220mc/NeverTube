@@ -168,7 +168,7 @@ Sigo esperando los dos subagentes restantes (CPU mpv y migración Innertube). Mi
 Tengo el selftest del player memorizado y el patrón de HwProbe claro (es la pieza "buena" para validar el perfil de códec antes de la reproducción real). El `playerSelfTest` ya verifica:
 
 - `hwdec == "auto"` → invariante protegida
-- `redrawIntervalMs() == 33` → invariante protegida
+- `redrawIntervalMs() == 33` → invariante protegida (sustituida por el redibujado por eventos: `renderContextReady()` tras `initializeGL`, sin timer de poll; ver AGENTS.md)
 
 Si añado opciones mpv extra (CPU optimization), **debo mantener** ambas invariantes pasando. Esa es la red de seguridad para el punto 2.
 
