@@ -300,6 +300,11 @@ void Yt::setCodecProfile(CodecProfile profile)
     m_codecProfile = profile;
 }
 
+void Yt::setNoAv1(bool on)
+{
+    m_noAv1 = on;
+}
+
 void Yt::search(const QString &query, int limit, int offset)
 {
     // Innertube: offset 0 = primera página; offset > 0 = continuación.
@@ -640,6 +645,15 @@ int Yt::codecRankedScore(int height, const QString &mimeOrCodecs) const
         rank = isH264 ? 2 : 0;
         break;
     }
+    // Build x86 sin mpv (NEVERTUBE_NO_MPV): AV1 no decodifica ni por HW ni por
+    // SW en el paquete i686 — el decoder nativo de FFmpeg 9 no soporta decode
+    // nativo ('the av1 decoder doesn't support native decode'; el paquete no
+    // trae libdav1d/libaom). Nunca elegirlo aunque sea la mayor altura: VP9
+    // (software) y h264 siempre son mejores que un formato que falla siempre.
+    // El flag lo fija MainWindow solo en ese build (Linux sin mpv, VAAPI puede
+    // dar AV1 HW, así que ahí no se activa).
+    if (m_noAv1 && isAV1)
+        rank = -1;
     return rank * 100000 + height;
 }
 
