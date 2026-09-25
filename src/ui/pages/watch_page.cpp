@@ -741,6 +741,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             &WatchPage::onPhaseChanged);
     connect(m_player, &PlayerController::positionChanged, this,
             &WatchPage::onPositionChanged);
+    connect(m_player, &PlayerController::volumeChanged, this,
+            &WatchPage::onVolumeChanged);
     connect(playerWidget, &PlayerWidget::videoSizeChanged, this,
             &WatchPage::onVideoSizeChanged);
     // Cuando mpv carga el archivo emite la altura máxima real de sus
@@ -1653,6 +1655,21 @@ void WatchPage::refreshVolumeSlider()
     m_ovVolume->setRange(0, m_player->volumeMax());
     // El volumen actual puede haber quedado capeado por el nuevo tope.
     m_ovVolume->setValue(qRound(m_player->volume()));
+}
+
+void WatchPage::onVolumeChanged()
+{
+    if (!m_ovVolume)
+        return;
+    // Sincronización en caliente del slider tras cualquier cambio de volumen
+    // (teclado de MainWindow, botón de silencio, slider, ajuste de volumen
+    // máximo). QSignalBlocker: el setValue programático NO debe re-disparar
+    // el valueChanged (que persistiría y re-aplicaría el volumen).
+    QSignalBlocker block(m_ovVolume);
+    m_ovVolume->setValue(qRound(m_player->volume()));
+    m_ovMuteBtn->setIcon(nt::icon(
+        m_player->muted() ? nt::Icon::Unmute : nt::Icon::Mute,
+        nt::kText, 18));
 }
 
 void WatchPage::applyAccent()

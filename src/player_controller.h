@@ -87,6 +87,13 @@ signals:
     // MainWindow la escucha para desarmar el reinicio automático (que no debe
     // repetirse sin agotar antes otra recuperación).
     void recoveryHealthy();
+    // El volumen o el silencio cambió (teclado de MainWindow, botón de
+    // silencio, slider del overlay, ajuste). Las UIs la escuchan para
+    // sincronizar en caliente. ANTES no existía ninguna notificación: el
+    // slider del overlay solo se refrescaba al volver a mostrar la barra
+    // (updateOverlayIcons), por eso subir/bajar con las flechas no se veía
+    // hasta que el overlay se re-mostraba.
+    void volumeChanged();
 
 private slots:
     void onPlayerState();

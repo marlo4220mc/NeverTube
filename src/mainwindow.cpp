@@ -656,6 +656,8 @@ MainWindow::MainWindow(QWidget *parent)
             });
     connect(&m_player, &PlayerController::metadataChanged, this,
             [this]() { updateMiniBar(); });
+    connect(&m_player, &PlayerController::volumeChanged, this,
+            [this]() { updateMiniIcons(); });
     connect(&m_player, &PlayerController::positionChanged, this,
             [this](double pos, double dur) {
                 if (m_miniProgress) {

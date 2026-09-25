@@ -357,12 +357,14 @@ void PlayerController::toggleMute()
 {
     m_muted = !m_muted;
     m_player->setVolume(m_muted ? 0.0 : m_volume);
+    emit volumeChanged();
 }
 
 void PlayerController::setMuted(bool muted)
 {
     m_muted = muted;
     m_player->setVolume(muted ? 0.0 : m_volume);
+    emit volumeChanged();
 }
 
 void PlayerController::setVolume(double volume)
@@ -373,6 +375,7 @@ void PlayerController::setVolume(double volume)
     const int muted = m_muted ? 1 : 0;
     m_player->setProperty("volume_muted", muted);
     m_player->setVolume(m_volume);
+    emit volumeChanged();
 }
 
 void PlayerController::setVolumeMax(double maxPercent)
@@ -383,6 +386,7 @@ void PlayerController::setVolumeMax(double maxPercent)
         m_volume = double(m_volumeMax);
     m_player->setVolumeMax(double(m_volumeMax));
     m_player->setVolume(m_volume);
+    emit volumeChanged();
 }
 
 void PlayerController::seek(double seconds)
