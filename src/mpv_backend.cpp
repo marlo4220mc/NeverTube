@@ -2,6 +2,7 @@
 
 #include <QMetaObject>
 #include <QOpenGLContext>
+#include <QOpenGLFunctions>
 #include <QString>
 #include <QThread>
 #include <QtGlobal>
@@ -221,6 +222,22 @@ bool MpvBackend::initGL()
 {
     if (!m_mpv || m_rctx)
         return m_rctx != nullptr;
+    // Diagnóstico del contexto GL real (experimento ANGLE / desktop GL):
+    // vendor "Google ... (ANGLE ...)" + es=1 confirman que el contexto del
+    // widget es ANGLE y que mpv podrá intentar el hwdec zero-copy d3d11-egl
+    // con hwdec=auto (en video/out/gpu/hwdec.c d3d11-egl va ANTES que
+    // d3d11va; con GL de escritorio eglGetCurrentDisplay() es NULL y solo
+    // queda d3d11va-copy, el copy-back del CPU al 100% en x64).
+    if (QOpenGLContext *glc = QOpenGLContext::currentContext()) {
+        QOpenGLFunctions *glf = glc->functions();
+        const GLubyte *vendor = glf->glGetString(GL_VENDOR);
+        const GLubyte *renderer = glf->glGetString(GL_RENDERER);
+        if (vendor && renderer)
+            NT_DEBUG("E2E GL ctx es=%d vendor=%s renderer=%s\n",
+                     glc->isOpenGLES() ? 1 : 0,
+                     reinterpret_cast<const char *>(vendor),
+                     reinterpret_cast<const char *>(renderer));
+    }
     mpv_opengl_init_params init{ getProcAddress, nullptr };
     mpv_render_param params[] = {
         { MPV_RENDER_PARAM_API_TYPE, const_cast<char *>(MPV_RENDER_API_TYPE_OPENGL) },

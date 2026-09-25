@@ -206,6 +206,32 @@ int main(int argc, char *argv[])
 #ifdef Q_OS_WIN
     ensureConsoleAttached();
 #endif
+#ifdef Q_OS_WIN
+#ifndef NEVERTUBE_NO_MPV
+    // Experimento ANGLE (Windows x64, OPT-IN con NEVERTUBE_ANGLE=1): forzar
+    // el contexto GL del widget a ANGLE (OpenGL ES sobre D3D11) para que mpv
+    // pueda decodificar con zero-copy. Con GL de escritorio (el default de la
+    // pruebas — mpv loguea "Detected desktop OpenGL") mpv NO puede importar texturas D3D11
+    // y se ve forzado a d3d11va-copy: el copy-back VRAM->RAM->textura GL es el
+    // coste del CPU al 100% en la máquina de pruebas. Con contexto ANGLE, mpv (hwdec=auto,
+    // invariante protegida intacta) elige solo el hwdec d3d11-egl: decodifica
+    // en D3D11 y el frame viaja por EGLStream a la textura del widget sin
+    // copiar a CPU. mpv carga LIBEGL.DLL con la búsqueda de LoadLibrary, así
+    // que usa el MISMO ANGLE que carga Qt (mismo directorio) y toma el display
+    // con eglGetCurrentDisplay() en paintGL: no hay que pasarle handles.
+    // Solo Windows y solo donde hay mpv (el build x86/FfmpegBackend sale por
+    // NEVERTUBE_NO_MPV; su render GLES no está preparado para ANGLE). Respetar
+    // un QT_OPENGL que el usuario ya haya fijado.
+    if (qEnvironmentVariableIsSet("NEVERTUBE_ANGLE")
+        && !qEnvironmentVariableIsSet("QT_OPENGL")) {
+        qputenv("QT_OPENGL", QByteArrayLiteral("angle"));
+        std::fprintf(stderr,
+                     "ANGLE: QT_OPENGL=angle (contexto Qt -> ANGLE/D3D11) por "
+                     "NEVERTUBE_ANGLE=1; mpv debera elegir hwdec d3d11-egl "
+                     "(zero-copy)\n");
+    }
+#endif // !NEVERTUBE_NO_MPV
+#endif // Q_OS_WIN
     QApplication app(argc, argv);
     Q_INIT_RESOURCE(resources);
     app.setApplicationName(QStringLiteral("nevertube"));

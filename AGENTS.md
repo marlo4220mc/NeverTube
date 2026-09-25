@@ -315,6 +315,52 @@ vez de abortar (así el i5 llega a H.264, que sí decodifica por HW). Un
   DXVA2 (av1 es imposible en x86, ver arriba); se corre en la máquina de pruebas, donde
   salta el clip av1 si no hay decoder sw.
 
+## Experimento ANGLE (zero-copy x64, opt-in)
+
+El CPU al 100% de la máquina x64 de pruebas es el coste INHERENTE de
+`d3d11va-copy`: con GL de escritorio como superficie del widget, mpv no puede
+importar las texturas D3D11 del decodificador y copia VRAM→RAM→textura GL por
+frame. La vía de zero-copy real en Windows con libmpv+render es **ANGLE +
+`d3d11-egl`**: el contexto GL del widget es ANGLE (GLES sobre D3D11), el frame
+decodificado viaja por **EGLStream** de ANGLE a la textura sin pasar por CPU.
+EXPERIMENTAL y MEDIBLE con `NEVERTUBE_ANGLE=1` (solo Windows; no existe en el
+build x86, que sale por `NEVERTUBE_NO_MPV`):
+
+- `main.cpp` fuerza `QT_OPENGL=angle` antes de `QApplication` (solo si el
+  usuario no fijó ya `QT_OPENGL`). Con eso Qt crea el contexto del
+  `QOpenGLWidget` con ANGLE/D3D11 (todo lo demás de la UI sigue por QPainter,
+  que no usa GL).
+- NO hace falta pasarle handles EGL a libmpv: mpv carga `LIBEGL.DLL` con la
+  búsqueda de LoadLibrary (mismo directorio → el MISMO ANGLE que Qt ya cargó)
+  y toma el display en `eglGetCurrentDisplay()` del hilo de render
+  (`paintGL`). `hwdec=auto` se queda (invariante protegida): en
+  `video/out/gpu/hwdec.c` el driver `d3d11-egl` va ANTES que `d3d11va`, así
+  que con contexto ANGLE mpv elige solo el zero-copy; con GL de escritorio
+  `eglGetCurrentDisplay()` es NULL y cae a `d3d11va-copy` (comportamiento
+  actual, sin daño).
+- `MpvBackend::initGL` loguea `E2E GL ctx es=… vendor=… renderer=…` para
+  confirmar empíricamente qué contexto hay (ANGLE → vendor "Google … (ANGLE)";
+  desktop → vendor del driver).
+- **Cómo medir en la máquina x64 de pruebas** (antes/después con el MISMO vídeo y calidad):
+  1. `NEVERTUBE_ANGLE=1 ./nevertube_qt2` (necesita `libEGL.dll`/`libGLESv2.dll`
+     junto al exe; `windeployqt` las despliega y el CI x64 lo verifica en el
+     `$missing` del portátil).
+  2. Con `NEVERTUBE_DEBUG=1`, el veredicto es el log de mpv + `hwdec-current`
+     en el E2E: `Using hardware decoding (d3d11-egl)` = zero-copy activo;
+     `(d3d11va-copy)` = no cambió nada. Comparar CPU en el Administrador de
+     tareas.
+- **Caídas esperadas (inocuas)**: si el ANGLE de Qt 5.15.2 no expone las
+  extensiones que exige `hwdec_d3d11egl.c` (`EGL_ANGLE_stream_producer_d3d_texture`,
+  `EGL_ANGLE_d3d_share_handle_client_buffer`, `EGL_EXT_device_query`, GLES
+  `GL_OES_EGL_image_external_essl3`/`GL_NV_EGL_stream_consumer_external`), el
+  `init` del driver falla y mpv sigue con `d3d11va-copy`: ni mejora ni rompe.
+  ANGLE usa WARP solo si la GPU no llega a D3D11 FL9_3 (la Apollo Lake de la
+  máquina x64 de pruebas es FL11_1: hardware). Si el modo ANGLE diera parpadeo/negro en el
+  widget, el timer de 33 ms (protegido) fuerza el repintado; aún así, el modo
+  es reversible quitando la variable.
+- En Linux el guard `Q_OS_WIN` lo deja todo como estaba (GL de escritorio;
+  allí el zero-copy ya es posible por VAAPI/EGL sin ANGLE, ver `hwdec-current`).
+
 ## Puntos de entrada CLI
 
 - `./build/nevertube_qt2` → app normal
