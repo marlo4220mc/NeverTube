@@ -501,8 +501,10 @@ bool PlayerWidget::occludedByTopWindow()
     QWidget *top = window();
     if (!top)
         return false;
-    const HWND topHwnd = static_cast<HWND>(top->winId());
-    const HWND vidHwnd = static_cast<HWND>(winId());
+    // WId en Qt5 Windows es quintptr, no HWND: el cast correcto es
+    // reinterpret_cast (MSVC rechaza static_cast entre entero y puntero).
+    const HWND topHwnd = reinterpret_cast<HWND>(top->winId());
+    const HWND vidHwnd = reinterpret_cast<HWND>(winId());
     if (!topHwnd || !vidHwnd)
         return false;
     RECT vr;
@@ -511,7 +513,9 @@ bool PlayerWidget::occludedByTopWindow()
     // La cadena de GetWindow solo lista top-level windows (los child widgets,
     // como este QOpenGLWidget, no aparecen). Las ventanas por ENCIMA de la
     // nuestra en el z-order son las que llegan antes de topHwnd.
-    HWND h = GetWindow(GW_HWNDFIRST);
+    // GetWindow(GW_HWNDFIRST) no existe con un argumento: la primera
+    // top-level del z-order se obtiene con GetTopWindow(NULL).
+    HWND h = GetTopWindow(nullptr);
     for (; h && h != topHwnd; h = GetWindow(h, GW_HWNDNEXT)) {
         if (!IsWindowVisible(h) || IsIconic(h))
             continue;
