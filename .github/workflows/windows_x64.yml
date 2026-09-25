@@ -164,8 +164,13 @@ jobs:
           curl.exe -sL -o dist\VC_redist.x64.exe `
             https://aka.ms/vs/17/release/vc_redist.x64.exe
           if ($LASTEXITCODE -ne 0) { Write-Host 'VC_redist.x64 no bajó'; exit 1 }
+          # ANGLE (libEGL/libGLESv2): windeployqt las despliega por defecto
+          # (switch de GL dinámico de Qt5) y son las que necesita el modo
+          # experimental NEVERTUBE_ANGLE=1 (zero-copy d3d11-egl). Si faltan,
+          # el experimento no es probable en la máquina x64 de pruebas: fallar aquí.
           $missing = @('libmpv-2.dll', 'vulkan-1.dll', 'libssl-1_1-x64.dll',
-            'libcrypto-1_1-x64.dll', 'VC_redist.x64.exe') |
+            'libcrypto-1_1-x64.dll', 'libEGL.dll', 'libGLESv2.dll',
+            'VC_redist.x64.exe') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
           if ($missing) { Write-Host "dist incompleto: faltan $missing"; exit 1 }
           Compress-Archive -Path dist\* -DestinationPath nevertube-x64-portable.zip -Force
