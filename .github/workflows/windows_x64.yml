@@ -17,7 +17,7 @@ jobs:
     env:
       NEVERTUBE_DEBUG: 1
       # Build de mpv x86_64 (baseline, sin el sufijo 'v3': la máquina x64 de
-      # no tiene AVX2). Si el smoke test falla con abort/"lock != NULL" al
+      # pruebas no tiene AVX2 — Apollo Lake). Si el smoke test falla con abort/"lock != NULL" al
       # inicializar mpv (OpenSSL 3 roto de shinchiro >= may-2026), cambia estas
       # dos a un build anterior (tag + nombre del asset del release).
       MPV_TAG: '20260924'

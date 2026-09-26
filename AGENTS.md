@@ -48,8 +48,8 @@ libdav1d en software, no el nativo).
 COMPILADO (un hwaccel existe en el paquete), no lo que el hardware soporta.
 `av_hwdevice_ctx_create` (DXVA2 en Windows) suele funcionar aunque la GPU no
 decodifique h264 por hardware (el chequeo real ocurre al abrir el
-decodificador). Si `avcodec_open2` con device adjunto FALLA — p. ej. un
-Atom/GMA sin h264 DXVA2 — `openDecoder` devuelve `nullptr` y `runLoop` lo
+decodificador). Si `avcodec_open2` con device adjunto FALLA — p. ej. una
+plataforma sin h264 DXVA2 — `openDecoder` devuelve `nullptr` y `runLoop` lo
 reintenta en SOFTWARE PURO antes de reportar "Sin decodificador de vídeo"
 (error fatal). Sin ese retry, en esas máquinas cada clip h264 moriría con
 error en vez de caer a SW (visto en la máquina de pruebas x86). Con el retry, el primer
@@ -327,7 +327,7 @@ vez de abortar (así el i5 llega a H.264, que sí decodifica por HW). Un
 - El selftest `--selftest-hwprobe` verifica primero la tabla de decisión
   offline (9 casos, regresión determinista) y luego imprime el perfil
   detectado (dependiente de la GPU; no es un assert fijo). NO se corre en el
-  CI: el runner de GitHub no tiene GPU, así que el sondeo HW se valida en la
+  CI: el runner de GitHub no tiene GPU, así que el sondeo HW se valida en las
   máquinas de pruebas (x86/x64). Por el mismo motivo `--selftest-ffmpeg` (gate del
   FfmpegBackend) tampoco va en el smoke de CI: la VM no puede ejercitar AV1/
   DXVA2 (av1 es imposible en x86, ver arriba); se corre en la máquina de pruebas, donde
