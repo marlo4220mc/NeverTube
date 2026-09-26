@@ -1,5 +1,5 @@
-; ── Script Inno Setup de nevertube_qt2 ──────────────
-; Como el `win_exe.yml` / `flutter_distributor`, el entregable de la
+; ── Script Inno Setup de nevertube_qt2 (setup instalable con Inno) ─────────────
+; Como un setup Inno típico, el entregable del equipo objetivo es este
 ; `setup.exe` INSTALABLE que NO es un `dist/` con DLLs sueltas
 ; lleva TODO dentro (nevertube_qt2.exe + Qt5Widgets/Core/Gui.dll + plugins
 ; platforms/qwindows.dll + runtime VC + DLLs mpv-dev). Un solo

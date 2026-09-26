@@ -210,7 +210,7 @@ int main(int argc, char *argv[])
 #ifndef NEVERTUBE_NO_MPV
     // Experimento ANGLE (Windows x64, OPT-IN con NEVERTUBE_ANGLE=1): forzar
     // el contexto GL del widget a ANGLE (OpenGL ES sobre D3D11) para que mpv
-    // pueda decodificar con zero-copy. Con GL de escritorio (el default de la
+    // pueda decodificar con zero-copy. Con GL de escritorio (el default en la máquina de
     // pruebas — mpv loguea "Detected desktop OpenGL") mpv NO puede importar texturas D3D11
     // y se ve forzado a d3d11va-copy: el copy-back VRAM->RAM->textura GL es el
     // coste del CPU al 100% en la máquina de pruebas. Con contexto ANGLE, mpv (hwdec=auto,
