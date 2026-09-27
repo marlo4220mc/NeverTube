@@ -1,8 +1,11 @@
 name: Windows x64 (mpv moderno — Win10+)
 
-# Workflow de PRUEBA (x64), para descartar que el problema de la máquina x64 de pruebas sea el
-# libmpv i686 de 2021 (pin de Win7). Aquí NO hay restricción Win7: mpv moderno,
-# Qt x64 y target Win10+. Se dispara a mano y, además, al tocar este fichero.
+# Build x64 (Win10+): mpv moderno, Qt x64, target de 64 bits. Aquí NO hay
+# restricción Win7 (el pin de Win7 es del build x86 de 32 bits). Empaqueta un
+# setup.exe INSTALABLE con Inno Setup (dist64.iss), no un zip portátil: el
+# setup x86 cancela en 64 bits 10/11 y remite a este build, así que este es el
+# entregable para Windows 10/11 de 64 bits. Se dispara a mano y, además, al
+# tocar este fichero.
 
 on:
   workflow_dispatch:
@@ -142,10 +145,25 @@ jobs:
           Get-ChildItem build-win/Release -ErrorAction SilentlyContinue |
             Select-Object Name, Length
 
-      # Paquete PORTÁTIL (zip): x64 sin instalador (para probar rápido en la
-      # máquina x64 de pruebas). Incluye Qt (windeployqt), libmpv + vulkan + OpenSSL y el
-      # VC_redist.x64.exe por si al equipo le falta el runtime VC++.
-      - name: empaquetar portátil (windeployqt x64 + mpv + vulkan + openssl)
+      # Inno Setup (choco), igual que el workflow x86: el .iss se compila con
+      # ISCC.exe. Se busca en las dos rutas posibles porque choco instala Inno en
+      # ProgramFiles(x86) o en ProgramFiles según la imagen del runner.
+      - name: instalar Inno Setup (choco)
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          $iscc = Get-ChildItem "$env:ProgramFiles\Inno Setup*\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $iscc) { Write-Host "ISCC.exe no encontrado"; exit 1 }
+          Write-Host "Inno: $($iscc.FullName)"
+
+      # Paquete INSTALABLE (setup.exe con Inno Setup), no un zip portátil: el
+      # target x64 es Win10+ y este es el entregable para el usuario final
+      # (el x86 aparte lleva su propio setup; ver dist64.iss y dist.iss).
+      # Incluye Qt (windeployqt), libmpv + vulkan + OpenSSL y el
+      # VC_redist.x64.exe que el setup instala al final (ssPostInstall).
+      - name: empaquetar setup.exe instalable (windeployqt x64 + mpv + vulkan + openssl + iscc)
         shell: pwsh
         run: |
           $exe = "build-win\Release\nevertube_qt2.exe"
@@ -173,8 +191,51 @@ jobs:
             'VC_redist.x64.exe') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
           if ($missing) { Write-Host "dist incompleto: faltan $missing"; exit 1 }
-          Compress-Archive -Path dist\* -DestinationPath nevertube-x64-portable.zip -Force
           Get-ChildItem dist | Select-Object Name, Length
+          # dist64.iss (NO dist.iss: ese es el setup x86/Win7 y su guard de
+          # arquitectura cancela justamente en 64 bits 10/11, que es el target
+          # de este workflow). iscc compila a setup-out\nevertube-setup-x64.exe.
+          $iscc = Get-ChildItem "$env:ProgramFiles\Inno Setup*\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          & $iscc.FullName dist64.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $setup = "setup-out\nevertube-setup-x64.exe"
+          if (-not (Test-Path $setup)) { Write-Host "no se generó $setup"; exit 1 }
+          Get-Item $setup | Select-Object Name, Length
+
+      # Gate del INSTALADOR: comprueba que el setup.exe existe y pesa lo que debe
+      # (Qt + mpv + Vulkan + OpenSSL comprimidos con LZMA2 son decenas de MB; un
+      # paquete roto son unos pocos cientos de KB), y luego innoextrae el
+      # instalador SIN ejecutarlo (en el runner no hay elevación/UAC) para
+      # verificar que dentro van la app, el plugin de windows y las DLLs que el
+      # runtime carga por LoadLibrary. Un .iss que se rompe puede compilar bien y
+      # aun así no llevar lo necesario: esto lo atrapa.
+      # innoextract 1.9 puede no reconocer una versión de Inno Setup más nueva
+      # que la suya: si no puede parsearlo, avisa y SE SALTA la comprobación de
+      # contenido (no es un rojo falso por una herramienta de verificación), pero
+      # el tamaño del setup sigue siendo obligatorio.
+      - name: gate del instalador (tamaño + innoextract, sin ejecutar)
+        shell: pwsh
+        run: |
+          $setup = "setup-out\nevertube-setup-x64.exe"
+          $sz = (Get-Item $setup).Length
+          Write-Host ("setup: {0:N1} MB" -f ($sz / 1MB))
+          if ($sz -lt 5MB) {
+            Write-Host "el setup son menos de 5 MB: el paquete va vacío o incompleto"
+            exit 1 }
+          Remove-Item setup-check -Recurse -Force -ErrorAction SilentlyContinue
+          & .\innoextract-tool\innoextract.exe -s -d setup-check $setup
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "AVISO: innoextract no pudo leer el setup (versión de Inno no soportada). Se salta el gate de contenido."
+            exit 0 }
+          $need = @('nevertube_qt2.exe', 'qwindows.dll', 'libmpv-2.dll',
+            'vulkan-1.dll', 'libssl-1_1-x64.dll', 'libcrypto-1_1-x64.dll',
+            'libEGL.dll', 'libGLESv2.dll', 'VC_redist.x64.exe')
+          $files = Get-ChildItem setup-check -Recurse -File | ForEach-Object Name
+          $missing = $need | Where-Object { $files -notcontains $_ }
+          if ($missing) { Write-Host "el setup NO lleva: $missing"; exit 1 }
+          Write-Host "gate del setup x64 OK: el instalador lleva los $($need.Count) ficheros clave"
 
       # Smoke test desde dist\ (con todo su maquetillaje de DLLs): TLS real (que
       # OpenSSL x64 carga y hace handshake), db, búsqueda Innertube, navegación
@@ -203,6 +264,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nevertube-windows-x64-portable
-          path: nevertube-x64-portable.zip
+          name: nevertube-windows-x64-setup
+          path: setup-out/nevertube-setup-x64.exe
           retention-days: 21

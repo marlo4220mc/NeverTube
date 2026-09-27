@@ -551,7 +551,34 @@ Los dos últimos datos los escribe el reproductor, no la red:
   - `Yt::channelTabVideos` → browse del canal con el cliente **WEB** para las tres pestañas (videos/shorts/live): VISIONOS solo expone "Vídeos" y su continuación devuelve páginas vacías, mientras que WEB sirve las tres con layout moderno (`lockupViewModel`/`shortsLockupViewModel`) y continuación funcional. El cliente WEB no necesita API key. `fetchChannelVideos` (feed de suscripciones, sin paginación) sigue por VISIONOS con `compactVideoRenderer`.
   - `Yt::getDetail` → `/next`: `videoMetadataRenderer` (título/descripción traducidos, vistas, fecha, canal) + `likeButtonRenderer` (me gusta).
   - `Yt::playlistDetail` → browse `VL<id>`: `playlistHeaderRenderer` + `playlistVideoRenderer`.
-- Empaquetado Windows (Win7 x86): la UCRT NO se copia app-local desde la Windows SDK — esa versión importa `GetSystemTimePreciseAsFileTime` (W8+) y ucrtbase no carga en Win7. En su lugar el setup empaqueta `VC_redist.x86.exe` (descargado en CI) y lo instala con `Exec` (`/install /passive /norestart`, códigos 0/1638/3010 aceptados) con `PrivilegesRequired=admin`. El CRT (msvcp140/vcruntime140) sí va junto al exe (`windeployqt --compiler-runtime`). ORDEN del setup: 1) app completa → 2) iconos (menú + acceso directo al escritorio, casilla `[Tasks] desktopicon` marcada por defecto) → 3) `InstallVcRedist` desde `CurStepChanged` → `ssPostInstall` (no en `AfterInstall` de un `[Files]`, que correría en mitad de la copia). El `[InstallDelete]` sigue purgando la UCRT app-local de instalaciones antiguas. El setup x86 **cancela en Windows de 64 bits 10/11** (`InitializeSetup` + `IsWin64` + `GetWindowsVersion >= $0A000000`) y dirige al build x64: el x86 ahí quedaría capado a h264 HW + VP9 software y sin AV1. Se permite en 32 bits y en 64 bits < 10 (donde el x64/mpv moderno no corre). **TOOLSET y REDIST (Win7)**: el x86 compila con `-T v142` (VS2019/14.29) sobre `runs-on: windows-2022` y el setup instala `vc_redist.x86` **2015-2019** (`aka.ms/vs/16`): el target (Win7) necesita ese CRT. `windows-latest` ya es VS2026 (MSVC 14.5x) y su runtime NO es Win7-compatible (imports W8+); un binario 14.5x tampoco enlaza contra el vs/16. No quitar el pin de toolset/imagen ni cambiar el redist a `vs/17`+ sin prueba en el target. Además, el CI purga `qtaudio_wasapi.dll` del paquete antes del gate: Qt5 Multimedia la despliega pero importa `RoGetActivationFactory` (W8+) y el gate de imports lo aborta; en Win7 el audio va por `qtaudio_windows.dll` (WaveOut), no WASAPI.
+- Empaquetado Windows (Win7 x86): la UCRT NO se copia app-local desde la Windows SDK — esa versión importa `GetSystemTimePreciseAsFileTime` (W8+) y ucrtbase no carga en Win7. En su lugar el setup empaqueta `VC_redist.x86.exe` (descargado en CI) y lo instala con `Exec` (`/install /passive /norestart`, códigos 0/1638/3010 aceptados) con `PrivilegesRequired=admin`. El CRT (msvcp140/vcruntime140) sí va junto al exe (`windeployqt --compiler-runtime`). ORDEN del setup: 1) app completa → 2) iconos (menú + acceso directo al escritorio, casilla `[Tasks] desktopicon` marcada por defecto) → 3) `InstallVcRedist` desde `CurStepChanged` → `ssPostInstall` (no en `AfterInstall` de un `[Files]`, que correría en mitad de la copia). El `[InstallDelete]` sigue purgando la UCRT app-local de instalaciones antiguas. El setup x86 **cancela en Windows de 64 bits 10/11** (`InitializeSetup` + `IsWin64` + `GetWindowsVersion >= $0A000000`) y dirige al build x64 (el `MsgBox` nombra `nevertube-setup-x64.exe`: cancelar sin decir dónde está el instalador que sí vale deja al usuario sin salida): el x86 ahí quedaría capado a h264 HW + VP9 software y sin AV1. Se permite en 32 bits y en 64 bits < 10 (donde el x64/mpv moderno no corre). **TOOLSET y REDIST (Win7)**: el x86 compila con `-T v142` (VS2019/14.29) sobre `runs-on: windows-2022` y el setup instala `vc_redist.x86` **2015-2019** (`aka.ms/vs/16`): el target (Win7) necesita ese CRT. `windows-latest` ya es VS2026 (MSVC 14.5x) y su runtime NO es Win7-compatible (imports W8+); un binario 14.5x tampoco enlaza contra el vs/16. No quitar el pin de toolset/imagen ni cambiar el redist a `vs/17`+ sin prueba en el target. Además, el CI purga `qtaudio_wasapi.dll` del paquete antes del gate: Qt5 Multimedia la despliega pero importa `RoGetActivationFactory` (W8+) y el gate de imports lo aborta; en Win7 el audio va por `qtaudio_windows.dll` (WaveOut), no WASAPI.
+- Empaquetado Windows x64 (Win10+): el entregable es un **setup.exe instalable**
+  (`dist64.iss`, compilado con `iscc` en `windows_x64.yml`), NO un zip portátil.
+  Es el gemelo de `dist.iss` (x86/Win7) con 5 diferencias, todas deliberadas:
+  (1) `ArchitecturesInstallIn64BitMode=x64compatible` para que `{autopf}` sea
+  `C:\Program Files` de 64 bits y no `Program Files (x86)`, y
+  `ArchitecturesAllowed=x64compatible` (64 bits real y Win11 ARM emulado);
+  (2) `MinVersion=10.0` (mpv moderno + Vulkan no existen antes de Win10). OJO:
+  Win10 se reporta como 6.3 salvo el manifiesto de compatibilidad que el setup de
+  Inno 6 sí lleva; con Inno 5.5.5 ese `MinVersion` rechazaría el propio Win10;
+  (3) NO hay problema de UCRT (Win10+ la trae en el sistema) → sin
+  `[InstallDelete]` de la UCRT app-local, y el redist es `VC_redist.x64.exe` de
+  `aka.ms/vs/17` (el 2022+, sin la restricción de imports W8+ que obliga al x86
+  a usar vs/16); (4) los ficheros vienen de `dist\` con `VC_redist.x64.exe`
+  excluido y copiado a `{tmp}` para que lo lance `InstallVcRedist` desde
+  `CurStepChanged`; (5) **NO hay `InitializeSetup`**: el guard de arquitectura
+  del x86 cancelaba en 64 bits 10/11 y aquí el 64 bits ES el objetivo (un 32
+  bits lo rechaza `ArchitecturesAllowed` antes de escribir en disco, con su
+  propio mensaje). Lo que SÍ comparte con el x86: `[Tasks] desktopicon` marcado
+  por defecto, `[UninstallDelete]` de la BD (`{userdocs}\mini_tube`) y de las
+  cachés (`{localappdata}\nevertube\nevertube`), `PrivilegesRequired=admin` y el
+  mismo orden app → iconos → redist. En `[Code]` los comentarios van con `//`:
+  el `;` solo es válido en el resto de secciones (dentro de `[Code]` es
+  separador de sentencias y `iscc` lo rechaza). El gate del workflow exige que
+  el setup pese >5 MB y lo `innoextract`a sin ejecutarlo (el runner no tiene
+  UAC) para comprobar que lleva los 9 ficheros clave; si `innoextract 1.9` no
+  reconoce la versión de Inno, avisa y salta SOLO esa parte (el tamaño sigue
+  siendo obligatorio) para no dar un rojo falso.
 - Overlay de los controles NO es un widget separado: vive dentro de
   `WatchPage::m_overlay`/`PlayerContainer` (src/ui/pages/watch_page.cpp).
   Cualquier cambio ahí que afecte el área de video requiere el selftest.
