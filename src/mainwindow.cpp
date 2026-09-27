@@ -828,7 +828,14 @@ void MainWindow::setupNav()
 {
     m_nav = new QWidget(this);
     m_nav->setObjectName(QStringLiteral("navBottom"));
-    m_nav->setFixedHeight(66);
+    // Alto de la barra. Es el ÚLTIMO widget del layout raíz, así que queda
+    // pegado al borde inferior de la ventana sea cual sea su alto (recortar
+    // aquí NO la separa del borde). El icono y el texto los centra verticalmente
+    // QToolButton dentro de su rect, pero el contenido (icono 33 + hueco + línea
+    // de texto) necesita ~53 px: con el padding vertical de 2 px del QSS
+    // (theme.cpp, QToolButton#navBtn) caben 56 en 60. Bajar más el alto recorta
+    // el texto o el icono, no los encoge.
+    m_nav->setFixedHeight(60);
 
     auto *lay = new QHBoxLayout(m_nav);
     lay->setContentsMargins(0, 0, 0, 0);
