@@ -10,7 +10,17 @@
 #include "yt.h"
 
 namespace {
-constexpr int kPositionFlushMs = 60000;
+// Cada cuánto se guarda la posición en el historial. 20 s (antes 60 s): es lo
+// que marca el retardo de la barra de progreso de "Continuar viendo" — con 60 s
+// el usuario veía un progreso hasta un minuto viejo. El coste por escritura es
+// UN INSERT OR REPLACE de una fila en SQLite local, y savePosition() descarta
+// la escritura si la posición no ha avanzado (vídeo en pausa), así que bajar el
+// intervalo no se nota ni en CPU ni en disco. El resto de guardas (pausa, cambio
+// de vídeo, aboutToQuit) siguen salvando al instante.
+constexpr int kPositionFlushMs = 20000;
+// Avance mínimo (ms) para dar por nueva la posición a guardar. Evita reescribir
+// la misma fila cuando el flush cae con el vídeo parado.
+constexpr qlonglong kPositionFlushMinDeltaMs = 2000;
 // Ventana de reproducción "estable" que reinicia el presupuesto de intentos de
 // recuperación (una interrupción puntual tras un tramo largo sano no debe
 // agotar lo acumulado). 5 min y NO 60 s: la sesión gateada de YouTube muere a
@@ -69,7 +79,7 @@ void PlayerController::ensurePlayerConnections()
     m_posConn = connect(m_player, &PlayerWidget::positionChanged, this,
                         &PlayerController::onPlayerPosition);
     m_durConn = connect(m_player, &PlayerWidget::durationChanged, this,
-                        &PlayerController::onPlayerPosition);
+                        &PlayerController::onPlayerDuration);
     m_errConn = connect(m_player, &PlayerWidget::mediaError, this,
                         &PlayerController::onPlayerError);
 }
@@ -131,6 +141,7 @@ void PlayerController::playIndex(int index)
         return;
     savePosition();
     m_index = index;
+    m_reportedDuration = -1.0;
     m_seekBack = 0.0;
     m_errorMessage.clear();
     m_pendingStartMs = m_indexStartMs.value(index, 0);
@@ -140,8 +151,14 @@ void PlayerController::playIndex(int index)
     emit currentChanged();
 
     const VideoInfo &v = m_queue[index];
-    if (m_history && !v.id.isEmpty())
+    if (m_history && !v.id.isEmpty()) {
         m_history->add(v.id, m_pendingStartMs);
+        // La fila del vídeo nuevo se acaba de escribir con la posición de
+        // reanudación: la línea base del descarte de escrituras redundantes es
+        // esa, no la del vídeo anterior.
+        m_lastSavedId = v.id;
+        m_lastSavedMs = m_pendingStartMs;
+    }
 
     if (v.id.isEmpty()) {
         setPhase(QStringLiteral("error"));
@@ -236,6 +253,22 @@ void PlayerController::onPlayerPosition()
     m_position = m_player->position();
     m_duration = m_player->duration();
     emit positionChanged(m_position, m_duration);
+}
+
+// La duración del medio cambió de verdad (el backend ya la tiene). Se avisa por
+// separado de positionChanged porque esta llega ~1/s durante la reproducción y
+// escribir en la caché de vídeos en cada tick sería trabajo inútil en BD.
+void PlayerController::onPlayerDuration()
+{
+    const double d = m_player->duration();
+    if (d <= 0 || qAbs(d - m_reportedDuration) < 0.5)
+        return;
+    // Se compara contra la duración YA NOTIFICADA, no contra m_duration: los
+    // ticks de posición también la actualizan y podrían "consumirse" el aviso
+    // antes de que llegue la señal (el vídeo se quedaría sin cachear).
+    m_reportedDuration = d;
+    m_duration = d;
+    emit durationChanged(d);
 }
 
 void PlayerController::onPlayerError(const QString &message)
@@ -334,8 +367,19 @@ void PlayerController::savePosition()
     const VideoInfo cur = current();
     const bool active = m_phase == QLatin1String("playing")
                         || m_phase == QLatin1String("paused");
-    if (m_history && active && !cur.id.isEmpty())
-        m_history->add(cur.id, qRound(m_position * 1000.0));
+    if (!m_history || !active || cur.id.isEmpty())
+        return;
+    const qlonglong posMs = qRound(m_position * 1000.0);
+    // Descarta la escritura si es el MISMO vídeo y la posición apenas ha
+    // movido (flush con el vídeo en pausa, o posición idéntica). Con el
+    // intervalo corto (20 s) esto es lo que mantiene el coste en un solo
+    // INSERT por cada 2 s de reproducción real.
+    if (cur.id == m_lastSavedId
+        && qAbs(posMs - m_lastSavedMs) < kPositionFlushMinDeltaMs)
+        return;
+    m_lastSavedId = cur.id;
+    m_lastSavedMs = posMs;
+    m_history->add(cur.id, posMs);
 }
 
 void PlayerController::playPause()

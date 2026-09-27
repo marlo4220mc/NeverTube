@@ -769,6 +769,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // Alturas reales del vídeo (Innertube): si Auto pidió 360 de un vídeo 1080,
     // el menú debe seguir ofreciendo 1080 aunque el stream cargado sea 360.
     connect(m_yt, &Yt::streamHeightsReady, this, &WatchPage::onStreamHeights);
+    connect(m_player, &PlayerController::durationChanged, this,
+            &WatchPage::onDurationKnown);
     connect(m_yt, &Yt::detailReady, this, &WatchPage::onDetailReady);
     connect(m_yt, &Yt::detailFailed, this, &WatchPage::onDetailFailed);
     connect(m_yt, &Yt::relatedReady, this, &WatchPage::onRelatedReady);
@@ -1203,6 +1205,47 @@ void WatchPage::onAvatarReady(const QString &key)
         m_channelBtn->setIcon(avatarWithGap(circularAvatar(pm, 40), 40, 3));
 }
 
+// El backend ya conoce la duración real del medio (la de mpv o el reloj de
+// audio del FfmpegBackend). Los vídeos abiertos desde search/home/canal llegan
+// con durationSeconds=0, y "Continuar viendo" descarta todo lo que no tenga
+// duración en la caché: por eso un vídeo visto varios minutos nunca aparecía
+// allí. Se rellena SOLO la duración y se respeta lo ya cacheado (el upsert es
+// un INSERT OR REPLACE, meter un ítem de cola con campos vacíos los borraría).
+void WatchPage::onDurationKnown(double seconds)
+{
+    const int dur = qRound(seconds);
+    if (dur <= 0 || !m_cache || !m_player->isActive())
+        return;
+    const VideoInfo cur = m_player->current();
+    if (cur.id.isEmpty())
+        return;
+    VideoInfo cached;
+    const bool known = m_cache->get(cur.id, cached);
+    if (known && cached.durationSeconds == dur)
+        return; // ya está al día: no escribir por gusto
+    if (known) {
+        // Rellenar solo lo que falte: el upsert es INSERT OR REPLACE, así que
+        // meter el ítem de cola tal cual borraría lo ya cacheado.
+        if (cached.title.isEmpty())
+            cached.title = cur.title;
+        if (cached.channel.isEmpty())
+            cached.channel = cur.channel;
+        if (cached.channelId.isEmpty())
+            cached.channelId = cur.channelId;
+        if (cached.thumbnailUrl.isEmpty())
+            cached.thumbnailUrl = cur.thumbnailUrl;
+        if (cached.viewCount == 0)
+            cached.viewCount = cur.viewCount;
+        if (cached.publishedAt.isEmpty())
+            cached.publishedAt = cur.publishedAt;
+        cached.durationSeconds = dur;
+    } else {
+        cached = cur;
+        cached.durationSeconds = dur;
+    }
+    m_cache->upsert(cached);
+}
+
 void WatchPage::onDetailFailed(const QString &videoId)
 {
     if (!isCurrentVideo(videoId))
@@ -1237,7 +1280,17 @@ void WatchPage::onDetailReady(const VideoInfo &video, const QString &desc,
     }
     meta << QStringLiteral("%1 me gusta").arg(likes);
     m_meta->setText(meta.join(QStringLiteral("  •  ")));
-    m_cache->upsert(video);
+    // El videoMetadataRenderer del /next NO trae duración. Como el upsert es
+    // INSERT OR REPLACE, guardarlo tal cual pondría duration=0 y borraría la
+    // duración real que ya cacheó onDurationKnown(). "Continuar viendo" filtra
+    // por duración > 0, así que perderla sacaba el vídeo de la lista.
+    VideoInfo toCache = video;
+    if (toCache.durationSeconds <= 0) {
+        VideoInfo known;
+        if (m_cache->get(toCache.id, known) && known.durationSeconds > 0)
+            toCache.durationSeconds = known.durationSeconds;
+    }
+    m_cache->upsert(toCache);
 }
 
 // Detalle traducido del vídeo actual (/next): título y descripción en el

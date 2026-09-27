@@ -87,6 +87,10 @@ private slots:
     void onRadioReady(const QString &videoId, const QVector<VideoInfo> &videos);
     void onCurrentDetailReady(const QString &videoId, const QString &title,
                               const QString &description);
+    // El backend informó de la duración real del medio: se guarda en la caché
+    // de vídeos (la que lee "Continuar viendo"), rellenando el hueco de los
+    // vídeos que llegaron sin duración desde search/home/canal.
+    void onDurationKnown(double seconds);
 
 public slots:
     void toggleFullscreen();

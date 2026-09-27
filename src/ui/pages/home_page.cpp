@@ -402,6 +402,13 @@ void HomePage::reload()
 
 void HomePage::refreshContinueWatching()
 {
+    // El historial se escribe cada kPositionFlushMs (20 s) mientras se
+    // reproduce, y este slot está conectado a su changed(). Reconstruir la
+    // rejilla con la página OCULTA (se reproduce en el mini player, que es el
+    // caso normal) es trabajo tirado: al entrar al Home, onNavButton llama a
+    // refreshDynamic() y entonces sí se reconstruye con los datos frescos.
+    if (!isVisible())
+        return;
     loadContinueWatching();
 }
 
