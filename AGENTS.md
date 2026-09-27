@@ -88,15 +88,44 @@ texto fijo` (hueco 8 + título 34 + línea de canal). NO usar un ratio fijo
 escala y un vídeo tapa el nombre del canal del siguiente. Ningún vídeo debe
 solaparse sobre otro, ni en vertical ni en horizontal.
 
-## Altura del área de vídeo (WatchPage/PlayerContainer)
+## Página Player: scroll único (vídeo + descripción + A continuación)
 
-`PlayerContainer::updateMaxHeight()` capa el área del vídeo con
-`min(width/aspect, kMaxPlayerHeight=560)` para que descripción + "A
-continuación" no se queden sin espacio en ventanas grandes/maximizadas. Ese
-tope absoluto **NO aplica en pantalla completa** (`setFullscreen(true)` →
-`capped = width/aspect`): si se re-aplica el 560 en fullscreen el vídeo queda
-en 560 px con la pantalla llena de negro (regresión vista y revertida). El
-tope sí debe seguir aplicando en ventana normal y maximizada.
+La página Player scrollea como YouTube: vídeo, descripción y "A continuación"
+viven DENTRO de un único `QScrollArea` (`WatchPage::m_topScroll`) y el scroll
+mueve todo junto — al bajar, el vídeo se va de la pantalla y descripción/cola
+ganan espacio. Dentro del scroll, la descripción va a la izquierda y "A
+continuación" a la DERECHA (sin límite vertical: crece con todas sus filas y
+el scroll general la recorre). Ambos bloques se alinean ARRIBA y conservan su
+altura natural (`midLay->setAlignment(..., Qt::AlignTop)`): la fila crece con
+la cola, pero la descripción no se estira a esa altura — debajo de cada
+bloque solo queda espacio vacío scrollable, no un widget estirado. El botón
+"◀ Volver" es un botón FLOTANTE transparente (estilo `ghost`)
+arriba-izquierda, fuera del scroll (fijo) y se oculta en fullscreen.
+
+- `PlayerContainer::updateMaxHeight()` fija `min = max = min(width/aspect,
+  kMaxPlayerHeight=560)` (no solo el máximo, como el split antiguo): dentro
+  del scroll el layout debe darle al vídeo EXACTAMENTE su altura, ni estirado
+  por políticas Expanding ni encogido por el contenido scrolleable. El tope
+  absoluto **NO aplica en pantalla completa** (`setFullscreen(true)` →
+  `capped = width/aspect`): si se re-aplica el 560 en fullscreen el vídeo
+  quedaría en 560 px con la pantalla llena de negro (regresión vista y
+  revertida en el layout split anterior). El tope sí aplica en ventana normal
+  y maximizada.
+- La cola "A continuación" va a la DERECHA de la descripción, SIN límite
+  vertical: en `WatchPage::updateQueue()` se fija su altura al contenido real
+  (`sizeHintForRow(0)` × nº de filas) para que el scroll general de la página
+  la recorra entera, sin scroll interno duplicado.
+- Fullscreen (solo vídeo): se ocultan botón Volver + descripción + cola
+  (`m_back`, `m_watchBody`, `m_bottomWidget`); con `widgetResizable` el
+  contenido queda = solo vídeo y se estira a toda la página (sin reparent del
+  player). Al salir se restauran y el scroll vuelve a 0.
+- Al cambiar de vídeo (`onCurrentChanged`) el scroll vuelve arriba (como
+  YouTube); no en fullscreen (ahí está oculto).
+- Verificación visual: QOpenGLWidget dentro de QScrollArea funciona en Qt
+  5.15, pero hay que comprobar en la máquina real que no haya parpadeo/
+  artefactos al scrollear y que el "salto al volver" del vídeo al volver
+  arriba tras estar fuera del viewport sea aceptable (mpv acumula frames
+  mientras no pinta).
 
 ## Pruebas de regresión
 
