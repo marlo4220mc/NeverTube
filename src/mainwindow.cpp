@@ -880,6 +880,11 @@ void MainWindow::onNavButton(int index)
     switch (index) {
     case 0:
         m_currentTab = 0;
+        // Guardar ANTES de refrescar: refreshDynamic() lee la posición del
+        // historial para pintar "Continuar viendo", y aquí se llama con la
+        // página aún oculta (el setCurrentIndex va después), así que el
+        // changed() del guardado lo salta el guard de visibilidad de HomePage.
+        m_player.savePositionNow();
         m_home->refreshDynamic();
         break;
     case 1:
@@ -1222,8 +1227,12 @@ void MainWindow::showPreviousTab()
         dest = 0;
     m_pages->setCurrentIndex(dest);
     m_currentTab = dest;
-    if (dest == 0)
+    if (dest == 0) {
+        // Igual que en onNavButton: la posición se guarda antes de que
+        // "Continuar viendo" la lea de la BD.
+        m_player.savePositionNow();
         m_home->refreshDynamic();
+    }
     // Canal (2) y reproductor (3) no tienen botón de nav: no marcar ninguno.
     if (m_currentTab == 2 || m_currentTab == 3)
         return;

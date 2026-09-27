@@ -460,6 +460,48 @@ en caliente desde Ajustes (Interfaz → Color de acento) y se persiste.
   comprobación el feed cacheado (TTL 30 min) seguiría mostrando solo las
   suscripciones previas tras suscribirse.
 
+## "Continuar viendo" (duración + posición en el historial)
+
+`HomePage::loadContinueWatching` exige, para cada id reciente: `pos > 0`, fila
+en `videos` (la caché), **`durationSeconds > 0`**, no completado y 0 < frac < 1.
+Los dos últimos datos los escribe el reproductor, no la red:
+
+- **Duración**: `PlayerWidget::durationUpdated` (lo emiten los DOS motores:
+  `mpv_backend.cpp` observando la propiedad `duration` y `ffmpeg_backend.cpp`
+  con el reloj de audio) → `PlayerController::onPlayerDuration` →
+  `durationChanged(double)` → `WatchPage::onDurationKnown`, que la guarda en la
+  caché. Es el dato AUTORITATIVO: `parseVideoDetail` (`/next`) no rellena
+  duración y los renderizadores de origen (search/home/canal) a veces tampoco, así
+  que sin esto un vídeo visto varios minutos se quedaba con `duration=0` y
+  NUNCA aparecía en "Continuar viendo" (el filtro lo descartaba en silencio).
+  `PlayerController` compara contra `m_reportedDuration` (reiniciado en cada
+  `playIndex`), no contra `m_duration`: los ticks de posición también actualizan
+  `m_duration` y podrían "consumirse" el aviso antes de que llegue la señal.
+  `onDurationKnown` rellena SOLO la duración y respeta lo ya cacheado — el
+  `upsert` es `INSERT OR REPLACE`, así que meter el ítem de cola tal cual
+  borraría título/canal/miniatura. Por lo mismo `onDetailReady` conserva la
+  duración buena cuando el `/next` la trae a 0.
+- **Posición**: `kPositionFlushMs = 20000` (20 s, antes 60 s: era el retardo
+  visible de la barra de progreso; YouTube guarda cada ~15-20 s). `savePosition()`
+  descarta la escritura si es el mismo vídeo y la posición no ha avanzado 2 s,
+  así que con el vídeo en pausa no se escribe nada. El coste por escritura es un
+  `INSERT OR REPLACE` de una fila (SQLite local) más el `changed()`.
+  Puntos en los que se guarda, todos ya en el código:
+  `playPause` (pausa), `playIndex` (cambio de vídeo: click explícito en
+  cualquier página, "A continuación" o auto-advance al terminar), `stop()`
+  (botón "Cerrar y detener" del mini), `aboutToQuit`, y
+  `MainWindow::savePositionNow()` al **entrar al Home** con algo reproduciéndose
+  en el mini player (`onNavButton` case 0 y `showPreviousTab` con destino 0).
+  Ese último es el que hace que la fila se pinte con el progreso REAL, y va
+  **antes** de `refreshDynamic()` a propósito: en `onNavButton` el
+  `setCurrentIndex` va después, así que la página sigue oculta y el `changed()`
+  del guardado lo salta el guard de visibilidad de `HomePage`.
+  `HomePage::refreshContinueWatching` (conectado a `HistoryRepo::changed`) hace
+  early-return si la página está oculta: cada flush con la app en el mini player
+  no debe reconstruir una rejilla que nadie ve.
+- **Al verificar en BD, copia también `mini_tube.db-wal`**: la app usa WAL y
+  copiar solo el `.db` da un snapshot obsoleto (parece que no se guarda nada).
+
 ## Convenciones
 
 - UI, lógica y reproducción separadas. `PlayerController` (estado/cola) vs

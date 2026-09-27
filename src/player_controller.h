@@ -70,10 +70,23 @@ public:
     bool isPaused() const { return m_phase == QLatin1String("paused"); }
     double position() const { return m_position; }
     double duration() const { return m_duration; }
+    // Fuerza el guardado de la posición actual en el historial (no hace nada
+    // si no hay vídeo en fase playing/paused). Lo llama MainWindow al entrar al
+    // Home con algo reproduciéndose en el mini player: la fila "Continuar
+    // viendo" se pinta en ese momento y debe salir con el progreso real, no con
+    // el del último flush (o con pos=0, que el filtro descarta en silencio).
+    void savePositionNow() { savePosition(); }
 
 signals:
     void phaseChanged(const QString &phase);
     void positionChanged(double position, double duration);
+    // La duración real del medio la reporta el backend al cargar (mpv o el
+    // reloj de audio del FfmpegBackend). Es el dato autoritativo: el /next y los
+    // renderizadores de origen (search/home/canal) a veces no la traen y
+    // dejan durationSeconds=0, y "Continuar viendo" descarta los vídeos sin
+    // duración en la caché. Se emite solo cuando CAMBIA (no por tick de
+    // posición, que llega ~1/s) para no escribir en la BD sin motivo.
+    void durationChanged(double duration);
     void currentChanged();
     void queueChanged();
     void metadataChanged();
@@ -98,6 +111,7 @@ signals:
 private slots:
     void onPlayerState();
     void onPlayerPosition();
+    void onPlayerDuration();
     void onPlayerError(const QString &message);
     // Atasco de reproducción (sin avance de posición) durante la reproducción:
     // re-resuelve con URLs firmadas frescas y reanuda en la posición actual.
@@ -125,6 +139,15 @@ private:
     QString m_errorMessage;
     double m_position = 0.0;
     double m_duration = 0.0;
+    // Última posición ya escrita en el historial (y su vídeo), para no
+    // reescribir la fila cuando el flush de kPositionFlushMs cae con el vídeo
+    // parado. playIndex los actualiza al crear la fila del vídeo nuevo.
+    QString m_lastSavedId;
+    qlonglong m_lastSavedMs = -1;
+    // Última duración ya notificada con durationChanged (-1 = ninguna). Se
+    // reinicia en cada playIndex para que el aviso salga siempre una vez por
+    // vídeo, aunque los ticks de posición hayan actualizado m_duration antes.
+    double m_reportedDuration = -1.0;
     bool m_muted = false;
     double m_volume = 100.0;
     int m_volumeMax = 100;
