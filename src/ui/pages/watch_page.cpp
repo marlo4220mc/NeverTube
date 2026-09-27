@@ -19,6 +19,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QStackedWidget>
@@ -47,12 +48,12 @@ namespace {
 const int kQualityHeights[] = {144, 240, 360, 480, 720, 1080, 1440, 2160};
 constexpr int kQualityCount =
     static_cast<int>(sizeof(kQualityHeights) / sizeof(kQualityHeights[0]));
-// Altura máxima del área de vídeo (PlayerContainer). El stretch de página
-// (3:1, vídeo vs. descripción+"A continuación") crecería el vídeo 3/4 de la
-// pantalla en ventanas maximizadas y dejaría el contenido SIN hueco. Este tope
-// solo muerde cuando el stretch ya supera los 560 px (ventanas grandes): en
-// ventana pequeña/mitad de pantalla el cap por aspecto (width/aspect) manda y
-// no cambia nada. Layout puro: no toca render ni el timer de 33 ms.
+// Altura máxima del área de vídeo (PlayerContainer). En la página con scroll
+// único, un vídeo sin tope ocuparía width/aspect (768+ px en ventanas grandes
+// y maximizadas) y descripción + "A continuación" quedarían empujadas fuera de
+// la vista. El tope muerde cuando el cap por aspecto supera los 560 px: en
+// ventanas pequeñas manda width/aspect y no cambia nada. Layout puro: no toca
+// render ni el redibujado.
 constexpr int kMaxPlayerHeight = 560;
 } // namespace
 
@@ -145,10 +146,14 @@ private:
         // pantalla (solo lo limita su aspecto).
         const int h = qRound(width() / m_aspect);
         const int capped = m_fullscreen ? h : qMin(h, kMaxPlayerHeight);
-        NT_DEBUG("E2E pc aspect=%.3f width=%d maxH=%d curMax=%d\n",
-                 m_aspect, width(), capped, maximumHeight());
-        if (capped == maximumHeight())
+        NT_DEBUG("E2E pc aspect=%.3f width=%d maxH=%d curMin=%d curMax=%d\n",
+                 m_aspect, width(), capped, minimumHeight(), maximumHeight());
+        if (capped == minimumHeight() && capped == maximumHeight())
             return;
+        // min = max = cap: dentro del scroll único de la página el layout debe
+        // darle al vídeo EXACTAMENTE su altura (aspecto o 560 px), ni estirado
+        // por políticas Expanding ni encogido por el contenido scrolleable.
+        setMinimumHeight(capped);
         setMaximumHeight(capped);
     }
 
@@ -506,7 +511,6 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     auto *pc = new PlayerContainer(playerWidget, m_overlay, this);
     m_playerContainer = pc;
     pc->setObjectName(QStringLiteral("playerArea"));
-    splitOuter->addWidget(pc, 3);
     enableOverlayTracking(this, pc);
     connect(playerWidget, &PlayerWidget::videoAspectChanged, pc,
             &PlayerContainer::setVideoAspect);
@@ -516,6 +520,11 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_overlay->setFocusPolicy(Qt::NoFocus);
     gl->setFocusPolicy(Qt::NoFocus);
 
+    // Scroll ÚNICO de toda la página: vídeo + descripción + "A continuación"
+    // apilados y afectados por el MISMO scroll (estilo YouTube). Al bajar, el
+    // vídeo se va de la pantalla y descripción/cola ganan espacio. La altura
+    // del vídeo la fija PlayerContainer::updateMaxHeight (cap por aspecto
+    // hasta 560 px) dentro del contenido scrolleable.
     auto *topScroll = new QScrollArea(this);
     topScroll->setWidgetResizable(true);
     topScroll->setFrameShape(QFrame::NoFrame);
@@ -526,18 +535,23 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     top->setContentsMargins(0, 0, 0, 0);
     top->setSpacing(0);
     topScroll->setWidget(topWidget);
+    splitOuter->addWidget(topScroll, 1);
 
-    auto *backRow = new QHBoxLayout;
-    backRow->setContentsMargins(12, 8, 12, 0);
-    m_back = new QPushButton(QStringLiteral("◀ Volver"), this);
-    m_back->setObjectName(QStringLiteral("ghost"));
-    m_back->setIcon(nt::icon(nt::Icon::Back, nt::kText, 14));
-    backRow->addWidget(m_back);
-    backRow->addStretch(1);
-    top->addLayout(backRow);
+    // El reproductor vive DENTRO del scroll (arriba del contenido): se mueve
+    // con la página.
+    top->addWidget(pc);
+
+    // Fila media DENTRO del scroll: descripción a la izquierda y "A
+    // continuación" a la derecha, SIN límite vertical en la cola (crece con
+    // todas sus filas y el scroll general la recorre, sin scroll interno).
+    auto *midRow = new QWidget;
+    auto *midLay = new QHBoxLayout(midRow);
+    midLay->setContentsMargins(0, 0, 0, 0);
+    midLay->setSpacing(0);
 
     auto *infoWidget = new QWidget;
     infoWidget->setObjectName(QStringLiteral("watchBody"));
+    m_watchBody = infoWidget;
     auto *infoLay = new QVBoxLayout(infoWidget);
     infoLay->setContentsMargins(16, 14, 16, 8);
     infoLay->setSpacing(6);
@@ -628,8 +642,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // La descripción del vídeo crece verticalmente: sin tope de altura y sin
     // botón "Ver más" (no se colapsa).
     infoLay->addWidget(m_descLabel);
-    top->addWidget(infoWidget);
-    top->addStretch(1);
+    midLay->addWidget(infoWidget, 7);
 
     auto *bottomWidget = new QWidget;
     m_bottomWidget = bottomWidget;
@@ -647,14 +660,31 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     bot->addWidget(quTitle);
     bot->addWidget(m_nextUpList);
 
-    auto *belowRow = new QWidget(this);
-    m_belowWidget = belowRow;
-    auto *row = new QHBoxLayout(belowRow);
-    row->setContentsMargins(0, 0, 0, 0);
-    row->setSpacing(0);
-    row->addWidget(topScroll, 7);
-    row->addWidget(bottomWidget, 3);
-    splitOuter->addWidget(belowRow, 1);
+    // "A continuación" a la derecha de la descripción, dentro del scroll
+    // general (sin límite vertical: la altura la fija updateQueue al
+    // contenido real).
+    midLay->addWidget(bottomWidget, 3);
+    // Ambos bloques conservan su alto NATURAL y quedan alineados arriba: la
+    // fila crece con la cola (sin límite), pero la descripción no se estira a
+    // esa altura — debajo de cada bloque solo queda espacio vacío scrollable.
+    midLay->setAlignment(infoWidget, Qt::AlignTop);
+    midLay->setAlignment(bottomWidget, Qt::AlignTop);
+    top->addWidget(midRow);
+    // El stretch absorbe el sobrante cuando el contenido no llena la ventana:
+    // los bloques quedan pegados arriba, con hueco al final (como YouTube).
+    top->addStretch(1);
+
+    // Botón "Volver" flotante sobre el área de vídeo: usa el estilo ghost
+    // transparente que ya tenía, sin ocupar una barra. Flota arriba-izquierda
+    // de la página (fijo, NO scrollea con el contenido) y se oculta en
+    // fullscreen. Se crea al final para quedar como sibling posterior (por
+    // encima del scroll).
+    m_back = new QPushButton(QStringLiteral("◀ Volver"), this);
+    m_back->setObjectName(QStringLiteral("ghost"));
+    m_back->setIcon(nt::icon(nt::Icon::Back, nt::kText, 14));
+    m_back->setCursor(Qt::PointingHandCursor);
+    m_back->move(12, 8);
+    m_back->raise();
 
     connect(m_back, &QPushButton::clicked, this,
             &WatchPage::backRequested);
@@ -811,6 +841,11 @@ void WatchPage::onCurrentChanged()
         m_title->setText(QStringLiteral("Reproduciendo…"));
         return;
     }
+    // Página en un único scroll (estilo YouTube): al cambiar de vídeo se
+    // vuelve arriba para que el nuevo parta desde el vídeo. No en fullscreen
+    // (ahí el scroll está oculto y el vídeo llena la página).
+    if (m_topScroll && !m_inFullscreen)
+        m_topScroll->verticalScrollBar()->setValue(0);
     // Nuevo vídeo: el techo de calidades disponibles se recalcula con su
     // streamHeightsReady; hasta entonces no se arrastra el del anterior.
     m_availableMaxH = 0;
@@ -876,6 +911,12 @@ void WatchPage::updateQueue()
     // con recuadro y los saltados/ya vistos siguen visibles y elegibles.
     m_nextUpList->showVideos(m_queue, VideoListView::ListMode);
     m_nextUpList->setCurrentRow(idx);
+    // La cola vive DENTRO del scroll de la página: su altura se ajusta al
+    // contenido real (filas × alto de fila) para que el scroll de la página
+    // mueva la cola entera, sin scroll interno duplicado.
+    const int rowH = m_nextUpList->sizeHintForRow(0);
+    if (rowH > 0)
+        m_nextUpList->setFixedHeight(qMax(1, m_queue.size()) * rowH);
     if (m_bottomWidget)
         m_bottomWidget->setVisible(!m_queue.isEmpty());
 }
@@ -1473,8 +1514,17 @@ void WatchPage::enterFullscreen()
     m_inFullscreen = true;
     if (m_playerContainer)
         m_playerContainer->setFullscreen(true);
-    if (m_belowWidget)
-        m_belowWidget->hide();
+    // Fullscreen de SOLO vídeo: se ocultan botón Volver + descripción + cola.
+    // Con todo en el scroll único, ocultarlos deja el contenido = solo vídeo y
+    // widgetResizable lo estira a toda la página (sin reparent del player).
+    if (m_back)
+        m_back->hide();
+    if (m_watchBody)
+        m_watchBody->hide();
+    if (m_bottomWidget)
+        m_bottomWidget->hide();
+    if (m_topScroll)
+        m_topScroll->verticalScrollBar()->setValue(0);
     if (m_overlay->currentIndex() == 0)
         showOverlayControls();
     emit fullscreenToggled(true);
@@ -1488,8 +1538,12 @@ void WatchPage::leaveFullscreen()
     m_inFullscreen = false;
     if (m_playerContainer)
         m_playerContainer->setFullscreen(false);
-    if (m_belowWidget)
-        m_belowWidget->show();
+    if (m_back)
+        m_back->show();
+    if (m_watchBody)
+        m_watchBody->show();
+    if (m_bottomWidget)
+        m_bottomWidget->show();
     emit fullscreenToggled(false);
     NT_DEBUG("E2E fullscreen exit\n");
 }

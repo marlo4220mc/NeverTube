@@ -24,6 +24,7 @@ class QLineEdit;
 class QListWidget;
 class QMenu;
 class QPushButton;
+class QScrollArea;
 class QStackedWidget;
 class QTimer;
 class QEvent;
@@ -159,9 +160,14 @@ private:
     QPushButton *m_back;
     QStackedWidget *m_overlay;
     QLabel *m_errorLabel;
-    QWidget *m_topScroll = nullptr;
+    // Scroll ÚNICO de toda la página: vídeo arriba + fila con descripción y
+    // "A continuación" (derecha, sin límite vertical), movidos por el mismo
+    // scroll (estilo YouTube).
+    QScrollArea *m_topScroll = nullptr;
     QWidget *m_bottomWidget = nullptr;
-    QWidget *m_belowWidget = nullptr;
+    // Bloque de descripción (título/meta/canal/acciones/descripción) dentro
+    // del scroll. Se oculta en fullscreen para dejar solo el vídeo.
+    QWidget *m_watchBody = nullptr;
     bool m_inFullscreen = false;
     QLabel *m_title;
     QLabel *m_meta;
