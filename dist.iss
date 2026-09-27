@@ -98,12 +98,20 @@ Name: "{autodesktop}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"; Tasks:
 // dirige al build x64. GetWindowsVersion: Major shl 24 | Minor shl 16 | Build
 // -> Win10/Win11 = $0A000000. Se permite en 32 bits y en 64 bits < 10 (donde
 // el build x64 con mpv moderno no correría).
+// El mensaje NO dice solo "cancelada": el que llega aquí tiene un Windows de
+// 64 bits, o sea que hay un instalador que SÍ le vale (el x64, que es el
+// entregable para Win10/11). Decirle solo que se cancela lo deja sin salida;
+// sin tildes ni caracteres raros, como el resto de cadenas del setup.
 function InitializeSetup(): Boolean;
 begin
   if IsWin64 and (GetWindowsVersion >= $0A000000) then begin
     MsgBox('Este instalador es solo para Windows 7 de 32 bits.'
            + #13#10 + #13#10
            + 'Tu equipo no es un Windows 7 de 32 bits.'
+           + #13#10 + #13#10
+           + 'Para Windows 10/11 de 64 bits usa el instalador x64'
+           + #13#10
+           + '(nevertube-setup-x64.exe) de la pagina de releases.'
            + #13#10 + #13#10
            + 'Instalacion cancelada.', mbCriticalError, MB_OK);
     Result := False;
