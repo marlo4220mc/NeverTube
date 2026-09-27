@@ -62,7 +62,10 @@ QToolButton#navBtn {
     background: transparent;
     border: none;
     border-radius: 8px;
-    padding: 4px 0;
+    /* 2px (no 4): el alto de la barra es 60 (mainwindow.cpp setupNav) y el
+       contenido icono 33 + hueco + línea de texto 12px necesita ~53; con 4px
+       por arriba y por abajo solo caben 52 y el texto se recortaría. */
+    padding: 2px 0;
 color: #8F8F8F;
     font-size: 12px;
 }
