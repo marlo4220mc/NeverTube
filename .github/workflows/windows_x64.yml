@@ -198,24 +198,28 @@ jobs:
           $iscc = Get-ChildItem "$env:ProgramFiles\Inno Setup*\ISCC.exe",
             "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
             Select-Object -First 1
-          & $iscc.FullName dist64.iss
+          # iscc imprime su propio manifiesto: una línea `Compressing: <ruta>` por
+          # fichero que mete en el setup. Se guarda en iscc.log porque lo que hay
+          # en dist\ y lo que ACABA dentro del setup.exe no tienen por qué
+          # coincidir (un patrón mal escrito en [Files] compila igual): el gate
+          # del paso siguiente valida contra ESTE log.
+          & $iscc.FullName dist64.iss 2>&1 | Tee-Object -FilePath iscc.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $setup = "setup-out\nevertube-setup-x64.exe"
           if (-not (Test-Path $setup)) { Write-Host "no se generó $setup"; exit 1 }
           Get-Item $setup | Select-Object Name, Length
 
-      # Gate del INSTALADOR: comprueba que el setup.exe existe y pesa lo que debe
-      # (Qt + mpv + Vulkan + OpenSSL comprimidos con LZMA2 son decenas de MB; un
-      # paquete roto son unos pocos cientos de KB), y luego innoextrae el
-      # instalador SIN ejecutarlo (en el runner no hay elevación/UAC) para
-      # verificar que dentro van la app, el plugin de windows y las DLLs que el
-      # runtime carga por LoadLibrary. Un .iss que se rompe puede compilar bien y
-      # aun así no llevar lo necesario: esto lo atrapa.
-      # innoextract 1.9 puede no reconocer una versión de Inno Setup más nueva
-      # que la suya: si no puede parsearlo, avisa y SE SALTA la comprobación de
-      # contenido (no es un rojo falso por una herramienta de verificación), pero
-      # el tamaño del setup sigue siendo obligatorio.
-      - name: gate del instalador (tamaño + innoextract, sin ejecutar)
+      # Gate del INSTALADOR, en dos partes:
+      # 1) TAMAÑO: Qt + mpv + Vulkan + OpenSSL comprimidos con LZMA2 son decenas
+      #    de MB; un paquete roto son unos pocos cientos de KB.
+      # 2) MANIFIESTO: se comprueban los ficheros que iscc dice haber COMPRIMIDO
+      #    en el setup (iscc.log), no los que hay en dist\. El setup puede
+      #    compilar sin error y aun así no llevar lo necesario (patrón de [Files]
+      #    mal escrito, o compilar dist.iss —el x86— por error), y esto lo
+      #    atrapa. NO se usa innoextract: su última versión es 1.9 (2020) y no
+      #    sabe leer el Inno 6.7 que instala choco (loader revision 2), así que
+      #    solo daría un aviso y el log del compilador es la fuente autoritativa.
+      - name: gate del instalador (tamaño + manifiesto de iscc)
         shell: pwsh
         run: |
           $setup = "setup-out\nevertube-setup-x64.exe"
@@ -224,16 +228,25 @@ jobs:
           if ($sz -lt 5MB) {
             Write-Host "el setup son menos de 5 MB: el paquete va vacío o incompleto"
             exit 1 }
-          Remove-Item setup-check -Recurse -Force -ErrorAction SilentlyContinue
-          & .\innoextract-tool\innoextract.exe -s -d setup-check $setup
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "AVISO: innoextract no pudo leer el setup (versión de Inno no soportada). Se salta el gate de contenido."
-            exit 0 }
+          # Cada línea del manifiesto es `Compressing: D:\...\dist\<fichero>`, y
+          # los ficheros con versión llevan un sufijo que hay que quitar
+          # (`VC_redist.x64.exe   (14.44.35211.0)`).
+          $packed = foreach ($l in (Get-Content iscc.log)) {
+            if ($l -match 'Compressing:\s+(.+)$') {
+              $p = $matches[1].Trim() -replace '\s+\([^)]*\)$',''
+              [System.IO.Path]::GetFileName($p)
+            }
+          }
+          if (-not $packed) {
+            Write-Host "no se pudo leer el manifiesto de iscc (¿cambió su formato?)"
+            exit 1 }
+          Write-Host "el setup lleva $($packed.Count) ficheros"
+          # VC_redist.x64.exe en la lista es además la prueba de que se compiló
+          # dist64.iss: en el .iss del x86 eso es VC_redist.x86.exe.
           $need = @('nevertube_qt2.exe', 'qwindows.dll', 'libmpv-2.dll',
             'vulkan-1.dll', 'libssl-1_1-x64.dll', 'libcrypto-1_1-x64.dll',
             'libEGL.dll', 'libGLESv2.dll', 'VC_redist.x64.exe')
-          $files = Get-ChildItem setup-check -Recurse -File | ForEach-Object Name
-          $missing = $need | Where-Object { $files -notcontains $_ }
+          $missing = $need | Where-Object { $packed -notcontains $_ }
           if ($missing) { Write-Host "el setup NO lleva: $missing"; exit 1 }
           Write-Host "gate del setup x64 OK: el instalador lleva los $($need.Count) ficheros clave"
 

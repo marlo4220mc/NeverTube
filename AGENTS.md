@@ -575,10 +575,13 @@ Los dos últimos datos los escribe el reproductor, no la red:
   mismo orden app → iconos → redist. En `[Code]` los comentarios van con `//`:
   el `;` solo es válido en el resto de secciones (dentro de `[Code]` es
   separador de sentencias y `iscc` lo rechaza). El gate del workflow exige que
-  el setup pese >5 MB y lo `innoextract`a sin ejecutarlo (el runner no tiene
-  UAC) para comprobar que lleva los 9 ficheros clave; si `innoextract 1.9` no
-  reconoce la versión de Inno, avisa y salta SOLO esa parte (el tamaño sigue
-  siendo obligatorio) para no dar un rojo falso.
+  el setup pese >5 MB y comprueba los 9 ficheros clave contra el manifiesto que
+  `iscc` imprime (`Compressing: <ruta>` por fichero, guardado en `iscc.log`), no
+  contra `dist\`: un patrón de `[Files]` mal escrito compila igual. NO se usa
+  `innoextract` para eso: su última versión es 1.9 (2020) y no sabe leer el Inno
+  6.7 que instala choco (loader revision 2), así que solo daría un aviso; el log
+  del compilador es la fuente autoritativa (y ver `VC_redist.x64.exe` en la lista
+  es la prueba de que se compiló `dist64.iss` y no el del x86).
 - Overlay de los controles NO es un widget separado: vive dentro de
   `WatchPage::m_overlay`/`PlayerContainer` (src/ui/pages/watch_page.cpp).
   Cualquier cambio ahí que afecte el área de video requiere el selftest.
