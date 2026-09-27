@@ -67,6 +67,13 @@ public:
     // radios). Se llama cuando cambia el historial (p. ej. al borrar vídeos):
     // Descubre no debe seguir mostrando selecciones de radios eliminadas.
     void invalidateDiscover();
+    // Vídeos por fila de las rejillas del Home (ajuste "Tamaño de las
+    // miniaturas": 4/5/6). Es la única palanca de tamaño de una rejilla, que
+    // es dimensionada por el ancho con un número de columnas fijo; el ancho
+    // manda un tope para que la celda no baje de kMinCellW (si no, con 6
+    // columnas en una ventana estrecha el título de 2 líneas se recorta).
+    void setCellColumns(int columns);
+    int cellColumns() const { return m_cellColumns; }
     // Re-aplica el botón del empty state con el acento vigente (MainWindow lo
     // llama al cambiar el color de acento en Ajustes, sin reconstruir).
     void applyAccent();
@@ -132,6 +139,8 @@ private:
     // apartado y los siguientes.
     void applyGridSizes();
     void scheduleGridSizes();
+    // Columnas efectivas tras aplicar el tope por ancho (kMinCellW).
+    int effectiveCellColumns() const;
 
     Yt *m_yt;
     SubscriptionsRepo *m_subs;
@@ -172,6 +181,9 @@ private:
     VideoListView *m_discGrid;
     QLabel *m_trendTitle;
     VideoListView *m_trendGrid;
+    // Vídeos por fila elegidos por el usuario (4/5/6). applyGridSizes() les
+    // aplica el tope por ancho antes de fijar el tamaño de las rejillas.
+    int m_cellColumns = 5;
 
     QVector<VideoInfo> m_continueVideos;
     QVector<qlonglong> m_continuePositions; // alineado con m_continueVideos

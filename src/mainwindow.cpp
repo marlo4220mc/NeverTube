@@ -480,15 +480,8 @@ MainWindow::MainWindow(QWidget *parent)
                 // miniatura encima.
                 applyMiniVideoMode();
             });
-    connect(m_settingsPage, &SettingsPage::gridDensityChanged,
-            this, [this](const QString &val) {
-                const qreal density =
-                    (val == QStringLiteral("compact")) ? 0.88 : 1.0;
-                const auto lists = m_pages->findChildren<VideoListView *>();
-                for (VideoListView *l : lists)
-                    if (l)
-                        l->setDensity(density);
-            });
+    connect(m_settingsPage, &SettingsPage::thumbSizeChanged,
+            this, [this](const QString &val) { applyThumbSize(val); });
     // Color de acento: se aplica en caliente. Se re-genera el stylesheet
     // global (sliders, botón primario, selección, nav activa, scrollbar…), se
     // re-tiñen los iconos de la nav y se repintan las vistas que dibujan con
@@ -631,17 +624,10 @@ MainWindow::MainWindow(QWidget *parent)
     // ventana (sin la franja vacía con borde que quedaba debajo).
     statusBar()->hide();
 
-    // Densidad de cuadrícula guardada (Cómoda/Compacta)
-    {
-        const QString savedD = m_settings.getString(
-            QStringLiteral("grid_density"), QStringLiteral("cozy"));
-        const qreal density =
-            (savedD == QStringLiteral("compact")) ? 0.88 : 1.0;
-        const auto lists = m_pages->findChildren<VideoListView *>();
-        for (VideoListView *l : lists)
-            if (l)
-                l->setDensity(density);
-    }
+    // "Tamaño de las miniaturas" guardado: se aplica antes de pintar nada, con
+    // el mismo punto único que el cambio en caliente (applyThumbSize).
+    if (m_settingsPage)
+        applyThumbSize(m_settingsPage->thumbSize());
 
     goHome();
     m_home->reload();
@@ -1061,6 +1047,25 @@ void MainWindow::applyMiniVideoMode()
         m_miniThumb->show();
         m_miniThumb->raise();
     }
+}
+
+void MainWindow::applyThumbSize(const QString &value)
+{
+    // Listas (búsqueda, canal, historial, playlists, cola "A continuación"):
+    // la fila y la miniatura se escalan con el factor.
+    const qreal scale = SettingsPage::thumbListScale(value);
+    if (m_pages) {
+        const auto lists = m_pages->findChildren<VideoListView *>();
+        for (VideoListView *l : lists)
+            if (l)
+                l->setDensity(scale);
+    }
+    // Rejillas del Home: aquí el factor no hace nada visible (la celda la
+    // dimensiona el ancho con las columnas fijas), así que la palanca es el
+    // número de columnas por fila. HomePage le aplica el tope por ancho para
+    // que la celda no baje de kMinCellW en ventanas estrechas.
+    if (m_home)
+        m_home->setCellColumns(SettingsPage::thumbGridColumns(value));
 }
 
 void MainWindow::updateMiniBar()

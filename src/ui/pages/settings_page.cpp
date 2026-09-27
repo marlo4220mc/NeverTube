@@ -19,6 +19,7 @@ static const char *kQualityAutoKey = "quality_auto";
 static const char *kNextModeKey = "next_mode";
 static const char *kAudioLangKey = "audio_language";
 static const char *kGridDensityKey = "grid_density";
+static const char *kThumbSizeKey = "thumb_size";
 static const char *kMiniVideoKey = "mini_video";
 static const char *kAccentKey = "ui_accent";
 
@@ -143,22 +144,52 @@ static QString volumeMaxFromValue(const QString &val)
     return val + QStringLiteral("%");
 }
 
-static QStringList gridDensityOptions()
+// "Tamaño de las miniaturas". Tres niveles que se traducen a DOS efectos, porque
+// las rejillas del Home y las vistas de lista no se dimensionan igual: las
+// rejillas son dimensionadas por el ancho con un número de columnas FIJO (el
+// factor no hace nada visible: con 5 columnas a 903 px la celda mide 175 px con
+// densidad 1.0 y 175 px con 0.88), mientras que las listas escalan su fila con
+// el factor. Por eso la palanca del Home son las COLUMNAS.
+static QStringList thumbSizeOptions()
 {
-    return {QStringLiteral("Cómoda"), QStringLiteral("Compacta")};
+    return {QStringLiteral("Pequeñas"), QStringLiteral("Normales"),
+            QStringLiteral("Grandes")};
 }
 
-static QString valueFromGridDensity(const QString &text)
+static QString valueFromThumbSize(const QString &text)
 {
-    if (text == QStringLiteral("Compacta"))
-        return QStringLiteral("compact");
-    return QStringLiteral("cozy");
+    if (text == QStringLiteral("Pequeñas"))
+        return QStringLiteral("small");
+    if (text == QStringLiteral("Grandes"))
+        return QStringLiteral("large");
+    return QStringLiteral("normal");
 }
 
-static QString gridDensityFromValue(const QString &val)
+static QString thumbSizeFromValue(const QString &val)
 {
-    return val == QStringLiteral("compact") ? QStringLiteral("Compacta")
-                                          : QStringLiteral("Cómoda");
+    if (val == QStringLiteral("small"))
+        return QStringLiteral("Pequeñas");
+    if (val == QStringLiteral("large"))
+        return QStringLiteral("Grandes");
+    return QStringLiteral("Normales");
+}
+
+double SettingsPage::thumbListScale(const QString &value)
+{
+    if (value == QStringLiteral("small"))
+        return 0.88;
+    if (value == QStringLiteral("large"))
+        return 1.15;
+    return 1.0;
+}
+
+int SettingsPage::thumbGridColumns(const QString &value)
+{
+    if (value == QStringLiteral("small"))
+        return 6;
+    if (value == QStringLiteral("large"))
+        return 4;
+    return 5;
 }
 
 // Color de acento de la app. La paleta (labels + hex) vive en la FUENTE ÚNICA
@@ -602,18 +633,38 @@ void SettingsPage::buildUI()
         QStringLiteral("Se aplica al instante: sliders, progreso, botones "
                        "resaltados, selección de texto e iconos activos."));
 
-    // Densidad de cuadrícula: tamaño de las celdas de vídeo. Cómoda (normal)
-    // o Compacta (celdas algo más pequeñas para ver más en pantalla).
+    // Tamaño de las miniaturas: Pequeñas (6 por fila, filas cortas), Normales
+    // (5 por fila) o Grandes (4 por fila, filas altas). Es el ajuste que el
+    // usuario percibe de verdad, y el que SÍ mueve la rejilla del Home.
+    //
+    // Migración: el ajuste anterior se llamaba "Densidad de cuadrícula"
+    // ("cozy"/"compact") y solo escalaba un factor, que en las rejillas del
+    // Home no producía ningún cambio visible (la celda es 175 px con y sin
+    // factor). Se lee su valor la primera vez para no perder la elección:
+    // "compact" → "Pequeñas", "cozy" → "Normales". La clave vieja se deja en
+    // la BD (inofensiva) y se reescribe sola al elegir una opción.
+    m_thumbSize = m_settings->getString(
+        QString::fromLatin1(kThumbSizeKey), QString());
+    if (m_thumbSize.isEmpty()) {
+        const QString old =
+            m_settings->getString(QString::fromLatin1(kGridDensityKey),
+                                  QStringLiteral("cozy"));
+        m_thumbSize = (old == QStringLiteral("compact")) ? QStringLiteral("small")
+                                                        : QStringLiteral("normal");
+    }
     addOptionRow(
-        QStringLiteral("Densidad de cuadrícula"), gridDensityOptions(),
-        m_settings->getString(QStringLiteral("grid_density"),
-                              QStringLiteral("cozy")),
-        QStringLiteral("cozy"), gridDensityFromValue,
+        QStringLiteral("Tamaño de las miniaturas"), thumbSizeOptions(),
+        thumbSizeFromValue(m_thumbSize), QStringLiteral("Normales"),
+        thumbSizeFromValue,
         [this](const QString &text) {
-            const QString val = valueFromGridDensity(text);
-            m_settings->set(QStringLiteral("grid_density"), val);
-            emit gridDensityChanged(val);
-        });
+            const QString val = valueFromThumbSize(text);
+            m_thumbSize = val;
+            m_settings->set(QString::fromLatin1(kThumbSizeKey), val);
+            emit thumbSizeChanged(val);
+        },
+        QStringLiteral("Pequeñas: 6 vídeos por fila en el Inicio y filas "
+                       "cortas en búsqueda, historial y cola. Grandes: 4 por "
+                       "fila y miniatura más grande."));
 
     scrollLay->addStretch(3);
 

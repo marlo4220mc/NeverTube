@@ -13,6 +13,7 @@
 #include "hwprobe.h"
 #include "player_selftest.h"
 #include "ffmpeg_selftest.h"
+#include "ui/video_list_view.h"
 #include "yt.h"
 #include "yt_innertube.h"
 
@@ -201,6 +202,64 @@ static bool hwprobeVerdictSelfTests()
     return true;
 }
 
+// Tope de columnas de las rejillas del Home (VideoListView::clampGridColumns).
+// El ajuste "Tamaño de las miniaturas" pide 4/5/6 columnas fijas y la rejilla es
+// dimensionada por el ancho, así que en ventanas estrechas hay que recortar: con
+// 6 columnas a 700 px la celda mide 113 px y el título de 2 líneas + el canal se
+// recortan. Es una función pura, sin widget ni red: se testea aquí.
+static bool gridGeometrySelfTest()
+{
+    struct Case
+    {
+        int wanted;
+        int vw;
+        int want;
+        const char *why;
+    };
+    const Case cases[] = {
+        // Ancho de la máquina de pruebas (portátil 1024x600): 6 columnas
+        // caben (celda de 147 px), que es justo lo que busca "Pequeñas".
+        { 6, 903, 6, "6 pedidas caben a 903 px (celda 147)" },
+        { 5, 903, 5, "5 pedidas a 903 px" },
+        { 4, 903, 4, "4 pedidas a 903 px (celda 222)" },
+        // Ventana estrecha: 6 columnas darían 113 px -> se baja a 5 (136 px).
+        { 6, 700, 5, "6 recortadas a 5 a 700 px (celda 136)" },
+        { 6, 600, 4, "6 recortadas a 4 a 600 px (celda 147)" },
+        // Muy estrecha: nunca menos de 3 columnas.
+        { 6, 380, 3, "suelo de 3 columnas a 380 px" },
+        { 4, 380, 3, "4 recortadas al suelo de 3" },
+        // "Grandes" nunca sube de 4 aunque la ventana sea enorme.
+        { 4, 1850, 4, "4 pedidas a 1850 px (no se estira a 8)" },
+        // Ancho aún desconocido (layout inicial): no se recorta; el
+        // resizeEvent del Home lo ajustará cuando lo haya.
+        { 6, 0, 6, "sin ancho no se recorta" },
+        { 6, -1, 6, "ancho negativo no se recorta" },
+        // Entradas degeneradas: nunca 0 columnas.
+        { 0, 903, 1, "0 pedidas -> 1" },
+        { -3, 903, 1, "negativo pedido -> 1" },
+    };
+    for (const Case &c : cases) {
+        const int got = VideoListView::clampGridColumns(c.wanted, c.vw);
+        if (got != c.want) {
+            std::fprintf(stderr,
+                         "SELFTEST grid FAIL wanted=%d vw=%d want=%d got=%d (%s)\n",
+                         c.wanted, c.vw, c.want, got, c.why);
+            return false;
+        }
+    }
+    // El ancho mínimo por defecto (kMinCellW) es la razón del tope: por debajo
+    // la celda no cabe el bloque de texto completo.
+    if (VideoListView::kMinCellW < 100) {
+        std::fprintf(stderr, "SELFTEST grid FAIL kMinCellW=%d (<100)\n",
+                     VideoListView::kMinCellW);
+        return false;
+    }
+    std::fprintf(stderr, "SELFTEST grid -> ok (%d casos, kMinCellW=%d)\n",
+                 int(sizeof(cases) / sizeof(cases[0])),
+                 VideoListView::kMinCellW);
+    return true;
+}
+
 int main(int argc, char *argv[])
 {
 #ifdef Q_OS_WIN
@@ -325,6 +384,12 @@ int main(int argc, char *argv[])
 
     if (args.contains(QLatin1String("--selftest-home"))) {
         return homeBrowseSelfTest() ? 0 : 1;
+    }
+
+    // Tope de columnas de las rejillas (función pura, sin red ni GPU): vale en
+    // el CI, donde no se puede comprobar el hardware ni reproducir.
+    if (args.contains(QLatin1String("--selftest-grid"))) {
+        return gridGeometrySelfTest() ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-feeds"))) {

@@ -78,15 +78,49 @@ Contexto: el primer intento de separar los controles multimedia (overlay
 flotante sobre el video) rompió la app y fue revertido. Hacer cambios de UI
 que toquen el reproductor por incrementos pequeños y verificando cada uno.
 
-## Layout de rejilla (vídeos)
+## Layout de rejilla (vídeos) y "Tamaño de las miniaturas"
 
-La rejilla del Home mantiene **5 columnas fijas** en cualquier ancho de
-ventana. Cada celda se dimensiona según su contenido real
-(`VideoListView::applyGridGeometry`): `cellH = miniatura 16:9 + bloque de
-texto fijo` (hueco 8 + título 34 + línea de canal). NO usar un ratio fijo
-(`cellW * 258/320`) para la altura: al estrechar la ventana el texto no
-escala y un vídeo tapa el nombre del canal del siguiente. Ningún vídeo debe
-solaparse sobre otro, ni en vertical ni en horizontal.
+La rejilla del Home mantiene un **número de columnas FIJO** en cualquier ancho
+de ventana (5 por defecto; 4 o 6 según el ajuste). Cada celda se dimensiona
+según su contenido real (`VideoListView::applyGridGeometry`): `cellH =
+miniatura 16:9 + bloque de texto fijo` (hueco 8 + título 34 + línea de canal).
+NO usar un ratio fijo (`cellW * 258/320`) para la altura: al estrechar la
+ventana el texto no escala y un vídeo tapa el nombre del canal del siguiente.
+Ningún vídeo debe solaparse sobre otro, ni en vertical ni en horizontal.
+
+El ajuste **"Tamaño de las miniaturas"** (Ajustes → Interfaz, clave
+`thumb_size` = `small|normal|large`) sustituye al antiguo "Densidad de
+cuadrícula" (`grid_density`), que se MIGRA al leerlo (`compact`→`small`,
+`cozy`→`normal`; la clave vieja se queda inerte en la BD). Se traduce a DOS
+efectos porque rejillas y listas no se dimensionan igual
+(`MainWindow::applyThumbSize`, el único punto que lo aplica, tanto al arrancar
+como en caliente):
+
+| valor | Home (columnas) | Listas (escala de fila) |
+|---|---|---|
+| `small` "Pequeñas" | 6 | 0.88 (fila 76 px) |
+| `normal` "Normales" | 5 (defecto) | 1.0 (fila 86 px) |
+| `large` "Grandes" | 4 | 1.15 (fila 99 px) |
+
+- **En las listas** (búsqueda, canal, historial, playlists y la cola "A
+  continuación", todas `ListMode`) el factor `setDensity` sí se ve: la fila es
+  `kListH * d` y la miniatura `136d × 76d`.
+- **En las rejillas el factor NO hace nada visible** (por eso el ajuste antes
+  no se notaba en el Home): la celda la dimensiona el ANCHO con las columnas
+  fijas, así que a 903 px mide 175 px con densidad 1.0 y 175 px con 0.88. La
+  única palanca real es el número de columnas (`HomePage::setCellColumns` →
+  `setGridColumns` → `applyGridSizes`, que también recalcula la altura de cada
+  sección con el tamaño de celda nuevo).
+- **Tope por ancho**: `VideoListView::clampGridColumns` recorta las columnas
+  pedidas para que la celda no baje de `kMinCellW` = 130 px (por debajo, el
+  título de 2 líneas y la línea de canal se recortan). A 903 px caben 6
+  columnas (celda 147 px), a 700 px solo 5 y nunca baja de 3. Se aplica en
+  `HomePage::effectiveCellColumns` desde `applyGridSizes`, o sea también en
+  cada `resizeEvent`. Función pura testeada en `--selftest-grid` (12 casos).
+  OJO: el bloque de texto de la celda sigue siendo FIJO (no escala con el
+  ancho), así que con 4 columnas en un monitor grande las miniaturas quedan
+  grandes y el texto se ve pequeño; arreglar eso (texto derivado de la celda)
+  es la mejora pendiente de fondo, no un bug.
 
 ## Página Player: scroll único (vídeo + descripción + A continuación)
 
@@ -141,6 +175,7 @@ arriba-izquierda, fuera del scroll (fijo) y se oculta en fullscreen.
 ./build/nevertube_qt2 --selftest-search    # búsqueda Innertube REAL: vídeos con id no vacío
 ./build/nevertube_qt2 --selftest-browse    # endpoints Innertube: canal + tabs (videos/shorts/live) + detalle + playlist
 ./build/nevertube_qt2 --selftest-feeds     # canal por Innertube + trending (protocolo y cadena)
+./build/nevertube_qt2 --selftest-grid      # tope de columnas de las rejillas (puro, sin red ni GPU: va en el CI)
 ```
 
 El selftest del player verifica invariantes del núcleo protegido sin
@@ -417,7 +452,8 @@ build x86, que sale por `NEVERTUBE_NO_MPV`):
 - `./build/nevertube_qt2 http://...` → reproducir una URL al arrancar
 - `./build/nevertube_qt2 --selftest-db` / `--selftest-player` /
   `--selftest-innertube` / `--selftest-discover` / `--selftest-home` /
-  `--selftest-feeds` / `--selftest-av1hls` / `--selftest-hwprobe` / `--selftest-search` → pruebas
+  `--selftest-feeds` / `--selftest-av1hls` / `--selftest-hwprobe` / `--selftest-search` /
+  `--selftest-grid` → pruebas
 
 ## Color de acento configurable
 

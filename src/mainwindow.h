@@ -81,6 +81,14 @@ private:
     // cambio hecho por el usuario (teclado, mini bar u overlay).
     void persistVolume();
     void applyMiniVideoMode();
+    // "Tamaño de las miniaturas" (Ajustes → Interfaz): único punto que aplica
+    // el ajuste, tanto al arrancar (con el valor guardado) como en caliente
+    // (SettingsPage::thumbSizeChanged). El valor se traduce a DOS efectos,
+    // porque las rejillas y las listas no se dimensionan igual: las vistas de
+    // lista escalan su fila con un factor, y las rejillas del Home (que son
+    // dimensionadas por el ancho con columnas fijas) cambian de número de
+    // columnas. Ver SettingsPage::thumbListScale/thumbGridColumns.
+    void applyThumbSize(const QString &value);
     void updateMiniBar();
     void updateMiniIcons();
     void setMiniThumb();

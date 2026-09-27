@@ -463,6 +463,17 @@ int VideoListView::gridColumns() const
     return qMax(1, vw / qMax(1, kGridW));
 }
 
+int VideoListView::clampGridColumns(int wanted, int viewportW, int minCellW)
+{
+    if (wanted <= 0)
+        return 1;
+    // Sin ancho aún (layout inicial) no hay tope que aplicar: el resizeEvent
+    // del Home lo ajustará en cuanto lo haya.
+    if (viewportW <= 0 || minCellW <= 0)
+        return wanted;
+    return qMax(1, qMin(wanted, qMax(3, viewportW / minCellW)));
+}
+
 void VideoListView::applyGridGeometry()
 {
     if (m_mode != GridMode)

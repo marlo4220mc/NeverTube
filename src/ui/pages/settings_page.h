@@ -24,13 +24,28 @@ public:
     // (MainWindow lo llama al cambiar el color de acento en Ajustes).
     void applyAccent();
 
+    // "Tamaño de las miniaturas" (Ajustes → Interfaz): valor persistido
+    // ("small" | "normal" | "large"), ya migrado desde el antiguo ajuste
+    // "Densidad de cuadrícula". MainWindow lo lee al arrancar para pintar con
+    // el tamaño correcto desde el primer frame, sin esperar a un cambio.
+    QString thumbSize() const { return m_thumbSize; }
+    // El valor se traduce a DOS efectos, porque las rejillas y las listas no
+    // se dimensionan igual (ver AGENTS.md):
+    //  - las VISTAS DE LISTA (búsqueda, canal, historial, playlists, cola
+    //    "A continuación") escalan su fila y su miniatura con un factor;
+    //  - las REJILLAS del Inicio son dimensionadas por el ancho con un número
+    //    de columnas FIJO, así que un factor no hace nada visible: la palanca
+    //    es el número de columnas.
+    static double thumbListScale(const QString &value);
+    static int thumbGridColumns(const QString &value);
+
 signals:
     void qualityChanged(const QString &value);
     void nextModeChanged(const QString &mode);
     void miniVideoModeChanged(const QString &mode);
     void audioLanguageChanged(const QString &code);
     void volumeMaxChanged(const QString &value);
-    void gridDensityChanged(const QString &density);
+    void thumbSizeChanged(const QString &value);
     void accentChanged(const QString &hex);
     void clearThumbsRequested();
     void resetRequested();
@@ -70,6 +85,8 @@ private:
 
     SettingsRepo *m_settings;
     QLabel *m_codecProfileLabel = nullptr;
+    // Valor persistido de "Tamaño de las miniaturas" (ver thumbSize()).
+    QString m_thumbSize;
     // Botón "Restablecer aplicación": su borde/texto usan el acento, se guarda
     // el puntero para re-aplicarlo al cambiar el color de acento (applyAccent).
     QPushButton *m_resetBtn = nullptr;
