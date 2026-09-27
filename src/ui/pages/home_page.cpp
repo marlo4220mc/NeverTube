@@ -180,12 +180,13 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     outer->addWidget(m_scroll);
 
     // Las secciones del Home llenan todo el ancho disponible (celdas que se
-    // estiran) con 5 vídeos por fila; su altura se deriva del ancho real de
-    // cada rejilla.
+    // estiran) con los vídeos por fila que marque el ajuste "Tamaño de las
+    // miniaturas" (4/5/6, por defecto 5); su altura se deriva del ancho real
+    // de cada rejilla.
     for (VideoListView *g : {m_contGrid, m_feedGrid, m_homeGrid,
                              m_discGrid, m_trendGrid}) {
         g->setGridFillWidth(kGridW);
-        g->setGridColumns(5);
+        g->setGridColumns(m_cellColumns);
     }
 
     // Timer para recalcular alturas de grids después del layout inicial
@@ -984,17 +985,44 @@ void HomePage::adjustGridHeight(VideoListView *grid)
     grid->setFixedHeight(newH);
 }
 
+// Columnas efectivas: las que pidió el usuario, recortadas si la ventana es
+// demasiado estrecha para que la celda conserve el bloque de texto completo.
+// Sin tope, "Pequeñas" (6) en una ventana de 700 px daría celdas de 113 px con
+// el título y el canal recortados. La regla vive en
+// VideoListView::clampGridColumns (función pura, testeada en --selftest-grid).
+int HomePage::effectiveCellColumns() const
+{
+    const int vw = m_contGrid ? m_contGrid->viewport()->width() : 0;
+    return VideoListView::clampGridColumns(m_cellColumns, vw);
+}
+
+void HomePage::setCellColumns(int columns)
+{
+    if (columns <= 0 || columns == m_cellColumns)
+        return;
+    m_cellColumns = columns;
+    applyGridSizes();
+}
+
 void HomePage::applyGridSizes()
 {
     NT_DEBUG("E2E applyGridSizes called\n");
+    // Primero las columnas efectivas (con el tope por ancho) y el tamaño de
+    // celda que de ahí se deriva; después las alturas de cada sección, que usan
+    // ese tamaño. Aplicarlo al revés dejaría las alturas de un paso atrás.
+    const int cols = effectiveCellColumns();
+    for (VideoListView *g : {m_contGrid, m_feedGrid, m_homeGrid,
+                             m_discGrid, m_trendGrid})
+        if (g)
+            g->setGridColumns(cols);
     adjustGridHeight(m_contGrid);
     adjustGridHeight(m_feedGrid);
     adjustGridHeight(m_homeGrid);
     adjustGridHeight(m_discGrid);
     adjustGridHeight(m_trendGrid);
-    NT_DEBUG("E2E applyGridSizes done: cont=%d feed=%d home=%d disc=%d trend=%d\n",
-             m_contGrid->height(), m_feedGrid->height(), m_homeGrid->height(),
-             m_discGrid->height(), m_trendGrid->height());
+    NT_DEBUG("E2E applyGridSizes done: cols=%d cont=%d feed=%d home=%d disc=%d trend=%d\n",
+             cols, m_contGrid->height(), m_feedGrid->height(),
+             m_homeGrid->height(), m_discGrid->height(), m_trendGrid->height());
 }
 
 void HomePage::scheduleGridSizes()

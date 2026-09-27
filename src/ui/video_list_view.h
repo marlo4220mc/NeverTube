@@ -52,9 +52,24 @@ public:
     // celda fija cuántas columnas entran; el sobrante se reparte entre ellas.
     void setGridFillWidth(int minCellWidth);
     // Fuerza un número fijo de columnas en el modo rejilla (0 = automático por
-    // ancho mínimo). Usado por el Home para mostrar 5 por fila.
+    // ancho mínimo). Usado por el Home para mostrar los vídeos por fila que elija
+    // el usuario (4/5/6 según "Tamaño de las miniaturas").
     void setGridColumns(int columns);
     int gridColumns() const;
+
+    // Ancho de celda por debajo del cual el bloque de texto (miniatura 16:9 +
+    // hueco + título de 2 líneas + línea de canal) se recorta. Es la constante
+    // que justifica el tope de columnas del Home.
+    static constexpr int kMinCellW = 130;
+
+    // Recorta las columnas pedidas para que la celda no baje de minCellW: una
+    // rejilla es dimensionada por el ancho con columnas fijas, así que con 6
+    // columnas en una ventana estrecha (celda de 113 px a 700 px de viewport) el
+    // título y el canal saldrían cortados; es mejor mostrar menos vídeos por
+    // fila que metidos. Función PURA (sin widget) para poder testearla.
+    // viewportW <= 0 = ancho aún no conocido: no se recorta nada.
+    static int clampGridColumns(int wanted, int viewportW,
+                                int minCellW = kMinCellW);
 
 signals:
     void videoActivated(int index, const VideoInfo &video);
