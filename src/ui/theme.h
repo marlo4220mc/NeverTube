@@ -66,6 +66,21 @@ inline QString accentAlpha(int alpha255)
         .arg(alpha255);
 }
 
+// Caja de controles del reproductor (QWidget#playerOverlay). Se queda
+// translucida sobre el video, asi que va con alfa y no con un token opaco.
+// El 165/255 (~65 %) es el de siempre: medido sobre el video, el texto
+// #ECECEC da 16,2:1 en video oscuro, 10,1:1 en medio y 5,5:1 en claro, asi
+// que la opacidad no es lo que hay que tocar. Lo que no leia era el borde, de
+// ahi overlayEdgeRgba().
+inline QString overlayBgRgba() { return QStringLiteral("rgba(15,15,15,165)"); }
+
+// Canto superior de la caja y contorno de la pista, en blanco al 28 % (71/255).
+// Motivo (medido contra el video, que con la caja flotante es el vecino del
+// borde): el gris #2A2A2A solo da 1,33:1 en video oscuro y este blanco solo da
+// 1,04:1 en video claro. Ninguno delimita la caja por si solo, pero con los
+// dos siempre hay un canto que lee (2,47 / 3,63 / 12,60).
+inline QString overlayEdgeRgba() { return QStringLiteral("rgba(255,255,255,71)"); }
+
 // Paleta de acentos: etiqueta visible (Ajustes), hex canónico y sufijo de
 // fichero PNG de la navegación (nav/<key>_<state>_<suffix>.png, pre-pintados
 // offline en tools/gen_nav_accent.cpp). FUENTE ÚNICA: settings_page y la nav

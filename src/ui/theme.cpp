@@ -214,6 +214,64 @@ QStatusBar { background: #101010; color: #8F8F8F; border-top: 1px solid #1F1F1F;
 QWidget#miniBar { background-color: #1F1F1F; border-top: 1px solid @BORDER@; }
 QWidget#watchBody { background-color: #0F0F0F; }
 QWidget#cardPanel { background-color: #181818; border: 1px solid @BORDER@; border-radius: 10px; }
+
+/* Caja de controles del reproductor. El separador de 12 px que la hace
+   flotante no es de QSS sino del layout (gl1 en watch_page.cpp); aqui van solo
+   los bordes. El de arriba va en blanco al 28 % y el resto en el gris de
+   borde: por separado ninguno lee contra todo video (1,33:1 el gris en oscuro,
+   1,04:1 el blanco en claro), juntos siempre hay un canto que la delimita. */
+QWidget#playerOverlay {
+    background-color: @OVERLAY_BG@;
+    border: 1px solid @BORDER@;
+    border-top: 1px solid @OVERLAY_EDGE@;
+    border-radius: 12px;
+}
+QLabel#ovTime { color: #ECECEC; font-size: 12px; }
+
+/* Chip de calidad. Antes llevaba objectName="iconBtn", que es el estilo de un
+   boton cuadrado de icono (padding 6, sin borde), pero lleva texto: sin
+   relleno ni borde no se leia como control. Ancho por contenido, no 98 fijos. */
+QPushButton#chip {
+    background-color: #1F1F1F;
+    border: 1px solid @BORDER@;
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: #ECECEC;
+}
+QPushButton#chip:hover { background-color: @HOVER@; border-color: @HANDLE_HOVER@; }
+QPushButton#chip:pressed { background-color: @SELECTION@; }
+QPushButton#chip:focus { border-color: @ACCENT@; }
+
+/* Pista de los dos sliders de la caja. Selector PROPIO (#ovSeek / #ovVolume) a
+   proposito: la regla QSlider global es compartida con el de volumen de la mini
+   bar y el de Ajustes, que no van sobre un panel translucido y no necesitan
+   contorno. El global es de 4 px; aqui 6 px para que el contorno de 1 px no
+   se coma el relleno. El handle baja de margin:-4px a -3px para seguir
+   centrado sobre una pista 2 px mas alta. */
+QSlider#ovSeek::groove:horizontal, QSlider#ovVolume::groove:horizontal {
+    height: 6px; background: @HANDLE@;
+    border: 1px solid @OVERLAY_EDGE@; border-radius: 3px;
+}
+QSlider#ovSeek::sub-page:horizontal, QSlider#ovVolume::sub-page:horizontal {
+    background: @ACCENT@; border-radius: 2px;
+}
+QSlider#ovSeek::handle:horizontal, QSlider#ovVolume::handle:horizontal {
+    width: 12px; height: 12px; margin: -3px 0;
+    background: #FFFFFF; border-radius: 6px;
+}
+QSlider#ovSeek::handle:horizontal:hover, QSlider#ovVolume::handle:horizontal:hover {
+    background: @ACCENT@;
+}
+
+/* Menu de calidad: los tres stylesheet inline de watch_page.cpp pasan aqui. */
+QFrame#qualityMenu {
+    background-color: #1F1F1F; border: 1px solid @SELECTION@; border-radius: 6px;
+}
+QFrame#qualityMenu QPushButton {
+    background: transparent; color: #ECECEC; border: none;
+    text-align: left; padding: 6px 8px; border-radius: 4px;
+}
+QFrame#qualityMenu QPushButton:hover { background: @SELECTION@; }
 )QSS");
     // Los placeholders se sustituyen en CADA llamada: un cambio de acento en
     // caliente (Ajustes → Color de acento) regenera el stylesheet al momento.
@@ -236,7 +294,9 @@ QWidget#cardPanel { background-color: #181818; border: 1px solid @BORDER@; borde
               .replace(QStringLiteral("@SELECTION@"), kSelection.name())
               .replace(QStringLiteral("@HANDLE@"), kHandle.name())
               .replace(QStringLiteral("@HANDLE_HOVER@"), kHandleHover.name())
-              .replace(QStringLiteral("@POPOVER@"), kPopover.name());
+              .replace(QStringLiteral("@POPOVER@"), kPopover.name())
+              .replace(QStringLiteral("@OVERLAY_BG@"), overlayBgRgba())
+              .replace(QStringLiteral("@OVERLAY_EDGE@"), overlayEdgeRgba());
 }
 
 } // namespace nt

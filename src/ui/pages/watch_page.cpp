@@ -18,6 +18,7 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QResizeEvent>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSignalBlocker>
@@ -26,6 +27,8 @@
 #include <QTimer>
 #include <QToolTip>
 #include <QVBoxLayout>
+
+#include <functional>
 
 #include "../../db/repositories.h"
 #include "../../debug.h"
@@ -55,6 +58,43 @@ constexpr int kQualityCount =
 // ventanas pequeñas manda width/aspect y no cambia nada. Layout puro: no toca
 // render ni el redibujado.
 constexpr int kMaxPlayerHeight = 560;
+
+// Ancho de vídeo por debajo del cual la fila completa de controles no cabe y se
+// esconde el slider de volumen. La suma sale del código, no es a ojo:
+//   6 botones iconBtn (icono + 12 de padding)  188
+//   chip de calidad por contenido                ~60
+//   slider de volumen                            80
+//   reloj "12:04 / 32:11" a 12 px               ~85
+//   8 huecos de btnRow x 6                       48
+//   márgenes laterales de barLay                 24
+//                                              -----
+//                                               ~485
+// 500 deja ~15 px de holgura y es deliberadamente conservador: en la banda
+// 485-500 el volumen se esconde aunque habría cabido. Preferimos esconderlo de
+// más que recortar, porque los setFixedWidth no ceden y el recorte caería en los
+// botones y el reloj. El mute sigue estando, así que no se pierde la capacidad
+// de silenciar.
+constexpr int kOverlayFullRowMinW = 500;
+
+// Área de vídeo dentro del overlay. gl1 (el layout que lleva la caja) iba con
+// contentsMargins 0, así que la caja ocupaba el ancho entero sin separador. Esta
+// clase no pinta nada: solo avisa de ese ancho, que es lo que decide si la fila
+// cabe. Sin Q_OBJECT a propósito para no meter una clase con señales en el
+// namespace anónimo: un std::function que se asigna al vuelo.
+class OverlayHost : public QWidget
+{
+public:
+    explicit OverlayHost(QWidget *parent = nullptr) : QWidget(parent) {}
+    std::function<void(int)> onWidth;
+
+protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        QWidget::resizeEvent(event);
+        if (onWidth)
+            onWidth(width());
+    }
+};
 } // namespace
 
 class PlayerContainer : public QWidget
@@ -322,33 +362,42 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_overlay->setAttribute(Qt::WA_TranslucentBackground, true);
     m_overlay->setStyleSheet(QStringLiteral("background: transparent;"));
 
-    auto *gl = new QWidget;
+    auto *gl = new OverlayHost;
     gl->setStyleSheet(QStringLiteral("background: transparent;"));
     auto *gl1 = new QVBoxLayout(gl);
-    gl1->setContentsMargins(0, 0, 0, 0);
+    // Separador de 12 px: antes 0,0,0,0. m_ctrlBar no recibe geometría (solo la
+    // gl1 lo coloca), así que la caja tocaba los tres bordes del vídeo y su
+    // border-radius y su borde no delimitaban nada: parecían adornos de una
+    // banda pegada al canto. Con separador, la caja flota y su forma dice lo que
+    // dice. Arriba 0 a propósito: la caja se apoya en el borde inferior.
+    gl1->setContentsMargins(12, 0, 12, 12);
     gl1->setSpacing(0);
     gl1->addStretch(1);
 
     m_ctrlBar = new QWidget(gl);
     m_ctrlBar->setObjectName(QStringLiteral("playerOverlay"));
     m_ctrlBar->setAttribute(Qt::WA_StyledBackground, true);
-    m_ctrlBar->setStyleSheet(
-        QStringLiteral("QWidget#playerOverlay { background-color: rgba(15,15,15,165);"
-                       " border:1px solid #2A2A2A; border-radius:8px; }"));
+    // El estilo (fondo translúcido, borde de dos tonos, radio 12) vive en el
+    // QSS global: antes era un setStyleSheet inline con #2A2A2A, que además
+    // contradecía kBorder (#262626), y por eso esta superficie era la única que
+    // no cubría un cambio de acento.
     auto *barLay = new QVBoxLayout(m_ctrlBar);
-    barLay->setContentsMargins(10, 4, 10, 6);
-    barLay->setSpacing(2);
+    // Antes (10, 4, 10, 6) con spacing 2: 4 px de aire encima de la pista y 2
+    // entre filas, frente a 10 px a los lados. Al flotar la caja ese desequilibrio
+    // se nota. 8/8/6 es lo que usa el resto de la app. La caja crece ~10 px.
+    barLay->setContentsMargins(12, 8, 12, 8);
+    barLay->setSpacing(6);
 
     auto *seekRow = new QHBoxLayout;
     seekRow->setSpacing(8);
     m_ovSeek = new SeekSlider(Qt::Horizontal, m_ctrlBar);
+    m_ovSeek->setObjectName(QStringLiteral("ovSeek"));
     m_ovSeek->setCursor(Qt::PointingHandCursor);
     connect(m_ovSeek, &QSlider::sliderMoved, this,
             [this](int value) { m_player->seek(value); });
     seekRow->addWidget(m_ovSeek, 1);
     m_ovTime = new QLabel(QStringLiteral("0:00 / 0:00"), m_ctrlBar);
     m_ovTime->setObjectName(QStringLiteral("ovTime"));
-    m_ovTime->setStyleSheet(QStringLiteral("color:#ECECEC; font-size:12px;"));
     seekRow->addWidget(m_ovTime);
     barLay->addLayout(seekRow);
 
@@ -394,6 +443,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     btnRow->addWidget(m_ovMuteBtn);
 
     m_ovVolume = new QSlider(Qt::Horizontal, m_ctrlBar);
+    m_ovVolume->setObjectName(QStringLiteral("ovVolume"));
     m_ovVolume->setRange(0, m_player->volumeMax());
     m_ovVolume->setValue(int(m_player->volume()));
     m_ovVolume->setFixedWidth(80);
@@ -422,8 +472,13 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
 
     m_quality = new QPushButton(
         QStringLiteral("%1p").arg(idxToQuality(m_qualityIndex)), m_ctrlBar);
-    m_quality->setObjectName(QStringLiteral("iconBtn"));
-    m_quality->setFixedWidth(98);
+    // Antes objectName="iconBtn" con setFixedWidth(98): el estilo de un botón
+    // cuadrado de icono (padding 6, sin borde) aplicado a un botón con texto, que
+    // sin relleno ni borde no se leía como control. Ahora tiene estilo propio y
+    // ancho por contenido — los 98 fijos además desperdiciaban hueco, y el menú
+    // se ancla a m_quality->width() para que siga cuadrando.
+    m_quality->setObjectName(QStringLiteral("chip"));
+    m_quality->setToolTip(QStringLiteral("Calidad de vídeo"));
     m_quality->setCursor(Qt::PointingHandCursor);
     connect(m_quality, &QPushButton::clicked, this,
             &WatchPage::toggleQualityMenu);
@@ -441,16 +496,32 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     gl1->addWidget(m_ctrlBar);
     m_ctrlBar->hide();
 
+    // Lógica responsive: si el ancho del vídeo no cabe la fila completa, se
+    // oculta el slider de volumen. El mute sigue estando, asi que no se pierde
+    // la capacidad de silenciar. LoCONNECTAMOS al widget que realmente conoce el
+    // ancho (OverlayHost), así no hay que adivinarlo por el parent.
+    gl->onWidth = [this](int w) {
+        if (!m_ovVolume)
+            return;
+        if (w <= 0) {
+            if (m_ovVolume->isHidden())
+                m_ovVolume->setVisible(true);
+            return;
+        }
+        const bool showVol = (w >= kOverlayFullRowMinW);
+        // isHidden() y NO isVisible(): la caja vive oculta casi todo el tiempo,
+        // y isVisible() devuelve false en cuanto el padre está oculto, así que
+        // con isVisible() la guarda nunca se cumpliría (el volumen no se
+        // escondería nunca) y además se forzaría un relayout en cada resize.
+        if (m_ovVolume->isHidden() == showVol)
+            m_ovVolume->setVisible(showVol);
+    };
+
     m_qualityMenu = new QFrame(gl);
     m_qualityMenu->setObjectName(QStringLiteral("qualityMenu"));
     m_qualityMenu->setAttribute(Qt::WA_StyledBackground, true);
-    m_qualityMenu->setStyleSheet(
-        QStringLiteral("QFrame#qualityMenu { background-color:#1F1F1F;"
-                       " border:1px solid #2D2D2D; border-radius:6px; }"
-                       "QPushButton { background:transparent; color:#ECECEC;"
-                       " border:none; text-align:left; padding:6px 8px;"
-                       " border-radius:4px; }"
-                       "QPushButton:hover { background:#2D2D2D; }"));
+    // El estilo vive en el QSS global (QFrame#qualityMenu): aquí era un
+    // setStyleSheet inline que repetía #1F1F1F y #2D2D2D, que ya son tokens.
     auto *menuLay = new QVBoxLayout(m_qualityMenu);
     menuLay->setContentsMargins(4, 4, 4, 4);
     menuLay->setSpacing(1);
@@ -1483,6 +1554,9 @@ void WatchPage::onVideoSizeChanged(int width, int height)
     const int requested = idxToQuality(m_qualityIndex);
     const int visible = (requested <= height) ? requested : height;
     m_quality->setText(QStringLiteral("%1p").arg(visible));
+    // El menú se ancla con m_quality->mapTo(anchor, ...) al abrirse
+    // (toggleQualityMenu), así que sigue solo al ancho por contenido: no hace
+    // falta reajustar nada aquí al cambiar el texto.
     NT_DEBUG("E2E combo sync %dx%d requested=%d button=%d\n",
              width, height, requested, visible);
 }
@@ -1624,6 +1698,14 @@ bool WatchPage::eventFilter(QObject *watched, QEvent *event)
     case QEvent::Wheel:
         showOverlayControls();
         break;
+    case QEvent::MouseButtonRelease:
+        // Suelta lo que hubiera pulsado en la barra: al soltar, el temporizador de
+        // 2,5 s puede volver a ocultar. Sin esto, un clic lento se comía.
+        if (m_ctrlPressed && isControlClick(watched)) {
+            m_ctrlPressed = false;
+            showOverlayControls();
+        }
+        break;
     case QEvent::MouseMove:
     case QEvent::MouseButtonPress:
     case QEvent::MouseButtonDblClick: {
@@ -1635,6 +1717,12 @@ bool WatchPage::eventFilter(QObject *watched, QEvent *event)
             break;
         m_lastMousePos = gp;
         showOverlayControls();
+        // Marca que hay un control pulsado para que hideOverlayControls() no
+        // desaparezca la caja a mitad de gesto (el temporador de 2,5 s se agota
+        // igual si el usuario mantiene pulsado sin mover: pulsas el volumen, te
+        // quedas quieto y la caja se va con el dedo encima).
+        if (event->type() == QEvent::MouseButtonPress && isControlClick(watched))
+            m_ctrlPressed = true;
         // Un solo click sobre el vídeo alterna play/pausa de forma inmediata.
         // Ojo: un mismo click engancha eventos en dos widgets (PlayerWidget y
         // el QWidget del overlay), así que deduplicamos el mismo click físico
@@ -1677,6 +1765,24 @@ bool WatchPage::isVideoClick(const QObject *watched) const
     return true;
 }
 
+// Considera "click sobre un control" cualquier click que apunte a la barra de
+// controles flotante (o al menú de calidad), con el overlay en la vista normal.
+// Es la contraparte de isVideoClick(): sirve para no ocultar la caja mientras el
+// usuario tiene un control pulsado.
+bool WatchPage::isControlClick(const QObject *watched) const
+{
+    if (!m_overlay || m_overlay->currentIndex() != 0)
+        return false;
+    const auto *w = qobject_cast<const QWidget *>(watched);
+    if (!w)
+        return false;
+    if (m_ctrlBar && (w == m_ctrlBar || m_ctrlBar->isAncestorOf(w)))
+        return true;
+    if (m_qualityMenu && (w == m_qualityMenu || m_qualityMenu->isAncestorOf(w)))
+        return true;
+    return false;
+}
+
 void WatchPage::showOverlayControls()
 {
     if (!m_ctrlBar)
@@ -1698,9 +1804,23 @@ void WatchPage::hideOverlayControls()
 {
     if (!m_ctrlBar)
         return;
+    // Si hay un control pulsado, no ocultamos: postponemos. Sin esto, mantener
+    // pulsado sin mover (p. ej. sambilando el volumen) agota el temporizador de
+    // 2,5 s y la caja desaparece con el dedo encima, Qt suelta el grab y el
+    // gesto se pierde a mitad.
+    if (m_ctrlPressed) {
+        if (m_overlayTimer)
+            m_overlayTimer->start();
+        return;
+    }
     NT_DEBUG("E2E overlayHide idx=%d barVisible=%d\n",
              m_overlay->currentIndex(), m_ctrlBar->isVisible());
     m_ctrlBar->hide();
+    // reaches a la guarda de m_ctrlPressed, así que aquí el estado ya no puede
+    // estar atascado. Se pone a cero igualmente: si un release se perdiera
+    // (el filtro está en el reproductor y sus hijos, pero por si acaso), la
+    // caja dejaría de auto-ocultarse para siempre.
+    m_ctrlPressed = false;
     if (m_qualityMenuActive) {
         m_qualityMenu->hide();
         m_qualityMenuActive = false;

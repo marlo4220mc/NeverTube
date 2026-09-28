@@ -140,6 +140,7 @@ private:
     void hideOverlayControls();
     void updateOverlayIcons();
     bool isVideoClick(const QObject *watched) const;
+    bool isControlClick(const QObject *watched) const;
 
     bool eventFilter(QObject *watched, QEvent *event) override;
 
@@ -236,6 +237,9 @@ private:
     bool m_subsVisible = false;
     qint64 m_lastVideoPressMs = -100000;
     QPoint m_lastVideoPressPos = QPoint(-100000, -100000);
+    // Hay un control de la caja pulsado: el temporizador de auto-ocultado no
+    // debe hacer desaparecer la barra a mitad de gesto.
+    bool m_ctrlPressed = false;
 
     QVector<VideoInfo> m_queue;
     int m_queueStart = -1;
