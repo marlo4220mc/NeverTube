@@ -347,7 +347,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             [this](int value) { m_player->seek(value); });
     seekRow->addWidget(m_ovSeek, 1);
     m_ovTime = new QLabel(QStringLiteral("0:00 / 0:00"), m_ctrlBar);
-    m_ovTime->setStyleSheet(QStringLiteral("color:#ECECEC; font-size:11px;"));
+    m_ovTime->setObjectName(QStringLiteral("ovTime"));
+    m_ovTime->setStyleSheet(QStringLiteral("color:#ECECEC; font-size:12px;"));
     seekRow->addWidget(m_ovTime);
     barLay->addLayout(seekRow);
 

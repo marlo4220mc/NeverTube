@@ -62,17 +62,20 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     searchIcon->setPixmap(nt::icon(nt::Icon::Search, nt::kMuted, 18).pixmap(20, 20));
     m_field = new QLineEdit(searchCard);
     m_field->setPlaceholderText(QStringLiteral("Buscar en YouTube…"));
-    m_field->setFixedHeight(32);
+    // 36 px, no 32: el QSS global aplica padding 8px 12px, así que con 32 el
+    // padding vertical se comía el texto (8+8+alto_de_línea > 32). 36 deja los
+    // 8+8 y una línea de 13 comfortable.
+    m_field->setFixedHeight(36);
     m_clearBtn = new QPushButton(QStringLiteral("✕"), searchCard);
     m_clearBtn->setObjectName(QStringLiteral("ghost"));
     m_clearBtn->setCursor(Qt::PointingHandCursor);
-    m_clearBtn->setFixedSize(26, 26);
+    m_clearBtn->setFixedSize(28, 28);
     m_clearBtn->setFocusPolicy(Qt::NoFocus);
     m_clearBtn->hide();
     auto *searchBtn = new QPushButton(QStringLiteral("Buscar"), searchCard);
     searchBtn->setObjectName(QStringLiteral("primary"));
     searchBtn->setCursor(Qt::PointingHandCursor);
-    searchBtn->setFixedHeight(32);
+    searchBtn->setFixedHeight(36);
     searchRow->addWidget(searchIcon);
     searchRow->addWidget(m_field, 1);
     searchRow->addWidget(m_clearBtn);
