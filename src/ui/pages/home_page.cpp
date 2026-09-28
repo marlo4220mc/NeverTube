@@ -990,9 +990,21 @@ void HomePage::adjustGridHeight(VideoListView *grid)
 // Sin tope, "Pequeñas" (6) en una ventana de 700 px daría celdas de 113 px con
 // el título y el canal recortados. La regla vive en
 // VideoListView::clampGridColumns (función pura, testeada en --selftest-grid).
+//
+// El ancho NO se toma del grid de una sección: los grids se ocultan cuando su
+// sección está vacía y un widget oculto tiene su viewport estrechado (98 px en
+// vez de 760 con la ventana a 1280). Con la base vacía eso forzaba siempre el
+// mínimo de 3 columnas y el ajuste "Tamaño de las miniaturas" se ignoraba. Se
+// mide el scroll, que está siempre visible y comparte ancho con todos los grids;
+// si aún no está visible (arranque), se recurre al ancho de la página menos los
+// márgenes de m_bodyLayout.
 int HomePage::effectiveCellColumns() const
 {
-    const int vw = m_contGrid ? m_contGrid->viewport()->width() : 0;
+    int vw = 0;
+    if (m_scroll && m_scroll->isVisible())
+        vw = m_scroll->viewport()->width();
+    if (vw <= 0)
+        vw = qMax(0, width() - 2 * 14);
     return VideoListView::clampGridColumns(m_cellColumns, vw);
 }
 
