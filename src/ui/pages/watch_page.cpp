@@ -362,6 +362,12 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
 
     m_overlay = new QStackedWidget(this);
     m_overlay->setAttribute(Qt::WA_TranslucentBackground, true);
+    // Los dos "background: transparent" de aqui (el stack y OverlayHost) NO son
+    // inlines de tema pendientes de migrar: son estructurales. El stack tiene que
+    // dejar ver el video que hay detras, y OverlayHost es un QWidget plano que
+    // solo existe para colocar la caja de controles encima del video. Moverlos
+    // al QSS global no cambia ni un pixel (ya son "sin color"), y si el selector
+    // fallara el stack volveria a pintar su fondo de paleta encima del video.
     m_overlay->setStyleSheet(QStringLiteral("background: transparent;"));
 
     auto *gl = new OverlayHost;
@@ -561,17 +567,13 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_overlay->addWidget(gl);
     auto *spinner = new QLabel(QStringLiteral("Cargando…"), this);
     spinner->setAlignment(Qt::AlignCenter);
-    spinner->setStyleSheet(
-        QStringLiteral("background: transparent; color: #8F8F8F; font-size: 13px;"));
+    spinner->setObjectName(QStringLiteral("ovSpinner"));
     m_overlay->addWidget(spinner);
 
     m_errorLabel = new QLabel(this);
     m_errorLabel->setAlignment(Qt::AlignCenter);
     m_errorLabel->setWordWrap(true);
-    m_errorLabel->setStyleSheet(
-        QStringLiteral("background: transparent; color: %1; "
-                       "font-size: 14px; padding: 16px;")
-            .arg(nt::kTextSoft.name()));
+    m_errorLabel->setObjectName(QStringLiteral("ovError"));
     m_overlay->addWidget(m_errorLabel);
     m_overlay->setCurrentIndex(0);
     enableOverlayTracking(this, gl);
@@ -644,34 +646,27 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     infoLay->addWidget(m_title);
 
     m_meta = new QLabel(this);
-    m_meta->setStyleSheet(
-        QStringLiteral("color: %1; font-size: 12px;").arg(nt::kMetaText.name()));
+    m_meta->setObjectName(QStringLiteral("watchMeta"));
     infoLay->addWidget(m_meta);
 
     m_channelBtn = new QPushButton(QStringLiteral("Canal"), this);
-    m_channelBtn->setObjectName(QStringLiteral("ghost"));
+    m_channelBtn->setObjectName(QStringLiteral("channelBtn"));
     m_channelBtn->setCursor(Qt::PointingHandCursor);
     m_channelBtn->setIconSize(QSize(43, 40));
     m_channelBtn->setIcon(nt::icon(nt::Icon::User, nt::kMuted, 20));
-    m_channelBtn->setStyleSheet(
-        QStringLiteral("QPushButton { background:transparent; border:none;"
-                       " border-radius:8px; text-align:left; padding:8px;"
-                       " color:#ECECEC; font-weight:600; font-size:13px; }"
-                       "QPushButton:hover { background:#1F1F1F; }"));
+    // A proposito NO es #ghost: el boton lleva icono a la izquierda y texto a la
+    // derecha alineado, y necesita padding de 8px en vez de los 6px de #ghost.
+    m_channelBtn->setObjectName(QStringLiteral("channelBtn"));
     m_channelBtn->setMinimumHeight(56);
     m_channelBtn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
 
     m_subscribeBtn = new QPushButton(QStringLiteral("Suscribirse"), this);
+    m_subscribeBtn->setObjectName(QStringLiteral("subscribe"));
     m_subscribeBtn->setCursor(Qt::PointingHandCursor);
     m_subscribeBtn->setMinimumHeight(36);
-    m_subscribeBtn->setStyleSheet(
-        QStringLiteral(// Acento vivo (no suscrito). El hover es una versión
-                       // más clara del acento para que siga el color elegido.
-                       "QPushButton { background:%1;"
-                       " border-radius:18px; padding:0 18px;"
-                       " color:white; font-weight:600; font-size:13px; }"
-                       "QPushButton:hover { background:%2; }")
-            .arg(nt::accentHex(), nt::accentHoverHex()));
+    // Sin stylesheet propio: el estado inicial (no suscrito, con acento) lo da
+    // la regla QPushButton#subscribe, y el hover es la variante clara de
+    // @ACCENT@, asi que sigue al color elegido sin re-aplicar nada.
 
     auto *channelRow = new QHBoxLayout;
     channelRow->setSpacing(8);
@@ -685,7 +680,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
                              QPushButton **out, nt::Icon *iconOut)
         -> QPushButton * {
         auto *b = new QPushButton(text, this);
-        b->setObjectName(QStringLiteral("ghost"));
+        b->setObjectName(QStringLiteral("actionChip"));
         b->setCursor(Qt::PointingHandCursor);
         b->setIcon(nt::icon(icon, nt::kMuted, 20));
         b->setIconSize(QSize(20, 20));
@@ -720,9 +715,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_descLabel->setTextInteractionFlags(Qt::LinksAccessibleByMouse
                                          | Qt::TextSelectableByMouse);
     m_descLabel->setOpenExternalLinks(true);
-    m_descLabel->setStyleSheet(QStringLiteral("color: %1; font-size:12px; "
-                                               "background:transparent;")
-                                   .arg(nt::kMetaText.name()));
+    m_descLabel->setObjectName(QStringLiteral("watchDesc"));
     // La descripción del vídeo crece verticalmente: sin tope de altura y sin
     // botón "Ver más" (no se colapsa).
     infoLay->addWidget(m_descLabel);
@@ -734,8 +727,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     bot->setContentsMargins(0, 8, 16, 8);
     bot->setSpacing(6);
     auto *quTitle = new QLabel(QStringLiteral("A continuación"), this);
-    quTitle->setStyleSheet(
-        QStringLiteral("font-weight:600; font-size:13px; color:#ECECEC;"));
+    quTitle->setObjectName(QStringLiteral("queueTitle"));
     m_nextUpList = new VideoListView(m_thumbs, this);
     m_nextUpList->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_nextUpList->setSizePolicy(QSizePolicy::Expanding,
@@ -1091,22 +1083,13 @@ void WatchPage::updateSubscribeButton(bool subscribed)
     m_subscribeBtn->setText(subscribed ? QStringLiteral("Suscrito")
                                        : QStringLiteral("Suscribirse"));
     m_subscribeBtn->setIcon(QIcon());
-    if (subscribed) {
-        m_subscribeBtn->setProperty("subscribed", true);
-        m_subscribeBtn->setStyleSheet(
-            QStringLiteral("QPushButton { background:#262626;"
-                           " border-radius:18px; padding:0 18px;"
-                           " color:#ECECEC; font-weight:600; font-size:13px; }"
-                           "QPushButton:hover { background:#2D2D2D; }"));
-    } else {
-        m_subscribeBtn->setProperty("subscribed", false);
-        m_subscribeBtn->setStyleSheet(
-            QStringLiteral("QPushButton { background:%1;"
-                           " border-radius:18px; padding:0 18px;"
-                           " color:white; font-weight:600; font-size:13px; }"
-                           "QPushButton:hover { background:%2; }")
-                .arg(nt::accentHex(), nt::accentHoverHex()));
-    }
+    // Misma regla #subscribe que el boton de la ficha de canal: los dos
+    // estados los decide la propiedad `subscribed` y el acento sale de
+    // @ACCENT@. Re-polish obligatorio al cambiar la propiedad.
+    m_subscribeBtn->setProperty("subscribed", subscribed);
+    m_subscribeBtn->style()->unpolish(m_subscribeBtn);
+    m_subscribeBtn->style()->polish(m_subscribeBtn);
+    m_subscribeBtn->update();
 }
 
 void WatchPage::updateSubscription(const VideoInfo &v, bool subscribe)
@@ -1125,19 +1108,17 @@ void WatchPage::updateActionButtons()
         b->setIcon(nt::icon(icon, active ? QColor(nt::accentHex())
                                          : nt::kMuted, 20));
         b->setIconSize(QSize(20, 20));
-        if (active)
-            b->setStyleSheet(
-                QStringLiteral("QPushButton { background:#262626;"
-                               " border-radius:16px; padding:7px 14px;"
-                               " color:%1; font-weight:600; font-size:13px; }"
-                               "QPushButton:hover { background:#2D2D2D; }")
-                    .arg(nt::accentHex()));
-        else
-            b->setStyleSheet(
-                QStringLiteral("QPushButton { background:#1F1F1F;"
-                               " border-radius:16px; padding:7px 14px;"
-                               " color:#ECECEC; font-size:13px; }"
-                               "QPushButton:hover { background:#242424; }"));
+        // Los dos estados viven en el QSS global (#actionChip) y los distingue
+        // la propiedad booleana `active`, igual que el boton Suscribirse. El
+        // acento sale de @ACCENT@, asi que un cambio de color lo repinta solo
+        // y ya no hace falta rehacer el stylesheet aqui.
+        b->setProperty("active", active);
+        // La propiedad cambia el selector, asi que hay que re-polish: sin esto
+        // Qt no vuelve a resolver las reglas y el boton conserva el estado
+        // anterior (por ejemplo, "Me gusta" pulsado que no se ve marcado).
+        b->style()->unpolish(b);
+        b->style()->polish(b);
+        b->update();
     };
     paint(m_likeBtn, m_likeIcon, m_liked);
     paint(m_dislikeBtn, m_dislikeIcon, m_disliked);

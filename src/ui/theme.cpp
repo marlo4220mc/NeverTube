@@ -228,6 +228,41 @@ QWidget#playerOverlay {
 }
 QLabel#ovTime { color: #ECECEC; font-size: 12px; }
 
+/* --- Pagina Player ------------------------------------------------------
+   Los dos overlays (spinner y error) viven dentro de m_overlay, sobre el
+   video, asi que los dos son transparentes: cualquier fondo taparia el frame. */
+QLabel#ovSpinner {
+    background: transparent; color: @MUTED@; font-size: 13px;
+}
+QLabel#ovError {
+    background: transparent; color: @TEXTSOFT@;
+    font-size: 14px; padding: 16px;
+}
+/* Columna de informacion: metadatos y descripcion. */
+QLabel#watchMeta { color: @METATEXT@; font-size: 12px; }
+QLabel#watchDesc { color: @METATEXT@; font-size: 12px; background: transparent; }
+/* Titulo del bloque "A continuacion". */
+QLabel#queueTitle { font-weight: 600; font-size: 13px; color: @TEXT@; }
+/* Boton del canal bajo el titulo: icono a la izquierda y texto a la derecha.
+   No es #ghost porque necesita padding de 8px en vez de 6px. */
+QPushButton#channelBtn {
+    background: transparent; border: none; border-radius: 8px;
+    text-align: left; padding: 8px;
+    color: @TEXT@; font-weight: 600; font-size: 13px;
+}
+QPushButton#channelBtn:hover { background: #1F1F1F; }
+/* Botones de accion (Me gusta, No me gusta, Favorito...). El estado lo decide
+   la propiedad booleana `active`, igual que #subscribe con la suya. */
+QPushButton#actionChip {
+    background: #1F1F1F; border-radius: 16px; padding: 7px 14px;
+    color: @TEXT@; font-size: 13px;
+}
+QPushButton#actionChip:hover { background: @HOVER@; }
+QPushButton#actionChip[active="true"] {
+    background: @BORDER@; color: @ACCENT@; font-weight: 600;
+}
+QPushButton#actionChip[active="true"]:hover { background: @SELECTION@; }
+
 /* Chip de calidad. Antes llevaba objectName="iconBtn", que es el estilo de un
    boton cuadrado de icono (padding 6, sin borde), pero lleva texto: sin
    relleno ni borde no se leia como control. Ancho por contenido, no 98 fijos. */
