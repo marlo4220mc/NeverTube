@@ -194,13 +194,21 @@ QToolButton:hover { background: @HOVER@; }
 QToolButton:pressed { background: @SELECTION@; }
 QToolButton:focus { background: @HOVER@; }
 
-QListWidget#cards {
+/* El objeto #cards lo pone VideoListView, que deriva de QListView (no de
+   QListWidget): con el selector "QListWidget#cards" la regla NO se aplicaba
+   (verificado) y la vista conservaba el marco por defecto de
+   QAbstractScrollArea. Ese marco dejaba el viewport 2 px mas bajo que el
+   contenido de las secciones del Home (altura fija = filas * alto de celda),
+   o sea un rango de scroll INTERNO de 2 px: al pasar la rueda por encima, la
+   seccion daba un "pequeno scroll vertical". Con el selector correcto el rango
+   es 0 en cualquier tamano y ajuste. */
+QListView#cards {
     background: transparent;
     border: none;
     outline: 0;
 }
-QListWidget#cards::item { background: transparent; border: none; }
-QListWidget#cards::item:selected { background: transparent; }
+QListView#cards::item { background: transparent; border: none; }
+QListView#cards::item:selected { background: transparent; }
 
 QMenu { background-color: #1F1F1F; border: 1px solid @BORDER@; }
 QMenu::item { padding: 7px 24px; }
