@@ -55,7 +55,7 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     m_avatar->setScaledContents(true);
     m_avatar->setPixmap(nt::icon(nt::Icon::User, nt::kMuted, 40)
                             .pixmap(64, 64));
-    m_avatar->setStyleSheet(QStringLiteral("border-radius:32px;"));
+    m_avatar->setObjectName(QStringLiteral("channelAvatar"));
     headerRow->addWidget(m_avatar, 0, Qt::AlignVCenter);
 
     auto *titleCol = new QVBoxLayout;
@@ -70,6 +70,7 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     headerRow->addLayout(titleCol, 1);
 
     m_subscribeBtn = new QPushButton(this);
+    m_subscribeBtn->setObjectName(QStringLiteral("subscribe"));
     m_subscribeBtn->setCursor(Qt::PointingHandCursor);
     m_subscribeBtn->setMinimumHeight(36);
     headerRow->addWidget(m_subscribeBtn, 0, Qt::AlignVCenter);
@@ -250,19 +251,17 @@ void ChannelPage::updateSubscribeButton(bool subscribed)
 {
     m_subscribeBtn->setText(subscribed ? QStringLiteral("Suscrito")
                                        : QStringLiteral("Suscribirse"));
-    if (subscribed)
-        m_subscribeBtn->setStyleSheet(
-            QStringLiteral("QPushButton { background:#262626;"
-                           " border-radius:18px; padding:0 18px;"
-                           " color:#ECECEC; font-weight:600; font-size:13px; }"
-                           "QPushButton:hover { background:#2D2D2D; }"));
-    else
-        m_subscribeBtn->setStyleSheet(
-            QStringLiteral("QPushButton { background:%1;"
-                           " border-radius:18px; padding:0 18px;"
-                           " color:white; font-weight:600; font-size:13px; }"
-                           "QPushButton:hover { background:%2; }")
-                .arg(nt::accentHex(), nt::accentHoverHex()));
+    // El aspecto de los dos estados vive en el QSS global (QPushButton#subscribe
+    // y #subscribed) y lo distingue la propiedad booleana `subscribed`. El
+    // acento lo pone nt::styleSheet(), que se regenera entero en cada cambio, asi
+    // que ya no hace falta re-pintar el boton a mano.
+    m_subscribeBtn->setProperty("subscribed", subscribed);
+    // La propiedad cambia el selector del QSS, asi que hay que re-polish: sin
+    // esto Qt no vuelve a resolver las reglas y el boton se queda con el
+    // aspecto del estado anterior.
+    m_subscribeBtn->style()->unpolish(m_subscribeBtn);
+    m_subscribeBtn->style()->polish(m_subscribeBtn);
+    m_subscribeBtn->update();
 }
 
 // Re-aplica el botón Suscribirse con el acento vigente (llamada desde

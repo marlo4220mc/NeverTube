@@ -14,14 +14,13 @@ PlaceholderPage::PlaceholderPage(const QString &title, QWidget *parent)
     auto *row = new QHBoxLayout;
     row->setContentsMargins(16, 12, 16, 8);
     m_title = new QLabel(title, this);
-    m_title->setStyleSheet(QStringLiteral("font-size:18px; font-weight:700;"));
+    m_title->setObjectName(QStringLiteral("pageTitle"));
     row->addWidget(m_title);
     row->addStretch(1);
     lay->addLayout(row);
 
     auto *hint = new QLabel(QStringLiteral("Próximamente."), this);
-    hint->setStyleSheet(
-        QStringLiteral("color:#8F8F8F; font-size:14px; padding: 40px;"));
+    hint->setObjectName(QStringLiteral("placeholderHint"));
     hint->setAlignment(Qt::AlignCenter);
     lay->addWidget(hint, 1);
     lay->addStretch(8);

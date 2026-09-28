@@ -273,6 +273,73 @@ QFrame#qualityMenu QPushButton {
 }
 QFrame#qualityMenu QPushButton:hover { background: @SELECTION@; }
 
+/* Fila de una consulta buscada antes (pestaña Historial del buscador).
+   Es un QPushButton plano porque necesita text-align:left con icono a la
+   izquierda, cosa que la regla base de QPushButton no da. */
+QPushButton#historyRow {
+    text-align: left; background: transparent; border: none;
+    color: @TEXTSOFT@; padding: 7px 4px;
+}
+QPushButton#historyRow:hover { background: #1F1F1F; border-radius: 6px; }
+
+/* Boton Suscribirse de la ficha de canal: los dos estados en el QSS global, con
+   la propiedad booleana `subscribed` como selector. El acento sale de
+   @ACCENT@, asi que un cambio de color lo repinta sin tocar el C++. */
+/* Boton Suscribirse de la ficha de canal: los dos estados en el QSS global, con
+   la propiedad booleana `subscribed` como selector. El acento sale de
+   @ACCENT@, asi que un cambio de color lo repinta sin tocar el C++.
+   NO se pone `border: none`: los setStyleSheet que sustituye no tocaban el
+   borde, asi que el boton conservaba el 1px @BORDER@ de la regla base. En el
+   estado suscrito no se nota (borde y fondo son el mismo gris), pero en el de
+   acento es visible. */
+QPushButton#subscribe {
+    background: @ACCENT@; border-radius: 18px; padding: 0 18px;
+    color: #FFFFFF; font-weight: 600; font-size: 13px;
+}
+QPushButton#subscribe:hover { background: @ACCENT_HOVER@; }
+QPushButton#subscribe[subscribed="true"] { background: @BORDER@; color: @TEXT@; }
+QPushButton#subscribe[subscribed="true"]:hover { background: @SELECTION@; }
+
+/* Filas compactas de canales (channel_row) */
+QLabel#channelRowTitle { color: @TEXT@; background: transparent; }
+QLabel#channelRowMeta  { color: @MUTED@; background: transparent; }
+
+/* Placeholder y títulos de página */
+QLabel#pageTitle { font-size: 18px; font-weight: 700; }
+QLabel#placeholderHint { color: @MUTED@; font-size: 14px; padding: 40px; }
+QLabel#sectionTitle { font-size: 22px; font-weight: 700; color: @TEXT@; }
+
+/* Avatar de la ficha de canal (64x64, radio 32) */
+QLabel#channelAvatar { border-radius: 32px; }
+
+/* Chip de acento plano: el boton "Ir a Buscar" del estado vacio del Home.
+   Se migra tal cual estaba, SIN :hover ni :pressed a proposito: el QSS global
+   tiene reglas de estado para #primary y aqui no las habia, y anadirlas seria
+   cambiar comportamiento en un refactor. */
+QPushButton#accentChip {
+    background-color: @ACCENT@; border: none; border-radius: 8px;
+    color: #FFFFFF; font-size: 12px; padding: 8px 18px;
+}
+
+/* Estado vacio del Home (va sobre un popupDialog) */
+QLabel#emptyStateTitle {
+    color: @TEXT@; font-size: 15px; font-weight: 700;
+    border: none; background: transparent;
+}
+QLabel#emptyStateBody {
+    color: @METATEXT@; font-size: 12px;
+    border: none; background: transparent;
+}
+
+/* Filas de la Biblioteca (playlists, historial: mismo item card) */
+QLabel#libraryItemTitle {
+    color: @TEXT@; font-weight: 600; font-size: 14px;
+    background: transparent;
+}
+QLabel#libraryItemMeta {
+    color: @MUTED@; font-size: 12px; background: transparent;
+}
+
 /* Cartelón "Detectando hardware" (hwProbePopup). Estaba entero en un
    setStyleSheet inline con rgba(18,18,18,0.96) y #3a3a3a, que son valores que
    el QSS global no tenía: por eso era otra superficie que el cambio de acento

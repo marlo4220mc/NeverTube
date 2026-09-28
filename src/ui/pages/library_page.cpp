@@ -199,9 +199,7 @@ public:
         if (!m_title) {
             m_title = new QLabel(this);
             m_title->setWordWrap(true);
-            m_title->setStyleSheet(
-                QStringLiteral("color:#ECECEC; font-weight:600;"
-                               " font-size:14px; background:transparent;"));
+            m_title->setObjectName(QStringLiteral("libraryItemTitle"));
             const QFontMetricsF fm(m_title->font());
             m_title->setFixedHeight(qRound(fm.height() * 2.0 + 3));
             m_textLay->insertWidget(1, m_title);
@@ -214,9 +212,7 @@ public:
         if (!m_meta) {
             m_meta = new QLabel(this);
             m_meta->setWordWrap(true);
-            m_meta->setStyleSheet(
-                QStringLiteral("color:#8F8F8F; font-size:12px;"
-                               " background:transparent;"));
+            m_meta->setObjectName(QStringLiteral("libraryItemMeta"));
             m_textLay->insertWidget(m_textLay->count() - 1, m_meta);
         }
         m_meta->setText(meta);
@@ -387,8 +383,7 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     lay->setSpacing(8);
 
     auto *title = new QLabel(QStringLiteral("Biblioteca"), m_body);
-    title->setStyleSheet(QStringLiteral("font-size:22px; font-weight:700;"
-                                        " color:#ECECEC;"));
+    title->setObjectName(QStringLiteral("sectionTitle"));
     lay->addWidget(title);
     lay->addSpacing(12);
 

@@ -269,18 +269,17 @@ bool HomePage::cachedFresh(qint64 at, qint64 ttlMs) const
 void HomePage::buildEmptyState()
 {
     auto *emptyBox = new QFrame(m_body);
+    // Estilo por QSS global (QFrame#popupDialog), igual que los otros cuatro
+    // popups de la app. Antes llevaba ademas un inline que lo bajaba a kPanel
+    // (#181818) sobre el kPopover (#202020) de la regla: era el unico popup
+    // con ese fondo, se veia como deriva y no comodecision.
     emptyBox->setObjectName(QStringLiteral("popupDialog"));
-    emptyBox->setStyleSheet(
-        QStringLiteral("QFrame { background:#181818; border:1px solid #262626;"
-                       " border-radius:12px; }"));
     auto *emptyLay = new QVBoxLayout(emptyBox);
     emptyLay->setContentsMargins(28, 24, 28, 24);
     emptyLay->setSpacing(8);
     auto *emptyTitle = new QLabel(
         QStringLiteral("Aún no hay contenido personalizado"), emptyBox);
-    emptyTitle->setStyleSheet(
-        QStringLiteral("color:#ECECEC; font-size:15px; font-weight:700;"
-                       " border:none; background:transparent;"));
+    emptyTitle->setObjectName(QStringLiteral("emptyStateTitle"));
     emptyTitle->setAlignment(Qt::AlignCenter);
     auto *emptyBody = new QLabel(
         QStringLiteral("Reproducí un vídeo o suscribite a un canal desde el "
@@ -288,10 +287,7 @@ void HomePage::buildEmptyState()
                        "Nuevos de tus suscripciones. Mientras tanto, arriba "
                        "tenés Recomendado y Tendencias."),
         emptyBox);
-    emptyBody->setStyleSheet(
-        QStringLiteral("color:%1; font-size:12px; border:none;"
-                       " background:transparent;")
-            .arg(nt::kMetaText.name()));
+    emptyBody->setObjectName(QStringLiteral("emptyStateBody"));
     emptyBody->setWordWrap(true);
     emptyBody->setAlignment(Qt::AlignCenter);
     emptyLay->addWidget(emptyTitle);
@@ -300,13 +296,8 @@ void HomePage::buildEmptyState()
     emptyRow->setSpacing(8);
     emptyRow->addStretch(1);
     auto *goSearch = new QPushButton(QStringLiteral("Ir a Buscar"), emptyBox);
-    m_goSearchBtn = goSearch;
     goSearch->setCursor(Qt::PointingHandCursor);
-    goSearch->setStyleSheet(
-        QStringLiteral("font-size:12px; padding:8px 18px;"
-                       " background-color:%1; color:#FFFFFF;"
-                       " border:none; border-radius:8px;")
-            .arg(nt::accentHex()));
+    goSearch->setObjectName(QStringLiteral("accentChip"));
     connect(goSearch, &QPushButton::clicked, this,
             [this]() { emit navigateToSearchRequested(); });
     emptyRow->addWidget(goSearch);
@@ -421,17 +412,13 @@ void HomePage::refreshDynamic()
     buildDiscoverSelection();
 }
 
-// Re-aplica el botón del empty state con el acento vigente (MainWindow lo
-// llama al cambiar el color de acento en Ajustes; el botón conserva su estado).
+// Re-aplica el acento de la pagina. El boton del estado vacio ya no lleva
+// stylesheet propio: es QPushButton#accentChip, y nt::styleSheet() se regenera
+// entero en cada cambio de acento, asi que el boton se repinta solo y aqui no
+// queda nada que hacer. Se mantiene el metodo porque MainWindow lo llama en las
+// cuatro paginas por igual.
 void HomePage::applyAccent()
 {
-    if (m_goSearchBtn) {
-        m_goSearchBtn->setStyleSheet(
-            QStringLiteral("font-size:12px; padding:8px 18px;"
-                           " background-color:%1; color:#FFFFFF;"
-                           " border:none; border-radius:8px;")
-                .arg(nt::accentHex()));
-    }
 }
 
 QString HomePage::currentSubsSignature() const

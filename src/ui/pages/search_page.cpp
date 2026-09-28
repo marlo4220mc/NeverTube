@@ -379,11 +379,7 @@ void SearchPage::showHistory()
         rowLay->setSpacing(4);
         auto *btn = new QPushButton(QStringLiteral("  %1").arg(q), row);
         btn->setIcon(nt::icon(nt::Icon::Search, nt::kMuted, 14));
-        btn->setStyleSheet(
-            QStringLiteral("QPushButton { text-align:left; background:transparent; "
-                           "border:none; color:%1; padding:7px 4px; }"
-                           "QPushButton:hover { background:#1F1F1F; border-radius:6px; }")
-                .arg(nt::kTextSoft.name()));
+        btn->setObjectName(QStringLiteral("historyRow"));
         connect(btn, &QPushButton::clicked, this,
                 [this, q]() { onHistoryQuery(q); });
         auto *del = new QPushButton(row);

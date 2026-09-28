@@ -88,8 +88,7 @@ ChannelRow::ChannelRow(ThumbnailCache *thumbs, const QString &channelId,
     titleFont.setPixelSize(14);
     titleFont.setWeight(QFont::DemiBold);
     m_title->setFont(titleFont);
-    m_title->setStyleSheet(
-        QStringLiteral("color:#ECECEC; background:transparent;"));
+    m_title->setObjectName(QStringLiteral("channelRowTitle"));
     m_title->setFixedHeight(qRound(QFontMetricsF(m_title->font()).height() + 1));
     textLay->insertWidget(1, m_title);
 
@@ -98,8 +97,7 @@ ChannelRow::ChannelRow(ThumbnailCache *thumbs, const QString &channelId,
     QFont metaFont = m_meta->font();
     metaFont.setPixelSize(12);
     m_meta->setFont(metaFont);
-    m_meta->setStyleSheet(
-        QStringLiteral("color:#8F8F8F; background:transparent;"));
+    m_meta->setObjectName(QStringLiteral("channelRowMeta"));
     m_meta->setFixedHeight(
         qRound(QFontMetricsF(m_meta->font()).height() * 2 + 3));
     textLay->insertWidget(textLay->count() - 1, m_meta);

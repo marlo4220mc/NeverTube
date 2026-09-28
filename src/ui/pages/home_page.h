@@ -166,9 +166,6 @@ private:
     // Descubre, sin caché previa). Cierra el hueco gigante que dejaban las
     // secciones hide() y le dice al usuario qué hacer para empezar.
     QWidget *m_emptyState = nullptr;
-    // Botón "Ir a Buscar" del empty state: su fondo usa el acento, así que se
-    // guarda el puntero para re-aplicarlo al cambiar el color de acento.
-    QPushButton *m_goSearchBtn = nullptr;
 
     QLabel *m_contTitle;
     VideoListView *m_contGrid;
