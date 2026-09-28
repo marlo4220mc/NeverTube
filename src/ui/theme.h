@@ -26,6 +26,21 @@ inline const QColor kHandle(0x2F, 0x2F, 0x2F);
 inline const QColor kHandleHover(0x3A, 0x3A, 0x3A);
 inline const QColor kPopover(0x20, 0x20, 0x20);
 
+// Texto secundario, en dos pesos. kMuted (#8F8F8F, 5,9:1 sobre kBg) es el
+// atenuado de etiquetas cortas; estos son los de los bloques largos, que se
+// leen de verdad y por eso no se quedan en kMuted:
+//
+//   kMetaText (#9AA2AD, 7,4:1) -> línea de metadatos del vídeo, descripción y
+//     cuerpo del estado vacío del Home. Bajar esto a kMuted quitaba un 20 % de
+//     contraste (7,4:1 -> 5,9:1) en el texto que más se lee de la página.
+//   kTextSoft (#C8C8C8, 11,5:1) -> etiqueta de error del reproductor y cuerpo
+//     del cartelón de sondeo de hardware: texto atenuado sobre superficie negra.
+//
+// También estaban escritos a mano en #9aa2ad / #c8c8c8 (con dos mayúsculas
+// distintas para el mismo color) en cinco sitios.
+inline const QColor kMetaText(0x9A, 0xA2, 0xAD);
+inline const QColor kTextSoft(0xC8, 0xC8, 0xC8);
+
 // Acento de la app (rojo NeverTube por defecto). No es const: se cambia en
 // caliente desde Ajustes (color de acento). Cada widget que pinte con kAccent
 // o construya QSS debe leerlo al repintar/regenerar, no cachearlo en build.

@@ -375,7 +375,7 @@ MainWindow::MainWindow(QWidget *parent)
     // que el QSS ya nace con el acento elegido.
     {
         const QString savedAccent = m_settings.getString(
-            QStringLiteral("ui_accent"), QStringLiteral("#FF0033"));
+            QStringLiteral("ui_accent"), nt::accentHex());
         const QColor accent(savedAccent);
         if (accent.isValid())
             nt::setAccent(accent);
@@ -927,9 +927,7 @@ void MainWindow::setupMiniBar()
     hostLay->setSpacing(0);
     m_miniThumb = new QLabel(m_miniVideoHost);
     m_miniThumb->setAlignment(Qt::AlignCenter);
-    m_miniThumb->setStyleSheet(
-        QStringLiteral("background:#262626; border-radius:6px; color:#8F8F8F; "
-                       "font-size:10px;"));
+    m_miniThumb->setObjectName(QStringLiteral("miniThumb"));
     m_miniThumb->setTextInteractionFlags(Qt::NoTextInteraction);
     hostLay->addWidget(m_miniThumb);
     row->addWidget(m_miniVideoHost);
@@ -937,11 +935,10 @@ void MainWindow::setupMiniBar()
     auto *textBox = new QVBoxLayout;
     textBox->setSpacing(1);
     m_miniTitle = new QLabel(QStringLiteral("Nada en reproducción"), m_miniBar);
-    m_miniTitle->setStyleSheet(
-        QStringLiteral("color:#ECECEC; font-size:12px; font-weight:600;"));
+    m_miniTitle->setObjectName(QStringLiteral("miniTitle"));
     m_miniTitle->setTextInteractionFlags(Qt::NoTextInteraction);
     m_miniTime = new QLabel(QStringLiteral("0:00 / 0:00"), m_miniBar);
-    m_miniTime->setStyleSheet(QStringLiteral("color:#8F8F8F; font-size:11px;"));
+    m_miniTime->setObjectName(QStringLiteral("miniTime"));
     m_miniTime->setTextInteractionFlags(Qt::NoTextInteraction);
     textBox->addWidget(m_miniTitle);
     textBox->addWidget(m_miniTime);
@@ -1292,22 +1289,20 @@ void MainWindow::showHwPopup()
     m_hwPopup = new QFrame(this);
     m_hwPopup->setObjectName(QStringLiteral("hwProbePopup"));
     m_hwPopup->setAttribute(Qt::WA_StyledBackground, true);
-    m_hwPopup->setStyleSheet(QStringLiteral(
-        "#hwProbePopup { background: rgba(18,18,18,0.96);"
-        " border: 1px solid #3a3a3a; border-radius: 10px; }"));
+    // Estilo en el QSS global (QWidget#hwProbePopup): aquí era un inline con
+    // rgba(18,18,18,0.96) y #3a3a3a, que no existían como token.
     auto *lay = new QVBoxLayout(m_hwPopup);
     lay->setContentsMargins(28, 22, 28, 22);
     lay->setSpacing(8);
     auto *title = new QLabel(QStringLiteral("Detectando hardware de vídeo"),
                              m_hwPopup);
-    title->setStyleSheet(QStringLiteral(
-        "color: #fff; font-size: 16px; font-weight: 600;"));
+    title->setObjectName(QStringLiteral("hwPopupTitle"));
     title->setAlignment(Qt::AlignCenter);
     auto *text = new QLabel(
         QStringLiteral("Comprobando la aceleración de vídeo de tu equipo.\n"
                        "La reproducción comenzará al terminar."),
         m_hwPopup);
-    text->setStyleSheet(QStringLiteral("color: #c8c8c8; font-size: 12px;"));
+    text->setObjectName(QStringLiteral("hwPopupBody"));
     text->setAlignment(Qt::AlignCenter);
     lay->addWidget(title);
     lay->addWidget(text);

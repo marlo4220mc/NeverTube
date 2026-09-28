@@ -268,7 +268,7 @@ QPushButton *SettingsPage::makeActionButton(const QString &text)
     btn->setStyleSheet(
         QStringLiteral("font-size:12px; padding:7px 14px;"
                        " background-color:#1F1F1F;"
-                       " border:1px solid #2A2A2A;"
+                       " border:1px solid #262626;"
                        " border-radius:8px; color:#ECECEC;"));
     btn->setMinimumWidth(150);
     return btn;
@@ -622,9 +622,8 @@ void SettingsPage::buildUI()
     // accentChanged).
     addOptionRow(
         QStringLiteral("Color de acento"), accentOptions(),
-        m_settings->getString(QLatin1String(kAccentKey),
-                              QStringLiteral("#FF0033")),
-        QStringLiteral("#FF0033"), accentFromValue,
+        m_settings->getString(QLatin1String(kAccentKey), nt::accentHex()),
+        nt::accentHex(), accentFromValue,
         [this](const QString &text) {
             const QString hex = valueFromAccent(text);
             m_settings->set(QLatin1String(kAccentKey), hex);
@@ -677,7 +676,7 @@ void SettingsPage::buildUI()
         btn->setStyleSheet(
             QStringLiteral("font-size:12px; padding:8px 16px;"
                            " background-color:#1F1F1F;"
-                           " border:1px solid #2A2A2A;"
+                           " border:1px solid #262626;"
                            " border-radius:8px; color:#ECECEC; ") +
             extraStyle);
         btn->setCursor(Qt::PointingHandCursor);

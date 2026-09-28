@@ -272,6 +272,36 @@ QFrame#qualityMenu QPushButton {
     text-align: left; padding: 6px 8px; border-radius: 4px;
 }
 QFrame#qualityMenu QPushButton:hover { background: @SELECTION@; }
+
+/* Cartelón "Detectando hardware" (hwProbePopup). Estaba entero en un
+   setStyleSheet inline con rgba(18,18,18,0.96) y #3a3a3a, que son valores que
+   el QSS global no tenía: por eso era otra superficie que el cambio de acento
+   no cubría. */
+QWidget#hwProbePopup {
+    background-color: @POPOVER@;
+    border: 1px solid @HANDLE@;
+    border-radius: 10px;
+}
+QLabel#hwPopupTitle { color: #FFFFFF; font-size: 16px; font-weight: 600; }
+QLabel#hwPopupBody { color: @TEXTSOFT@; font-size: 12px; }
+
+/* Mini player. El hueco en sí (miniVideoHost) no necesita regla: hereda el
+   fondo transparente del QWidget global, que es lo correcto, porque por debajo
+   va el PlayerWidget en vivo reparentado. */
+QLabel#miniThumb {
+    background-color: @BORDER@; border-radius: 6px;
+    color: @MUTED@; font-size: 10px;
+}
+QLabel#miniTime { color: @MUTED@; font-size: 11px; }
+QLabel#miniTitle {
+    color: @TEXT@; font-size: 12px; font-weight: 600;
+    background: transparent; border: none;
+}
+
+/* Área de vídeo. Negro puro, NO kBg (#0F0F0F): es el fondo de las bandas
+   letterbox cuando el vídeo no llena la caja, y tiene que ser negro de verdad
+   para que no se note el marco. Estaba en un setStyleSheet inline. */
+QWidget#playerArea { background-color: #000000; }
 )QSS");
     // Los placeholders se sustituyen en CADA llamada: un cambio de acento en
     // caliente (Ajustes → Color de acento) regenera el stylesheet al momento.
@@ -295,6 +325,10 @@ QFrame#qualityMenu QPushButton:hover { background: @SELECTION@; }
               .replace(QStringLiteral("@HANDLE@"), kHandle.name())
               .replace(QStringLiteral("@HANDLE_HOVER@"), kHandleHover.name())
               .replace(QStringLiteral("@POPOVER@"), kPopover.name())
+              .replace(QStringLiteral("@MUTED@"), kMuted.name())
+              .replace(QStringLiteral("@TEXT@"), kText.name())
+              .replace(QStringLiteral("@METATEXT@"), kMetaText.name())
+              .replace(QStringLiteral("@TEXTSOFT@"), kTextSoft.name())
               .replace(QStringLiteral("@OVERLAY_BG@"), overlayBgRgba())
               .replace(QStringLiteral("@OVERLAY_EDGE@"), overlayEdgeRgba());
 }

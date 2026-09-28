@@ -289,8 +289,9 @@ void HomePage::buildEmptyState()
                        "tenés Recomendado y Tendencias."),
         emptyBox);
     emptyBody->setStyleSheet(
-        QStringLiteral("color:#9aa2ad; font-size:12px; border:none;"
-                       " background:transparent;"));
+        QStringLiteral("color:%1; font-size:12px; border:none;"
+                       " background:transparent;")
+            .arg(nt::kMetaText.name()));
     emptyBody->setWordWrap(true);
     emptyBody->setAlignment(Qt::AlignCenter);
     emptyLay->addWidget(emptyTitle);

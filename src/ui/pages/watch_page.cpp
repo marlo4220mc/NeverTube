@@ -105,7 +105,9 @@ public:
         , m_overlay(overlay)
         , m_player(player)
     {
-        setStyleSheet(QStringLiteral("background:#000;"));
+        // El fondo va por QSS global (QWidget#playerArea): negro puro, no kBg,
+        // porque es el fondo de las bandas letterbox y tiene que ser negro de
+        // verdad para que no se note el marco. Antes era un setStyleSheet inline.
         player->setParent(this);
         overlay->setParent(player);
         overlay->setGeometry(player->rect());
@@ -567,8 +569,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_errorLabel->setAlignment(Qt::AlignCenter);
     m_errorLabel->setWordWrap(true);
     m_errorLabel->setStyleSheet(
-        QStringLiteral("background: transparent; color: #C8C8C8; "
-                       "font-size: 14px; padding: 16px;"));
+        QStringLiteral("background: transparent; color: %1; "
+                       "font-size: 14px; padding: 16px;")
+            .arg(nt::kTextSoft.name()));
     m_overlay->addWidget(m_errorLabel);
     m_overlay->setCurrentIndex(0);
     enableOverlayTracking(this, gl);
@@ -583,6 +586,13 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     auto *pc = new PlayerContainer(playerWidget, m_overlay, this);
     m_playerContainer = pc;
     pc->setObjectName(QStringLiteral("playerArea"));
+    // PlayerContainer es un QWidget plano, no un QFrame: Qt solo pinta el fondo
+    // que le da el QSS si el widget lleva WA_StyledBackground. Con el fondo en
+    // el stylesheet global (en vez de un setStyleSheet propio) hay que decirlo
+    // explícitamente, o las bandas letterbox quedan en kBg (#0F0F0F) en vez de
+    // negro y se nota el marco alrededor del vídeo.
+    pc->setAttribute(Qt::WA_StyledBackground, true);
+    pc->ensurePolished();
     enableOverlayTracking(this, pc);
     connect(playerWidget, &PlayerWidget::videoAspectChanged, pc,
             &PlayerContainer::setVideoAspect);
@@ -634,7 +644,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     infoLay->addWidget(m_title);
 
     m_meta = new QLabel(this);
-    m_meta->setStyleSheet(QStringLiteral("color: #9aa2ad; font-size: 12px;"));
+    m_meta->setStyleSheet(
+        QStringLiteral("color: %1; font-size: 12px;").arg(nt::kMetaText.name()));
     infoLay->addWidget(m_meta);
 
     m_channelBtn = new QPushButton(QStringLiteral("Canal"), this);
@@ -709,8 +720,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_descLabel->setTextInteractionFlags(Qt::LinksAccessibleByMouse
                                          | Qt::TextSelectableByMouse);
     m_descLabel->setOpenExternalLinks(true);
-    m_descLabel->setStyleSheet(
-        QStringLiteral("color:#9aa2ad; font-size:12px; background:transparent;"));
+    m_descLabel->setStyleSheet(QStringLiteral("color: %1; font-size:12px; "
+                                               "background:transparent;")
+                                   .arg(nt::kMetaText.name()));
     // La descripción del vídeo crece verticalmente: sin tope de altura y sin
     // botón "Ver más" (no se colapsa).
     infoLay->addWidget(m_descLabel);
@@ -1085,7 +1097,7 @@ void WatchPage::updateSubscribeButton(bool subscribed)
             QStringLiteral("QPushButton { background:#262626;"
                            " border-radius:18px; padding:0 18px;"
                            " color:#ECECEC; font-weight:600; font-size:13px; }"
-                           "QPushButton:hover { background:#333333; }"));
+                           "QPushButton:hover { background:#2D2D2D; }"));
     } else {
         m_subscribeBtn->setProperty("subscribed", false);
         m_subscribeBtn->setStyleSheet(
@@ -1118,14 +1130,14 @@ void WatchPage::updateActionButtons()
                 QStringLiteral("QPushButton { background:#262626;"
                                " border-radius:16px; padding:7px 14px;"
                                " color:%1; font-weight:600; font-size:13px; }"
-                               "QPushButton:hover { background:#333333; }")
+                               "QPushButton:hover { background:#2D2D2D; }")
                     .arg(nt::accentHex()));
         else
             b->setStyleSheet(
                 QStringLiteral("QPushButton { background:#1F1F1F;"
                                " border-radius:16px; padding:7px 14px;"
                                " color:#ECECEC; font-size:13px; }"
-                               "QPushButton:hover { background:#2A2A2A; }"));
+                               "QPushButton:hover { background:#242424; }"));
     };
     paint(m_likeBtn, m_likeIcon, m_liked);
     paint(m_dislikeBtn, m_dislikeIcon, m_disliked);

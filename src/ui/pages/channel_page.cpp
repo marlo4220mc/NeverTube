@@ -255,7 +255,7 @@ void ChannelPage::updateSubscribeButton(bool subscribed)
             QStringLiteral("QPushButton { background:#262626;"
                            " border-radius:18px; padding:0 18px;"
                            " color:#ECECEC; font-weight:600; font-size:13px; }"
-                           "QPushButton:hover { background:#333333; }"));
+                           "QPushButton:hover { background:#2D2D2D; }"));
     else
         m_subscribeBtn->setStyleSheet(
             QStringLiteral("QPushButton { background:%1;"

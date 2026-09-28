@@ -381,8 +381,9 @@ void SearchPage::showHistory()
         btn->setIcon(nt::icon(nt::Icon::Search, nt::kMuted, 14));
         btn->setStyleSheet(
             QStringLiteral("QPushButton { text-align:left; background:transparent; "
-                           "border:none; color:#D6D6D6; padding:7px 4px; }"
-                           "QPushButton:hover { background:#1F1F1F; border-radius:6px; }"));
+                           "border:none; color:%1; padding:7px 4px; }"
+                           "QPushButton:hover { background:#1F1F1F; border-radius:6px; }")
+                .arg(nt::kTextSoft.name()));
         connect(btn, &QPushButton::clicked, this,
                 [this, q]() { onHistoryQuery(q); });
         auto *del = new QPushButton(row);
