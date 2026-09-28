@@ -248,28 +248,17 @@ void SettingsPage::updateCodecProfile(const QString &profile)
 
 void SettingsPage::applyAccent()
 {
-    if (m_resetBtn) {
-        // Mismo estilo base que makeActionButton (padding 7/14) cambiando solo
-        // borde y color al acento vigente; consistente con el resto de botones
-        // de acción y sin cambio de tamaño al re-aplicar.
-        m_resetBtn->setStyleSheet(
-            QStringLiteral("font-size:12px; padding:7px 14px;"
-                           " background-color:#1F1F1F;"
-                           " border-radius:8px;"
-                           " border:1px solid %1; color:%1;"
-                           " font-weight:600;").arg(nt::accentHex()));
-    }
+    // El boton de restablecer es #accentOutline en el QSS global, y su color
+    // sale de @ACCENT@: nt::styleSheet() se regenera entero en cada cambio de
+    // acento, asi que ya no hay nada que re-aplicar aqui. El metodo se mantiene
+    // porque MainWindow lo llama en las cuatro paginas por igual.
 }
 
 QPushButton *SettingsPage::makeActionButton(const QString &text)
 {
     auto *btn = new QPushButton(text, this);
     btn->setCursor(Qt::PointingHandCursor);
-    btn->setStyleSheet(
-        QStringLiteral("font-size:12px; padding:7px 14px;"
-                       " background-color:#1F1F1F;"
-                       " border:1px solid #262626;"
-                       " border-radius:8px; color:#ECECEC;"));
+    btn->setObjectName(QStringLiteral("actionBtn"));
     btn->setMinimumWidth(150);
     return btn;
 }
@@ -387,16 +376,17 @@ void SettingsPage::buildUI()
     mainLay->setSpacing(20);
 
     auto *title = new QLabel(QStringLiteral("Ajustes"), this);
-    title->setObjectName(QStringLiteral("sectionTitle"));
-    title->setStyleSheet(QStringLiteral("font-size:18px; font-weight:700;"));
+    // A proposito NO es #sectionTitle (16 px): este es el titulo de la pagina
+    // entera, un escalon por encima del titulo de seccion.
+    title->setObjectName(QStringLiteral("pageHeading"));
     mainLay->addWidget(title);
 
     auto *scrollArea = new QScrollArea(this);
+    scrollArea->setObjectName(QStringLiteral("settingsScroll"));
     scrollArea->setWidgetResizable(true);
     scrollArea->setFrameShape(QFrame::NoFrame);
     scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    scrollArea->setStyleSheet(QStringLiteral("background:transparent;"));
     auto *content = new QWidget(scrollArea);
     auto *scrollLay = new QVBoxLayout(content);
     scrollLay->setContentsMargins(0, 0, 0, 12);
@@ -404,12 +394,12 @@ void SettingsPage::buildUI()
     scrollArea->setWidget(content);
     mainLay->addWidget(scrollArea, 1);
 
+    // Encabezado de sección de Ajustes (INTERFAZ, REPRODUCCION, DATOS...). A
+    // propósito NO es #sectionSub: ese es el subtitulo de 12 px de las demas
+    // paginas, y aqui son 11 px en versalitas con algo de tracking.
     auto addSectionTitle = [scrollLay](const QString &t) {
         auto *subTitle = new QLabel(t);
-        subTitle->setObjectName(QStringLiteral("sectionSub"));
-        subTitle->setStyleSheet(
-            QStringLiteral("font-size:11px; font-weight:600; color:#8F8F8F;"
-                           " letter-spacing:0.5px;"));
+        subTitle->setObjectName(QStringLiteral("settingsSectionTitle"));
         scrollLay->addWidget(subTitle);
     };
 
@@ -417,7 +407,7 @@ void SettingsPage::buildUI()
     // bloque de espaciado corto (nunca suelta en scrollLay, que separa con 24px).
     auto addNote = [content](const QString &text) {
         auto *note = new QLabel(text, content);
-        note->setStyleSheet(QStringLiteral("font-size:10px; color:#8F8F8F;"));
+        note->setObjectName(QStringLiteral("settingsNote"));
         note->setWordWrap(true);
         return note;
     };
@@ -437,7 +427,7 @@ void SettingsPage::buildUI()
         auto *row = new QHBoxLayout;
         row->setSpacing(8);
         auto *lbl = new QLabel(labelText);
-        lbl->setStyleSheet(QStringLiteral("color:#ECECEC; min-width:200px;"));
+        lbl->setObjectName(QStringLiteral("settingsRowLabel"));
         row->addWidget(lbl);
         QPushButton *btn = makeValueButton(fromVal(saved));
         row->addWidget(btn, 1, Qt::AlignRight);
@@ -514,12 +504,12 @@ void SettingsPage::buildUI()
         auto *row = new QHBoxLayout;
         row->setSpacing(8);
         auto *lbl = new QLabel(QStringLiteral("Aceleración de vídeo"));
-        lbl->setStyleSheet(QStringLiteral("color:#ECECEC; min-width:200px;"));
+        lbl->setObjectName(QStringLiteral("settingsRowLabel"));
         row->addWidget(lbl);
         m_codecProfileLabel = new QLabel(codecProfileText(
             m_settings->getString(QStringLiteral("codec_profile"),
                                   QString())));
-        m_codecProfileLabel->setStyleSheet(QStringLiteral("color:#8F8F8F;"));
+        m_codecProfileLabel->setObjectName(QStringLiteral("settingsRowValue"));
         row->addWidget(m_codecProfileLabel);
         row->addStretch(1);
 #ifndef NEVERTUBE_NO_MPV
@@ -563,7 +553,7 @@ void SettingsPage::buildUI()
         auto *row = new QHBoxLayout;
         row->setSpacing(8);
         auto *lbl = new QLabel(QStringLiteral("Volumen máximo"));
-        lbl->setStyleSheet(QStringLiteral("color:#ECECEC; min-width:200px;"));
+        lbl->setObjectName(QStringLiteral("settingsRowLabel"));
         row->addWidget(lbl);
         const QString saved = m_settings->getString(
             QStringLiteral("volume_max"), QStringLiteral("100"));
@@ -670,15 +660,13 @@ void SettingsPage::buildUI()
     // --- DATOS ---
     addSectionTitle(QStringLiteral("DATOS"));
 
-    auto addActionButton = [scrollLay](const QString &text,
-                                       const QString &extraStyle) {
+    // Los botones de la sección DATOS. Hay dos: el normal (#actionBtn) y el de
+    // restablecer (#accentOutline, con borde y color de acento). El acento sale
+    // del QSS global, asi que ya no hace falta re-aplicarlo al cambiarlo.
+    auto addActionButton = [scrollLay](const QString &text, bool conAcento) {
         auto *btn = new QPushButton(text);
-        btn->setStyleSheet(
-            QStringLiteral("font-size:12px; padding:8px 16px;"
-                           " background-color:#1F1F1F;"
-                           " border:1px solid #262626;"
-                           " border-radius:8px; color:#ECECEC; ") +
-            extraStyle);
+        btn->setObjectName(conAcento ? QStringLiteral("accentOutline")
+                                     : QStringLiteral("dataActionBtn"));
         btn->setCursor(Qt::PointingHandCursor);
         scrollLay->addWidget(btn);
         scrollLay->addSpacing(4);
@@ -688,7 +676,7 @@ void SettingsPage::buildUI()
     // Limpiar caché de miniaturas: borra solo las imágenes guardadas en disco
     // (se vuelven a descargar solas al mostrar vídeos). No toca datos ni la BD.
     QPushButton *clearBtn = addActionButton(
-        QStringLiteral("Limpiar caché de miniaturas"), QString());
+        QStringLiteral("Limpiar caché de miniaturas"), false);
     connect(clearBtn, &QPushButton::clicked, this, [this]() {
         showConfirmPopup(
             QStringLiteral("Limpiar caché de miniaturas"),
@@ -701,10 +689,7 @@ void SettingsPage::buildUI()
     // suscripciones y ajustes) y el caché, y reinicia la app con defaults.
     // Nunca toca archivos personales ni vídeos descargados.
     QPushButton *resetBtn = addActionButton(
-        QStringLiteral("Restablecer aplicación"),
-        QStringLiteral("border:1px solid %1; color:%1;"
-                       " font-weight:600;").arg(nt::accentHex()));
-    m_resetBtn = resetBtn;
+        QStringLiteral("Restablecer aplicación"), true);
     connect(resetBtn, &QPushButton::clicked, this, [this]() {
         showConfirmPopup(
             QStringLiteral("Restablecer aplicación"),
@@ -722,7 +707,7 @@ void SettingsPage::buildUI()
 
     auto *verLabel = new QLabel(QStringLiteral("Versión 1.0 (nevertube_qt2)"),
                                 content);
-    verLabel->setStyleSheet(QStringLiteral("font-size:12px; color:#ECECEC;"));
+    verLabel->setObjectName(QStringLiteral("settingsVersion"));
 
     auto *aboutBlock = new QVBoxLayout;
     aboutBlock->setSpacing(4);
@@ -749,7 +734,7 @@ void SettingsPage::buildUI()
     pv->addWidget(m_confirmTitle);
 
     m_confirmText = new QLabel(QString(), m_confirmPopup);
-    m_confirmText->setStyleSheet(QStringLiteral("color:#8F8F8F;"));
+    m_confirmText->setObjectName(QStringLiteral("popupText"));
     m_confirmText->setWordWrap(true);
     pv->addWidget(m_confirmText);
 

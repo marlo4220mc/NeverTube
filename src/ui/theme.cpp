@@ -282,9 +282,48 @@ QPushButton#historyRow {
 }
 QPushButton#historyRow:hover { background: #1F1F1F; border-radius: 6px; }
 
-/* Boton Suscribirse de la ficha de canal: los dos estados en el QSS global, con
-   la propiedad booleana `subscribed` como selector. El acento sale de
-   @ACCENT@, asi que un cambio de color lo repinta sin tocar el C++. */
+/* --- Ajustes ------------------------------------------------------------
+   Tres niveles de encabezado, y a proposito NO se reutilizan entre si:
+     pageHeading           18 px, titulo de la pagina entera
+     sectionTitle          16 px, titulo de seccion (compartido con las demas
+                           paginas, que ya lo usaban)
+     settingsSectionTitle  11 px en versalitas con tracking, encabezado de
+                           seccion de Ajustes ("INTERFAZ", "DATOS"...)
+   Y las filas de ajuste: etiqueta a la izquierda con ancho minimo para que
+   todos los menus encajen, valor a la derecha. */
+QLabel#pageHeading { font-size: 18px; font-weight: 700; }
+QLabel#settingsSectionTitle {
+    font-size: 11px; font-weight: 600; color: @MUTED@;
+    letter-spacing: 0.5px;
+}
+QLabel#settingsRowLabel { color: @TEXT@; min-width: 200px; }
+QLabel#settingsRowValue { color: @MUTED@; }
+QLabel#settingsNote { font-size: 10px; color: @MUTED@; }
+QLabel#settingsVersion { font-size: 12px; color: @TEXT@; }
+QLabel#popupText { color: @MUTED@; }
+/* El area de scroll de Ajustes no pinta fondo: la pagina ya tiene el suyo. */
+QScrollArea#settingsScroll { background: transparent; }
+
+/* Botones de accion de Ajustes. #actionBtn y #dataActionBtn son el mismo
+   aspecto con padding algo mayor (filas de 150 px de ancho minimo frente a las
+   de la seccion DATOS); se mantienen separados para no cambiar la caja. */
+QPushButton#actionBtn {
+    font-size: 12px; padding: 7px 14px; background-color: #1F1F1F;
+    border: 1px solid @BORDER@; border-radius: 8px; color: @TEXT@;
+}
+QPushButton#dataActionBtn {
+    font-size: 12px; padding: 8px 16px; background-color: #1F1F1F;
+    border: 1px solid @BORDER@; border-radius: 8px; color: @TEXT@;
+}
+/* "Restablecer aplicacion": mismo fondo que los anteriores y solo el borde y
+   el texto en acento, para que se lea como destructivo sin ser un boton
+   primario. El acento sale de @ACCENT@, asi que se repinta solo. */
+QPushButton#accentOutline {
+    font-size: 12px; padding: 8px 16px; background-color: #1F1F1F;
+    border: 1px solid @ACCENT@; border-radius: 8px;
+    color: @ACCENT@; font-weight: 600;
+}
+
 /* Boton Suscribirse de la ficha de canal: los dos estados en el QSS global, con
    la propiedad booleana `subscribed` como selector. El acento sale de
    @ACCENT@, asi que un cambio de color lo repinta sin tocar el C++.

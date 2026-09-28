@@ -87,9 +87,6 @@ private:
     QLabel *m_codecProfileLabel = nullptr;
     // Valor persistido de "Tamaño de las miniaturas" (ver thumbSize()).
     QString m_thumbSize;
-    // Botón "Restablecer aplicación": su borde/texto usan el acento, se guarda
-    // el puntero para re-aplicarlo al cambiar el color de acento (applyAccent).
-    QPushButton *m_resetBtn = nullptr;
     QFrame *m_confirmPopup = nullptr;
     QLabel *m_confirmTitle = nullptr;
     QLabel *m_confirmText = nullptr;

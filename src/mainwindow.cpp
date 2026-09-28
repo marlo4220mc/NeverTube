@@ -1111,6 +1111,9 @@ void MainWindow::setMiniThumb()
         return;
     }
     m_miniThumb->setText(QString());
+    // Con miniatura real el fondo gris del QSS (miniThumb) estorba: el mapa de
+    // bits es el contenido, asi que se queda solo el radio. NO es un inline de
+    // tema pendiente de migrar, es estado dinamico (con o sin miniatura).
     m_miniThumb->setStyleSheet(
         QStringLiteral("background:transparent; border-radius:6px;"));
     m_miniThumb->setPixmap(
