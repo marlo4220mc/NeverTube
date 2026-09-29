@@ -14,7 +14,6 @@ class VideoListView;
 class ThumbnailCache;
 class SettingsRepo;
 class ChannelRow;
-class ChannelCard;
 class Yt;
 class QPushButton;
 
@@ -43,7 +42,7 @@ private slots:
 private:
     void showHistory();
     void setResultsMode(bool active);
-    void buildChannelCards();
+    void buildChannelButtons();
     QStringList history() const;
     void setHistory(const QStringList &queries);
 
@@ -52,19 +51,19 @@ private:
     ThumbnailCache *m_thumbs;
 
     QLineEdit *m_field;
-    QAction *m_clearAct = nullptr;
+    QPushButton *m_clearBtn = nullptr;
     QTimer *m_debounce;
     QWidget *m_historyBox;
     QWidget *m_resultBox;
     QWidget *m_channelBox;
-    QWidget *m_emptyBox = nullptr;
     QSpacerItem *m_bottomStretch = nullptr;
     VideoListView *m_list;
     QPushButton *m_moreButton;
 
     QVector<VideoInfo> m_results;
     QVector<ChannelInfo> m_channels;
-    QHash<QString, ChannelCard *> m_channelCards;
+    QHash<QString, ChannelRow *> m_channelButtons;
+    QWidget *m_channelStrip = nullptr;
     QString m_error;
     bool m_searching = false;
     QString m_activeQuery;
