@@ -92,6 +92,10 @@ private:
     void updateMiniBar();
     void updateMiniIcons();
     void setMiniThumb();
+    // Recorta el título del mini a una línea con elipsis al ancho real.
+    void updateMiniTitleElide();
+    // Compone la segunda línea del mini: "Canal · m:ss / m:ss".
+    void updateMiniTimeText();
     void goToPlayerPage();
     bool handleShortcut(QKeyEvent *event);
     void openWatchAt(const QVector<VideoInfo> &videos, int startIndex,
@@ -160,6 +164,10 @@ private:
     QLabel *m_miniThumb = nullptr;
     QLabel *m_miniTitle = nullptr;
     QLabel *m_miniTime = nullptr;
+    QString m_miniTitleFull;
+    QString m_miniChannel;
+    double m_miniPos = 0.0;
+    double m_miniDur = 0.0;
     QProgressBar *m_miniProgress = nullptr;
     QPushButton *m_miniPlayBtn = nullptr;
     QPushButton *m_miniMuteBtn = nullptr;

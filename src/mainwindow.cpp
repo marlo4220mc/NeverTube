@@ -673,12 +673,9 @@ MainWindow::MainWindow(QWidget *parent)
                     m_miniProgress->setRange(0, dur > 0 ? qRound(dur) : 0);
                     m_miniProgress->setValue(qRound(pos));
                 }
-                if (m_miniTime) {
-                    m_miniTime->setText(
-                        QStringLiteral("%1 / %2")
-                            .arg(fmtTime(pos))
-                            .arg(fmtTime(dur)));
-                }
+                m_miniPos = pos;
+                m_miniDur = dur;
+                updateMiniTimeText();
             });
     connect(m_pages, &QStackedWidget::currentChanged, this,
             [this](int) { updateMiniPlayer(); });
@@ -816,6 +813,10 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
+    if (event->type() == QEvent::Resize && watched == m_miniTitle) {
+        updateMiniTitleElide();
+        return false;
+    }
     if (event->type() == QEvent::KeyPress && watched->isWidgetType()) {
         if (auto *ke = static_cast<QKeyEvent *>(event))
             if (handleShortcut(ke))
@@ -943,6 +944,11 @@ void MainWindow::setupMiniBar()
     m_miniTitle = new QLabel(QStringLiteral("Nada en reproducción"), m_miniBar);
     m_miniTitle->setObjectName(QStringLiteral("miniTitle"));
     m_miniTitle->setTextInteractionFlags(Qt::NoTextInteraction);
+    // Una sola línea con elipsis: updateMiniTitleElide() recorta al ancho real y
+    // el eventFilter de la ventana lo recalcula al redimensionar la etiqueta.
+    m_miniTitle->setWordWrap(false);
+    m_miniTitleFull = QStringLiteral("Nada en reproducción");
+    m_miniTitle->installEventFilter(this);
     m_miniTime = new QLabel(QStringLiteral("0:00 / 0:00"), m_miniBar);
     m_miniTime->setObjectName(QStringLiteral("miniTime"));
     m_miniTime->setTextInteractionFlags(Qt::NoTextInteraction);
@@ -953,21 +959,21 @@ void MainWindow::setupMiniBar()
     m_miniPlayBtn = new QPushButton(m_miniBar);
     m_miniPlayBtn->setObjectName(QStringLiteral("iconBtn"));
     m_miniPlayBtn->setCursor(Qt::PointingHandCursor);
-    m_miniPlayBtn->setIcon(nt::icon(nt::Icon::Play, nt::kText, 20));
+    m_miniPlayBtn->setIcon(nt::icon(nt::Icon::Play, nt::kText, 17));
     m_miniPlayBtn->setToolTip(QStringLiteral("Reproducir / Pausar (K)"));
     row->addWidget(m_miniPlayBtn);
 
     m_miniMuteBtn = new QPushButton(m_miniBar);
     m_miniMuteBtn->setObjectName(QStringLiteral("iconBtn"));
     m_miniMuteBtn->setCursor(Qt::PointingHandCursor);
-    m_miniMuteBtn->setIcon(nt::icon(nt::Icon::Mute, nt::kMuted, 16));
+    m_miniMuteBtn->setIcon(nt::icon(nt::Icon::Mute, nt::kMuted, 17));
     m_miniMuteBtn->setToolTip(QStringLiteral("Silenciar (M)"));
     row->addWidget(m_miniMuteBtn);
 
     m_miniCloseBtn = new QPushButton(m_miniBar);
     m_miniCloseBtn->setObjectName(QStringLiteral("iconBtn"));
     m_miniCloseBtn->setCursor(Qt::PointingHandCursor);
-    m_miniCloseBtn->setIcon(nt::icon(nt::Icon::Clear, nt::kMuted, 16));
+    m_miniCloseBtn->setIcon(nt::icon(nt::Icon::Clear, nt::kMuted, 17));
     m_miniCloseBtn->setToolTip(QStringLiteral("Cerrar y detener"));
     row->addWidget(m_miniCloseBtn);
 
@@ -975,7 +981,7 @@ void MainWindow::setupMiniBar()
 
     m_miniProgress = new QProgressBar(m_miniBar);
     m_miniProgress->setTextVisible(false);
-    m_miniProgress->setFixedHeight(3);
+    m_miniProgress->setFixedHeight(4);
     lay->addWidget(m_miniProgress);
 
     connect(m_miniPlayBtn, &QPushButton::clicked, this, [this]() {
@@ -1084,17 +1090,17 @@ void MainWindow::updateMiniBar()
         return;
     const VideoInfo v = m_player.current();
     if (v.id.isEmpty()) {
-        m_miniTitle->setText(QStringLiteral("Nada en reproducción"));
+        m_miniTitleFull = QStringLiteral("Nada en reproducción");
+        updateMiniTitleElide();
         m_miniThumb->setText(QString());
         m_miniProgress->setRange(0, 0);
         return;
     }
-    QString line = v.title;
-    if (!line.isEmpty() && !v.channel.isEmpty())
-        line += QStringLiteral("\n");
-    if (!v.channel.isEmpty())
-        line += v.channel;
-    m_miniTitle->setText(line);
+    m_miniChannel = v.channel;
+    m_miniTitleFull = v.title.isEmpty() ? QStringLiteral("Nada en reproducción")
+                                        : v.title;
+    updateMiniTitleElide();
+    updateMiniTimeText();
 
     QString thumbUrl = v.thumbnailUrl;
     if (thumbUrl.isEmpty())
@@ -1148,10 +1154,32 @@ void MainWindow::updateMiniIcons()
         return;
     m_miniPlayBtn->setIcon(nt::icon(
         m_player.isPaused() ? nt::Icon::Play : nt::Icon::Pause,
-        nt::kText, 20));
+        nt::kText, 17));
     m_miniMuteBtn->setIcon(nt::icon(
         m_player.muted() ? nt::Icon::Unmute : nt::Icon::Mute,
-        nt::kMuted, 16));
+        nt::kMuted, 17));
+}
+
+// El título del mini cabe una sola línea: se recorta con elipsis al ancho real
+// (el eventFilter lo recalcula al redimensionar la etiqueta).
+void MainWindow::updateMiniTitleElide()
+{
+    if (!m_miniTitle)
+        return;
+    const QString elided = m_miniTitle->fontMetrics().elidedText(
+        m_miniTitleFull, Qt::ElideRight, qMax(0, m_miniTitle->width()));
+    m_miniTitle->setText(elided);
+}
+
+// Segunda línea del mini: "Canal · m:ss / m:ss" (el canal solo si se conoce).
+void MainWindow::updateMiniTimeText()
+{
+    if (!m_miniTime)
+        return;
+    QString t = QStringLiteral("%1 / %2").arg(fmtTime(m_miniPos)).arg(fmtTime(m_miniDur));
+    if (!m_miniChannel.isEmpty())
+        t = m_miniChannel + QStringLiteral(" · ") + t;
+    m_miniTime->setText(t);
 }
 
 void MainWindow::goHome()
