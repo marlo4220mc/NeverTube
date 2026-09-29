@@ -711,8 +711,10 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     segLay->addWidget(m_dislikeBtn);
     actionsRow->addWidget(seg);
 
-    // Resto de acciones: pastilla circular de icono solo, con tooltip.
-    auto makeAction = [this](nt::Icon icon, const QString &tip,
+    // Resto de acciones: pastilla circular de icono solo, con tooltip. Se
+    // añaden EXPLÍCITAMENTE a actionsRow: crear el botón no basta, sin
+    // addWidget queda fuera del layout y no se ve.
+    auto makeAction = [this, actionsRow](nt::Icon icon, const QString &tip,
                              QPushButton **out, nt::Icon *iconOut) {
         auto *b = new QPushButton(this);
         b->setObjectName(QStringLiteral("actionChip"));
@@ -722,6 +724,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         b->setFixedSize(40, 40);
         b->setToolTip(tip);
         b->setAccessibleName(tip);
+        actionsRow->addWidget(b);
         *out = b;
         *iconOut = icon;
     };
