@@ -679,14 +679,17 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     channelRow->addWidget(m_subscribeBtn, 0, Qt::AlignVCenter);
     infoLay->addLayout(channelRow);
 
-    auto *actionsRow = new FlowLayout(0, 8, 8);
+    // Fila de acciones. Altura 44 px (WCAG 2.5.5, objetivo táctil recomendado;
+    // 40 px se quedaba corto) y 10 px de separacion entre objetivos contiguos.
+    // El segmentado crece a la misma altura para que la fila no quede escalonada.
+    auto *actionsRow = new FlowLayout(0, 10, 10);
 
     // Grupo segmentado Me gusta / No me gusta. Ambos son de icono solo: el texto
     // de los 6 chips liberaba media fila y el FlowLayout saltaba de línea. El
     // tooltip y el nombre accesible conservan la etiqueta.
     auto *seg = new QWidget(this);
     seg->setObjectName(QStringLiteral("actionSeg"));
-    seg->setFixedHeight(40);
+    seg->setFixedHeight(44);
     auto *segLay = new QHBoxLayout(seg);
     segLay->setContentsMargins(0, 0, 0, 0);
     segLay->setSpacing(0);
@@ -697,7 +700,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         b->setCursor(Qt::PointingHandCursor);
         b->setIcon(nt::icon(icon, nt::kMuted, 20));
         b->setIconSize(QSize(20, 20));
-        b->setFixedSize(48, 40);
+        b->setFixedSize(52, 44);
         b->setToolTip(tip);
         b->setAccessibleName(tip);
         *out = b;
@@ -721,7 +724,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         b->setCursor(Qt::PointingHandCursor);
         b->setIcon(nt::icon(icon, nt::kMuted, 20));
         b->setIconSize(QSize(20, 20));
-        b->setFixedSize(40, 40);
+        b->setFixedSize(44, 44);
         b->setToolTip(tip);
         b->setAccessibleName(tip);
         actionsRow->addWidget(b);

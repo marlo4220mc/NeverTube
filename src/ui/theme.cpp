@@ -301,7 +301,7 @@ QPushButton#channelBtn:hover { background: #1F1F1F; }
    decide la propiedad booleana `active`, igual que #subscribe con la suya; el
    color del icono lo pinta updateActionButtons (el QSS no tinta QIcons). */
 QPushButton#actionChip {
-    background: #1F1F1F; border-radius: 20px; padding: 0;
+    background: #1F1F1F; border-radius: 22px; padding: 0;
 }
 QPushButton#actionChip:hover { background: @HOVER@; }
 QPushButton#actionChip[active="true"] { background: @BORDER@; }
@@ -309,17 +309,17 @@ QPushButton#actionChip[active="true"]:hover { background: @SELECTION@; }
 
 /* Grupo segmentado Me gusta / No me gusta: las esquinas exteriores redondeadas
    y un hairline entre los dos. El fondo del grupo es el del chip. */
-QWidget#actionSeg { background: #1F1F1F; border-radius: 20px; }
+QWidget#actionSeg { background: #1F1F1F; border-radius: 22px; }
 QPushButton#actionSegL, QPushButton#actionSegR {
     background: transparent; border: none; padding: 0;
 }
 QPushButton#actionSegL:hover, QPushButton#actionSegR:hover { background: @HOVER@; }
 QPushButton#actionSegL {
-    border-top-left-radius: 20px; border-bottom-left-radius: 20px;
+    border-top-left-radius: 22px; border-bottom-left-radius: 22px;
     border-right: 1px solid @BORDER@;
 }
 QPushButton#actionSegR {
-    border-top-right-radius: 20px; border-bottom-right-radius: 20px;
+    border-top-right-radius: 22px; border-bottom-right-radius: 22px;
 }
 QPushButton#actionSegL[active="true"], QPushButton#actionSegR[active="true"] {
     background: @BORDER@;
