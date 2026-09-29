@@ -7,6 +7,7 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QEvent>
+#include <QFontMetrics>
 #include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
@@ -42,6 +43,9 @@
 #include "../theme.h"
 #include "../thumbnail_cache.h"
 #include "../video_list_view.h"
+
+// Líneas visibles de la descripción cuando está colapsada (estilo YouTube).
+static const int kDescLines = 3;
 
 // Resoluciones del menú del reproductor, de menor a mayor. Fuente ÚNICA de
 // verdad: los índices del menú (m_qualityItems), idxToQuality,
@@ -676,35 +680,59 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     infoLay->addLayout(channelRow);
 
     auto *actionsRow = new FlowLayout(0, 8, 8);
-    auto makeAction = [this](nt::Icon icon, const QString &text,
-                             QPushButton **out, nt::Icon *iconOut)
-        -> QPushButton * {
-        auto *b = new QPushButton(text, this);
+
+    // Grupo segmentado Me gusta / No me gusta. Ambos son de icono solo: el texto
+    // de los 6 chips liberaba media fila y el FlowLayout saltaba de línea. El
+    // tooltip y el nombre accesible conservan la etiqueta.
+    auto *seg = new QWidget(this);
+    seg->setObjectName(QStringLiteral("actionSeg"));
+    seg->setFixedHeight(40);
+    auto *segLay = new QHBoxLayout(seg);
+    segLay->setContentsMargins(0, 0, 0, 0);
+    segLay->setSpacing(0);
+    auto makeSeg = [&](const QString &objName, nt::Icon icon, const QString &tip,
+                       QPushButton **out, nt::Icon *iconOut) {
+        auto *b = new QPushButton(seg);
+        b->setObjectName(objName);
+        b->setCursor(Qt::PointingHandCursor);
+        b->setIcon(nt::icon(icon, nt::kMuted, 20));
+        b->setIconSize(QSize(20, 20));
+        b->setFixedSize(48, 40);
+        b->setToolTip(tip);
+        b->setAccessibleName(tip);
+        *out = b;
+        *iconOut = icon;
+    };
+    makeSeg(QStringLiteral("actionSegL"), nt::Icon::Thumb,
+            QStringLiteral("Me gusta"), &m_likeBtn, &m_likeIcon);
+    makeSeg(QStringLiteral("actionSegR"), nt::Icon::ThumbDown,
+            QStringLiteral("No me gusta"), &m_dislikeBtn, &m_dislikeIcon);
+    segLay->addWidget(m_likeBtn);
+    segLay->addWidget(m_dislikeBtn);
+    actionsRow->addWidget(seg);
+
+    // Resto de acciones: pastilla circular de icono solo, con tooltip.
+    auto makeAction = [this](nt::Icon icon, const QString &tip,
+                             QPushButton **out, nt::Icon *iconOut) {
+        auto *b = new QPushButton(this);
         b->setObjectName(QStringLiteral("actionChip"));
         b->setCursor(Qt::PointingHandCursor);
         b->setIcon(nt::icon(icon, nt::kMuted, 20));
         b->setIconSize(QSize(20, 20));
+        b->setFixedSize(40, 40);
+        b->setToolTip(tip);
+        b->setAccessibleName(tip);
         *out = b;
         *iconOut = icon;
-        return b;
     };
-    actionsRow->addWidget(makeAction(nt::Icon::Thumb, QStringLiteral("Me gusta"),
-                                   &m_likeBtn, &m_likeIcon));
-    actionsRow->addWidget(makeAction(nt::Icon::ThumbDown,
-                                   QStringLiteral("No me gusta"),
-                                   &m_dislikeBtn, &m_dislikeIcon));
-    actionsRow->addWidget(makeAction(nt::Icon::Share,
-                                   QStringLiteral("Compartir"),
-                                   &m_shareBtn, &m_shareIcon));
-    actionsRow->addWidget(makeAction(nt::Icon::Star,
-                                   QStringLiteral("Favorito"),
-                                   &m_starBtn, &m_starIcon));
-    actionsRow->addWidget(makeAction(nt::Icon::WatchLater,
-                                   QStringLiteral("Ver más tarde"),
-                                   &m_watchLaterBtn, &m_watchLaterIcon));
-    actionsRow->addWidget(makeAction(nt::Icon::ListAdd,
-                                   QStringLiteral("Agregar a playlist"),
-                                   &m_playlistBtn, &m_playlistIcon));
+    makeAction(nt::Icon::Share, QStringLiteral("Compartir"),
+               &m_shareBtn, &m_shareIcon);
+    makeAction(nt::Icon::Star, QStringLiteral("Favorito"),
+               &m_starBtn, &m_starIcon);
+    makeAction(nt::Icon::WatchLater, QStringLiteral("Ver más tarde"),
+               &m_watchLaterBtn, &m_watchLaterIcon);
+    makeAction(nt::Icon::ListAdd, QStringLiteral("Agregar a playlist"),
+               &m_playlistBtn, &m_playlistIcon);
     connect(m_playlistBtn, &QPushButton::clicked, this,
             &WatchPage::showPlaylistMenu);
     infoLay->addLayout(actionsRow);
@@ -716,9 +744,22 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
                                          | Qt::TextSelectableByMouse);
     m_descLabel->setOpenExternalLinks(true);
     m_descLabel->setObjectName(QStringLiteral("watchDesc"));
-    // La descripción del vídeo crece verticalmente: sin tope de altura y sin
-    // botón "Ver más" (no se colapsa).
+    // El colapso lo decide updateDescCollapse() según el ancho REAL (no un
+    // número fijo de caracteres). El filtro de eventos de la página re-evalúa
+    // al redimensionar la etiqueta, para que el botón no aparezca de más ni
+    // falte al cambiar el tamaño de la ventana.
+    m_descLabel->installEventFilter(this);
     infoLay->addWidget(m_descLabel);
+
+    m_descToggle = new QPushButton(QStringLiteral("…más"), this);
+    m_descToggle->setObjectName(QStringLiteral("descToggle"));
+    m_descToggle->setCursor(Qt::PointingHandCursor);
+    m_descToggle->hide();
+    connect(m_descToggle, &QPushButton::clicked, this, [this]() {
+        m_descExpanded = !m_descExpanded;
+        updateDescCollapse();
+    });
+    infoLay->addWidget(m_descToggle, 0, Qt::AlignLeft);
     midLay->addWidget(infoWidget, 7);
 
     auto *bottomWidget = new QWidget;
@@ -726,14 +767,22 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     auto *bot = new QVBoxLayout(bottomWidget);
     bot->setContentsMargins(0, 8, 16, 8);
     bot->setSpacing(6);
+    auto *quRow = new QHBoxLayout;
+    quRow->setContentsMargins(0, 0, 0, 0);
+    quRow->setSpacing(8);
     auto *quTitle = new QLabel(QStringLiteral("A continuación"), this);
     quTitle->setObjectName(QStringLiteral("queueTitle"));
+    m_queueCount = new QLabel(this);
+    m_queueCount->setObjectName(QStringLiteral("queueCount"));
+    quRow->addWidget(quTitle);
+    quRow->addStretch(1);
+    quRow->addWidget(m_queueCount);
     m_nextUpList = new VideoListView(m_thumbs, this);
     m_nextUpList->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_nextUpList->setSizePolicy(QSizePolicy::Expanding,
                                 QSizePolicy::Expanding);
     m_nextUpList->setMinimumHeight(90);
-    bot->addWidget(quTitle);
+    bot->addLayout(quRow);
     bot->addWidget(m_nextUpList);
 
     // "A continuación" a la derecha de la descripción, dentro del scroll
@@ -989,6 +1038,10 @@ void WatchPage::updateQueue()
     // con recuadro y los saltados/ya vistos siguen visibles y elegibles.
     m_nextUpList->showVideos(m_queue, VideoListView::ListMode);
     m_nextUpList->setCurrentRow(idx);
+    if (m_queueCount)
+        m_queueCount->setText(m_queue.isEmpty()
+            ? QString()
+            : QStringLiteral("%1 vídeos").arg(m_queue.size()));
     // La cola vive DENTRO del scroll de la página: su altura se ajusta al
     // contenido real (filas × alto de fila) para que el scroll de la página
     // mueva la cola entera, sin scroll interno duplicado.
@@ -1398,6 +1451,8 @@ void WatchPage::applyDescription(const QString &description)
     m_description = description;
     if (description.isEmpty()) {
         m_descLabel->hide();
+        if (m_descToggle)
+            m_descToggle->hide();
         return;
     }
     QString rich = description.toHtmlEscaped();
@@ -1408,6 +1463,41 @@ void WatchPage::applyDescription(const QString &description)
     m_descLabel->setText(QStringLiteral(
         "<style>a { text-decoration:none; }</style>") + rich);
     m_descLabel->show();
+    // Cada vídeo arranca colapsado. El ancho real aún no está calculado en este
+    // punto, así que la decisión se toma en el siguiente ciclo del bucle.
+    m_descExpanded = false;
+    QTimer::singleShot(0, this, [this]() { updateDescCollapse(); });
+}
+
+// Recorta la descripción a kDescLines y muestra "…más"/"…menos" solo cuando el
+// texto no cabe. Se recalcula al cambiar el ancho (eventFilter) para que el
+// botón no aparezca de más ni falte al redimensionar la ventana.
+void WatchPage::updateDescCollapse()
+{
+    if (!m_descLabel || !m_descToggle || m_inDescCollapse)
+        return;
+    if (m_description.isEmpty()) {
+        m_descToggle->hide();
+        m_descCollapsible = false;
+        return;
+    }
+    m_inDescCollapse = true;
+    m_descLabel->setMaximumHeight(QWIDGETSIZE_MAX);
+    const int w = m_descLabel->width();
+    const int lineH = m_descLabel->fontMetrics().lineSpacing();
+    const int maxH = lineH * kDescLines;
+    const int fullH = (w > 0 && lineH > 0) ? m_descLabel->heightForWidth(w) : 0;
+    m_descCollapsible = fullH > maxH + lineH / 2;
+    if (!m_descCollapsible) {
+        m_descToggle->hide();
+    } else {
+        m_descToggle->setText(m_descExpanded ? QStringLiteral("…menos")
+                                             : QStringLiteral("…más"));
+        m_descToggle->show();
+        if (!m_descExpanded)
+            m_descLabel->setMaximumHeight(maxH);
+    }
+    m_inDescCollapse = false;
 }
 
 void WatchPage::onPhaseChanged(const QString &phase)
@@ -1673,6 +1763,13 @@ void WatchPage::leaveFullscreen()
 // scroll) sobre el área de vídeo muestra los controles y reinicia el temporizador.
 bool WatchPage::eventFilter(QObject *watched, QEvent *event)
 {
+    // La descripción re-evalúa su colapso cuando cambia de ancho: así el botón
+    // "…más" aparece justo cuando el texto deja de caber y desaparece cuando
+    // vuelve a caber.
+    if (watched == m_descLabel && event->type() == QEvent::Resize) {
+        updateDescCollapse();
+        return false;
+    }
     // En el mini player el PlayerWidget está reparentado al hueco del mini bar
     // (el filtro sigue instalado en él). Los eventos sobre el vídeo del mini no
     // deben alternar play/pausa ni mostrar el overlay: el mini bar gestiona el

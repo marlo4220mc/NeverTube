@@ -127,6 +127,9 @@ private:
     // Pinta la descripción del vídeo como HTML enriquecido (enlaces + saltos
     // de línea) y guarda el texto plano. Vacía = oculta la descripción.
     void applyDescription(const QString &description);
+    // Aplica el colapso de la descripción (kDescLines) y decide si el botón
+    // "…más" hace falta para el ancho actual.
+    void updateDescCollapse();
     // True si el vídeo dado es el que está en reproducción (ignora respuestas
     // que llegan tarde, de un vídeo ya reemplazado).
     bool isCurrentVideo(const QString &videoId) const;
@@ -218,7 +221,16 @@ private:
     // baja. 0 = indeterminado (cae al techo del stream cargado).
     int m_availableMaxH = 0;
     QLabel *m_descLabel;
+    // Descripción colapsable: se recorta a kDescLines y un botón "…más"/"…menos"
+    // la despliega. m_descCollapsible se recalcula al vuelo (según el ancho)
+    // para no mostrar el botón cuando el texto ya cabe entero.
+    QPushButton *m_descToggle = nullptr;
+    bool m_descExpanded = false;
+    bool m_descCollapsible = false;
+    bool m_inDescCollapse = false;
     VideoListView *m_nextUpList;
+    // Contador de la cola, alineado a la derecha del título "A continuación".
+    QLabel *m_queueCount = nullptr;
 
     // Controles flotantes sobre el video (overlay).
     QWidget *m_ctrlBar = nullptr;

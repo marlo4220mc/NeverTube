@@ -254,8 +254,17 @@ QLabel#ovError {
 /* Columna de informacion: metadatos y descripcion. */
 QLabel#watchMeta { color: @METATEXT@; font-size: 12px; }
 QLabel#watchDesc { color: @METATEXT@; font-size: 12px; background: transparent; }
-/* Titulo del bloque "A continuacion". */
+/* Titulo del bloque "A continuacion" y contador a su derecha. */
 QLabel#queueTitle { font-weight: 600; font-size: 13px; color: @TEXT@; }
+QLabel#queueCount { color: @METATEXT@; font-size: 12px; }
+
+/* Boton "…mas"/"…menos" de la descripcion colapsada: enlace discreto, no una
+   capsula (no compite con las acciones). */
+QPushButton#descToggle {
+    background: transparent; border: none; padding: 0;
+    color: @MUTED@; font-size: 12px; font-weight: 600; text-align: left;
+}
+QPushButton#descToggle:hover { color: @TEXT@; }
 /* Boton del canal bajo el titulo: icono a la izquierda y texto a la derecha.
    No es #ghost porque necesita padding de 8px en vez de 6px. */
 QPushButton#channelBtn {
@@ -264,17 +273,35 @@ QPushButton#channelBtn {
     color: @TEXT@; font-weight: 600; font-size: 13px;
 }
 QPushButton#channelBtn:hover { background: #1F1F1F; }
-/* Botones de accion (Me gusta, No me gusta, Favorito...). El estado lo decide
-   la propiedad booleana `active`, igual que #subscribe con la suya. */
+/* Botones de accion del player: icono solo, en pastilla circular. El estado lo
+   decide la propiedad booleana `active`, igual que #subscribe con la suya; el
+   color del icono lo pinta updateActionButtons (el QSS no tinta QIcons). */
 QPushButton#actionChip {
-    background: #1F1F1F; border-radius: 16px; padding: 7px 14px;
-    color: @TEXT@; font-size: 13px;
+    background: #1F1F1F; border-radius: 20px; padding: 0;
 }
 QPushButton#actionChip:hover { background: @HOVER@; }
-QPushButton#actionChip[active="true"] {
-    background: @BORDER@; color: @ACCENT@; font-weight: 600;
-}
+QPushButton#actionChip[active="true"] { background: @BORDER@; }
 QPushButton#actionChip[active="true"]:hover { background: @SELECTION@; }
+
+/* Grupo segmentado Me gusta / No me gusta: las esquinas exteriores redondeadas
+   y un hairline entre los dos. El fondo del grupo es el del chip. */
+QWidget#actionSeg { background: #1F1F1F; border-radius: 20px; }
+QPushButton#actionSegL, QPushButton#actionSegR {
+    background: transparent; border: none; padding: 0;
+}
+QPushButton#actionSegL:hover, QPushButton#actionSegR:hover { background: @HOVER@; }
+QPushButton#actionSegL {
+    border-top-left-radius: 20px; border-bottom-left-radius: 20px;
+    border-right: 1px solid @BORDER@;
+}
+QPushButton#actionSegR {
+    border-top-right-radius: 20px; border-bottom-right-radius: 20px;
+}
+QPushButton#actionSegL[active="true"], QPushButton#actionSegR[active="true"] {
+    background: @BORDER@;
+}
+QPushButton#actionSegL[active="true"]:hover,
+QPushButton#actionSegR[active="true"]:hover { background: @SELECTION@; }
 
 /* Chip de calidad. Antes llevaba objectName="iconBtn", que es el estilo de un
    boton cuadrado de icono (padding 6, sin borde), pero lleva texto: sin
