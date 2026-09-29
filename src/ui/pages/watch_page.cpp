@@ -645,7 +645,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     infoLay->setSpacing(6);
 
     m_title = new QLabel(this);
-    m_title->setObjectName(QStringLiteral("sectionTitle"));
+    m_title->setObjectName(QStringLiteral("watchTitle"));
     m_title->setWordWrap(true);
     infoLay->addWidget(m_title);
 
@@ -748,10 +748,23 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // número fijo de caracteres). El filtro de eventos de la página re-evalúa
     // al redimensionar la etiqueta, para que el botón no aparezca de más ni
     // falte al cambiar el tamaño de la ventana.
+    // Tarjeta de la descripción: fondo #181818 con el texto y el control
+    // "…más"/"…menos", y un degradado en el borde inferior cuando está
+    // colapsada (el texto se funde con el fondo en vez de cortarse).
+    m_descCard = new QFrame(this);
+    m_descCard->setObjectName(QStringLiteral("watchDescCard"));
+    m_descCard->installEventFilter(this);
+    auto *descLay = new QVBoxLayout(m_descCard);
+    descLay->setContentsMargins(12, 10, 12, 10);
+    descLay->setSpacing(4);
     m_descLabel->installEventFilter(this);
-    infoLay->addWidget(m_descLabel);
+    descLay->addWidget(m_descLabel);
 
-    m_descToggle = new QPushButton(QStringLiteral("…más"), this);
+    m_descFade = new QFrame(m_descCard);
+    m_descFade->setObjectName(QStringLiteral("descFade"));
+    m_descFade->hide();
+
+    m_descToggle = new QPushButton(QStringLiteral("…más"), m_descCard);
     m_descToggle->setObjectName(QStringLiteral("descToggle"));
     m_descToggle->setCursor(Qt::PointingHandCursor);
     m_descToggle->hide();
@@ -759,7 +772,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         m_descExpanded = !m_descExpanded;
         updateDescCollapse();
     });
-    infoLay->addWidget(m_descToggle, 0, Qt::AlignLeft);
+    descLay->addWidget(m_descToggle, 0, Qt::AlignLeft);
+    infoLay->addWidget(m_descCard);
     midLay->addWidget(infoWidget, 7);
 
     auto *bottomWidget = new QWidget;
@@ -1453,6 +1467,10 @@ void WatchPage::applyDescription(const QString &description)
         m_descLabel->hide();
         if (m_descToggle)
             m_descToggle->hide();
+        if (m_descFade)
+            m_descFade->hide();
+        if (m_descCard)
+            m_descCard->hide();
         return;
     }
     QString rich = description.toHtmlEscaped();
@@ -1463,6 +1481,8 @@ void WatchPage::applyDescription(const QString &description)
     m_descLabel->setText(QStringLiteral(
         "<style>a { text-decoration:none; }</style>") + rich);
     m_descLabel->show();
+    if (m_descCard)
+        m_descCard->show();
     // Cada vídeo arranca colapsado. El ancho real aún no está calculado en este
     // punto, así que la decisión se toma en el siguiente ciclo del bucle.
     m_descExpanded = false;
@@ -1478,6 +1498,8 @@ void WatchPage::updateDescCollapse()
         return;
     if (m_description.isEmpty()) {
         m_descToggle->hide();
+        if (m_descFade)
+            m_descFade->hide();
         m_descCollapsible = false;
         return;
     }
@@ -1490,6 +1512,8 @@ void WatchPage::updateDescCollapse()
     m_descCollapsible = fullH > maxH + lineH / 2;
     if (!m_descCollapsible) {
         m_descToggle->hide();
+        if (m_descFade)
+            m_descFade->hide();
     } else {
         m_descToggle->setText(m_descExpanded ? QStringLiteral("…menos")
                                              : QStringLiteral("…más"));
@@ -1498,6 +1522,27 @@ void WatchPage::updateDescCollapse()
             m_descLabel->setMaximumHeight(maxH);
     }
     m_inDescCollapse = false;
+    positionDescFade();
+}
+
+// Coloca el degradado en el borde inferior de la tarjeta (solo con la
+// descripción colapsada) y lo sube por encima del texto, dejando el botón
+// "…más" por delante.
+void WatchPage::positionDescFade()
+{
+    if (!m_descFade || !m_descCard)
+        return;
+    if (!(m_descCollapsible && !m_descExpanded && m_descCard->isVisible())) {
+        m_descFade->hide();
+        return;
+    }
+    const int fh = 26;
+    m_descFade->setGeometry(1, qMax(0, m_descCard->height() - fh - 1),
+                            qMax(0, m_descCard->width() - 2), fh);
+    m_descFade->show();
+    m_descFade->raise();
+    if (m_descToggle)
+        m_descToggle->raise();
 }
 
 void WatchPage::onPhaseChanged(const QString &phase)
@@ -1768,6 +1813,10 @@ bool WatchPage::eventFilter(QObject *watched, QEvent *event)
     // vuelve a caber.
     if (watched == m_descLabel && event->type() == QEvent::Resize) {
         updateDescCollapse();
+        return false;
+    }
+    if (watched == m_descCard && event->type() == QEvent::Resize) {
+        positionDescFade();
         return false;
     }
     // En el mini player el PlayerWidget está reparentado al hueco del mini bar

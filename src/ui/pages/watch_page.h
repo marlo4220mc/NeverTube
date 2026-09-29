@@ -130,6 +130,9 @@ private:
     // Aplica el colapso de la descripción (kDescLines) y decide si el botón
     // "…más" hace falta para el ancho actual.
     void updateDescCollapse();
+    // Coloca el degradado en el borde inferior de la tarjeta de descripción
+    // (solo con la descripción colapsada).
+    void positionDescFade();
     // True si el vídeo dado es el que está en reproducción (ignora respuestas
     // que llegan tarde, de un vídeo ya reemplazado).
     bool isCurrentVideo(const QString &videoId) const;
@@ -225,6 +228,10 @@ private:
     // la despliega. m_descCollapsible se recalcula al vuelo (según el ancho)
     // para no mostrar el botón cuando el texto ya cabe entero.
     QPushButton *m_descToggle = nullptr;
+    // Tarjeta que agrupa la descripción (+ su "…más") y el degradado inferior
+    // que se muestra cuando está colapsada.
+    QFrame *m_descCard = nullptr;
+    QFrame *m_descFade = nullptr;
     bool m_descExpanded = false;
     bool m_descCollapsible = false;
     bool m_inDescCollapse = false;

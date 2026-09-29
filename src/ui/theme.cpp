@@ -91,6 +91,9 @@ QToolButton#navBtn:disabled { color: @DISABLED@; }
 
 QLabel { background: transparent; }
 QLabel#sectionTitle { font-size: 16px; font-weight: 600; color: #ECECEC; }
+/* Titulo del video en la pagina Player: un punto mas grande que los titulos de
+   seccion (es el H1 de la pagina). */
+QLabel#watchTitle { font-size: 17px; font-weight: 600; color: @TEXT@; }
 QLabel#sectionSub { font-size: 12px; color: #8F8F8F; }
 /* Estado vacio de una seccion de la Biblioteca: caja con borde punteado y el
    texto centrado, en vez de una linea suelta de texto gris. */
@@ -261,9 +264,23 @@ QLabel#ovError {
 /* Columna de informacion: metadatos y descripcion. */
 QLabel#watchMeta { color: @METATEXT@; font-size: 12px; }
 QLabel#watchDesc { color: @METATEXT@; font-size: 12px; background: transparent; }
+/* Tarjeta de la descripcion del Player (agrupa el texto y el "…mas"/"…menos"),
+   con el degradado inferior que se usa cuando la descripcion esta colapsada. */
+QFrame#watchDescCard {
+    background: #181818; border: 1px solid @BORDER@; border-radius: 10px;
+}
+QFrame#descFade {
+    border: none;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 rgba(24,24,24,0), stop:1 #181818);
+}
 /* Titulo del bloque "A continuacion" y contador a su derecha. */
 QLabel#queueTitle { font-weight: 600; font-size: 13px; color: @TEXT@; }
-QLabel#queueCount { color: @METATEXT@; font-size: 12px; }
+QLabel#queueCount {
+    color: @METATEXT@; font-size: 11px;
+    background: #1F1F1F; border: 1px solid @BORDER@; border-radius: 9px;
+    padding: 1px 8px;
+}
 
 /* Boton "…mas"/"…menos" de la descripcion colapsada: enlace discreto, no una
    capsula (no compite con las acciones). */
