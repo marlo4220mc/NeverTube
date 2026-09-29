@@ -394,13 +394,31 @@ void SettingsPage::buildUI()
     scrollArea->setWidget(content);
     mainLay->addWidget(scrollArea, 1);
 
+    // Cada sección es un grupo "título + tarjeta": las filas van dentro de la
+    // tarjeta (#settingsCard), no sueltas en scrollLay. cardLay apunta a la
+    // tarjeta de la sección vigente y lo consumen los helpers de fila
+    // (addOptionRow, addActionButton y los bloques en línea).
+    QVBoxLayout *cardLay = nullptr;
+
     // Encabezado de sección de Ajustes (INTERFAZ, REPRODUCCION, DATOS...). A
     // propósito NO es #sectionSub: ese es el subtitulo de 12 px de las demas
     // paginas, y aqui son 11 px en versalitas con algo de tracking.
-    auto addSectionTitle = [scrollLay](const QString &t) {
+    auto addSectionTitle = [scrollLay, &cardLay](const QString &t) {
+        auto *group = new QWidget;
+        auto *gv = new QVBoxLayout(group);
+        gv->setContentsMargins(0, 0, 0, 0);
+        gv->setSpacing(6);
         auto *subTitle = new QLabel(t);
         subTitle->setObjectName(QStringLiteral("settingsSectionTitle"));
-        scrollLay->addWidget(subTitle);
+        gv->addWidget(subTitle);
+        auto *card = new QFrame;
+        card->setObjectName(QStringLiteral("settingsCard"));
+        auto *cv = new QVBoxLayout(card);
+        cv->setContentsMargins(14, 4, 14, 4);
+        cv->setSpacing(0);
+        gv->addWidget(card);
+        scrollLay->addWidget(group);
+        cardLay = cv;
     };
 
     // Nota aclaratoria bajo un ajuste: siempre se agrupa con su fila en un
@@ -412,7 +430,7 @@ void SettingsPage::buildUI()
         return note;
     };
 
-    auto addOptionRow = [this, scrollLay, addNote](
+    auto addOptionRow = [this, &cardLay, addNote](
                             const QString &labelText,
                             const QStringList &options,
                             const QString &saved,
@@ -434,7 +452,7 @@ void SettingsPage::buildUI()
         block->addLayout(row);
         if (!note.isEmpty())
             block->addWidget(addNote(note));
-        scrollLay->addLayout(block);
+        cardLay->addLayout(block);
         setupValueMenu(btn, options, fromVal(saved), onPick);
         Q_UNUSED(defaultVal);
     };
@@ -521,7 +539,7 @@ void SettingsPage::buildUI()
         });
         row->addWidget(btn);
 #endif
-        scrollLay->addLayout(row);
+        cardLay->addLayout(row);
     }
 
     // Idioma de audio: pista preferida cuando el vídeo la ofrece (incluye
@@ -597,7 +615,7 @@ void SettingsPage::buildUI()
             "Por seguridad, el volumen solo se guarda hasta el 100%. Al "
             "reiniciar la app, aunque el ajuste siga por encima, el "
             "reproductor empezará al 100%.")));
-        scrollLay->addLayout(block);
+        cardLay->addLayout(block);
     }
 
     scrollLay->addStretch(1);
@@ -663,13 +681,13 @@ void SettingsPage::buildUI()
     // Los botones de la sección DATOS. Hay dos: el normal (#actionBtn) y el de
     // restablecer (#accentOutline, con borde y color de acento). El acento sale
     // del QSS global, asi que ya no hace falta re-aplicarlo al cambiarlo.
-    auto addActionButton = [scrollLay](const QString &text, bool conAcento) {
+    auto addActionButton = [&cardLay](const QString &text, bool conAcento) {
         auto *btn = new QPushButton(text);
         btn->setObjectName(conAcento ? QStringLiteral("accentOutline")
                                      : QStringLiteral("dataActionBtn"));
         btn->setCursor(Qt::PointingHandCursor);
-        scrollLay->addWidget(btn);
-        scrollLay->addSpacing(4);
+        cardLay->addWidget(btn);
+        cardLay->addSpacing(4);
         return btn;
     };
 
@@ -716,7 +734,7 @@ void SettingsPage::buildUI()
         QStringLiteral("Sin telemetría: esta aplicación no envía datos de "
                        "uso, búsquedas ni historial a ningún servidor. "
                        "Todo permanece local en tu dispositivo.")));
-    scrollLay->addLayout(aboutBlock);
+    cardLay->addLayout(aboutBlock);
 
     // --- Popup flotante de confirmación (no modal) ---
     m_confirmPopup = new QFrame(this);

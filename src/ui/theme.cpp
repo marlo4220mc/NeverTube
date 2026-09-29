@@ -382,6 +382,11 @@ QLabel#settingsRowLabel { color: @TEXT@; min-width: 200px; }
 QLabel#settingsRowValue { color: @MUTED@; }
 QLabel#settingsNote { font-size: 10px; color: @MUTED@; }
 QLabel#settingsVersion { font-size: 12px; color: @TEXT@; }
+/* Tarjeta que agrupa las filas de una seccion de Ajustes: sustituye a la lista
+   plana de filas sueltas separadas por hairlines. */
+QFrame#settingsCard {
+    background: #181818; border: 1px solid @BORDER@; border-radius: 10px;
+}
 QLabel#popupText { color: @MUTED@; }
 /* El area de scroll de Ajustes no pinta fondo: la pagina ya tiene el suyo. */
 QScrollArea#settingsScroll { background: transparent; }
@@ -392,6 +397,8 @@ QScrollArea#settingsScroll { background: transparent; }
 QPushButton#actionBtn {
     font-size: 12px; padding: 7px 14px; background-color: #1F1F1F;
     border: 1px solid @BORDER@; border-radius: 8px; color: @TEXT@;
+    /* Ancho minimo comun: alinea la columna de controles dentro de la tarjeta. */
+    min-width: 150px;
 }
 QPushButton#dataActionBtn {
     font-size: 12px; padding: 8px 16px; background-color: #1F1F1F;
