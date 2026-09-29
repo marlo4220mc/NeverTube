@@ -414,8 +414,8 @@ void SettingsPage::buildUI()
         auto *card = new QFrame;
         card->setObjectName(QStringLiteral("settingsCard"));
         auto *cv = new QVBoxLayout(card);
-        cv->setContentsMargins(14, 4, 14, 4);
-        cv->setSpacing(0);
+        cv->setContentsMargins(14, 6, 14, 6);
+        cv->setSpacing(8);
         gv->addWidget(card);
         scrollLay->addWidget(group);
         cardLay = cv;
@@ -618,8 +618,6 @@ void SettingsPage::buildUI()
         cardLay->addLayout(block);
     }
 
-    scrollLay->addStretch(1);
-
     // --- INTERFAZ ---
     addSectionTitle(QStringLiteral("INTERFAZ"));
 
@@ -672,8 +670,6 @@ void SettingsPage::buildUI()
         QStringLiteral("Pequeñas: 6 vídeos por fila en el Inicio y filas "
                        "cortas en búsqueda, historial y cola. Grandes: 4 por "
                        "fila y miniatura más grande."));
-
-    scrollLay->addStretch(3);
 
     // --- DATOS ---
     addSectionTitle(QStringLiteral("DATOS"));
@@ -735,6 +731,11 @@ void SettingsPage::buildUI()
                        "uso, búsquedas ni historial a ningún servidor. "
                        "Todo permanece local en tu dispositivo.")));
     cardLay->addLayout(aboutBlock);
+
+    // El sobrante vertical va al FINAL: las secciones quedan pegadas arriba con
+    // separacion uniforme. Antes habia dos addStretch intermedios (1:3) que
+    // abrian huecos grandes entre REPRODUCCION/INTERFAZ/DATOS.
+    scrollLay->addStretch(1);
 
     // --- Popup flotante de confirmación (no modal) ---
     m_confirmPopup = new QFrame(this);
