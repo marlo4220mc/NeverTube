@@ -47,6 +47,13 @@ public:
     // videoActivated(). Puede combinarse con la X; el botón de opciones queda
     // a la izquierda de la X.
     void setRowMoreVisible(bool visible);
+    // Líneas del bloque de meta de cada fila (modo lista):
+    //   1 (defecto) = una sola línea "canal • vistas", como hoy;
+    //   2 = bloque enriquecido que aprovecha el hueco libre de la fila de 86 px
+    //       (no crece): título a 2 líneas, "vistas • fecha" y el canal con su
+    //       avatar en una tercera línea, más hover redondeado.
+    // Solo lo pide Search; el resto de listas se quedan en 1 y no cambian.
+    void setMetaLines(int lines);
     // Hace que las celdas del modo rejilla se estiren para llenar todo el ancho
     // disponible (0 desactiva: se usa el tamaño base fijo). El ancho mínimo de
     // celda fija cuántas columnas entran; el sobrante se reparte entre ellas.
@@ -101,6 +108,7 @@ private:
     qreal m_density = 1.0;
     bool m_rowRemove = false;
     bool m_rowMore = false;
+    int m_metaLines = 1;
     int m_gridMinCellW = 0;
     int m_gridColumns = 0;
     QHash<QString, double> m_progress;

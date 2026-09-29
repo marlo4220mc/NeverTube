@@ -105,6 +105,13 @@ public:
         m_showMore = show;
     }
 
+    // 1 = bloque de meta clásico; 2 = bloque enriquecido de Search (ver
+    // VideoListView::setMetaLines). Solo afecta al modo lista.
+    void setMetaLines(int lines)
+    {
+        m_metaLines = qBound(1, lines, 2);
+    }
+
     // Mapa (opcional) de fracciones de progreso por videoId que el delegado
     // dibuja como barra al pie de la miniatura en modo rejilla.
     void setProgressMap(const QHash<QString, double> *progress)
@@ -376,34 +383,10 @@ private:
         p->restore();
     }
 
-    void paintList(QPainter *p, const QStyleOptionViewItem &opt,
-                   const VideoInfo &v, int row) const
+    // Meta clásica de la fila de lista: una sola línea "canal • vistas" a
+    // 11,3 px bajo el título. Es el aspecto del resto de páginas.
+    void paintPlainMeta(QPainter *p, const QRect &r, const VideoInfo &v) const
     {
-        const QRect r = opt.rect;
-        if (opt.state & QStyle::State_MouseOver)
-            p->fillRect(r, nt::kHover);
-        if (row == m_currentRow)
-            drawCurrentMark(p, r);
-
-        const qreal lh = kListH * m_scale;
-        const QRectF thumbR(r.left() + 6 * m_scale,
-                            r.top() + (r.height() - 76 * m_scale) / 2.0,
-                            136 * m_scale, 76 * m_scale);
-        // Se pasa la clave, no el pixmap: el escalado va cacheado por
-        // (video, tamano), asi que hace falta la clave para consultarlo.
-        drawThumb(p, thumbR, cacheKeyFor(v), durationLabel(v.durationSeconds));
-        drawProgressBar(p, thumbR, v);
-
-        p->save();
-        QFont t = p->font();
-        t.setBold(true);
-        p->setFont(t);
-        p->setPen(nt::kText);
-        const QRect titleR(r.left() + 152 * m_scale, r.top() + 10 * m_scale,
-                           qRound(r.width() - 162 * m_scale), 34);
-        elideTitle(p, titleR, v.title);
-        p->restore();
-
         p->save();
         QFont m = shrunkFont(p->font(), 0.5);
         p->setFont(m);
@@ -420,6 +403,136 @@ private:
         p->drawText(QPointF(r.left() + 152 * m_scale, r.top() + 56 * m_scale),
                     line);
         p->restore();
+    }
+
+    // Meta enriquecida de Search: la fila de 86 px deja ~28 px libres bajo la
+    // línea de meta clásica (el título se pintaba en una sola línea dentro de
+    // una caja de 34), así que aquí se aprovechan con "vistas • fecha" y el
+    // canal (avatar + nombre) en su propia línea. La fila NO crece: no se gana
+    // scroll, se gana información por fila.
+    void paintRichMeta(QPainter *p, const QRect &r, const VideoInfo &v) const
+    {
+        const qreal x = r.left() + 152 * m_scale;
+        const qreal w = qRound(r.width() - 162 * m_scale);
+
+        p->save();
+        QFont m = shrunkFont(p->font(), 0.5);
+        p->setFont(m);
+        p->setPen(nt::kMuted);
+        QStringList meta;
+        if (v.viewCount > 0)
+            meta << viewsLabel(v.viewCount);
+        const QString pub = publishedLabel(v.publishedAt);
+        if (!pub.isEmpty())
+            meta << pub;
+        if (!meta.isEmpty()) {
+            const QFontMetricsF fm(m);
+            p->drawText(QPointF(x, r.top() + 57 * m_scale),
+                        fm.elidedText(meta.join(QStringLiteral("  •  ")),
+                                      Qt::ElideRight, qRound(w)));
+        }
+        p->restore();
+
+        if (v.channel.isEmpty())
+            return;
+        // Canal en su línea, con avatar si ya está en la caché (lo pide la
+        // sección "Canales" de la página); si no llegó, disco neutro: el
+        // pintado nunca dispara red.
+        const qreal av = qRound(14 * m_scale);
+        const QRectF avR(x, r.top() + 64 * m_scale, av, av);
+        drawChannelAvatar(p, avR, v.channelId);
+        p->save();
+        QFont cf = p->font();
+        cf.setPixelSize(qMax(10, qRound(11 * m_scale)));
+        p->setFont(cf);
+        p->setPen(nt::kMuted);
+        const qreal tx = avR.right() + 6 * m_scale;
+        const QFontMetricsF cfm(cf);
+        p->drawText(QRectF(tx, avR.top() - 1, r.right() - tx - 8 * m_scale,
+                           av + 2),
+                    Qt::AlignLeft | Qt::AlignVCenter,
+                    cfm.elidedText(v.channel, Qt::ElideRight,
+                                   qRound(r.right() - tx - 8 * m_scale)));
+        p->restore();
+    }
+
+    // Avatar de canal de 14 px dentro de una fila. Usa el mismo cacheo de
+    // escalado que las miniaturas (clave "ch_<id>", tamaño de destino en la
+    // clave) para no reescalar en cada paint.
+    void drawChannelAvatar(QPainter *p, const QRectF &r,
+                           const QString &channelId) const
+    {
+        if (channelId.isEmpty() || r.width() < 1)
+            return;
+        const QString key = QStringLiteral("ch_%1").arg(channelId);
+        const QPixmap pm = m_thumbs->pixmap(key);
+        p->save();
+        p->setRenderHint(QPainter::Antialiasing);
+        QPainterPath clip;
+        clip.addEllipse(r);
+        p->setClipPath(clip);
+        if (pm.isNull()) {
+            p->fillRect(r, nt::kElevated);
+        } else {
+            const QSize dst = r.size().toSize();
+            const QPixmap &scaled = thumbEscalada(key, dst, pm);
+            const QRectF src((scaled.width() - r.width()) / 2.0,
+                             (scaled.height() - r.height()) / 2.0,
+                             r.width(), r.height());
+            p->drawPixmap(r, scaled, src);
+        }
+        p->restore();
+    }
+
+    void paintList(QPainter *p, const QStyleOptionViewItem &opt,
+                   const VideoInfo &v, int row) const
+    {
+        const QRect r = opt.rect;
+        // En la fila enriquecida (Search) el hover va redondeado y con 2 px de
+        // aire, para que se lea como una tarjeta destacada y no como una franja
+        // de color a sangre. El resto de listas mantienen el relleno cuadrado.
+        if (opt.state & QStyle::State_MouseOver) {
+            if (m_metaLines >= 2) {
+                p->save();
+                p->setRenderHint(QPainter::Antialiasing);
+                p->setPen(Qt::NoPen);
+                p->setBrush(nt::kHover);
+                p->drawRoundedRect(QRectF(r).adjusted(2, 2, -2, -2), 8, 8);
+                p->restore();
+            } else {
+                p->fillRect(r, nt::kHover);
+            }
+        }
+        if (row == m_currentRow)
+            drawCurrentMark(p, r);
+
+        const QRectF thumbR(r.left() + 6 * m_scale,
+                            r.top() + (r.height() - 76 * m_scale) / 2.0,
+                            136 * m_scale, 76 * m_scale);
+        // Se pasa la clave, no el pixmap: el escalado va cacheado por
+        // (video, tamano), asi que hace falta la clave para consultarlo.
+        drawThumb(p, thumbR, cacheKeyFor(v), durationLabel(v.durationSeconds));
+        drawProgressBar(p, thumbR, v);
+
+        p->save();
+        QFont t = p->font();
+        t.setBold(true);
+        p->setFont(t);
+        p->setPen(nt::kText);
+        const QRect titleR(r.left() + 152 * m_scale, r.top() + 10 * m_scale,
+                           qRound(r.width() - 162 * m_scale), 34);
+        // Con la meta de 2 líneas el título también puede partir en dos: la
+        // caja de 34 px ya daba para dos líneas de 13 px, solo se usaba una.
+        if (m_metaLines >= 2)
+            drawGridTitle(p, titleR, v.title);
+        else
+            elideTitle(p, titleR, v.title);
+        p->restore();
+
+        if (m_metaLines >= 2)
+            paintRichMeta(p, r, v);
+        else
+            paintPlainMeta(p, r, v);
 
         if (m_showRemove) {
             p->save();
@@ -463,6 +576,7 @@ private:
     int m_currentRow = -1;
     bool m_showRemove = false;
     bool m_showMore = false;
+    int m_metaLines = 1;
     int m_cellW = 0;
     int m_cellH = 0;
     qreal m_scale = 1.0;
@@ -632,6 +746,16 @@ void VideoListView::setRowMoreVisible(bool visible)
         return;
     m_rowMore = visible;
     static_cast<VideosDelegate *>(itemDelegate())->setShowMore(visible);
+    viewport()->update();
+}
+
+void VideoListView::setMetaLines(int lines)
+{
+    lines = qBound(1, lines, 2);
+    if (lines == m_metaLines)
+        return;
+    m_metaLines = lines;
+    static_cast<VideosDelegate *>(itemDelegate())->setMetaLines(lines);
     viewport()->update();
 }
 
