@@ -92,6 +92,13 @@ QToolButton#navBtn:disabled { color: @DISABLED@; }
 QLabel { background: transparent; }
 QLabel#sectionTitle { font-size: 16px; font-weight: 600; color: #ECECEC; }
 QLabel#sectionSub { font-size: 12px; color: #8F8F8F; }
+/* Estado vacio de una seccion de la Biblioteca: caja con borde punteado y el
+   texto centrado, en vez de una linea suelta de texto gris. */
+QLabel#emptyState {
+    color: @METATEXT@; font-size: 13px;
+    background: #181818; border: 1px dashed @BORDER@; border-radius: 10px;
+    padding: 18px;
+}
 QLabel#muted { color: #8F8F8F; }
 
 QPushButton {

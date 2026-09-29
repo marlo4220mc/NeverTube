@@ -59,6 +59,7 @@ private:
     {
         QWidget *host = nullptr;
         QVBoxLayout *lay = nullptr;
+        QLabel *title = nullptr;
         QLabel *empty = nullptr;
         QPushButton *allBtn = nullptr;
         QVector<VideoInfo> videos;
@@ -111,6 +112,8 @@ private:
 
     // Suscripciones
     QLabel *m_channelHint = nullptr;
+    QLabel *m_subsTitle = nullptr;
+    QLabel *m_playlistsTitle = nullptr;
     QScrollArea *m_subScroll = nullptr;
     QWidget *m_subHost = nullptr;
     QHBoxLayout *m_subRowLay = nullptr;

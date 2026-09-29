@@ -388,10 +388,12 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     lay->addSpacing(12);
 
     const auto addSectionHeader = [this, lay](const QString &t, QPushButton **btn,
-                                              const QString &btnText) {
+                                              const QString &btnText,
+                                              QLabel **titleOut = nullptr) {
         auto *header = new QHBoxLayout;
         auto *l = new QLabel(t, m_body);
         l->setObjectName(QStringLiteral("sectionTitle"));
+        l->setProperty("baseTitle", t);
         header->addWidget(l);
         header->addStretch(1);
         auto *b = new QPushButton(btnText, m_body);
@@ -400,21 +402,24 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
         header->addWidget(b);
         if (btn)
             *btn = b;
+        if (titleOut)
+            *titleOut = l;
         lay->addLayout(header);
     };
 
     // ---- Suscripciones -------------------------------------------------
     QPushButton *manageBtn = nullptr;
     addSectionHeader(QStringLiteral("Suscripciones"), &manageBtn,
-                     QStringLiteral("Administrar"));
+                     QStringLiteral("Administrar"), &m_subsTitle);
     connect(manageBtn, &QPushButton::clicked, this, &LibraryPage::openManageSubs);
 
     m_channelHint = new QLabel(
         QStringLiteral("Aún no te has suscrito a ningún canal. Abre un vídeo "
                        "o un canal y pulsa «Suscribirse»."),
         m_body);
-    m_channelHint->setObjectName(QStringLiteral("sectionSub"));
+    m_channelHint->setObjectName(QStringLiteral("emptyState"));
     m_channelHint->setWordWrap(true);
+    m_channelHint->setAlignment(Qt::AlignCenter);
     lay->addWidget(m_channelHint);
 
     m_subHost = new QWidget(m_body);
@@ -440,7 +445,7 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
 
     // ---- Videos que me gustan ------------------------------------------
     addSectionHeader(QStringLiteral("Videos que me gustan"), &m_fav.allBtn,
-                     QStringLiteral("Ver todo"));
+                     QStringLiteral("Ver todo"), &m_fav.title);
     connect(m_fav.allBtn, &QPushButton::clicked, this, [this]() {
         m_fav.showAll = !m_fav.showAll;
         rebuildFavorites();
@@ -453,15 +458,16 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     m_fav.empty = new QLabel(
         QStringLiteral("Pulsa «Me gusta» en un vídeo y aparecerá aquí."),
         m_body);
-    m_fav.empty->setObjectName(QStringLiteral("sectionSub"));
+    m_fav.empty->setObjectName(QStringLiteral("emptyState"));
     m_fav.empty->setWordWrap(true);
+    m_fav.empty->setAlignment(Qt::AlignCenter);
     lay->addWidget(m_fav.empty);
 
     lay->addSpacing(16);
 
     // ---- Ver más tarde -------------------------------------------------
     addSectionHeader(QStringLiteral("Ver más tarde"), &m_later.allBtn,
-                     QStringLiteral("Ver todo"));
+                     QStringLiteral("Ver todo"), &m_later.title);
     connect(m_later.allBtn, &QPushButton::clicked, this, [this]() {
         m_later.showAll = !m_later.showAll;
         rebuildWatchLater();
@@ -474,15 +480,16 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     m_later.empty = new QLabel(
         QStringLiteral("Pulsa el reloj en un vídeo para guardarlo aquí."),
         m_body);
-    m_later.empty->setObjectName(QStringLiteral("sectionSub"));
+    m_later.empty->setObjectName(QStringLiteral("emptyState"));
     m_later.empty->setWordWrap(true);
+    m_later.empty->setAlignment(Qt::AlignCenter);
     lay->addWidget(m_later.empty);
 
     lay->addSpacing(16);
 
     // ---- Historial -----------------------------------------------------
     addSectionHeader(QStringLiteral("Historial"), &m_historySec.allBtn,
-                     QStringLiteral("Ver todo"));
+                     QStringLiteral("Ver todo"), &m_historySec.title);
     connect(m_historySec.allBtn, &QPushButton::clicked, this,
             &LibraryPage::historyAllRequested);
     m_historySec.host = new QWidget(m_body);
@@ -492,8 +499,9 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     lay->addWidget(m_historySec.host);
     m_historySec.empty = new QLabel(
         QStringLiteral("Los vídeos que veas aparecerán aquí."), m_body);
-    m_historySec.empty->setObjectName(QStringLiteral("sectionSub"));
+    m_historySec.empty->setObjectName(QStringLiteral("emptyState"));
     m_historySec.empty->setWordWrap(true);
+    m_historySec.empty->setAlignment(Qt::AlignCenter);
     lay->addWidget(m_historySec.empty);
 
     lay->addSpacing(16);
@@ -501,7 +509,7 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     // ---- Playlists -----------------------------------------------------
     QPushButton *newBtn = nullptr;
     addSectionHeader(QStringLiteral("Playlists"), &newBtn,
-                     QStringLiteral("+ Nueva"));
+                     QStringLiteral("+ Nueva"), &m_playlistsTitle);
     connect(newBtn, &QPushButton::clicked, this, &LibraryPage::createPlaylist);
 
     auto *playlistHost = new QWidget(m_body);
@@ -512,8 +520,9 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     lay->addWidget(playlistHost);
     m_playlistEmpty = new QLabel(
         QStringLiteral("Crea tu primera playlist con «+ Nueva»."), m_body);
-    m_playlistEmpty->setObjectName(QStringLiteral("sectionSub"));
+    m_playlistEmpty->setObjectName(QStringLiteral("emptyState"));
     m_playlistEmpty->setWordWrap(true);
+    m_playlistEmpty->setAlignment(Qt::AlignCenter);
     lay->addWidget(m_playlistEmpty);
 
     lay->addStretch(1);
@@ -540,6 +549,18 @@ void LibraryPage::reload()
 // --------------------------------------------------------------------------
 // Suscripciones
 // --------------------------------------------------------------------------
+// Contador de sección: el título base va en la propiedad baseTitle del QLabel y
+// aquí se compone "Título · N" (sin sufijo si N es 0).
+static void setSectionCount(QLabel *l, int n)
+{
+    if (!l)
+        return;
+    const QString base = l->property("baseTitle").toString();
+    if (base.isEmpty())
+        return;
+    l->setText(n > 0 ? QStringLiteral("%1 · %2").arg(base).arg(n) : base);
+}
+
 void LibraryPage::rebuildSubscriptions()
 {
     clearRows(m_subRowLay);
@@ -548,6 +569,7 @@ void LibraryPage::rebuildSubscriptions()
 
     const auto channels = m_subs->all();
     m_channelHint->setVisible(channels.isEmpty());
+    setSectionCount(m_subsTitle, channels.size());
 
     for (const SubscriptionInfo &s : channels) {
         auto *row = new ChannelRow(m_thumbs, s.id,
@@ -660,6 +682,7 @@ void LibraryPage::rebuildFavorites()
     m_fav.allBtn->setVisible(has && m_fav.videos.size() > kVisibleRows);
     m_fav.allBtn->setText(m_fav.showAll ? QStringLiteral("Ver menos")
                                         : QStringLiteral("Ver todo"));
+    setSectionCount(m_fav.title, m_fav.videos.size());
     if (!has)
         return;
     const int visible = m_fav.showAll ? m_fav.videos.size() : kVisibleRows;
@@ -685,6 +708,7 @@ void LibraryPage::rebuildWatchLater()
     m_later.allBtn->setVisible(has && m_later.videos.size() > kVisibleRows);
     m_later.allBtn->setText(m_later.showAll ? QStringLiteral("Ver menos")
                                             : QStringLiteral("Ver todo"));
+    setSectionCount(m_later.title, m_later.videos.size());
     if (!has)
         return;
     const int visible = m_later.showAll ? m_later.videos.size() : kVisibleRows;
@@ -709,6 +733,7 @@ void LibraryPage::rebuildHistory()
     m_historySec.host->setVisible(has);
     m_historySec.empty->setVisible(!has);
     m_historySec.allBtn->setVisible(has && m_historySec.videos.size() > kVisibleRows);
+    setSectionCount(m_historySec.title, m_historySec.videos.size());
     if (!has)
         return;
     buildRows(m_historySec.lay, m_historySec.videos,
@@ -784,6 +809,7 @@ void LibraryPage::rebuildPlaylists()
 
     const auto playlists = m_playlists->all();
     m_playlistEmpty->setVisible(playlists.isEmpty());
+    setSectionCount(m_playlistsTitle, playlists.size());
 
     for (const PlaylistItem &p : playlists) {
         const QVector<VideoInfo> videos =
