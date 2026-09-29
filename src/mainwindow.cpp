@@ -104,7 +104,7 @@ public:
                   .arg(key, state, nt::accentSuffix())
             : QStringLiteral(":/nav/%1_%2.png").arg(key, state);
         setIcon(QIcon(path));
-        setIconSize(QSize(33, 33));
+        setIconSize(QSize(26, 26));
     }
 
 protected:
@@ -830,16 +830,16 @@ void MainWindow::setupNav()
     m_nav->setObjectName(QStringLiteral("navBottom"));
     // Alto de la barra. Es el ÚLTIMO widget del layout raíz, así que queda
     // pegado al borde inferior de la ventana sea cual sea su alto (recortar
-    // aquí NO la separa del borde). El icono y el texto los centra verticalmente
-    // QToolButton dentro de su rect, pero el contenido (icono 33 + hueco + línea
-    // de texto) necesita ~53 px: con el padding vertical de 2 px del QSS
-    // (theme.cpp, QToolButton#navBtn) caben 56 en 60. Bajar más el alto recorta
-    // el texto o el icono, no los encoge.
+    // aquí NO la separa del borde). Cada botón es una cápsula FIJA de 104x52
+    // (no Expanding): el contenido icono 26 + hueco + línea de texto 11px
+    // necesita ~46 y con el padding vertical de 3px del QSS (theme.cpp,
+    // QToolButton#navBtn) caben 52 en 60. Bajar más el alto recorta el texto o
+    // el icono, no los encoge.
     m_nav->setFixedHeight(60);
 
     auto *lay = new QHBoxLayout(m_nav);
     lay->setContentsMargins(0, 0, 0, 0);
-    lay->setSpacing(0);
+    lay->setSpacing(6);            // hueco entre cápsulas
 
     auto *group = new QButtonGroup(m_nav);
     group->setExclusive(true);
@@ -851,17 +851,23 @@ void MainWindow::setupNav()
         b->setProperty("navKey", key);
         b->setText(text);
         b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-        b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-        b->setIconSize(QSize(33, 33));
+        // Cápsula compacta: ancho fijo, no 1/4 de la ventana. Con Expanding el
+        // relleno de la pestaña activa medía 474 px en una ventana de 1896 y se
+        // leía como una banda, no como un indicador de posición.
+        b->setFixedSize(104, 52);
+        b->setIconSize(QSize(26, 26));
         b->updateIcon();
         group->addButton(b, index);
-        lay->addWidget(b, 1);
+        lay->addWidget(b);
         m_navButtons.append(b);
     };
+    // El grupo va CENTRADO: un muelle a cada lado.
+    lay->addStretch(1);
     addBtn(QStringLiteral("home"), QStringLiteral("Inicio"), 0);
     addBtn(QStringLiteral("search"), QStringLiteral("Buscar"), 1);
     addBtn(QStringLiteral("library"), QStringLiteral("Biblioteca"), 2);
     addBtn(QStringLiteral("settings"), QStringLiteral("Ajustes"), 3);
+    lay->addStretch(1);
 
     connect(group, QOverload<int>::of(&QButtonGroup::idClicked), this,
             &MainWindow::onNavButton);

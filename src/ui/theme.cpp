@@ -53,6 +53,9 @@ QMainWindow { background-color: #0F0F0F; }
 
 QWidget#navBottom {
     background-color: #101010;
+    /* Hairline superior: separa la barra del contenido (y del mini player, que
+       ya tiene la suya) sin añadir un widget. */
+    border-top: 1px solid @BORDER@;
 }
 
 /* Botones de la barra de navegación inferior. Los iconos (PNG) los gestiona
@@ -62,26 +65,28 @@ QWidget#navBottom {
 QToolButton#navBtn {
     background: transparent;
     border: none;
-    border-radius: 8px;
-    /* 2px (no 4): el alto de la barra es 60 (mainwindow.cpp setupNav) y el
-       contenido icono 33 + hueco + línea de texto 12px necesita ~53; con 4px
-       por arriba y por abajo solo caben 52 y el texto se recortaría. */
-    padding: 2px 0;
-color: #8F8F8F;
-    font-size: 12px;
+    border-radius: 12px;
+    /* Cada botón es una cápsula de 104x52 (mainwindow.cpp setupNav) y el
+       contenido icono 26 + hueco + línea de texto 11px necesita ~46: con 3px
+       por arriba y por abajo caben 52. Bajar el alto recorta el texto o el
+       icono, no los encoge. */
+    padding: 3px 0;
+    color: #8F8F8F;
+    font-size: 11px;
 }
-QToolButton#navBtn:hover { color: #ECECEC; }
-QToolButton#navBtn:pressed { color: @ACCENT_PRESSED@; }
-/* La pestaña activa se marca con un relleno translúcido del acento, no solo
-   con el color: el color solo daba 4,8:1 contra el fondo y no indicaba posición
-   en la barra. El relleno va en el widget (no en el icono) para no tener que
-   regenerar los PNG pre-pintados de resources/nav. Sin borde: el alto de 60 px
-   de la barra no tiene holgura para una barra de 2 px sin recortar el texto. */
-QToolButton#navBtn:checked { color: @ACCENT@; background: @ACCENT_A10@; }
-QToolButton#navBtn:checked:hover { color: @ACCENT@; background: @ACCENT_A16@; }
-/* Foco por color de fondo, no por borde: navBtn no tiene borde y añadir uno
-   (aunque fuese transparente) cambiaría la caja de contenido y el alto útil. */
-QToolButton#navBtn:focus { color: @ACCENT@; background: @HOVER@; }
+QToolButton#navBtn:hover { background: @HOVER@; color: #ECECEC; }
+/* ORDEN IMPORTANTE: :checked va DESPUÉS de :focus. Tienen la misma
+   especificidad y gana la última regla; con :focus al final, el foco pisaba el
+   relleno de acento y la pestaña recién clicada salía gris con el texto del
+   acento sobre #242424 = 3,92:1 (por debajo del mínimo AA de 4,5:1). */
+QToolButton#navBtn:focus { background: @HOVER@; color: #ECECEC; }
+QToolButton#navBtn:checked { background: @ACCENT_A10@; color: @ACCENT@; }
+/* Activo en hover/foco: el relleno se queda al 10% y el texto sube a la
+   variante hover del acento (#FF1A47) para quedar en 4,72:1; subir el relleno al
+   16% bajaba el texto a 4,32:1. */
+QToolButton#navBtn:checked:hover { background: @ACCENT_A10@; color: @ACCENT_HOVER@; }
+QToolButton#navBtn:checked:focus { background: @ACCENT_A10@; color: @ACCENT_HOVER@; }
+QToolButton#navBtn:pressed { background: @ACCENT_A10@; color: @ACCENT_HOVER@; }
 QToolButton#navBtn:disabled { color: @DISABLED@; }
 
 QLabel { background: transparent; }
