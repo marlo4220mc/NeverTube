@@ -125,9 +125,10 @@ como en caliente):
   `gridTitleLineH` = 1,28 × tamaño. Antes eran 13 px y una caja de 34 px fijos
   mientras la miniatura sí crecía, que en un monitor grande dejaba el texto
   pequeño y descoyente. Con celda de 177 px (5 columnas a 903 px de viewport)
-  salen 13 px, y con 340 px o más 16 px (tope). Va **SIN negrita**: con 14 px en
-  negrita el usuario lo veía demasiado grande ("lo sigo viendo grande") y pesaba
-  más que la propia miniatura.
+  salen 13 px, y con 340 px o más 16 px (tope). Va en **negrita**: se probó sin
+  ella y el usuario pidió volver a ella. Lo que no le gustaba era el TAMAÑO, no
+  el grosor (con la letra ya 1 px más pequeña la negrita solo ayuda a
+  distinguir el título de la línea de canal).
 - **`kGridTitleLines` = 2 líneas, con la fuente 1 px más pequeña y sin
   negrita.** Son las tres cosas que pidió el usuario al ver 14 px en negrita a 3
   líneas: la celda queda bastante más compacta (175 px de alto en vez de 195 con
@@ -138,17 +139,18 @@ como en caliente):
 
   | config | título entero | texto visible | de ellos, ≥5 líneas |
   |---|---|---|---|
-  | 14 px **negrita**, 3 líneas | 13% | 72% | 51/90 |
-  | **13 px normal, 2 líneas (actual)** | 5% | 58% | 22/90 |
+  | 14 px negrita, 3 líneas | 13% | 72% | 51/90 |
+  | **13 px negrita, 2 líneas (actual)** | 3% | 55% | 37/90 |
+  | 13 px normal, 2 líneas | 5% | 58% | 22/90 |
   | 12 px normal, 2 líneas | 8% | 62% | 9/90 |
 
-  O sea: se sigue leyendo el 58% del texto de media (antes el 72%) pero solo
-  la cuarta parte de los títulos necesita 5 líneas o más (antes la mitad). La
-  celda mide `thumbH + 6 + 8 + gridTextBlockH(cellW)` y el bloque
-  `2*lineH + 14 + 20` (66 px a 13 px); NO cambia el número de vídeos por fila.
-  Si algún día se queja de que se cortan títulos, el primer experimento es
-  **12 px** (medido: 8% enteros y 62% visible, MEJOR que 13 px) y el segundo
-  volver a 3 líneas.
+  La negrita cuesta algo de legibilidad (3% enteros frente al 5% sin negrita) y
+  es el precio que el usuario eligió: la celda compacta le importa más que leer
+  el título entero. La celda mide `thumbH + 6 + 8 + gridTextBlockH(cellW)` y el
+  bloque `2*lineH + 14 + 20` (64 px a 12 px, o sea celda de 140); NO cambia el
+  número de vídeos por fila. Si algún día se queja de que se cortan títulos, el
+  primer experimento es **12 px** (medido: 8% enteros y 62% visible, MEJOR que
+  13 px) y el segundo volver a 3 líneas.
   **Geometría y pintura comparten las mismas funciones puras**
   (`gridTitlePx`/`gridTitleLineH`/`kGridTitleLines`), así que la celda reserva
   exactamente lo que el título ocupa y no puede solaparse con la línea de canal.

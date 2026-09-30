@@ -102,18 +102,18 @@ public:
     // siempre reserva lo que el título ocupa y no hay solape.
     static int gridTitlePx(int cellW);
 
-    // Líneas de título de la celda de rejilla. Con 3 líneas el título se leía
-    // entero en el 12% de los casos (medido sobre los 97 títulos de la caché con
-    // la caja de 161 px que sale a 5 columnas en una ventana de 941 px) pero la
-    // celda quedaba con mucho texto y el usuario lo veía demasiado grande. Se
-    // vuelve a 2 líneas y se compensa bajando 1 px la fuente y quitando la
-    // negrita, que es más o menos lo que cabe. Se comparte entre geometría y
-    // pintura para que no puedan divergir.
+    // Líneas de título de la celda de rejilla. Con 3 líneas a 14 px en negrita el
+    // título se leía entero en el 13% de los casos (medido sobre los 90 títulos de
+    // la caché con la caja de 161 px que sale a 5 columnas en una ventana de 941
+    // px) pero la celda quedaba con mucho texto y el usuario lo veía demasiado
+    // grande. Bajaron a 2: se paga legibilidad (3% enteros, 55% del texto visible
+    // de media) a cambio de una celda de 175 px en vez de 195. La negrita se
+    // mantiene, que es lo que el usuario pidió tras verla sin ella. Se comparte
+    // entre geometría y pintura para que no puedan divergir.
     static constexpr int kGridTitleLines = 2;
 
     // Interlineado de las líneas de título, en px (1,28 del tamaño de fuente).
-    // A 13 px da 17 px, el mismo alto de línea que tenía la caja fija, así que
-    // el ancho de línea no cambia respecto a como estaba. Función PURA.
+    // A 12 px da 15 px, a 13 px daba 17. Función PURA.
     static int gridTitleLineH(int cellW);
     // Alto del bloque de texto bajo la miniatura: kGridTitleLines líneas de
     // título + hueco a la línea de canal + pie. Función PURA.

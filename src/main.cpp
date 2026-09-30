@@ -309,7 +309,7 @@ static bool gridGeometrySelfTest()
     }
     // El bloque reservado tiene que ser exactamente el que ocupa la pintura:
     // kGridTitleLines líneas de título + 14 px de hueco + 20 px de pie. A celda
-    // de 140 px son 2*16+34 = 66 px (con 3 líneas a 14 px eran 3*18+34 = 88 y el
+    // de 140 px son 2*15+34 = 64 px (con 3 líneas a 14 px eran 3*18+34 = 88 y el
     // usuario lo veía demasiado grande). Si esta suma no cuadra, la celda solapa
     // con la línea de canal o deja hueco.
     if (VideoListView::gridTextBlockH(140)

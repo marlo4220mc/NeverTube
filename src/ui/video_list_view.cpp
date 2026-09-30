@@ -363,15 +363,16 @@ private:
         // Título y línea de canal al tamaño que manda en ESTA celda (ver
         // gridTitlePx): 12 px en celda pequeña, 16 px en celda ancha. El
         // interlineado lo fija la misma función pura que usa la celda, así que la
-        // segunda línea cae dentro de la caja reservada. SIN negrita: con 14 px en
-        // negrita el título pesaba más que la propia miniatura en una celda de
-        // 177 px (lo pidió el usuario: "lo sigo viendo grande").
+        // segunda línea cae dentro de la caja reservada. En NEGRITA: se probó sin
+        // ella y el usuario pidió volver a ella (con la letra ya 1 px más pequeña
+        // el título se distingue de la línea de canal).
         const int titlePx = VideoListView::gridTitlePx(qRound(gw));
         const int lineH = VideoListView::gridTitleLineH(qRound(gw));
 
         p->save();
         QFont t = p->font();
         t.setPixelSize(titlePx);
+        t.setBold(true);
         p->setFont(t);
         p->setPen(nt::kText);
         const QRect titleR(r.left() + 8 * m_scale,
