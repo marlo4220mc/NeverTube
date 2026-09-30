@@ -481,3 +481,12 @@ bool feedsProtocolSelfTest();
 // Selftest de los endpoints de browse de Innertube: búsqueda, ficha de canal,
 // pestañas (videos/shorts/live), detalle de vídeo y playlist.
 bool innertubeBrowseSelfTest();
+
+// Sonda de los endpoints de sugerencias (type-ahead del campo de búsqueda).
+// Mide los DOS candidatos con el mismo prefijo y la misma red: Innertube
+// (music/get_search_suggestions, con WEB_REMIX y con WEB) y suggestqueries
+// (GET plano). Imprime estado, latencia, tamaño y, sobre todo, cuántas
+// sugerencias son CONSULTA y cuántas son ATAJOS sin destino (las que solo
+// traen serviceEndpoint): esas son las que un parseo descuidado convertiría en
+// filas muertas. No es PASS/FAIL: es una tabla para elegir endpoint.
+bool suggestSelfTest();

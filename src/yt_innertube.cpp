@@ -40,6 +40,10 @@ const char kBrowseEndpoint[] =
     "/youtubei/v1/browse?prettyPrint=false";
 const char kSearchEndpoint[] =
     "/youtubei/v1/search?prettyPrint=false";
+// Sugerencias de búsqueda (type-ahead del campo). Sondas de /selftest-suggest:
+// hoy la app NO lo llama, es solo el endpoint que decide el type-ahead.
+const char kSuggestEndpoint[] =
+    "/youtubei/v1/music/get_search_suggestions?prettyPrint=false";
 
 // UA del fork de youtube_explode_dart usado para /sw.js_data.
 const char kChromeUA[] =
@@ -3914,6 +3918,288 @@ bool homeBrowseSelfTest()
 
     QCoreApplication::exec();
     return homeFeedLiveCheck();
+}
+
+// --- C1: que endpoint de sugerencias usar ----------------------------------
+//
+// No es un PASS/FAIL: la pregunta es "que endpoint sirve, con que cliente y a
+// que precio", asi que se miden los dos candidatos y se imprime la tabla para
+// decidir. El numero que mas importa no es cuantas sugerencias salen, sino
+// cuantas son CONSULTAS y cuantas son ATAJOS: las que solo traen
+// serviceEndpoint apuntan a otro sitio (Google, el historial de la cuenta) y en
+// una app que es solo YouTube no tienen destino. Si el parseo las dejara pasar
+// serian filas muertas en el desplegable (el bug de Harmony: nav() a null).
+struct SuggestStats
+{
+    int total = 0;        // searchSuggestionRenderer encontrados
+    int conQuery = 0;     // traen navigationEndpoint.searchEndpoint.query
+    QStringList muestras; // hasta 6, marcando "(sin query)" donde toca
+};
+
+// Recorre el JSON buscando searchSuggestionRenderer en cualquier parte en vez
+// de fiarse de una ruta fija: si YouTube cambia el layout, el conteo sigue
+// siendo valido y el selftest lo delata, en vez de devolver cero en silencio.
+void collectSuggestStats(const QJsonValue &val, SuggestStats *st, int depth)
+{
+    if (depth > 24)
+        return;
+    if (val.isArray()) {
+        for (const QJsonValue &e : val.toArray())
+            collectSuggestStats(e, st, depth + 1);
+        return;
+    }
+    if (!val.isObject())
+        return;
+    const QJsonObject o = val.toObject();
+    for (auto it = o.begin(); it != o.end(); ++it) {
+        if (it.key() == QLatin1String("searchSuggestionRenderer")) {
+            const QJsonObject r = it.value().toObject();
+            ++st->total;
+            const QString q =
+                r.value(QStringLiteral("navigationEndpoint"))
+                    .toObject()
+                    .value(QStringLiteral("searchEndpoint"))
+                    .toObject()
+                    .value(QStringLiteral("query"))
+                    .toString();
+            if (!q.trimmed().isEmpty())
+                ++st->conQuery;
+            if (st->muestras.size() < 6)
+                st->muestras << (q.trimmed().isEmpty()
+                                     ? QStringLiteral("(sin query) ")
+                                     : q);
+        }
+        collectSuggestStats(it.value(), st, depth + 1);
+    }
+}
+
+bool suggestSelfTest()
+{
+    std::fprintf(stderr, "SUGGEST SELFTEST start\n");
+    Ipv4Https http;
+
+    // Watchdog global: son varias peticiones reales; no colgar el selftest.
+    QTimer watchdog;
+    watchdog.setSingleShot(true);
+    QObject::connect(&watchdog, &QTimer::timeout, []() {
+        std::fprintf(stderr, "SELFTEST FAIL: suggest (timeout global)\n");
+        QCoreApplication::exit(1);
+    });
+    watchdog.start(150000);
+
+    struct Probe
+    {
+        const char *label;
+        const char *path;       // Innertube, relativo a www.youtube.com
+        const char *url;        // Google, absoluta; si no es null, gana
+        const char *clientName; // solo Innertube
+        int clientId;
+        const char *clientVersion;
+        const char *referer;
+    };
+    // A = Innertube: POST con contexto y visitorData. B = suggestqueries: GET
+    // plano, sin cliente ni visitorData. Mismo prefijo y misma red, para que la
+    // comparacion sea justa.
+    const Probe probes[] = {
+        {"A1 innertube WEB_REMIX", kSuggestEndpoint, nullptr, "WEB_REMIX", 67,
+         "1.20240723.01.00", "https://music.youtube.com/"},
+        {"A2 innertube WEB", kSuggestEndpoint, nullptr, "WEB", kWebClientId,
+         kWebClientVersion, nullptr},
+        {"B1 suggestqueries firefox", nullptr,
+         "https://suggestqueries.google.com/complete/search"
+         "?client=firefox&ds=yt",
+         nullptr, 0, nullptr, nullptr},
+        {"B2 suggestqueries youtube", nullptr,
+         "https://suggestqueries.google.com/complete/search"
+         "?client=youtube&ds=yt",
+         nullptr, 0, nullptr, nullptr},
+    };
+    // Dos prefijos: el largo que motiva el cambio ("busca") y uno corto ("mus"),
+    // donde las sugerencias suelen ser mas precisas.
+    const QStringList queries{QStringLiteral("busca"), QStringLiteral("mus")};
+    const int probeCount = int(sizeof(probes) / sizeof(probes[0]));
+    const int total = 1 + int(queries.size()) * probeCount;
+
+    struct Result
+    {
+        int status = 0;
+        int ms = 0;
+        int bytes = 0;
+        bool failed = false;
+        SuggestStats st;
+    };
+    QHash<QString, Result> results;
+
+    QString visitor;
+    int step = 0;
+    int okProbes = 0;
+    std::function<void()> run; // se asigna abajo; stepDone lo invoca
+
+    const auto stepDone = [&]() {
+        ++step;
+        if (step < total) {
+            // Con un turno de evento entre sondas: encadenar peticiones desde
+            // dentro del readyRead del socket es reentrada.
+            QTimer::singleShot(0, [&]() { run(); });
+            return;
+        }
+        std::fprintf(stderr, "\nSUGGEST RESUMEN (agregado por sonda)\n");
+        for (int i = 0; i < probeCount; ++i) {
+            int ok = 0;
+            int conQuery = 0;
+            int ms = 0;
+            int bytes = 0;
+            for (const QString &q : queries) {
+                const Result r = results.value(
+                    QStringLiteral("%1|%2")
+                        .arg(QLatin1String(probes[i].label), q));
+                if (r.failed || r.status != 200)
+                    continue;
+                ++ok;
+                conQuery += r.st.conQuery;
+                ms += r.ms;
+                bytes += r.bytes;
+            }
+            if (ok)
+                ++okProbes;
+            std::fprintf(stderr,
+                         "  %-26s ok=%d/%d conQuery=%-3d msMedio=%-5d "
+                         "bytesMedio=%-6d fallos=%d\n",
+                         probes[i].label, ok, int(queries.size()), conQuery,
+                         ok ? ms / ok : 0, ok ? bytes / ok : 0,
+                         int(queries.size()) - ok);
+        }
+        const bool alguno = okProbes > 0;
+        std::fprintf(stderr, "SUGGEST %s\n",
+                     alguno ? "OK: hay endpoint con consultas"
+                            : "FAIL: ningun endpoint devolvio consultas");
+        QCoreApplication::exit(alguno ? 0 : 2);
+    };
+
+    const std::function<void()> runImpl = [&]() {
+        if (step == 0) {
+            http.setTimeoutMs(kVisitorTimeoutMs);
+            http.setResult([&](int status, const QByteArray &body) {
+                if (status == 200)
+                    visitor = visitorDataFromSwJsData(body);
+                std::fprintf(stderr, "SUGGEST visitorData len=%d\n",
+                             visitor.size());
+                stepDone();
+            });
+            http.setError([&](const QString &reason) {
+                std::fprintf(stderr, "SUGGEST sw.js_data err: %s (se sigue sin visitor)\n",
+                             reason.toUtf8().constData());
+                stepDone();
+            });
+            http.get(kSwJsData, kChromeUA);
+            return;
+        }
+
+        const int idx = step - 1;
+        // OJO: estas cuatro son COPIAS a proposito. El transporte guarda los
+        // std::function de setResult/setError y los invoca DESPUES de que este
+        // marco (el de runImpl) haya retornado. Si se capturaran por
+        // referencia, record() leeria p.clientVersion de memoria liberada y
+        // QString::fromLatin1() construiria sobre un const char* basura
+        // (corrupcion de heap, no un fallo legible).
+        const Probe p = probes[idx % probeCount];
+        const QString q = queries.at(idx / probeCount);
+        const bool google = p.url != nullptr;
+        const QString key =
+            QStringLiteral("%1|%2").arg(QLatin1String(p.label), q);
+        const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
+
+        // Por referencia solo lo que vive en el marco de suggestSelfTest(), que
+        // sigue activo dentro de exec(): el hash de resultados y stepDone.
+        QHash<QString, Result> &sink = results;
+        const auto &next = stepDone;
+
+        const auto record = [&sink, &next, p, q, google, key, t0](int status,
+                                                                 const QByteArray &body) {
+            Result res;
+            res.status = status;
+            res.ms = int(QDateTime::currentMSecsSinceEpoch() - t0);
+            res.bytes = body.size();
+            if (google) {
+                // suggestqueries devuelve un array JSON:
+                // ["consulta", ["s1", "s2", ...]]
+                QByteArray json = body.trimmed();
+                if (json.startsWith(")]}'"))
+                    json.remove(0, 4);
+                const QJsonDocument doc = QJsonDocument::fromJson(json);
+                const QJsonArray arr = doc.isArray() ? doc.array() : QJsonArray();
+                if (arr.size() > 1) {
+                    for (const QJsonValue &v : arr.at(1).toArray()) {
+                        const QString s = v.toString();
+                        if (!s.trimmed().isEmpty()) {
+                            ++res.st.total;
+                            ++res.st.conQuery;
+                            if (res.st.muestras.size() < 6)
+                                res.st.muestras << s;
+                        }
+                    }
+                }
+            } else {
+                QJsonObject root;
+                if (parseJsonObject(body, &root))
+                    collectSuggestStats(root, &res.st, 0);
+                else
+                    res.failed = true;
+            }
+            sink.insert(key, res);
+            std::fprintf(stderr,
+                         "SUGGEST %-26s q=%-6s status=%d ms=%4d bytes=%6d "
+                         "total=%2d conQuery=%2d\n",
+                         p.label, q.toUtf8().constData(), res.status, res.ms,
+                         res.bytes, res.st.total, res.st.conQuery);
+            for (const QString &s : res.st.muestras)
+                std::fprintf(stderr, "           - %s\n", s.toUtf8().constData());
+            next();
+        };
+
+        // Cada peticion captura SUS callbacks al encolarse (el transporte es
+        // FIFO), asi que setResult/setError van antes de CADA request.
+        http.setResult(record);
+        http.setError([&sink, &next, p, q, key, t0](const QString &reason) {
+            Result res;
+            res.failed = true;
+            res.ms = int(QDateTime::currentMSecsSinceEpoch() - t0);
+            sink.insert(key, res);
+            std::fprintf(stderr, "SUGGEST %-26s q=%-6s ERR %s\n", p.label,
+                         q.toUtf8().constData(), reason.toUtf8().constData());
+            next();
+        });
+        http.setTimeoutMs(20000);
+
+        if (google) {
+            const QUrl url(QString::fromLatin1(p.url) +
+                           QStringLiteral("&q=") + QUrl::toPercentEncoding(q));
+            http.getUrl(url, kChromeUA, true);
+            return;
+        }
+
+        http.setVisitorId(visitor);
+        QJsonObject client{
+            {QStringLiteral("clientName"), QString::fromLatin1(p.clientName)},
+            {QStringLiteral("clientVersion"), QString::fromLatin1(p.clientVersion)},
+            {QStringLiteral("hl"), QStringLiteral("es")},
+            {QStringLiteral("gl"), QStringLiteral("US")},
+        };
+        if (!visitor.isEmpty())
+            client.insert(QStringLiteral("visitorData"), visitor);
+        const QJsonObject body{
+            {QStringLiteral("context"),
+             QJsonObject{{QStringLiteral("client"), client}}},
+            {QStringLiteral("input"), q},
+        };
+        http.post(p.path, QJsonDocument(body).toJson(QJsonDocument::Compact),
+                  kChromeUA, p.clientId, p.clientVersion, p.referer);
+    };
+    run = runImpl;
+
+    run();
+    QCoreApplication::exec();
+    return true;
 }
 
 bool feedsProtocolSelfTest()

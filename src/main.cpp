@@ -413,6 +413,12 @@ int main(int argc, char *argv[])
         return ok ? 0 : 1;
     }
 
+    if (args.contains(QLatin1String("--selftest-suggest"))) {
+        // Sonda de elección, no PASS/FAIL: imprime la tabla de los dos
+        // candidatos para decidir con datos (ver suggestSelfTest).
+        return suggestSelfTest() ? 0 : 1;
+    }
+
     if (args.contains(QLatin1String("--selftest-tls"))) {
         QString detail;
         const bool ok = tlsHandshakeSelfTest(&detail);
