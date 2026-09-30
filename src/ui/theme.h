@@ -112,4 +112,11 @@ QString accentSuffix();
 
 QString styleSheet();
 
+// Selftest PURO del QSS (offline, sin GPU ni red): comprueba que ningun
+// selector se declare dos veces. Un selector repetido NO avisa de nada y el
+// override es mudo (gana el ultimo), que es como un QLabel#sectionTitle de
+// 22px se colo por detras del de 16px y subio los titulos de seccion de TODAS
+// las paginas sin que ningun test lo vieran. Se llama desde --selftest-theme.
+bool themeSelfTest();
+
 } // namespace nt

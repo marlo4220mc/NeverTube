@@ -1,6 +1,10 @@
 #include "theme.h"
 
 #include <QColor>
+#include <QHash>
+#include <QStringList>
+
+#include <cstdio>
 
 namespace nt {
 
@@ -490,7 +494,13 @@ QLabel#channelRowMeta  { color: @MUTED@; background: transparent; }
 /* Placeholder y títulos de página */
 QLabel#pageTitle { font-size: 18px; font-weight: 700; }
 QLabel#placeholderHint { color: @MUTED@; font-size: 14px; padding: 40px; }
-QLabel#sectionTitle { font-size: 22px; font-weight: 700; color: @TEXT@; }
+/* OJO: aqui NO va un QLabel#sectionTitle. Estuvo (22px/700, parte de la
+   migracion a QSS global) y como va DESPUES de la regla de la linea 93 GANABA
+   por orden, subiendo los titulos de seccion de TODAS las paginas de 16 a 22 px
+   (Home, Descubre, Buscar, canal, historial, biblioteca, playlist). El diseno
+   son 16 px: lo dice el comentario de settings_page.cpp ("A proposito NO es
+   #sectionTitle (16 px)"). Con un selector duplicado el QSS no avisa de nada y
+   el override es mudo, asi que la regla de #sectionTitle vive en un solo sitio. */
 
 /* Avatar de la ficha de canal (64x64, radio 32) */
 QLabel#channelAvatar { border-radius: 32px; }
@@ -581,6 +591,76 @@ QWidget#playerArea { background-color: #000000; }
               .replace(QStringLiteral("@TEXTSOFT@"), kTextSoft.name())
               .replace(QStringLiteral("@OVERLAY_BG@"), overlayBgRgba())
               .replace(QStringLiteral("@OVERLAY_EDGE@"), overlayEdgeRgba());
+}
+
+bool themeSelfTest()
+{
+    int fail = 0;
+    const auto chk = [&fail](bool ok, const char *what) {
+        std::fprintf(stderr, "  [%s] %s\n", ok ? "OK  " : "FAIL", what);
+        if (!ok)
+            ++fail;
+    };
+
+    QString qss = styleSheet();
+    // Fuera comentarios: un /* ... */ puede contener llaves o nombres de
+    // selector y ensuciaria el recuento.
+    while (true) {
+        const int a = qss.indexOf(QStringLiteral("/*"));
+        if (a < 0)
+            break;
+        const int b = qss.indexOf(QStringLiteral("*/"), a + 2);
+        if (b < 0) {
+            qss.remove(a, qss.size() - a);
+            break;
+        }
+        qss.remove(a, b + 2 - a);
+    }
+
+    QHash<QString, int> veces;
+    int reglas = 0;
+    int i = 0;
+    while (i < qss.size()) {
+        const int abre = qss.indexOf(QLatin1Char('{'), i);
+        if (abre < 0)
+            break;
+        const int cierra = qss.indexOf(QLatin1Char('}'), abre + 1);
+        if (cierra < 0)
+            break;
+        const QString sel = qss.mid(i, abre - i).simplified();
+        if (!sel.isEmpty()) {
+            ++reglas;
+            veces[sel] += 1;
+        }
+        i = cierra + 1;
+    }
+
+    // Si el parser se rompe (p. ej. por un cambio de formato del QSS) el numero
+    // de reglas se hunde y las dos comprobaciones de abajo pasarian por vacio.
+    chk(reglas > 100 && veces.size() > 50,
+        "el QSS se ha parseado (mas de 100 reglas y 50 selectores)");
+
+    QStringList repetidos;
+    for (auto it = veces.constBegin(); it != veces.constEnd(); ++it)
+        if (it.value() > 1)
+            repetidos << it.key();
+    repetidos.sort();
+    for (const QString &r : repetidos)
+        std::fprintf(stderr, "    [info] selector repetido en el QSS: %s\n",
+                     qPrintable(r));
+    chk(repetidos.isEmpty(),
+        "ningun selector se declara dos veces (el ultimo gana y no avisa)");
+
+    // Guarda de la regresion concreta: #sectionTitle son 16 px por diseno (lo
+    // dice el comentario de settings_page.cpp) y solo puede declararse una vez.
+    // Estuvo duplicado a 22 px y subio los titulos de seccion de TODAS las
+    // paginas (Home, Descubre, Buscar, canal, historial, biblioteca, playlist).
+    chk(veces.value(QStringLiteral("QLabel#sectionTitle")) == 1,
+        "QLabel#sectionTitle se declara exactamente una vez");
+
+    std::fprintf(stderr, "THEME %s (%d reglas, %d selectores)\n",
+                 fail == 0 ? "OK" : "FAIL", reglas, (int)veces.size());
+    return fail == 0;
 }
 
 } // namespace nt

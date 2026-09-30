@@ -271,6 +271,7 @@ jobs:
           # autocompletado, construcción del desplegable del buscador y sus
           # gestos con entrega de eventos real), así que sí van en el smoke.
           foreach ($t in @('--selftest-tls', '--selftest-db', '--selftest-grid',
+                           '--selftest-theme',
                            '--selftest-suggest-parse', '--selftest-suggest-panel',
                            '--selftest-suggest-gestures',
                            '--selftest-search', '--selftest-browse', '--selftest-feeds')) {

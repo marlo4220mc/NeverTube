@@ -296,6 +296,11 @@ jobs:
           # que recortarlas si la celda baja de 130 px.
           $rc = Invoke-Selftest '--selftest-grid'
           if ($rc -ne 0) { exit $rc }
+          # QSS puro: ningún selector declarado dos veces. Un duplicado gana en
+          # silencio (el último), que es como un #sectionTitle de 22 px subió los
+          # títulos de sección de todas las páginas por detrás del de 16 px.
+          $rc = Invoke-Selftest '--selftest-theme'
+          if ($rc -ne 0) { exit $rc }
           # Parser del autocompletado de youtube.com (función pura, sin red):
           # fija el formato de los dos tipos de item que devuelve el endpoint.
           $rc = Invoke-Selftest '--selftest-suggest-parse'

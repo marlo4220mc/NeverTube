@@ -15,6 +15,7 @@
 #include "ffmpeg_selftest.h"
 #include "ui/video_list_view.h"
 #include "ui/pages/search_page.h"
+#include "ui/theme.h"
 #include "yt.h"
 #include "yt_innertube.h"
 
@@ -391,6 +392,16 @@ int main(int argc, char *argv[])
     // el CI, donde no se puede comprobar el hardware ni reproducir.
     if (args.contains(QLatin1String("--selftest-grid"))) {
         return gridGeometrySelfTest() ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-theme"))) {
+        // QSS puro: ningun selector declarado dos veces. Un duplicado no avisa y
+        // el ultimo gana, que es como se colo un #sectionTitle de 22px por
+        // detras del de 16px y crecieron los titulos de seccion de todas las
+        // paginas. Offline y determinista: vale en el CI.
+        const bool ok = nt::themeSelfTest();
+        std::fprintf(stderr, "SELFTEST theme -> %s\n", ok ? "OK" : "FAIL");
+        return ok ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-feeds"))) {

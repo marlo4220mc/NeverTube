@@ -176,6 +176,7 @@ arriba-izquierda, fuera del scroll (fijo) y se oculta en fullscreen.
 ./build/nevertube_qt2 --selftest-browse    # endpoints Innertube: canal + tabs (videos/shorts/live) + detalle + playlist
 ./build/nevertube_qt2 --selftest-feeds     # canal por Innertube + trending (protocolo y cadena)
 ./build/nevertube_qt2 --selftest-grid      # tope de columnas de las rejillas (puro, sin red ni GPU: va en el CI)
+./build/nevertube_qt2 --selftest-theme     # QSS puro: ningún selector declarado dos veces (duplicado silencioso): va en el CI
 ```
 
 El selftest del player verifica invariantes del núcleo protegido sin
@@ -453,7 +454,7 @@ build x86, que sale por `NEVERTUBE_NO_MPV`):
 - `./build/nevertube_qt2 --selftest-db` / `--selftest-player` /
   `--selftest-innertube` / `--selftest-discover` / `--selftest-home` /
   `--selftest-feeds` / `--selftest-av1hls` / `--selftest-hwprobe` / `--selftest-search` /
-  `--selftest-grid` → pruebas
+  `--selftest-grid` / `--selftest-theme` → pruebas
 
 ## Color de acento configurable
 
