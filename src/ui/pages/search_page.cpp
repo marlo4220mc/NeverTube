@@ -296,8 +296,17 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     // padding vertical se comía el texto (8+8+alto_de_línea > 32). 36 deja los
     // 8+8 y una línea de 13 comfortable.
     m_field->setFixedHeight(36);
-    m_clearBtn = new QPushButton(QStringLiteral("✕"), searchCard);
+    // Icono en vez del glifo "✕" (U+2715): ese carácter NO está en la fuente
+    // por defecto (Liberation Sans en Linux; en Windows depende de la fuente)
+    // y Qt pintaba en su lugar un punto de 2x5 px, o sea un botón casi
+    // invisible: había que saber que estaba ahí para pulsarlo. nt::icon()
+    // dibuja con QPainter y no depende de ninguna fuente. La propiedad
+    // iconOnly quita el padding global, que si no deja al icono sin sitio
+    // dentro de los 28 px.
+    m_clearBtn = new QPushButton(searchCard);
     m_clearBtn->setObjectName(QStringLiteral("ghost"));
+    m_clearBtn->setProperty("iconOnly", true);
+    m_clearBtn->setIcon(nt::icon(nt::Icon::Clear, nt::kText, 16));
     m_clearBtn->setCursor(Qt::PointingHandCursor);
     m_clearBtn->setFixedSize(28, 28);
     m_clearBtn->setFocusPolicy(Qt::NoFocus);

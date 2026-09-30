@@ -824,7 +824,10 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // de la página (fijo, NO scrollea con el contenido) y se oculta en
     // fullscreen. Se crea al final para quedar como sibling posterior (por
     // encima del scroll).
-    m_back = new QPushButton(QStringLiteral("◀ Volver"), this);
+    // El icono Back (abajo) ya es la flecha: el "◀" del texto era un glifo
+    // que no existe en la fuente por defecto y salia como un punto, ademas
+    // duplicaba la misma affordance.
+    m_back = new QPushButton(QStringLiteral("Volver"), this);
     m_back->setObjectName(QStringLiteral("ghost"));
     m_back->setIcon(nt::icon(nt::Icon::Back, nt::kText, 14));
     m_back->setCursor(Qt::PointingHandCursor);
@@ -1216,8 +1219,10 @@ void WatchPage::showPlaylistMenu()
         const bool contains = m_playlists->contains(p.id, v.id);
         if (contains)
             anyAdded = true;
+        // Sin glifo de check: "✔" (U+2714) no esta en la fuente por defecto y
+        // salia como un punto. El "(ya esta)" ya dice lo mismo.
         const QString label = contains
-            ? QStringLiteral("✔ %1 (ya está)").arg(p.title)
+            ? QStringLiteral("%1 (ya está)").arg(p.title)
             : p.title;
         QAction *act = menu.addAction(label);
         act->setEnabled(!contains);

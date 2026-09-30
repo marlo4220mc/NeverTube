@@ -60,7 +60,7 @@ private:
     // alternativas (mismo patrón que los tres puntos de Biblioteca). Al
     // elegir una opción llama a onPick(displayText).
     // Botón de acción simple (mismo estilo y tamaño que los de valor, sin el
-    // sufijo "▾"): usado p. ej. por "Volver a detectar".
+    // sufijo "▼"): usado p. ej. por "Volver a detectar".
     QPushButton *makeActionButton(const QString &text);
     QPushButton *makeValueButton(const QString &text);
     void setupValueMenu(QPushButton *btn, const QStringList &options,

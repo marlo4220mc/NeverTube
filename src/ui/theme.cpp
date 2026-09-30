@@ -1,8 +1,17 @@
 #include "theme.h"
 
 #include <QColor>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QFont>
+#include <QFontMetrics>
+#include <QGuiApplication>
+#include <QRawFont>
 #include <QHash>
 #include <QStringList>
+
+#include <algorithm>
 
 #include <cstdio>
 
@@ -141,6 +150,11 @@ QPushButton#ghost { background: transparent; border: 1px solid @BORDER@; border-
 QPushButton#ghost:hover { background: #1F1F1F; }
 QPushButton#ghost:pressed { background: @HOVER@; }
 QPushButton#ghost:focus { border-color: @ACCENT@; }
+/* Ghost SOLO con icono (el X de limpiar del buscador). El padding global
+   (7px 14px) deja 2x2 px de contenido dentro de los 28 px del boton, asi que
+   sin esto el icono se sale. Es un selector de propiedad para que el boton
+   siga heredando el resto de #ghost. */
+QPushButton#ghost[iconOnly="true"] { padding: 0; }
 QPushButton#iconBtn { background: transparent; border: none; border-radius: 6px; padding: 6px; }
 QPushButton#iconBtn:hover { background: @HOVER@; }
 QPushButton#iconBtn:pressed { background: @SELECTION@; }
@@ -703,6 +717,205 @@ bool themeSelfTest()
 
     std::fprintf(stderr, "THEME %s (%d reglas, %d selectores)\n",
                  fail == 0 ? "OK" : "FAIL", reglas, (int)veces.size());
+    return fail == 0;
+}
+
+namespace {
+
+// Quita los comentarios de una linea (respetando el estado de bloque) y
+// devuelve solo el codigo. Sin esto se leen los comentarios como si fueran
+// literales y cada glifo citado en un "// asi se evita el X" sale como falso
+// positivo. Un "http://" dentro de un literal trunca el literal (queda sin
+// comilla de cierre y se descarta): para este test da igual.
+QString sinComentarios(const QString &linea, bool &enBloque)
+{
+    QString out;
+    for (int i = 0; i < linea.size();) {
+        if (enBloque) {
+            const int fin = linea.indexOf(QLatin1String("*/"), i);
+            if (fin < 0)
+                break;
+            enBloque = false;
+            i = fin + 2;
+            continue;
+        }
+        const QChar c = linea.at(i);
+        if (c == QLatin1Char('/') && i + 1 < linea.size()
+            && linea.at(i + 1) == QLatin1Char('/'))
+            break; // resto de la linea es comentario
+        if (c == QLatin1Char('/') && i + 1 < linea.size()
+            && linea.at(i + 1) == QLatin1Char('*')) {
+            enBloque = true;
+            i += 2;
+            continue;
+        }
+        out += c;
+        ++i;
+    }
+    return out;
+}
+
+// Literales de comillas dobles de una linea, con los escapes \", \\, \n, etc.
+// ya resueltos. Los que llevan \u o \x los filtra el llamante: ahi el
+// codepoint es explicito a proposito.
+QStringList literalesDe(const QString &linea)
+{
+    QStringList out;
+    for (int i = 0; i < linea.size(); ++i) {
+        if (linea.at(i) != QLatin1Char('"'))
+            continue;
+        QString lit;
+        int j = i + 1;
+        bool cerrado = false;
+        for (; j < linea.size(); ++j) {
+            const QChar c = linea.at(j);
+            if (c == QLatin1Char('\\') && j + 1 < linea.size()) {
+                lit += c;
+                lit += linea.at(j + 1);
+                ++j;
+                continue;
+            }
+            if (c == QLatin1Char('"')) {
+                cerrado = true;
+                break;
+            }
+            lit += c;
+        }
+        if (cerrado) {
+            out << lit;
+            i = j; // seguir despues de la comilla de cierre
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+// Selftest OFFLINE de GLIFOS. La UI pinta su texto con la fuente por defecto
+// del sistema, y esa fuente no tiene todos los caracteres: "✕" (U+2715),
+// "◀" (U+25C0), "▾" (U+25BE) y "✔" (U+2714) NO estan en Liberation Sans, la
+// que resuelve el sistema. Qt los sustituye por el marcador de glifo ausente,
+// que medido en pantalla son 2x5 px: el boton de limpiar del buscador era un
+// marco vacio con un punto, y los desplegables de Ajustes likewise.
+//
+// Para que no dependa de una lista que se desincroniza al anadir texto, se
+// recorren los literales del propio ARBOL DE FUENTES y se comprueba cada
+// caracter no ASCII contra la fuente real de la app: un glifo que no exista
+// sale en el CI en vez de en la pantalla del usuario. Offline y determinista.
+bool glyphSelfTest()
+{
+    int fail = 0;
+    const auto chk = [&fail](bool ok, const char *what) {
+        std::fprintf(stderr, "  [%s] %s\n", ok ? "OK  " : "FAIL", what);
+        if (!ok)
+            ++fail;
+    };
+
+    const QFont appFont = QGuiApplication::font();
+    const QFontMetrics fm(appFont);
+    std::fprintf(stderr, "GLYFTS fuente de la app: %s (%d px)\n",
+                 qPrintable(appFont.family()), appFont.pixelSize());
+
+    // OJO: QFontMetrics::inFont() NO sirve, consulta el FALLBACK del sistema y
+    // devuelve true si CUALQUIER fuente instalada tiene el caracter (aqui hay 25
+    // que cubren U+2715), mientras que la app segun pintando el marcador de
+    // glifo ausente. Lo que decide es si lo tiene EL FICHERO de la fuente de la
+    // app, y eso lo responde QRawFont. Si la fuente no se puede abrir (una
+    // fuente compuesta del sistema, p. ej.), se cae a inFont y se avisa: es
+    // mas permisivo, pero mejor que no comprobar nada.
+    const QRawFont raw = QRawFont::fromFont(appFont);
+    const bool usarRaw = raw.isValid();
+    if (!usarRaw)
+        std::fprintf(stderr,
+                     "GLYFTS (aviso: no se pudo abrir el fichero de la fuente; "
+                     "se usa inFont, que consulta el fallback)\n");
+    const auto tieneGlifo = [&fm, &raw, usarRaw](QChar c) {
+        return usarRaw ? raw.supportsCharacter(c.unicode()) : fm.inFont(c);
+    };
+
+    // Raiz del arbol: este fichero es <raiz>/src/ui/theme.cpp.
+    QDir root = QFileInfo(QString::fromUtf8(__FILE__)).absolutePath();
+    root.cdUp();
+    root.cdUp();
+    const QString srcDir = root.filePath(QStringLiteral("src"));
+    if (!QFileInfo(srcDir).isDir()) {
+        std::fprintf(stderr,
+                     "GLYFTS (sin arbol de fuentes junto al binario: omitido)\n");
+        return true;
+    }
+
+    // char -> primer uso ("fichero:linea"), para el diagnostico.
+    QHash<uint, QString> usos;
+    int ficheros = 0;
+    int literales = 0;
+    QStringList pila{srcDir};
+    bool enBloque = false;
+    while (!pila.isEmpty()) {
+        const QString dir = pila.takeLast();
+        QFileInfoList entradas =
+            QDir(dir).entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot,
+                                    QDir::Name);
+        for (const QFileInfo &fi : entradas) {
+            if (fi.isDir()) {
+                pila << fi.filePath();
+                continue;
+            }
+            const QString sufijo = fi.suffix();
+            if (sufijo != QLatin1String("cpp") && sufijo != QLatin1String("h"))
+                continue;
+            QFile f(fi.filePath());
+            if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+                continue;
+            ++ficheros;
+            // El estado de comentario en bloque NO puede pasar de un fichero a
+            // otro: un "/*" sin cerrar al final dejaria el siguiente entero
+            // "en bloque" y sus literales no se comprobarian (agujero
+            // silencioso, que es justo lo que este test evita).
+            enBloque = false;
+            const QStringList lineas =
+                QString::fromUtf8(f.readAll()).split(QLatin1Char('\n'));
+            for (int ln = 0; ln < lineas.size(); ++ln) {
+                const QString codigo = sinComentarios(lineas.at(ln), enBloque);
+                const QStringList lits = literalesDe(codigo);
+                literales += lits.size();
+                for (const QString &lit : lits) {
+                    if (lit.contains(QLatin1String("\\u"))
+                        || lit.contains(QLatin1String("\\x")))
+                        continue; // codepoint explicito: no se puede comprobar
+                    for (const QChar &c : lit) {
+                        if (c.unicode() < 128)
+                            continue;
+                        if (!usos.contains(c.unicode())) {
+                            usos.insert(c.unicode(),
+                                        QStringLiteral("%1:%2")
+                                            .arg(fi.filePath())
+                                            .arg(ln + 1));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    chk(ficheros > 20 && literales > 200,
+        "se ha recorrido el arbol de fuentes (literales incluidos)");
+    chk(!usos.isEmpty(), "hay caracteres no ASCII que comprobar");
+
+    int ausentes = 0;
+    QList<uint> claves = usos.keys();
+    std::sort(claves.begin(), claves.end());
+    for (uint cp : claves) {
+        const QChar c = QChar(ushort(cp));
+        if (tieneGlifo(c))
+            continue;
+        ++ausentes;
+        std::fprintf(stderr, "  [FAIL] U+%04X %s  NO esta en %s (primer uso: %s)\n",
+                     cp, qPrintable(QString(c)), qPrintable(appFont.family()),
+                     qPrintable(usos.value(cp)));
+    }
+    chk(ausentes == 0, "todo glifo no ASCII de la UI existe en la fuente");
+
+    std::fprintf(stderr, "GLYFTS %s (%d ficheros, %d literales, %d glifos)\n",
+                 fail == 0 ? "OK" : "FAIL", ficheros, literales, (int)usos.size());
     return fail == 0;
 }
 

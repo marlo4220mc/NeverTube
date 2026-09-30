@@ -301,6 +301,11 @@ jobs:
           # títulos de sección de todas las páginas por detrás del de 16 px.
           $rc = Invoke-Selftest '--selftest-theme'
           if ($rc -ne 0) { exit $rc }
+          # Glifos de la UI contra la fuente real de la app: la fuente por
+          # defecto no cubre todos los caracteres no ASCII y Qt pinta el
+          # marcador de glifo ausente (2x5 px medidos) en vez del caracter.
+          $rc = Invoke-Selftest '--selftest-glyphs'
+          if ($rc -ne 0) { exit $rc }
           # Parser del autocompletado de youtube.com (función pura, sin red):
           # fija el formato de los dos tipos de item que devuelve el endpoint.
           $rc = Invoke-Selftest '--selftest-suggest-parse'

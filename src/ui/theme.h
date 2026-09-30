@@ -142,4 +142,11 @@ QString styleSheet();
 // las paginas sin que ningun test lo vieran. Se llama desde --selftest-theme.
 bool themeSelfTest();
 
+// Selftest de GLIFOS (offline, sin red ni GPU): comprueba que TODO caracter no
+// ASCII de los literales del arbol de fuentes exista en la fuente real de la
+// app. Motivo: la fuente por defecto del sistema no los tiene todos y Qt
+// sustituye el que falta por el marcador de glifo ausente (medido: 2x5 px), o
+// sea un boton invisible. Se llama desde --selftest-glyphs.
+bool glyphSelfTest();
+
 } // namespace nt

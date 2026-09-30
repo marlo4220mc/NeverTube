@@ -236,6 +236,7 @@ arriba-izquierda, fuera del scroll (fijo) y se oculta en fullscreen.
 ./build/nevertube_qt2 --selftest-feeds     # canal por Innertube + trending (protocolo y cadena)
 ./build/nevertube_qt2 --selftest-grid      # rejillas: tope de columnas (puro) + celda coherente modelo/gridSize/seccion (monta un VideoListView; sin red ni GPU: va en el CI)
 ./build/nevertube_qt2 --selftest-theme     # QSS puro: ningún selector declarado dos veces (duplicado silencioso): va en el CI
+./build/nevertube_qt2 --selftest-glyphs    # todo glifo no ASCII de la UI existe en la fuente real de la app: va en el CI
 ```
 
 El selftest del player verifica invariantes del núcleo protegido sin
@@ -513,7 +514,7 @@ build x86, que sale por `NEVERTUBE_NO_MPV`):
 - `./build/nevertube_qt2 --selftest-db` / `--selftest-player` /
   `--selftest-innertube` / `--selftest-discover` / `--selftest-home` /
   `--selftest-feeds` / `--selftest-av1hls` / `--selftest-hwprobe` / `--selftest-search` /
-  `--selftest-grid` / `--selftest-theme` → pruebas
+  `--selftest-grid` / `--selftest-theme` / `--selftest-glyphs` → pruebas
 
 ## Color de acento configurable
 
@@ -569,6 +570,51 @@ Dosposites que se perdían de vista y que el usuario señaló:
 
 `--selftest-theme` cubre las dos: paleta en `kSelection`/`kText`, que el QSS no
 seleccione en el acento, y que el bloque `[highlight="true"]` lleve el acento.
+
+## Glifos: la fuente por defecto NO tiene todos los caracteres (medido)
+
+La UI pinta su texto con la fuente por defecto del sistema, y esa fuente
+(Liberation Sans en Linux, la que resuelve fontconfig) **no cubre todos los
+caracteres no ASCII**. Cuando el carácter no está, Qt pinta el *marcador de
+glifo ausente*: medido en pantalla, son **2x5 px**, o sea un botón casi
+invisible. Cuatro glifos de la UI estaban en esa situación:
+
+| glifo | U+ | sitio | se ve como |
+|---|---|---|---|
+| `✕` | 2715 | botón X de limpiar del buscador | marco vacío con un punto |
+| `◀` | 25C0 | botón "◀ Volver" (además duplicaba el icono `Back` que ya tenía) | un punto antes de "Volver" |
+| `▾` | 25BE | sufijo de los 3 botones de valor de Ajustes (`makeValueButton`) | un punto |
+| `✔` | 2714 | etiqueta "ya está" del menú de playlists | un punto |
+
+Cómo se arregla, por orden de preferencia:
+
+1. **Icono de `nt::icon()`** (`src/ui/icons.*`): dibuja con `QPainter`, no
+   depende de ninguna fuente. Es lo que se usa para el X de limpiar y para el
+   "Volver" (que ya tenía el icono `Back`: el `◀` del texto era redundante).
+2. **Un glifo que la fuente sí tenga**: `▼` (U+25BC) sí está, y es lo que usan
+   ahora los botones de valor de Ajustes (por `▾`). Antes de elegir un
+   carácter, comprobarlo (ver el selftest de abajo).
+3. **Quitarlo**: si el texto ya dice lo mismo ("✔ ... (ya está)"), el glifo es
+   decorativo y sobra.
+
+Lo que **no** hay que hacer es confiar en que el glifo se ve: `✕`, `▾`, `◀` y
+`✔` no están en Liberation Sans y en pantalla salían como un punto.
+
+`--selftest-glyphs` (`nt::glyphSelfTest` en `src/ui/theme.cpp`, en el smoke de
+los dos CI) recorre los **literales del propio árbol de fuentes** —los
+comentarios se descartan antes— y comprueba cada carácter no ASCII contra la
+fuente real de la app: un glifo nuevo que no exista sale en el CI en vez de en
+la pantalla del usuario. 64 ficheros, ~3350 literales, 18 glifos.
+
+- **OJO: `QFontMetrics::inFont()` NO sirve para esto.** Consulta el *fallback*
+  del sistema y devuelve true si **cualquier** fuente instalada tiene el
+  carácter (aquí hay 25 que cubren U+2715), mientras la app seguía pintando el
+  marcador de glifo ausente. Lo que decide es si lo tiene **el fichero** de la
+  fuente de la app, y eso lo responde `QRawFont::fromFont(appFont)` +
+  `supportsCharacter()`. Si la fuente no se puede abrir (una fuente compuesta
+  del sistema), se cae a `inFont` y se avisa por pantalla.
+- El `✕` que queda en los comentarios del código es a propósito: el test los
+  descarta, y citarlos explica por qué están prohibidos.
 
 ## Caché de miniaturas y suscripciones
 

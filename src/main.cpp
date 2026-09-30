@@ -580,6 +580,18 @@ int main(int argc, char *argv[])
         return ok ? 0 : 1;
     }
 
+    if (args.contains(QLatin1String("--selftest-glyphs"))) {
+        // Glifos de la UI contra la fuente real de la app. La fuente por
+        // defecto del sistema no cubre todos los caracteres no ASCII: el que
+        // falta lo sustituye Qt por el marcador de glifo ausente, que medido
+        // en pantalla son 2x5 px (un boton invisible). Recorre los literales
+        // del arbol de fuentes, asi que un glifo nuevo que no exista lo ve el
+        // CI. Offline y determinista: vale en el CI.
+        const bool ok = nt::glyphSelfTest();
+        std::fprintf(stderr, "SELFTEST glyphs -> %s\n", ok ? "OK" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
     if (args.contains(QLatin1String("--selftest-feeds"))) {
         const bool proto = feedsProtocolSelfTest();
         const bool chain = feedsChainSelfTest();
