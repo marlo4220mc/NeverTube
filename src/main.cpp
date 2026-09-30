@@ -431,6 +431,15 @@ int main(int argc, char *argv[])
         return ok ? 0 : 1;
     }
 
+    if (args.contains(QLatin1String("--selftest-suggest-gestures"))) {
+        // Gestos del desplegable en la jerarquia real (offline): la pagina
+        // dentro de un QStackedWidget, con QSS puesto, y cada gesto entregado
+        // por la ruta que usa la plataforma.
+        const bool ok = searchSuggestGesturesSelfTestRun();
+        std::fprintf(stderr, "SELFTEST suggest-gestures -> %s\n", ok ? "OK" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
     if (args.contains(QLatin1String("--selftest-suggest"))) {
         // Parser offline + sonda con red del endpoint que usa el type-ahead.
         return suggestSelfTest() ? 0 : 1;

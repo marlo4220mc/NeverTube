@@ -12,6 +12,7 @@
 class QJsonDocument;
 class QLineEdit;
 class QScrollArea;
+class QStackedWidget;
 class QTimer;
 class VideoListView;
 class ThumbnailCache;
@@ -49,6 +50,10 @@ public:
     // el historial y el campo y llamar al slot directamente, sin abrir un
     // monton de accesores publicos solo para test.
     friend bool searchSuggestPanelSelfTest(SearchPage *page);
+    // El banco de gestos tambien siembra el campo y el historial, y necesita el
+    // contenedor para probar el cambio de pestana.
+    friend bool searchSuggestGesturesSelfTest(SearchPage *page, QStackedWidget *stack,
+                                              QWidget *otra);
 
 signals:
     void openRequested(const QVector<VideoInfo> &videos, int startIndex);
@@ -166,3 +171,9 @@ private:
 // dos grupos, que el historial se filtra, y que una respuesta tardia se
 // ignora. Se llama desde --selftest-suggest-panel.
 bool searchSuggestPanelSelfTestRun();
+
+// Banco de gestos del desplegable en la jerarquia real (pagina dentro de un
+// QStackedWidget, con barra de navegacion y el QSS de verdad). Comprueba los
+// gestos con entrega real, que es donde fallaban. Se llama desde
+// --selftest-suggest-gestures.
+bool searchSuggestGesturesSelfTestRun();

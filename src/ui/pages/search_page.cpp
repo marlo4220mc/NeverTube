@@ -12,6 +12,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QHideEvent>
@@ -19,6 +20,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSignalBlocker>
+#include <QStackedWidget>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QRegularExpression>
@@ -1462,6 +1464,197 @@ bool searchSuggestPanelSelfTest(SearchPage *page)
     return fail == 0;
 }
 
+// Banco de pruebas del desplegable en la JERARQUIA REAL. El selftest de arriba
+// monta la SearchPage suelta como ventana de nivel superior, y ahi se perdian
+// gestos sin que se notara: el campo esta dentro de un QFrame, la pagina
+// dentro de un QStackedWidget, y el despliegue lo hace el pixel. Aqui se monta
+// la pagina dentro de un contenedor con barra de navegacion (la forma que tiene
+// en MainWindow), se aplica el QSS de verdad, y se repiten TODOS los gestos
+// con entrega real (qApp->notify al widget receptor, widgetAt para el clic).
+bool searchSuggestGesturesSelfTest(SearchPage *page, QStackedWidget *stack,
+                                   QWidget *otra)
+{
+    int fail = 0;
+    const auto chk = [&fail](bool ok, const char *what) {
+        std::fprintf(stderr, "  [%s] %s\n", ok ? "OK  " : "FAIL", what);
+        if (!ok)
+            ++fail;
+    };
+    if (!page || !stack || !otra) {
+        std::fprintf(stderr, "SUGGEST GESTURES FAIL: faltan piezas\n");
+        return false;
+    }
+    QWidget *panel = page->suggestPanel();
+    page->setHistory({QStringLiteral("Will smith"), QStringLiteral("Willie colon")});
+    page->m_field->setFocus();
+    QCoreApplication::processEvents();
+
+    // El QSS de verdad. Sin el los widgets salen sin estilo y el hit-test no se
+    // parece en nada a la app (el selftest de arriba no lo instala tampoco).
+    qApp->setStyleSheet(nt::styleSheet());
+
+    const QVector<Suggestion> items = {
+        {QStringLiteral("willie colón"), QStringLiteral("Cantautor y trombonista")},
+        {QStringLiteral("willyrex"), QStringLiteral("@Willyrex")},
+        {QStringLiteral("william luna"), QString()},
+    };
+    const auto abrir = [&page, &items](const QString &prefijo) {
+        page->m_field->setText(prefijo);
+        page->m_suggestQuery = prefijo;
+        page->onSuggestReady(prefijo, items);
+        QCoreApplication::processEvents();
+    };
+    // Entrega por la ruta real: se manda al widget que recibe el evento, no al
+    // handler. Llamar al handler a mano es lo que hacia pasar el test con el
+    // gesto roto.
+    const auto key = [](QWidget *w, int k) {
+        QKeyEvent ev(QEvent::KeyPress, k, Qt::NoModifier);
+        qApp->notify(w, &ev);
+        QCoreApplication::processEvents();
+    };
+    const auto clic = [](QWidget *w) {
+        QMouseEvent ev(QEvent::MouseButtonPress, QPointF(w->rect().center()),
+                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        qApp->notify(w, &ev);
+        QCoreApplication::processEvents();
+    };
+
+    // Enter dispara la busqueda y doSearch() pide a la red. Aqui se suelta esa
+    // conexion y se pone una sonda: lo que se comprueba es que la tecla LLEGA
+    // al QLineEdit y con que texto, no el resultado de la busqueda (eso es otra
+    // prueba). Sin esto la prueba cerraria con una peticion de red en vuelo.
+    QString textoEnEnter;
+    bool entroEnter = false;
+    QObject::disconnect(page->m_field, &QLineEdit::returnPressed, page,
+                        &SearchPage::doSearch);
+    QObject::connect(page->m_field, &QLineEdit::returnPressed, page,
+                     [&textoEnEnter, &entroEnter, page] {
+                         entroEnter = true;
+                         textoEnEnter = page->m_field->text();
+                     });
+
+    // --- 1) Clic: a quien lo entrega la plataforma, no como se propaga ------
+    abrir(QStringLiteral("Will"));
+    chk(!panel->isHidden(), "el desplegable se abre en la pagina apilada");
+    {
+        SuggestRow *row = page->m_rows.at(0);
+        QWidget *text = row->findChild<QLabel *>(QStringLiteral("suggestQuery"));
+        const QPoint g = text->mapToGlobal(text->rect().center());
+        chk(QApplication::widgetAt(g) == row,
+            "el hit-test del texto de la fila cae en la fila");
+        int picked = 0;
+        QMetaObject::Connection c = QObject::connect(
+            row, &SuggestRow::picked, [&picked](SuggestRow *) { ++picked; });
+        clic(row);
+        QObject::disconnect(c);
+        chk(picked == 1, "el clic sobre la fila se convierte en busqueda");
+    }
+
+    // --- 2) Tab entra en el desplegable (el bug del QFrame) ----------------
+    abrir(QStringLiteral("Will"));
+    key(page->m_field, Qt::Key_Tab);
+    chk(QApplication::focusWidget() == page->m_rows.at(0),
+        "Tab en el campo mete el foco real en la primera fila");
+    chk(!panel->isHidden(), "Tab en el campo no cierra el desplegable");
+    key(page->m_rows.at(0), Qt::Key_Down);
+    chk(QApplication::focusWidget() == page->m_rows.at(1),
+        "las flechas dentro del desplegable mueven el foco entre filas");
+    key(page->m_rows.at(1), Qt::Key_Up);
+    chk(QApplication::focusWidget() == page->m_rows.at(0),
+        "Arriba vuelve a la fila anterior");
+    key(page->m_rows.at(0), Qt::Key_Escape);
+    chk(panel->isHidden() && QApplication::focusWidget() == page->m_field,
+        "Esc en una fila cierra y devuelve el foco al campo");
+    chk(page->m_field->text() == QLatin1String("Will"),
+        "Esc en una fila no borra lo escrito");
+
+    // --- 3) Tab dentro del desplegable sale sin devolver el foco ------------
+    abrir(QStringLiteral("Will"));
+    key(page->m_field, Qt::Key_Tab);
+    key(page->m_rows.at(0), Qt::Key_Tab);
+    chk(panel->isHidden(), "Tab en una fila cierra el desplegable");
+    chk(QApplication::focusWidget() != page->m_field,
+        "Tab en una fila NO devuelve el foco al campo");
+
+    // --- 4) Teclado con el foco en el campo ---------------------------------
+    abrir(QStringLiteral("Will"));
+    key(page->m_field, Qt::Key_Down);
+    key(page->m_field, Qt::Key_Down);
+    chk(page->m_highlight == 1,
+        "las flechas en el campo mueven el resaltado del desplegable");
+    chk(page->m_field->text() == QLatin1String("Will"),
+        "mover el resaltado no sustituye el texto del campo");
+    entroEnter = false;
+    textoEnEnter.clear();
+    key(page->m_field, Qt::Key_Return);
+    chk(entroEnter, "Enter llega al campo (el desplegable no se lo come)");
+    chk(textoEnEnter == QLatin1String("Will"),
+        "Enter busca el texto literal, no la sugerencia resaltada");
+    key(page->m_field, Qt::Key_Escape);
+    chk(panel->isHidden() && page->m_field->text() == QLatin1String("Will"),
+        "Esc en el campo cierra sin borrar lo escrito");
+
+    // --- 5) Clic fuera y cambio de pestana ----------------------------------
+    abrir(QStringLiteral("Will"));
+    clic(otra);
+    chk(panel->isHidden(), "un clic fuera cierra el desplegable");
+    abrir(QStringLiteral("Will"));
+    stack->setCurrentWidget(otra);
+    QCoreApplication::processEvents();
+    chk(panel->isHidden(), "cambiar de pestana cierra el desplegable");
+    stack->setCurrentWidget(page);
+    QCoreApplication::processEvents();
+    page->m_field->setFocus();
+    QCoreApplication::processEvents();
+
+    // --- 6) El desplegable se ancla al campo y no se sale de la pagina ------
+    // Al Estrechar la ventana hasta que no cabe ni arriba ni abajo tiene que
+    // recortarse, no salirse. NOTA: la rama de "abre hacia arriba" de
+    // positionSuggestPanel() NO se puede cubrir aqui, y no es un fallo de la
+    // prueba: el campo esta siempre a unos 46 px del borde superior, asi que
+    // yAbove = 46 - alto_del_panel es negativo con cualquier panel de mas de
+    // 42 px. Es decir, con este layout esa rama no se ejecuta nunca; lo que si
+    // se ejecuta es el recorte de abajo.
+    const QVector<QSize> tamanos = {QSize(1400, 900), QSize(1100, 720),
+                                    QSize(900, 520), QSize(820, 400),
+                                    QSize(700, 300), QSize(1100, 240)};
+    int fuera = 0;
+    int desalineado = 0;
+    int recortado = 0;
+    int altoNatural = 0; // alto con sitio de sobra, para detectar el recorte
+    for (const QSize &s : tamanos) {
+        // Se redimensiona la VENTANA, no el QStackedWidget: el layout de la
+        // raiz manda sobre el, y resize() sobre el stack no cambia nada (la
+        // pagina se queda en su tamano y esta prueba no probaba nada).
+        QWidget *root = stack->parentWidget();
+        root->resize(s);
+        QCoreApplication::processEvents();
+        abrir(QStringLiteral("Will"));
+        const QRect pr = panel->geometry();
+        if (pr.left() < 0 || pr.top() < 0 || pr.right() > page->width() + 1
+            || pr.bottom() > page->height() + 1)
+            ++fuera;
+        if (qAbs(pr.left() - page->m_field->mapTo(page, QPoint(0, 0)).x()) > 2)
+            ++desalineado;
+        // Detectar el recorte comparando con el alto natural. Ojo: una vez
+        // recortado el panel SI cabe (de eso va el recorte), asi que no vale
+        // mirar si se sale de la pagina para saber que ha ocurrido.
+        if (altoNatural == 0) {
+            altoNatural = pr.height();
+        } else if (pr.height() < altoNatural - 2) {
+            ++recortado;
+            if (page->m_suggestScroll->verticalScrollBar()->maximum() <= 0)
+                ++fuera; // recortado y sin barra: las filas de abajo son inalcanzables
+        }
+    }
+    chk(fuera == 0, "el desplegable no se sale de la pagina en ningun tamano");
+    chk(desalineado == 0, "el desplegable sigue al borde izquierdo del campo");
+    chk(recortado > 0, "con muy poco alto el desplegable se recorta (y con barra)");
+
+    std::fprintf(stderr, "SUGGEST GESTURES %s\n", fail == 0 ? "OK" : "FAIL");
+    return fail == 0;
+}
+
 bool searchSuggestPanelSelfTestRun()
 {
     // Construye las piezas minimas que necesita SearchPage y lanza la prueba
@@ -1486,6 +1679,44 @@ bool searchSuggestPanelSelfTestRun()
     page.show();
     QCoreApplication::processEvents();
     return searchSuggestPanelSelfTest(&page);
+}
+
+bool searchSuggestGesturesSelfTestRun()
+{
+    // Monta la pagina donde vive de verdad: dentro de un QStackedWidget, con
+    // una barra de navegacion encima, como en MainWindow. Ver el comentario de
+    // la funcion: los gestos se pierden en ese trampolín y no en la pagina
+    // suelta.
+    AppDatabase db(QStringLiteral("/tmp/nevertube_selftest_gestures.db"));
+    if (!db.isOpen() && !db.open()) {
+        std::fprintf(stderr, "SUGGEST GESTURES FAIL: no se abre la BD de test\n");
+        return false;
+    }
+    SettingsRepo settings(db);
+    ThumbnailCache thumbs(QStringLiteral("gestures-selftest"), 1 << 20);
+    Yt yt;
+
+    QWidget root;
+    auto *lay = new QVBoxLayout(&root);
+    lay->setContentsMargins(0, 0, 0, 0);
+    lay->setSpacing(0);
+    auto *nav = new QWidget(&root);
+    nav->setFixedHeight(56);
+    lay->addWidget(nav);
+    auto *stack = new QStackedWidget(&root);
+    lay->addWidget(stack, 1);
+    auto *otra = new QWidget(stack);
+    stack->addWidget(otra);
+    SearchPage page(&yt, &settings, &thumbs);
+    stack->addWidget(&page);
+
+    root.resize(1100, 720);
+    root.show();
+    stack->setCurrentWidget(&page);
+    QCoreApplication::processEvents();
+    // El foco al campo lo pone la propia prueba (esta si es friend); aqui
+    // m_field es privado.
+    return searchSuggestGesturesSelfTest(&page, stack, otra);
 }
 
 // SuggestRow está definida en este .cpp (necesita el moc aquí).

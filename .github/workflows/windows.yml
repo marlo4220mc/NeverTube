@@ -305,6 +305,12 @@ jobs:
           # tardías y el tope de altura del panel.
           $rc = Invoke-Selftest '--selftest-suggest-panel'
           if ($rc -ne 0) { exit $rc }
+          # Gestos del desplegable con la jerarquia real (página dentro de un
+          # QStackedWidget, con el QSS puesto) y entrega de eventos real: es el
+          # banco que caza el clic que no llega a la fila y el Tab que se come
+          # el QFrame del buscador.
+          $rc = Invoke-Selftest '--selftest-suggest-gestures'
+          if ($rc -ne 0) { exit $rc }
           # qoffscreen se quita solo al final (todos los selftests lo necesitan).
           # Búsqueda real por Innertube: vídeos con id (y canal) no vacíos.
           $rc = Invoke-Selftest '--selftest-search'
