@@ -322,6 +322,22 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
         m_suggestDebounce->stop();
         hideSuggestPanel();
         m_field->clear();
+        // Al borrar todo: vuelve a modo historial y limpia los resultados, como
+        // si nunca se hubiese buscado (así el botón X "deshace" la búsqueda).
+        m_activeQuery.clear();
+        m_searching = false;
+        m_moreButton->hide();
+        m_results.clear();
+        m_list->clearVideos();
+        while (QLayoutItem *item = m_channelBox->layout()->takeAt(0)) {
+            delete item->widget();
+            delete item;
+        }
+        m_channelButtons.clear();
+        m_channels.clear();
+        m_channelBox->hide();
+        setResultsMode(false);
+        showHistory();
         m_field->setFocus();
     });
 
@@ -520,7 +536,10 @@ void SearchPage::doSearch()
 
 void SearchPage::onSearchReady(const QString &query, const QVector<VideoInfo> &videos)
 {
-    if (query != m_activeQuery)
+    // La consulta debe ser la vigente... y el campo no puede estar vacío: si el
+    // usuario pulsa X mientras esta búsqueda sigue en vuelo, la respuesta llega
+    // con query == m_activeQuery y repinta la lista que se acaba de vaciar.
+    if (query != m_activeQuery || m_field->text().trimmed().isEmpty())
         return;
     m_searching = false;
     NT_DEBUG("E2E searchReady count=%d\n", (int)videos.size());
@@ -1464,6 +1483,37 @@ bool searchSuggestPanelSelfTest(SearchPage *page)
         }
         QObject::disconnect(c);
         chk(pickedCount == 3, "la pulsacion sobre la fila emite picked()");
+    }
+
+    // --- Boton X: limpiar el campo tiene que DESHACER la busqueda ---------
+    // El X solo hacia m_field->clear(), asi que los resultados de la consulta
+    // anterior se quedaban en pantalla con el campo ya vacio.
+    {
+        page->m_field->setText(QStringLiteral("Will smith"));
+        page->m_activeQuery = QStringLiteral("Will smith");
+        page->m_searching = true;
+        page->m_results = { VideoInfo{ QStringLiteral("vid-1") } };
+        page->m_list->showVideos(page->m_results, VideoListView::ListMode);
+        page->setResultsMode(true);
+        chk(page->m_resultBox->isVisible() && !page->m_historyBox->isVisible(),
+            "con resultados se ve la caja de resultados, no el historial");
+
+        // Clic de verdad en el boton, no llamar al lambda a mano.
+        page->m_clearBtn->click();
+        chk(page->m_field->text().isEmpty(), "el X vacia el campo");
+        chk(page->m_results.isEmpty() && page->m_list->isEmpty(),
+            "el X borra los resultados de la lista");
+        chk(!page->m_resultBox->isVisible() && page->m_historyBox->isVisible(),
+            "el X vuelve al modo historial (como si no se hubiera buscado)");
+        chk(page->m_activeQuery.isEmpty() && !page->m_searching,
+            "el X invalida la busqueda en vuelo");
+
+        // Y la que llegaba tarde: con el X ya pulsado, la respuesta de la
+        // consulta anterior no debe repintar la lista que se acaba de vaciar.
+        page->onSearchReady(QStringLiteral("Will smith"),
+                            { VideoInfo{ QStringLiteral("vid-tarde") } });
+        chk(page->m_list->isEmpty() && page->m_results.isEmpty(),
+            "una respuesta tardia no repinta la lista tras borrar con X");
     }
 
     std::fprintf(stderr, "SUGGEST PANEL %s\n", fail == 0 ? "OK" : "FAIL");
