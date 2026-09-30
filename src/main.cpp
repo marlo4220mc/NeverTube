@@ -271,16 +271,16 @@ static bool gridGeometrySelfTest()
         const char *why;
     };
     const TxtCase txts[] = {
-        { 0, 13, "celda sin ancho -> 13 px" },
-        { 100, 13, "celda diminuta se queda en 13 px (tope inferior)" },
-        { 140, 13, "140 px -> 13 px" },
-        { 175, 14, "175 px (5 columnas a 903 px de viewport)" },
-        { 220, 15, "220 px (4 columnas a 903 px)" },
-        { 260, 16, "260 px" },
-        { 300, 17, "300 px" },
-        { 340, 18, "340 px -> 18 px" },
-        { 370, 18, "370 px (5 columnas a pantalla grande) -> tope superior" },
-        { 900, 18, "celda enorme -> tope superior" },
+        { 0, 12, "celda sin ancho -> 12 px" },
+        { 100, 12, "celda diminuta se queda en 12 px (tope inferior)" },
+        { 140, 12, "140 px -> 12 px" },
+        { 175, 13, "175 px (5 columnas a 903 px de viewport)" },
+        { 220, 14, "220 px (4 columnas a 903 px)" },
+        { 260, 15, "260 px" },
+        { 300, 16, "300 px" },
+        { 340, 16, "340 px -> tope superior de 16 px" },
+        { 370, 16, "370 px (5 columnas a pantalla grande) -> tope superior" },
+        { 900, 16, "celda enorme -> tope superior" },
     };
     for (const TxtCase &t : txts) {
         const int got = VideoListView::gridTitlePx(t.cellW);
@@ -309,9 +309,9 @@ static bool gridGeometrySelfTest()
     }
     // El bloque reservado tiene que ser exactamente el que ocupa la pintura:
     // kGridTitleLines líneas de título + 14 px de hueco + 20 px de pie. A celda
-    // de 140 px son 3*17+34 = 85 px (antes 2*17+34 = 68 px y solo el 3% de los
-    // títulos se veía entero). Si esta suma no cuadra, la celda solapa con la
-    // línea de canal o deja hueco.
+    // de 140 px son 2*16+34 = 66 px (con 3 líneas a 14 px eran 3*18+34 = 88 y el
+    // usuario lo veía demasiado grande). Si esta suma no cuadra, la celda solapa
+    // con la línea de canal o deja hueco.
     if (VideoListView::gridTextBlockH(140)
         != VideoListView::kGridTitleLines * VideoListView::gridTitleLineH(140) + 34) {
         std::fprintf(stderr,

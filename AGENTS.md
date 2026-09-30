@@ -125,15 +125,30 @@ como en caliente):
   `gridTitleLineH` = 1,28 × tamaño. Antes eran 13 px y una caja de 34 px fijos
   mientras la miniatura sí crecía, que en un monitor grande dejaba el texto
   pequeño y descoyente. Con celda de 177 px (5 columnas a 903 px de viewport)
-  salen 14 px, y con 368 px (5 columnas a 1896 px) 18 px.
-- **El título ocupa `kGridTitleLines` = 3 líneas, no 2.** Medido sobre los 97
-  títulos de la caché con la caja de 161 px que sale a 5 columnas en una ventana
-  de 941 px, con 2 líneas solo el **3%** se veía completo (mediana: se leía el
-  21% del texto, y el 64% necesitaba 5-6 líneas). Con 3 líneas el título entero
-  pasa al **12%** en celda estrecha y al **76%** en celda de 370 px. Coste: la
+  salen 13 px, y con 340 px o más 16 px (tope). Va **SIN negrita**: con 14 px en
+  negrita el usuario lo veía demasiado grande ("lo sigo viendo grande") y pesaba
+  más que la propia miniatura.
+- **`kGridTitleLines` = 2 líneas, con la fuente 1 px más pequeña y sin
+  negrita.** Son las tres cosas que pidió el usuario al ver 14 px en negrita a 3
+  líneas: la celda queda bastante más compacta (175 px de alto en vez de 195 con
+  celda de 177) a cambio de un poco de legibilidad. Medido con las métricas
+  REALES de Qt (`QFontMetricsF`, misma fuente y mismo reparto voraz por palabras
+  que `drawGridTitle`) sobre los 90 títulos de la caché y la caja de 161 px que
+  sale a 5 columnas en una ventana de 941 px:
+
+  | config | título entero | texto visible | de ellos, ≥5 líneas |
+  |---|---|---|---|
+  | 14 px **negrita**, 3 líneas | 13% | 72% | 51/90 |
+  | **13 px normal, 2 líneas (actual)** | 5% | 58% | 22/90 |
+  | 12 px normal, 2 líneas | 8% | 62% | 9/90 |
+
+  O sea: se sigue leyendo el 58% del texto de media (antes el 72%) pero solo
+  la cuarta parte de los títulos necesita 5 líneas o más (antes la mitad). La
   celda mide `thumbH + 6 + 8 + gridTextBlockH(cellW)` y el bloque
-  `3*lineH + 14 + 20` (85 px a 13 px, 103 px a 18 px), o sea ~17 px más de alto
-  por celda; NO aumenta el número de vídeos por fila.
+  `2*lineH + 14 + 20` (66 px a 13 px); NO cambia el número de vídeos por fila.
+  Si algún día se queja de que se cortan títulos, el primer experimento es
+  **12 px** (medido: 8% enteros y 62% visible, MEJOR que 13 px) y el segundo
+  volver a 3 líneas.
   **Geometría y pintura comparten las mismas funciones puras**
   (`gridTitlePx`/`gridTitleLineH`/`kGridTitleLines`), así que la celda reserva
   exactamente lo que el título ocupa y no puede solaparse con la línea de canal.

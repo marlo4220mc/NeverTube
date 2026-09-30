@@ -361,17 +361,17 @@ private:
         drawProgressBar(p, thumbR, v);
 
         // Título y línea de canal al tamaño que manda en ESTA celda (ver
-        // gridTitlePx): 13 px en celda pequeña, 18 px en celda ancha. Antes eran
-        // 13 px fijos con la miniatura creciendo, y el bloque de texto se
-        // quedaba corto. El interlineado lo fija la misma función pura que usa
-        // la celda, así que la segunda línea cae dentro de la caja reservada.
+        // gridTitlePx): 12 px en celda pequeña, 16 px en celda ancha. El
+        // interlineado lo fija la misma función pura que usa la celda, así que la
+        // segunda línea cae dentro de la caja reservada. SIN negrita: con 14 px en
+        // negrita el título pesaba más que la propia miniatura en una celda de
+        // 177 px (lo pidió el usuario: "lo sigo viendo grande").
         const int titlePx = VideoListView::gridTitlePx(qRound(gw));
         const int lineH = VideoListView::gridTitleLineH(qRound(gw));
 
         p->save();
         QFont t = p->font();
         t.setPixelSize(titlePx);
-        t.setBold(true);
         p->setFont(t);
         p->setPen(nt::kText);
         const QRect titleR(r.left() + 8 * m_scale,
@@ -670,13 +670,13 @@ int VideoListView::clampGridColumns(int wanted, int viewportW, int minCellW)
 int VideoListView::gridTitlePx(int cellW)
 {
     if (cellW <= 0)
-        return 13;
-    // 140 px de celda -> 13 px, 340 px -> 18 px (5 px por cada 200 px de celda).
+        return 12;
+    // 140 px de celda -> 12 px, 340 px -> 16 px (5 px por cada 200 px de celda).
     // Los topes importan en las dos direcciones: por debajo de ~150 px el título
-    // no debe bajar de 13 px (a 11 px un título de 2 líneas deja de leerse) y por
-    // encima de ~320 px no tiene que seguir creciendo (con celdas de 500 px un
-    // título de 25 px no cabe en dos líneas y se elide media frase).
-    return qBound(13, qRound(13.0 + (cellW - 140) * 0.025), 18);
+    // no debe bajar de 12 px (a 11 px deja de leerse) y por encima de ~320 px no
+    // tiene que seguir creciendo. Todo este rango bajó 1 px (y el techo 18 -> 16)
+    // porque con 14 px en negrita el usuario veía el título demasiado grande.
+    return qBound(12, qRound(12.0 + (cellW - 140) * 0.025), 16);
 }
 
 int VideoListView::gridTitleLineH(int cellW)
