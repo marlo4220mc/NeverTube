@@ -540,6 +540,36 @@ en caliente desde Ajustes (Interfaz → Color de acento) y se persiste.
   y `applyAccent()` en watch/channel/home/settings (suscribirse, acciones
   activas, enlaces de la descripción, empty state, botón reset).
 
+## Color de SELECCIÓN: texto y sugerencia (del usuario)
+
+Dosposites que se perdían de vista y que el usuario señaló:
+
+- **Seleccionar texto va en el gris de la app** (`kSelection` #2D2D2D, el mismo
+  token de los menús), no en el acento. Antes el `QLineEdit` pintaba
+  `selection-background-color: @ACCENT@` (rojo) y quedaba como un error. La
+  descripción del Player (un `QLabel` con `Qt::TextSelectableByMouse`) no la
+  cubre el QSS: la pinta con `QPalette::Highlight`, que sin más salía con el
+  azul del tema del escritorio. Por eso **la paleta se aplica en `main.cpp`**
+  (`nt::applyTextSelectionPalette`, justo tras crear la `QApplication`, sobre
+  `app.palette()`): es lo único que llega a los widgets seleccionables que el
+  QSS no alcanza. Solo se tocan `Highlight` y `HighlightedText` (este a `kText`,
+  11:1 sobre `kSelection`) para no cambiar nada más del tema del escritorio.
+  Medido sobre un render real: banda de selección `#2D2D2D` sobre campo `#1F1F1F`,
+  texto dentro en `#ECECEC`.
+- **La fila de sugerencia resaltada lleva el acento.** Se perdía porque
+  `QWidget#suggestRow[highlight="true"]` era `#1F1F1F`, MÁS oscuro que el popover
+  `#202020`: era un oscurecimiento, no un resaltado. Ahora es una **barra de
+  acento de 3 px a la izquierda** + un velo `@ACCENT_A16@`, sobre hover en
+  `kSelection`. El texto se queda en `kTextSoft`/`kMuted` (siguen dando 8:1 y 4:1
+  sobre el velo), así que no hay que tocar las etiquetas hijas. El borde
+  izquierdo se reserva siempre (3 px transparentes en la fila normal) para que la
+  barra no empuje el texto: medido, el texto arranca en `x=13` con la fila
+  resaltada y sin ella. La propiedad dinámica la pone `SuggestRow::setHighlighted`
+  (con re-polish, que es obligatorio: cambiar la propiedad no repinta solo).
+
+`--selftest-theme` cubre las dos: paleta en `kSelection`/`kText`, que el QSS no
+seleccione en el acento, y que el bloque `[highlight="true"]` lleve el acento.
+
 ## Caché de miniaturas y suscripciones
 
 - `ThumbnailCache::pixmap()` **cae a disco** si el LRU desalojó la imagen de

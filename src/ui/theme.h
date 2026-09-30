@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QColor>
+#include <QPalette>
 #include <QString>
 #include <QVector>
 
@@ -53,6 +54,28 @@ inline void setAccent(const QColor &c) { kAccent = c; }
 // Hex "#rrggbb" del acento y de sus variantes hover/pressed, para QSS
 // generado dinámicamente (theme.cpp y estilos inline de páginas).
 inline QString accentHex() { return kAccent.name(); }
+
+// Color de la SELECCIÓN DE TEXTO en toda la app: el gris de la app
+// (kSelection, el mismo de los menús y de las vistas desplegadas), no el del
+// tema del escritorio. Hace falta porque el QSS no llega a la descripción del
+// Player: es un QLabel con Qt::TextSelectableByMouse y pinta la selección con
+// QPalette::Highlight, que sin esto salía del tema del sistema (un azul en
+// GTK), un color que no está en la paleta de la app.
+//
+// Se tocan SOLO Highlight y HighlightedText: el resto de roles se deja como
+// estaban, para no cambiar el fondo de nada que hoy dependa del tema del
+// escritorio (tooltips, menús, barras de estado) y que el QSS no cubre.
+// HighlightedText va a kText porque sobre kSelection el texto tiene que seguir
+// leyéndose (11:1).
+inline QColor textSelectionBg() { return kSelection; }
+inline QColor textSelectionFg() { return kText; }
+inline void applyTextSelectionPalette(QPalette &p)
+{
+    for (int g : { QPalette::Active, QPalette::Inactive }) {
+        p.setColor(QPalette::ColorGroup(g), QPalette::Highlight, kSelection);
+        p.setColor(QPalette::ColorGroup(g), QPalette::HighlightedText, kText);
+    }
+}
 
 // Variante hover: mezcla ~10% hacia blanco. Reproduce el "#FF1A47" histórico
 // del rojo (lighter() no podía: multiplicar el verde 0 nunca lo sube).

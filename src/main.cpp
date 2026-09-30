@@ -428,6 +428,7 @@ static bool gridGeometrySelfTest()
     return true;
 }
 
+
 int main(int argc, char *argv[])
 {
 #ifdef Q_OS_WIN
@@ -464,6 +465,15 @@ int main(int argc, char *argv[])
     app.setApplicationName(QStringLiteral("nevertube"));
     app.setOrganizationName(QStringLiteral("nevertube"));
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+
+    // Selección de TEXTO en el gris de la app. Va aquí y no en el QSS porque hay
+    // texto seleccionable que el QSS no alcanza: la descripción del Player es un
+    // QLabel con Qt::TextSelectableByMouse y la pinta con QPalette::Highlight,
+    // que sin esto salía con el azul del tema del escritorio. Se aplica sobre la
+    // paleta de la QApplication para que la hereden todas las páginas.
+    QPalette pal = app.palette();
+    nt::applyTextSelectionPalette(pal);
+    app.setPalette(pal);
 
     const QStringList args = app.arguments();
     if (args.contains(QLatin1String("--selftest-db"))) {

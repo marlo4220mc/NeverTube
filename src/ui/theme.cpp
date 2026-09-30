@@ -154,7 +154,12 @@ QLineEdit, QComboBox {
     border: 1px solid @BORDER@;
     border-radius: 10px;
     padding: 8px 12px;
-    selection-background-color: @ACCENT@;
+    /* Seleccionar texto en el buscador va en el gris de la app, como el resto de
+       la app, no en el acento: en rojo parecía un error. Es el mismo token que
+       los menús (kSelection) y el texto seleccionado se queda en kText para que
+       siga leyéndose (11:1). */
+    selection-background-color: @SELECTION@;
+    selection-color: @TEXT@;
     color: #ECECEC;
 }
 QLineEdit:focus, QComboBox:focus { border-color: @ACCENT@; }
@@ -403,12 +408,21 @@ QFrame#suggestDividerRule { color: @BORDER@; background: @BORDER@; border: none;
 /* Fila del desplegable. Es un QWidget (no un boton) porque necesita negrita
    parcial, que Qt no dibuja en un boton. El hover es del raton y el
    resaltado [highlight] es del teclado: son estados distintos y el segundo
-   tiene que poder moverse con las flechas sin que el raton lo pise. */
+   tiene que poder moverse con las flechas sin que el raton lo pise.
+   El borde IZQUIERDO se reserva siempre (3 px, transparente si no esta
+   resaltada) para que la barra de acento no empuje el texto al aparecer. */
 QWidget#suggestRow {
-    background: transparent; border: none; border-radius: 6px; color: @TEXTSOFT@;
+    background: transparent; border: none; border-left: 3px solid transparent;
+    border-radius: 6px; color: @TEXTSOFT@;
 }
-QWidget#suggestRow:hover { background: #1F1F1F; }
-QWidget#suggestRow[highlight="true"] { background: #1F1F1F; }
+QWidget#suggestRow:hover { background: @SELECTION@; }
+/* Resaltado del teclado: barra de acento a la izquierda + fondo con un velo del
+   acento. Antes era #1F1F1F, mas oscuro que el popover (#202020): no se veia
+   nada. El texto se queda en kTextSoft/kMuted, que sobre el velo siguen dando
+   8:1 y 4:1, asi que no hay que tocar los colores de las etiquetas hijas. */
+QWidget#suggestRow[highlight="true"] {
+    background: @ACCENT_A16@; border-left: 3px solid @ACCENT@;
+}
 /* Detalle de entidad ("Cantante y compositor peruano") a la derecha, en
    tenue, para que la consulta mande. */
 QLabel#suggestDetail { color: @MUTED@; font-size: 12px; }
@@ -657,6 +671,35 @@ bool themeSelfTest()
     // paginas (Home, Descubre, Buscar, canal, historial, biblioteca, playlist).
     chk(veces.value(QStringLiteral("QLabel#sectionTitle")) == 1,
         "QLabel#sectionTitle se declara exactamente una vez");
+
+    // Regresion de las dos cosas que perdio el usuario de vista. La paleta no la
+    // cubre el QSS (la descripcion del Player es un QLabel seleccionable y pinta
+    // con QPalette::Highlight), asi que sin esto el texto seleccionado salia con
+    // el color del tema del escritorio.
+    QPalette pal;
+    applyTextSelectionPalette(pal);
+    chk(pal.color(QPalette::Highlight) == textSelectionBg(),
+        "la seleccion de texto va en el gris de la app (kSelection)");
+    chk(pal.color(QPalette::HighlightedText) == textSelectionFg(),
+        "el texto seleccionado se queda en kText (11:1 sobre kSelection)");
+    chk(qss.contains(QStringLiteral("selection-background-color: ")
+                     + kSelection.name()),
+        "el QSS selecciona texto en gris, no en otro color");
+    chk(!qss.contains(QStringLiteral("selection-background-color: ")
+                      + accentHex()),
+        "ningun texto seleccionado se pinta en el acento (parecia un error)");
+
+    // La fila de sugerencia resaltada por el teclado tiene que LLEVAR el acento:
+    // se perdia porque era #1F1F1F, mas oscuro que el popover #202020.
+    const int hl = qss.indexOf(QStringLiteral("QWidget#suggestRow[highlight=\"true\"]"));
+    chk(hl > 0, "existe la regla de la sugerencia resaltada");
+    if (hl > 0) {
+        const int a = qss.indexOf(QLatin1Char('{'), hl);
+        const int b = qss.indexOf(QLatin1Char('}'), a);
+        const QString bloque = qss.mid(a, b - a);
+        chk(bloque.contains(accentHex()),
+            "la sugerencia resaltada lleva el acento (barra y velo)");
+    }
 
     std::fprintf(stderr, "THEME %s (%d reglas, %d selectores)\n",
                  fail == 0 ? "OK" : "FAIL", reglas, (int)veces.size());
