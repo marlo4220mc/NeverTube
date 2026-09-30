@@ -116,11 +116,35 @@ como en caliente):
   título de 2 líneas y la línea de canal se recortan). A 903 px caben 6
   columnas (celda 147 px), a 700 px solo 5 y nunca baja de 3. Se aplica en
   `HomePage::effectiveCellColumns` desde `applyGridSizes`, o sea también en
-  cada `resizeEvent`. Función pura testeada en `--selftest-grid` (12 casos).
-  OJO: el bloque de texto de la celda sigue siendo FIJO (no escala con el
-  ancho), así que con 4 columnas en un monitor grande las miniaturas quedan
-  grandes y el texto se ve pequeño; arreglar eso (texto derivado de la celda)
-  es la mejora pendiente de fondo, no un bug.
+  cada `resizeEvent`. Función pura testeada en `--selftest-grid` (12 casos de
+  columnas + 10 de texto + la monotonía de 100 a 900 px).
+
+- **El texto de la celda se deriva de la celda** (ya no es fijo):
+  `VideoListView::gridTitlePx(cellW)` da **13 px con celda de 140 px hasta 18 px
+  con celda de 340 px** (lineal, con topes en los dos extremos), y
+  `gridTitleLineH` = 1,28 × tamaño. Antes eran 13 px y una caja de 34 px fijos
+  mientras la miniatura sí crecía, que en un monitor grande dejaba el texto
+  pequeño y descoyente. Con celda de 177 px (5 columnas a 903 px de viewport)
+  salen 14 px, y con 368 px (5 columnas a 1896 px) 18 px.
+- **El título ocupa `kGridTitleLines` = 3 líneas, no 2.** Medido sobre los 97
+  títulos de la caché con la caja de 161 px que sale a 5 columnas en una ventana
+  de 941 px, con 2 líneas solo el **3%** se veía completo (mediana: se leía el
+  21% del texto, y el 64% necesitaba 5-6 líneas). Con 3 líneas el título entero
+  pasa al **12%** en celda estrecha y al **76%** en celda de 370 px. Coste: la
+  celda mide `thumbH + 6 + 8 + gridTextBlockH(cellW)` y el bloque
+  `3*lineH + 14 + 20` (85 px a 13 px, 103 px a 18 px), o sea ~17 px más de alto
+  por celda; NO aumenta el número de vídeos por fila.
+  **Geometría y pintura comparten las mismas funciones puras**
+  (`gridTitlePx`/`gridTitleLineH`/`kGridTitleLines`), así que la celda reserva
+  exactamente lo que el título ocupa y no puede solaparse con la línea de canal.
+  El reparto en N líneas es voraz por palabras y en la ÚLTIMA línea entra todo
+  lo que queda desde el principio de esa línea, elidado: se ve el arranque del
+  resto en vez de un corte en seco. El modo **lista** no se toca (sigue a 2
+  líneas con el interlineado natural de la fuente, porque su altura de fila es
+  fija y no deriva de la celda).
+- OJO: el texto ya escala, pero el ajuste de la **columna** sigue siendo
+  decision del usuario (4/5/6). Con celdas muy estrechas el título se cortará
+  igual: ahí el que decide cuántas líneas caben es el ajuste, no la fuente.
 
 ## Página Player: scroll único (vídeo + descripción + A continuación)
 

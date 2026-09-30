@@ -256,9 +256,91 @@ static bool gridGeometrySelfTest()
                      VideoListView::kMinCellW);
         return false;
     }
-    std::fprintf(stderr, "SELFTEST grid -> ok (%d casos, kMinCellW=%d)\n",
+
+    // Texto de la celda derivado del ancho. Antes eran 13 px y 34 px FIJOS con la
+    // miniatura creciendo al estirar la ventana, que es lo que dejado el bloque
+    // descoyente en pantalla grande. Se comprueba la tabla de tamaños, que el
+    // interlineado quepa la fuente, que el bloque guardado sea el que ocupa, que
+    // a celda de 140 px siga midiendo lo que medía antes (68 px: nada cambia en
+    // ventana estrecha) y que la curva sea monótona.
+    struct TxtCase
+    {
+        int cellW;
+        int px;
+        const char *why;
+    };
+    const TxtCase txts[] = {
+        { 0, 13, "celda sin ancho -> 13 px" },
+        { 100, 13, "celda diminuta se queda en 13 px (tope inferior)" },
+        { 140, 13, "140 px -> 13 px" },
+        { 175, 14, "175 px (5 columnas a 903 px de viewport)" },
+        { 220, 15, "220 px (4 columnas a 903 px)" },
+        { 260, 16, "260 px" },
+        { 300, 17, "300 px" },
+        { 340, 18, "340 px -> 18 px" },
+        { 370, 18, "370 px (5 columnas a pantalla grande) -> tope superior" },
+        { 900, 18, "celda enorme -> tope superior" },
+    };
+    for (const TxtCase &t : txts) {
+        const int got = VideoListView::gridTitlePx(t.cellW);
+        if (got != t.px) {
+            std::fprintf(stderr,
+                         "SELFTEST grid FAIL gridTitlePx(%d)=%d want=%d (%s)\n",
+                         t.cellW, got, t.px, t.why);
+            return false;
+        }
+        const int lh = VideoListView::gridTitleLineH(t.cellW);
+        if (lh < got) {
+            std::fprintf(stderr,
+                         "SELFTEST grid FAIL lineH(%d)=%d < px=%d: la línea no "
+                         "cabe la fuente\n",
+                         t.cellW, lh, got);
+            return false;
+        }
+        const int bh = VideoListView::gridTextBlockH(t.cellW);
+        if (bh != VideoListView::kGridTitleLines * lh + 34) {
+            std::fprintf(stderr,
+                         "SELFTEST grid FAIL blockH(%d)=%d incoherente con "
+                         "lineH=%d\n",
+                         t.cellW, bh, lh);
+            return false;
+        }
+    }
+    // El bloque reservado tiene que ser exactamente el que ocupa la pintura:
+    // kGridTitleLines líneas de título + 14 px de hueco + 20 px de pie. A celda
+    // de 140 px son 3*17+34 = 85 px (antes 2*17+34 = 68 px y solo el 3% de los
+    // títulos se veía entero). Si esta suma no cuadra, la celda solapa con la
+    // línea de canal o deja hueco.
+    if (VideoListView::gridTextBlockH(140)
+        != VideoListView::kGridTitleLines * VideoListView::gridTitleLineH(140) + 34) {
+        std::fprintf(stderr,
+                     "SELFTEST grid FAIL blockH(140)=%d, want=%d\n",
+                     VideoListView::gridTextBlockH(140),
+                     VideoListView::kGridTitleLines
+                         * VideoListView::gridTitleLineH(140) + 34);
+        return false;
+    }
+    // Monótona creciente y con suelo en todo el rango real de celdas.
+    int prevPx = 0;
+    int prevBh = 0;
+    for (int cw = 100; cw <= 900; cw += 10) {
+        const int px = VideoListView::gridTitlePx(cw);
+        const int bh = VideoListView::gridTextBlockH(cw);
+        if (px < prevPx || bh < prevBh) {
+            std::fprintf(stderr,
+                         "SELFTEST grid FAIL cw=%d px=%d (prev=%d) blockH=%d "
+                         "(prev=%d)\n",
+                         cw, px, prevPx, bh, prevBh);
+            return false;
+        }
+        prevPx = px;
+        prevBh = bh;
+    }
+
+    std::fprintf(stderr,
+                 "SELFTEST grid -> ok (%d columnas, %d textos, kMinCellW=%d)\n",
                  int(sizeof(cases) / sizeof(cases[0])),
-                 VideoListView::kMinCellW);
+                 int(sizeof(txts) / sizeof(txts[0])), VideoListView::kMinCellW);
     return true;
 }
 

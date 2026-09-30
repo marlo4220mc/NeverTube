@@ -289,49 +289,58 @@ public:
         p->drawText(r, Qt::TextWordWrap | Qt::AlignTop, first);
     }
 
-    // Título de rejilla con salto de línea: si no cabe en una fila, usa una
-    // SEGUNDA línea (wrap por palabras) en lugar de cortarse con "…" a media
-    // palabra. Solo si aun así no cabe en las dos, se elide la última. La celda
-    // ya reserva 34px de título (applyGridGeometry), así que no hay solape.
-    static void drawGridTitle(QPainter *p, const QRect &r, const QString &text)
+    // Título con salto de línea: si no cabe en una fila, usa las siguientes
+    // (wrap voraz por palabras) en lugar de cortarse con "…" a media palabra. En
+    // la ÚLTIMA línea entra todo lo que queda desde el principio de esa línea,
+    // elidado, para que se lea el arranque del resto y no un corte en seco. La
+    // caja la reserva la celda (applyGridGeometry usa la misma
+    // gridTextBlockH), así que no hay solape con la línea de canal.
+    static void drawGridTitle(QPainter *p, const QRect &r, const QString &text,
+                              int lineH, int lines)
     {
         const QFontMetricsF fm(p->font());
         const qreal w = r.width();
+        lines = qMax(1, lines);
         if (fm.horizontalAdvance(text) <= w) {
             p->drawText(r, Qt::AlignLeft | Qt::AlignTop, text);
             return;
         }
-
-        // Primera línea: se llenan palabras hasta que la siguiente ya no cabe.
-        const QStringList words = text.split(QLatin1Char(' '));
-        QString first;
-        for (const QString &wd : words) {
-            const QString cand = first.isEmpty()
-                                     ? wd
-                                     : first + QLatin1Char(' ') + wd;
-            if (fm.horizontalAdvance(cand) <= w)
-                first = cand;
-            else
-                break;
-        }
-        if (first.isEmpty()) {
-            // Una sola palabra más ancha que la celda: elide en línea única.
-            p->drawText(r, Qt::AlignLeft | Qt::AlignTop,
-                        fm.elidedText(text, Qt::ElideRight, w));
+        const QStringList words =
+            text.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        if (words.isEmpty())
             return;
+        int i = 0;
+        for (int ln = 0; ln < lines; ++ln) {
+            const int start = i;
+            QString line;
+            while (i < words.size()) {
+                const QString cand = line.isEmpty()
+                                         ? words.at(i)
+                                         : line + QLatin1Char(' ') + words.at(i);
+                // Con la línea ya empezado no entra: se pasa a la siguiente. Con
+                // la línea vacía se acepta la palabra aunque no quepa (una sola
+                // palabra más ancha que la celda), si no el bucle no avanzaría.
+                if (fm.horizontalAdvance(cand) > w && !line.isEmpty())
+                    break;
+                line = cand;
+                ++i;
+            }
+            const QRect lr(r.left(), r.top() + ln * lineH, r.width(), lineH);
+            if (ln == lines - 1) {
+                QString rest;
+                for (int k = start; k < words.size(); ++k) {
+                    if (!rest.isEmpty())
+                        rest += QLatin1Char(' ');
+                    rest += words.at(k);
+                }
+                p->drawText(lr, Qt::AlignLeft | Qt::AlignTop,
+                            fm.elidedText(rest, Qt::ElideRight, w));
+                return;
+            }
+            p->drawText(lr, Qt::AlignLeft | Qt::AlignTop, line);
+            if (i >= words.size())
+                return;
         }
-
-        p->drawText(r, Qt::AlignLeft | Qt::AlignTop, first);
-        QString second = text.mid(first.size());
-        while (!second.isEmpty() && second.at(0) == QLatin1Char(' '))
-            second.remove(0, 1);
-        if (second.isEmpty())
-            return;
-        const int lh = qRound(fm.height());
-        const QRect secondR(r.left(), r.top() + lh, r.width(),
-                            qMax(0, r.height() - lh));
-        const QString rest = fm.elidedText(second, Qt::ElideRight, w);
-        p->drawText(secondR, Qt::AlignLeft | Qt::AlignTop, rest);
     }
 
 private:
@@ -351,19 +360,30 @@ private:
         drawThumb(p, thumbR, cacheKeyFor(v), durationLabel(v.durationSeconds));
         drawProgressBar(p, thumbR, v);
 
+        // Título y línea de canal al tamaño que manda en ESTA celda (ver
+        // gridTitlePx): 13 px en celda pequeña, 18 px en celda ancha. Antes eran
+        // 13 px fijos con la miniatura creciendo, y el bloque de texto se
+        // quedaba corto. El interlineado lo fija la misma función pura que usa
+        // la celda, así que la segunda línea cae dentro de la caja reservada.
+        const int titlePx = VideoListView::gridTitlePx(qRound(gw));
+        const int lineH = VideoListView::gridTitleLineH(qRound(gw));
+
         p->save();
         QFont t = p->font();
+        t.setPixelSize(titlePx);
         t.setBold(true);
         p->setFont(t);
         p->setPen(nt::kText);
         const QRect titleR(r.left() + 8 * m_scale,
                            qRound(thumbR.bottom()) + 8 * m_scale,
-                           qRound(gw - 16 * m_scale), 34);
-        drawGridTitle(p, titleR, v.title);
+                           qRound(gw - 16 * m_scale),
+                           VideoListView::kGridTitleLines * lineH);
+        drawGridTitle(p, titleR, v.title, lineH, VideoListView::kGridTitleLines);
         p->restore();
 
         p->save();
-        QFont m = shrunkFont(p->font(), 0.5);
+        QFont m = p->font();
+        m.setPixelSize(qMax(10, titlePx - 1));
         p->setFont(m);
         p->setPen(nt::kMuted);
         QStringList meta;
@@ -523,8 +543,12 @@ private:
                            qRound(r.width() - 162 * m_scale), 34);
         // Con la meta de 2 líneas el título también puede partir en dos: la
         // caja de 34 px ya daba para dos líneas de 13 px, solo se usaba una.
+        // Aquí el interlineado es el natural de la fuente y son 2 líneas, no las
+        // 3 de la rejilla: la fila de lista tiene altura fija de lista y su
+        // bloque de meta no crece con la celda.
         if (m_metaLines >= 2)
-            drawGridTitle(p, titleR, v.title);
+            drawGridTitle(p, titleR, v.title,
+                          qMax(1, qRound(QFontMetricsF(t).height())), 2);
         else
             elideTitle(p, titleR, v.title);
         p->restore();
@@ -643,6 +667,31 @@ int VideoListView::clampGridColumns(int wanted, int viewportW, int minCellW)
     return qMax(1, qMin(wanted, qMax(3, viewportW / minCellW)));
 }
 
+int VideoListView::gridTitlePx(int cellW)
+{
+    if (cellW <= 0)
+        return 13;
+    // 140 px de celda -> 13 px, 340 px -> 18 px (5 px por cada 200 px de celda).
+    // Los topes importan en las dos direcciones: por debajo de ~150 px el título
+    // no debe bajar de 13 px (a 11 px un título de 2 líneas deja de leerse) y por
+    // encima de ~320 px no tiene que seguir creciendo (con celdas de 500 px un
+    // título de 25 px no cabe en dos líneas y se elide media frase).
+    return qBound(13, qRound(13.0 + (cellW - 140) * 0.025), 18);
+}
+
+int VideoListView::gridTitleLineH(int cellW)
+{
+    return qMax(1, qRound(gridTitlePx(cellW) * 1.28));
+}
+
+int VideoListView::gridTextBlockH(int cellW)
+{
+    // kGridTitleLines líneas de título + 14 px hasta la línea de canal + 20 px
+    // de pie. La celda reserva exactamente esto y la pintura dibuja en una caja
+    // de kGridTitleLines*lineH, así que el texto no puede salirse de la celda.
+    return kGridTitleLines * gridTitleLineH(cellW) + 14 + 20;
+}
+
 void VideoListView::applyGridGeometry()
 {
     if (m_mode != GridMode)
@@ -655,11 +704,13 @@ void VideoListView::applyGridGeometry()
     const int avail = vw - (cols - 1) * spacing;
     const int cellW = qMax(1, avail / qMax(1, cols));
     // La altura de la celda se deriva del contenido real: miniatura 16:9 +
-    // bloque de texto fijo (hueco + título + línea de canal), que no escala
-    // con el ancho de la celda. Con un ratio fijo, al estrechar la ventana el
-    // texto se sale de la celda y el vídeo siguiente tapa el nombre del canal.
+    // bloque de texto (hueco + título + línea de canal). El bloque se calcula
+    // con la MISMA función pura que usa la pintura (gridTextBlockH), así que la
+    // celda reserva de verdad lo que ocupa el título y nunca hay solape. Con un
+    // ratio fijo, al estrechar la ventana el texto se sale de la celda y el
+    // vídeo siguiente tapa el nombre del canal.
     const int cellH = qRound(qreal(cellW - 12 * m_scale) * 9.0 / 16.0)
-                      + qRound(6 * m_scale) + 8 + 34 + 14 + 20;
+                      + qRound(6 * m_scale) + 8 + gridTextBlockH(cellW);
     setGridSize(QSize(cellW, cellH));
     static_cast<VideosDelegate *>(itemDelegate())->setCellSize(cellW, cellH);
     viewport()->update();

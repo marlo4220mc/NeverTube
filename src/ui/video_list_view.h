@@ -78,6 +78,35 @@ public:
     static int clampGridColumns(int wanted, int viewportW,
                                 int minCellW = kMinCellW);
 
+    // Tamaño del título de la celda de rejilla DERIVADO del ancho de la celda.
+    // Antes eran 13 px fijos con un bloque de texto de 34 px fijos, y como la
+    // rejilla tiene columnas FIJAS la miniatura crece con la ventana mientras el
+    // texto se quedaba: con 5 columnas en un monitor grande (celda de ~370 px,
+    // miniatura de 358) un título de 13 px se veía pequeño y descoyente. Ahora
+    // va de 13 px (celda de 140 px) a 18 px (celda de 340 px) en lineal, con
+    // topes para que ni en celda diminuta baje de 13 ni en enorme pase de 18.
+    // Función PURA (sin widget ni fuentes): la usan tanto la geometría
+    // (applyGridGeometry) como la pintura (paintGrid), de modo que la celda
+    // siempre reserva lo que el título ocupa y no hay solape.
+    static int gridTitlePx(int cellW);
+
+    // Líneas de título de la celda de rejilla. Eran 2 y con la caja de 161 px que
+    // sale con 5 columnas en una ventana de 941 px medido sobre los 97 títulos de
+    // la caché, solo el 3% se veía COMPLETO (mediana: se leía el 21% del texto y
+    // el 64% necesitaba 5-6 líneas). Con 3 líneas el título entero pasa al 12% en
+    // celda estrecha y al 76% en celda de 370 px. Coste: la celda crece 3 líneas
+    // (de 68 a 85 px de bloque de texto a 13 px), no el número de vídeos por
+    // fila. Se comparte entre geometría y pintura para que no puedan divergir.
+    static constexpr int kGridTitleLines = 3;
+
+    // Interlineado de las líneas de título, en px (1,28 del tamaño de fuente).
+    // A 13 px da 17 px, el mismo alto de línea que tenía la caja fija, así que
+    // el ancho de línea no cambia respecto a como estaba. Función PURA.
+    static int gridTitleLineH(int cellW);
+    // Alto del bloque de texto bajo la miniatura: kGridTitleLines líneas de
+    // título + hueco a la línea de canal + pie. Función PURA.
+    static int gridTextBlockH(int cellW);
+
 signals:
     void videoActivated(int index, const VideoInfo &video);
     // Click sobre el botón "X" de una fila (solo si setRowRemoveVisible(true)).
