@@ -40,10 +40,28 @@ const char kBrowseEndpoint[] =
     "/youtubei/v1/browse?prettyPrint=false";
 const char kSearchEndpoint[] =
     "/youtubei/v1/search?prettyPrint=false";
-// Sugerencias de búsqueda (type-ahead del campo). Sondas de /selftest-suggest:
-// hoy la app NO lo llama, es solo el endpoint que decide el type-ahead.
-const char kSuggestEndpoint[] =
-    "/youtubei/v1/music/get_search_suggestions?prettyPrint=false";
+// Sugerencias de búsqueda (type-ahead del campo).
+//
+// El endpoint elegido es el del autocompletado REAL de youtube.com:
+// suggestqueries.google.com con client=youtube. Lo decide la medición de
+// /selftest-suggest, no una preferencia (ver suggestSelfTest):
+//   - Innertube music/get_search_suggestions solo coincide con el YT real en
+//     el 14-43% de las sugerencias, da 6 en prefijos cortos y arrastra un
+//     carrusel de musica de 4-52 KB que el type-ahead no usa.
+//   - client=firefox coincide en el 50-71%, pero recorta a 10 items y tira
+//     los metadatos de entidad.
+//   - client=youtube ES el dataset del buscador de youtube.com: 14 items,
+//     0.3-2 KB, ~280 ms, y trae la entidad (descripcion, avatar, wikipedia)
+//     de las filas con panel de conocimiento.
+// No toca la sesion Innertube: es un GET plano a un host de Google, asi que no
+// puede sufrir el gate 403 de sesion documentado en AGENTS.md.
+const char kSuggestUrl[] =
+    "https://suggestqueries.google.com/complete/search"
+    "?client=youtube&ds=yt&hl=es&gl=US&q=";
+// Envoltura de JS que pone Google alrededor del JSON. NO es JavaScript que
+// ejecutar: es un prefijo y un parentesis que se recortan para dejar el JSON
+// plano, que se parsea con QJsonDocument. No hay motor JS en la app.
+const char kSuggestJsPrefix[] = "window.google.ac.h(";
 
 // UA del fork de youtube_explode_dart usado para /sw.js_data.
 const char kChromeUA[] =
@@ -236,6 +254,84 @@ QString visitorDataFromSwJsData(const QByteArray &body)
     return level4.at(13).toString();
 }
 
+// Body de /complete/search -> lista de sugerencias.
+//
+// El cuerpo es JSON envuelto en una llamada JS: window.google.ac.h([...]). No
+// se ejecuta nada: se recorta el prefijo y el parentesis final, y lo que queda
+// es un array JSON normal que se parsea con QJsonDocument. No hay motor JS en
+// la app. Si Google cambiara el envoltorio, el recorte no aplica y el parseo
+// falla -> lista vacia, que es el fallo correcto (el desplegable se oculta) en
+// vez de pintar filas basura.
+//
+// Cada item es ["texto", flags, [ids...], {metadatos}]. Solo se conserva el
+// texto, y SOLO si es una cadena no vacia: el filtro es explicito porque los
+// items sin texto no son consultas buscables y no deben convertirse en filas
+// en blanco del desplegable (el fallo tipico de este endpoint).
+QVector<Suggestion> parseSuggestBody(const QByteArray &body)
+{
+    QVector<Suggestion> out;
+    QString text = QString::fromUtf8(body).trimmed();
+    if (text.startsWith(QLatin1String(")]}'"))) {
+        text.remove(0, 4);
+        text = text.trimmed(); // el XSSI suele seguir de un \n
+    }
+    const QString prefix = QLatin1String(kSuggestJsPrefix);
+    if (text.startsWith(prefix)) {
+        text = text.mid(prefix.size()).trimmed();
+        if (text.endsWith(QLatin1Char(')')))
+            text.chop(1);
+    } else if (!text.startsWith(QLatin1Char('['))) {
+        // Sin la envoltura esperada no es el formato conocido: no se intenta
+        // adivinar ni a medias.
+        return out;
+    }
+
+    QJsonParseError err{};
+    const QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isArray())
+        return out;
+
+    // arr[1] es la lista de items; arr[0] es el prefijo ya escrito.
+    const QJsonArray arr = doc.array();
+    if (arr.size() < 2)
+        return out;
+    const QJsonArray items = arr.at(1).toArray();
+    for (const QJsonValue &v : items) {
+        // El endpoint usa DOS formatos segun el client, y hay que leer los dos:
+        //   client=youtube/chrome -> ["texto", flags, [ids...], {meta}]
+        //   client=firefox        -> "texto" (string pelado)
+        // Se cubre el de youtube (el que usa la app) y, si el item llega como
+        // string, tambien se acepta: es el mismo texto y no cuesta nada. Un item
+        // que no sea ninguno de los dos se descarta.
+        QString query;
+        QString detail;
+        if (v.isString()) {
+            query = v.toString().trimmed();
+        } else if (v.isArray()) {
+            const QJsonArray item = v.toArray();
+            if (item.isEmpty())
+                continue;
+            query = item.at(0).toString().trimmed();
+            // Metadatos de entidad del panel de conocimiento (solo algunas
+            // filas los traen): "Cantante y compositor peruano", avatar,
+            // wikipedia.
+            const QJsonObject meta = item.at(3).toObject();
+            detail = meta.value(QStringLiteral("zaf")).toString().trimmed();
+            if (detail.isEmpty())
+                detail = meta.value(QStringLiteral("zao")).toString().trimmed();
+        } else {
+            continue;
+        }
+        if (query.isEmpty())
+            continue; // sin consulta real: no es una fila valida
+        Suggestion s;
+        s.query = query;
+        s.detail = detail;
+        out.append(s);
+    }
+    return out;
+}
+
 } // namespace
 
 // Cliente HTTP/HTTPS mínimo que fuerza conexión por IPv4 manteniendo SNI y
@@ -301,9 +397,15 @@ public:
         HttpRequest req;
         req.verb = QByteArrayLiteral("GET");
         const QString host = url.host();
-        QString path = url.path();
+        // FullyEncoded (no el path()/query() por defecto, que DEVUELVEN la
+        // forma decodificada): el request-line tiene que llevar al servidor lo
+        // mismo que el caller escribio. Con query() sin FullyEncoded, un "&q="
+        // que el caller percent-encoded a mano vuelve con los espacios en crudo
+        // y el endpoint responde 400. Para el master HLS no se nota (sus URLs
+        // ya vienen consistentes), pero en /complete/search lo rompia.
+        QString path = url.path(QUrl::FullyEncoded);
         if (url.hasQuery())
-            path += QLatin1Char('?') + url.query();
+            path += QLatin1Char('?') + url.query(QUrl::FullyEncoded);
         req.host = host.toUtf8();
         req.path = path.toUtf8();
         req.headers = QList<QPair<QByteArray, QByteArray>>{
@@ -1733,6 +1835,58 @@ void Innertube::fetchSearchMore(int limit)
     m_searchLimit = limit > 0 ? limit : kSearchTake;
     m_searchInFlight = true;
     requestSearch(true);
+}
+
+void Innertube::fetchSuggest(const QString &query)
+{
+    // Sin texto no hay nada que sugerir, y un prefijo de 1 letra solo trae
+    // ruido de entidades; el minimo de 2 evita una peticion por cada tecla al
+    // arrancar la palabra.
+    const QString q = query.trimmed();
+    if (q.size() < 2) {
+        m_suggestInFlight = false;
+        emit suggestReady(query, QVector<Suggestion>());
+        return;
+    }
+    if (m_suggestInFlight && m_suggestQuery == q)
+        return; // mismo prefijo ya pedido
+
+    m_suggestInFlight = true;
+    m_suggestQuery = q;
+    // El query viaja en la URL, asi que codificarlo es OBLIGATORIO: con
+    // espacios en crudo el endpoint devuelve 400. QUrl::toPercentEncoding deja
+    // intactos los caracteres seguros y escapa el resto (acentos incluidos).
+    const QString url = QLatin1String(kSuggestUrl)
+        + QString::fromLatin1(QUrl::toPercentEncoding(q));
+
+    m_http->setResult([this, q](int status, const QByteArray &body) {
+        NT_DEBUG("E2E suggest q=%s HTTP %d size=%d\n", q.toUtf8().constData(),
+                 status, body.size());
+        handleSuggest(q, status == 200, body);
+    });
+    m_http->setError([this, q](const QString &reason) {
+        NT_DEBUG("E2E suggest q=%s err: %s\n", q.toUtf8().constData(),
+                 reason.toUtf8().constData());
+        handleSuggest(q, false, QByteArray());
+    });
+    m_http->setTimeoutMs(8000); // type-ahead: caduca antes que una busqueda
+    // getUrl() valida TLS contra el host de la propia URL, asi que sirve para
+    // suggestqueries.google.com sin tocar el transporte.
+    m_http->getUrl(QUrl(url), kChromeUA);
+}
+
+void Innertube::handleSuggest(const QString &query, bool ok,
+                              const QByteArray &body)
+{
+    m_suggestInFlight = false;
+    QVector<Suggestion> items;
+    if (ok)
+        items = parseSuggestBody(body);
+    NT_DEBUG("E2E suggest q=%s items=%d\n", query.toUtf8().constData(),
+             items.size());
+    // Se emite siempre, incluso vacio: la UI lo trata como "cierra el
+    // desplegable", no como "no hagas nada".
+    emit suggestReady(query, items);
 }
 
 void Innertube::requestSearch(bool more)
@@ -3973,9 +4127,83 @@ void collectSuggestStats(const QJsonValue &val, SuggestStats *st, int depth)
     }
 }
 
+bool suggestParseSelfTest()
+{
+    int fail = 0;
+    const auto check = [&fail](bool ok, const char *what) {
+        std::fprintf(stderr, "  [%s] %s\n", ok ? "OK  " : "FAIL", what);
+        if (!ok)
+            ++fail;
+    };
+
+    // Cuerpo real (medido con client=youtube): mix de filas con entidad, filas
+    // planas, y el envoltorio JS. Cada item es ["texto", flags, ids, meta].
+    const QByteArray real =
+        "window.google.ac.h([\"Will\",["
+        "[\"willie col\\u00f3n\",0,[512,433,47],{\"zaf\":\"Cantautor y trombonista estadounidense\",\"zao\":\"Willie Col\\u00f3n\"}],"
+        "[\"willyrex\",0,[512,433,790],{\"zaf\":\"@Willyrex\"}],"
+        "[\"willito\",0,[512,433,131]],"
+        "[\"\",0,[512]],"
+        "[123,0,[512]],"
+        "[\"william luna\",0,[512,433,47],{\"zao\":\"William Luna\"}]"
+        "]])";
+
+    const QVector<Suggestion> items = parseSuggestBody(real);
+    check(items.size() == 4, "envoltorio JS recortado y filas con query contadas (4 de 6)");
+    if (items.size() == 4) {
+        check(items.at(0).query == QStringLiteral("willie colón"),
+              "acentos preservados en la primera fila");
+        check(items.at(0).detail == QStringLiteral("Cantautor y trombonista estadounidense"),
+              "detalle de entidad (zaf) leido");
+        check(items.at(1).detail == QStringLiteral("@Willyrex"),
+              "detalle de entidad en la segunda fila");
+        check(items.at(2).query == QStringLiteral("willito")
+                  && items.at(2).detail.isEmpty(),
+              "fila sin metadatos: query si, detalle vacio");
+        check(items.at(3).query == QStringLiteral("william luna")
+                  && items.at(3).detail == QStringLiteral("William Luna"),
+              "sin zaf se usa zao como detalle");
+    }
+
+    // Formato string (client=firefox): items como "texto" a secas.
+    const QVector<Suggestion> plain =
+        parseSuggestBody("[\"blender\",[\"blender 4.5\",\"blender 5.0\"]]");
+    check(plain.size() == 2 && plain.at(0).query == QStringLiteral("blender 4.5")
+              && plain.at(0).detail.isEmpty(),
+          "items-string (firefox) tambien se parsean");
+
+    // Formatos que NO son el nuestro: lista vacia, sin crashear.
+    check(parseSuggestBody("<html>error</html>").isEmpty(),
+          "HTML de error -> vacio");
+    check(parseSuggestBody("").isEmpty(), "body vacio -> vacio");
+    check(parseSuggestBody("window.google.ac.h(\"no soy array\")").isEmpty(),
+          "envoltorio con contenido no-array -> vacio");
+    check(parseSuggestBody("{\"contents\":[]}").isEmpty(),
+          "objeto JSON en vez de array -> vacio");
+    check(parseSuggestBody("window.google.ac.h([\"solo\"])").isEmpty(),
+          "array sin lista de items -> vacio");
+
+    // Prefijo XSSI, por si algun dia vuelve.
+    const QVector<Suggestion> xssi =
+        parseSuggestBody(")]}'\n[\"x\",[\"x resultado\"]]");
+    check(xssi.size() == 1 && xssi.at(0).query == QStringLiteral("x resultado"),
+          "prefijo XSSI )]}' tolerado");
+
+    std::fprintf(stderr, "SUGGEST PARSE %s\n",
+                 fail == 0 ? "OK" : "FAIL");
+    return fail == 0;
+}
+
 bool suggestSelfTest()
 {
     std::fprintf(stderr, "SUGGEST SELFTEST start\n");
+    // Primero el parser, que es offline y determinista: si el parseo esta roto
+    // no tiene sentido ni intentar la red.
+    if (!suggestParseSelfTest()) {
+        std::fprintf(stderr, "SELFTEST FAIL: suggest (parseo)\n");
+        return false;
+    }
+    std::fprintf(stderr, "\n");
     Ipv4Https http;
 
     // Watchdog global: son varias peticiones reales; no colgar el selftest.
@@ -3997,36 +4225,40 @@ bool suggestSelfTest()
         const char *clientVersion;
         const char *referer;
     };
-    // A = Innertube: POST con contexto y visitorData. B = suggestqueries: GET
-    // plano, sin cliente ni visitorData. Mismo prefijo y misma red, para que la
-    // comparacion sea justa. En B solo cambia client (firefox vs chrome): el
-    // dataset de música (ds=ytmusic) devolvio 0 sugerencias en todas las
-    // pruebas, asi que no se sonda. Y client=youtube devuelve una respuesta
-    // JavaScript, no JSON, por lo que tampoco sirve.
+    // A = Innertube music/get_search_suggestions: POST con contexto y
+    // visitorData. B = suggestqueries: GET plano, sin cliente ni visitorData.
+    // Mismo prefijo y misma red para que la comparacion sea justa.
+    //
+    // C1 (client=youtube) es el que usa C2: es el autocompletado real de
+    // youtube.com. Se midio su solapamiento con el dataset de A1 y de B1 y
+    // gano por ser el original: 14 items, metadatos de entidad y 0.3-2 KB.
+    // A1 se mantiene en la sonda como referencia de calidad (y es la que peor
+    // coincide: 14-43% con el YT real).
     const Probe probes[] = {
-        {"A1 innertube WEB_REMIX", kSuggestEndpoint, nullptr, "WEB_REMIX", 67,
-         "1.20240723.01.00", "https://music.youtube.com/"},
-        {"A2 innertube WEB", kSuggestEndpoint, nullptr, "WEB", kWebClientId,
-         kWebClientVersion, nullptr},
+        {"C1 suggestqueries youtube", nullptr,
+         "https://suggestqueries.google.com/complete/search"
+         "?client=youtube&ds=yt",
+         nullptr, 0, nullptr, nullptr},
         {"B1 suggestqueries firefox", nullptr,
          "https://suggestqueries.google.com/complete/search"
          "?client=firefox&ds=yt",
          nullptr, 0, nullptr, nullptr},
-        {"B2 suggestqueries chrome", nullptr,
-         "https://suggestqueries.google.com/complete/search"
-         "?client=chrome&ds=yt",
-         nullptr, 0, nullptr, nullptr},
+        {"A1 innertube WEB_REMIX",
+         "/youtubei/v1/music/get_search_suggestions?prettyPrint=false", nullptr,
+         "WEB_REMIX", 67, "1.20240723.01.00", "https://music.youtube.com/"},
     };
-    // Prefijos de theme claro (tutorial/receta/codigo), de musica, y corto.
-    // "receta de tarta" lleva espacios A PROPOSITO: medido con curl, un espacio
-    // crudo en la query hace que suggestqueries conteste HTTP 400. El type-ahead
-    // tiene que funcionar con lo que se escribe de verdad (una frase), no solo
-    // con prefijos de una palabra, asi que este caso DEBE quedar verde: si C2 no
-    // codifica bien la query, aqui se ve.
-    const QStringList queries{QStringLiteral("musica"),
+    // Prefijos de theme claro (tutorial/receta/codigo), de musica, corto, y
+    // "Will" (el caso que pidio medir el usuario: 4 letras, una palabra).
+    // "tutorial blender" y "receta de tarta" llevan espacios A PROPOSITO:
+    // medido con curl, un espacio crudo en la query hace que suggestqueries
+    // conteste HTTP 400. El type-ahead tiene que funcionar con lo que se
+    // escribe de verdad (una frase), no solo con prefijos de una palabra, asi
+    // que estos casos DEBEN quedar verdes: si C2 no codifica bien la query, se
+    // ve aqui.
+    const QStringList queries{QStringLiteral("Will"),
                               QStringLiteral("tutorial blender"),
                               QStringLiteral("receta de tarta"),
-                              QStringLiteral("busca")};
+                              QStringLiteral("musica")};
     const int probeCount = int(sizeof(probes) / sizeof(probes[0]));
     const int total = 1 + int(queries.size()) * probeCount;
 
@@ -4079,11 +4311,28 @@ bool suggestSelfTest()
                          ok ? ms / ok : 0, ok ? bytes / ok : 0,
                          int(queries.size()) - ok);
         }
-        const bool alguno = okProbes > 0;
+        // El PASS es del endpoint que USA C2 (C1, client=youtube): tiene que
+        // devolver consultas con las CUATRO, incluidas las de espacios. Las
+        // demas sondas son referencia de calidad; si C1 se degrada, el type-ahead
+        // se queda sin sugerencias aunque las otras sigan verdes, asi que el
+        // fallo tiene que salir de aqui.
+        int c1Ok = 0;
+        int c1ConQuery = 0;
+        for (const QString &q : queries) {
+            const Result r = results.value(
+                QStringLiteral("%1|%2").arg(QLatin1String(probes[0].label), q));
+            if (r.failed || r.status != 200)
+                continue;
+            ++c1Ok;
+            c1ConQuery += r.st.conQuery;
+        }
+        const bool c1Bien = c1Ok == int(queries.size()) && c1ConQuery > 0;
+        std::fprintf(stderr, "SUGGEST C1 (usado por C2): ok=%d/%d conQuery=%d\n",
+                     c1Ok, int(queries.size()), c1ConQuery);
         std::fprintf(stderr, "SUGGEST %s\n",
-                     alguno ? "OK: hay endpoint con consultas"
-                            : "FAIL: ningun endpoint devolvio consultas");
-        QCoreApplication::exit(alguno ? 0 : 2);
+                     c1Bien ? "OK: el endpoint de C2 responde con consultas"
+                            : "FAIL: el endpoint de C2 no devolvio consultas");
+        QCoreApplication::exit(c1Bien ? 0 : 2);
     };
 
     const std::function<void()> runImpl = [&]() {
@@ -4131,23 +4380,17 @@ bool suggestSelfTest()
             res.ms = int(QDateTime::currentMSecsSinceEpoch() - t0);
             res.bytes = body.size();
             if (google) {
-                // suggestqueries devuelve un array JSON:
-                // ["consulta", ["s1", "s2", ...]]
-                QByteArray json = body.trimmed();
-                if (json.startsWith(")]}'"))
-                    json.remove(0, 4);
-                const QJsonDocument doc = QJsonDocument::fromJson(json);
-                const QJsonArray arr = doc.isArray() ? doc.array() : QJsonArray();
-                if (arr.size() > 1) {
-                    for (const QJsonValue &v : arr.at(1).toArray()) {
-                        const QString s = v.toString();
-                        if (!s.trimmed().isEmpty()) {
-                            ++res.st.total;
-                            ++res.st.conQuery;
-                            if (res.st.muestras.size() < 6)
-                                res.st.muestras << s;
-                        }
-                    }
+                // Se usa el MISMO parser que C2 (parseSuggestBody), no uno
+                // propio: asi la sonda mide el codigo de produccion, incluido
+                // el recorte del envoltorio window.google.ac.h(...) que solo
+                // necesita client=youtube. firefox/chrome vienen en JSON pelado
+                // y el parser tambien los acepta.
+                const QVector<Suggestion> items = parseSuggestBody(body);
+                for (const Suggestion &s : items) {
+                    ++res.st.total;
+                    ++res.st.conQuery;
+                    if (res.st.muestras.size() < 6)
+                        res.st.muestras << s.query;
                 }
             } else {
                 QJsonObject root;

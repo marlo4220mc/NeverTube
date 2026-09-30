@@ -10,6 +10,16 @@
 
 class Ipv4Https;
 
+// Una fila del desplegable de sugerencias del buscador.
+// query: la consulta que se ejecutaria al pulsarla. detail: texto de apoyo de
+// la entidad cuando YouTube lo envia ("Cantante y compositor peruano"), vacio
+// en las filas normales.
+struct Suggestion
+{
+    QString query;
+    QString detail;
+};
+
 // Resolución de streams de YouTube mediante el API Innertube, de forma
 // independiente de la UI y del reproductor.
 //
@@ -110,6 +120,12 @@ public slots:
     void fetchSearch(const QString &query, int limit = 20);
     void fetchSearchMore(int limit = 20);
 
+    // Sugerencias de type-ahead para el campo de búsqueda. GET plano a
+    // suggestqueries.google.com (el autocompletado real de youtube.com), sin
+    // tocar la sesión Innertube. suggestReady emite SIEMPRE el query pedido
+    // para que la UI descarte respuestas fuera de orden al seguir escribiendo.
+    void fetchSuggest(const QString &query);
+
     // Ficha de canal (POST /browse, pestaña "Información"): nombre, avatar,
     // suscriptores y descripción. channelInfoReady().
     void fetchChannelInfo(const QString &channelId);
@@ -182,6 +198,10 @@ signals:
     // (channelTabReady). hasMore indica si YouTube emitió token de continuación.
     void searchReady(const QString &query, const QVector<VideoInfo> &videos,
                      bool hasMore);
+    // Sugerencias de type-ahead para searchQuery. Vacía si la petición falló o
+    // el cuerpo no traía consultas válidas: la UI oculta el desplegable.
+    void suggestReady(const QString &searchQuery,
+                      const QVector<Suggestion> &suggestions);
     void channelTabReady(const QString &channelId, const QString &tab,
                          const QVector<VideoInfo> &videos, bool hasMore);
     // Ficha del canal (nombre, avatar, suscriptores, descripción).
@@ -209,6 +229,7 @@ private:
     void handleChannel(bool ok, const QString &error, const QByteArray &body);
     void handleTrending(bool ok, const QString &error, const QByteArray &body);
     void requestSearch(bool more);
+    void handleSuggest(const QString &query, bool ok, const QByteArray &body);
     void handleSearch(const QString &query, bool ok, const QString &error,
                       const QByteArray &body, bool more);
     void requestChannelInfo();
@@ -424,6 +445,11 @@ private:
     QString m_searchQuery;
     QString m_searchContinuation;
     int m_searchLimit = 20;
+    // Type-ahead de sugerencias. No lleva estado de paging ni de reintento: es
+    // una petición de ida por prefijo. Solo se guarda el query en vuelo para
+    // descartar respuestas que lleguen tarde (el usuario sigue escribiendo).
+    bool m_suggestInFlight = false;
+    QString m_suggestQuery;
     // Ficha de canal (browse "Información").
     bool m_chInfoPending = false;
     bool m_chInfoInFlight = false;
@@ -483,10 +509,18 @@ bool feedsProtocolSelfTest();
 bool innertubeBrowseSelfTest();
 
 // Sonda de los endpoints de sugerencias (type-ahead del campo de búsqueda).
-// Mide los DOS candidatos con el mismo prefijo y la misma red: Innertube
-// (music/get_search_suggestions, con WEB_REMIX y con WEB) y suggestqueries
-// (GET plano). Imprime estado, latencia, tamaño y, sobre todo, cuántas
-// sugerencias son CONSULTA y cuántas son ATAJOS sin destino (las que solo
-// traen serviceEndpoint): esas son las que un parseo descuidado convertiría en
-// filas muertas. No es PASS/FAIL: es una tabla para elegir endpoint.
+// Mide el endpoint que USA el type-ahead (C1, suggestqueries con
+// client=youtube) contra dos referencias de calidad, con el mismo prefijo y la
+// misma red. Imprime estado, latencia, tamano y cuantas sugerencias son
+// CONSULTA real. Ademas ejecuta suggestParseSelfTest() (offline) para fijar el
+// comportamiento del parser. El PASS/FAIL es de C1: es el que usa la app.
 bool suggestSelfTest();
+
+// Selftest OFFLINE del parseo de /complete/search (sin red ni GPU, va al CI).
+// Fija los tres puntos donde este endpoint puede romperse en silencio:
+//   1) el envoltorio window.google.ac.h(...) se recorta y se lee el JSON;
+//   2) los items SIN consulta (o con texto no-cadena) se descartan, no salen
+//      como filas en blanco;
+//   3) un body que no es el formato conocido (HTML de error, JSON vacio,
+//      envoltorio cambiado) devuelve lista vacia y NO revienta.
+bool suggestParseSelfTest();

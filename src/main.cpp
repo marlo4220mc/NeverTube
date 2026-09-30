@@ -413,9 +413,16 @@ int main(int argc, char *argv[])
         return ok ? 0 : 1;
     }
 
+    if (args.contains(QLatin1String("--selftest-suggest-parse"))) {
+        // Solo el parser del desplegable: sin red y sin GPU, asi que este si
+        // puede ir en el smoke del CI (a diferencia del selftest completo).
+        const bool ok = suggestParseSelfTest();
+        std::fprintf(stderr, "SELFTEST suggest-parse -> %s\n", ok ? "OK" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
     if (args.contains(QLatin1String("--selftest-suggest"))) {
-        // Sonda de elección, no PASS/FAIL: imprime la tabla de los dos
-        // candidatos para decidir con datos (ver suggestSelfTest).
+        // Parser offline + sonda con red del endpoint que usa el type-ahead.
         return suggestSelfTest() ? 0 : 1;
     }
 
