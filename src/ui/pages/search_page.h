@@ -71,8 +71,10 @@ private slots:
     void onRowFocused(SuggestRow *row);
 
 protected:
-    // Cierra el desplegable al pulsar fuera. Ver el installEventFilter del
-    // constructor: NO se usa editingFinished por el orden de los eventos.
+    // Cierra el desplegable al pulsar fuera, y resuelve el teclado del campo
+    // (fieldKey). Ver el installEventFilter del constructor: NO se usa
+    // editingFinished por el orden de los eventos, y el teclado NO va en un
+    // keyPressEvent de la pagina porque el QFrame del "card" se come el Tab.
     bool eventFilter(QObject *watched, QEvent *event) override;
     // Al cambiar el ancho de la pagina el campo se ensancha; el desplegable va
     // anclado a el, asi que hay que recolocarlo o se queda desalineado.
@@ -81,13 +83,14 @@ protected:
     // estado de "mostrado" y reaparece al volver a Buscar con sugerencias
     // viejas de lo que se escribio la ultima vez.
     void hideEvent(QHideEvent *event) override;
-    // Teclado del campo: flechas mueven el resaltado, Tab entra en el
-    // desplegable y Esc lo cierra. Enter NO se toca a proposito: el campo
-    // busca SIEMPRE el texto literal, resaltado o no (ver el comentario del
-    // constructor y acceptSuggestion).
-    void keyPressEvent(QKeyEvent *event) override;
 
 private:
+    // Teclado del campo con el desplegable abierto: flechas mueven el
+    // resaltado, Tab entra en el desplegable y Esc lo cierra. Se llama desde
+    // eventFilter (no desde un keyPressEvent) por el motivo del QFrame.
+    // Enter NO se toca a proposito: el campo busca SIEMPRE el texto literal,
+    // resaltado o no (ver el comentario del constructor y acceptSuggestion).
+    bool fieldKey(QKeyEvent *event);
     void showHistory();
     void setResultsMode(bool active);
     void buildChannelButtons();

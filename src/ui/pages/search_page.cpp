@@ -127,13 +127,22 @@ SuggestRow::SuggestRow(const QString &query, const QString &detail,
     lay->setContentsMargins(10, 0, 10, 0);
     lay->setSpacing(10);
 
-    auto *ico = new QLabel(this);
+    // Las etiquetas de la fila son transparentes al raton. No es cosmetico: son
+    // HIJAS de la fila y cubren casi todo su ancho (el texto es lo que se
+    // pincha), asi que si se quedan el clic no hay quien lo gestione y pulsar
+    // una sugerencia no hace nada. La fila es quien recibe el clic siempre.
+    const auto pasiva = [](QLabel *l) {
+        l->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        return l;
+    };
+
+    auto *ico = pasiva(new QLabel(this));
     ico->setPixmap(nt::icon(nt::Icon::Search, nt::kMuted, 14).pixmap(14, 14));
     ico->setFixedSize(14, 14);
     lay->addWidget(ico, 0, Qt::AlignVCenter);
 
     QFontMetrics fm(font());
-    m_text = new QLabel(this);
+    m_text = pasiva(new QLabel(this));
     m_text->setObjectName(QStringLiteral("suggestQuery"));
     m_text->setTextFormat(Qt::RichText);
     // NoWrap + tamaño fijo: el texto se recorta con elipsis, no pasa a dos
@@ -150,7 +159,7 @@ SuggestRow::SuggestRow(const QString &query, const QString &detail,
     lay->addStretch(1);
 
     if (!detail.isEmpty() && detailW > 0) {
-        auto *d = new QLabel(this);
+        auto *d = pasiva(new QLabel(this));
         d->setObjectName(QStringLiteral("suggestDetail"));
         d->setToolTip(detail);
         d->setText(fm.elidedText(detail, Qt::ElideRight, detailW));
@@ -159,7 +168,7 @@ SuggestRow::SuggestRow(const QString &query, const QString &detail,
         lay->addWidget(d, 0, Qt::AlignVCenter);
     }
     if (!badge.isEmpty()) {
-        auto *b = new QLabel(badge, this);
+        auto *b = pasiva(new QLabel(badge, this));
         b->setObjectName(QStringLiteral("suggestBadge"));
         b->setAlignment(Qt::AlignCenter);
         b->setToolTip(QStringLiteral("Toma esta búsqueda con Tab"));
@@ -413,6 +422,15 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     m_app = qApp;
     if (m_app)
         m_app->installEventFilter(this);
+    // Filtro ADEMAS sobre el campo, para el teclado del desplegable. Tiene que
+    // ser un filtro, no un keyPressEvent de la pagina: entre el campo y la
+    // pagina esta el QFrame del "card", y QWidget::event() resuelve Tab/Backtab
+    // con focusNextPrevChild() cuando keyPressEvent no acepta la tecla. Ese
+    // focusNextPrevChild se come el Tab en el QFrame y la pagina nunca lo ve (el
+    // gesto "Tab y luego flechas" no hacia nada). El filtro de la aplicacion ya
+    // recibia estos eventos; este los deja explicitos y sobrevive a que se
+    // cambie el de fuera.
+    m_field->installEventFilter(this);
 
     connect(m_list, &VideoListView::videoActivated, this,
             [this](int index, const VideoInfo &) {
@@ -432,6 +450,7 @@ void SearchPage::startSearch(const QString &query)
 
 SearchPage::~SearchPage()
 {
+    m_field->removeEventFilter(this);
     if (m_app)
         m_app->removeEventFilter(this);
 }
@@ -759,38 +778,45 @@ void SearchPage::hideEvent(QHideEvent *event)
     hideSuggestPanel();
 }
 
-void SearchPage::keyPressEvent(QKeyEvent *event)
+// Teclas del CAMPO con el desplegable abierto. Va en el eventFilter del campo,
+// no en SearchPage::keyPressEvent: el campo no es hijo directo de la pagina
+// (esta dentro del QFrame del "card") y para el Tab eso lo rompe todo.
+// QWidget::event() resuelve Backtab/Tab con focusNextPrevChild() cuando
+// keyPressEvent no acepta la tecla, y lo hace en el QFrame intermedio ANTES de
+// que el evento pueda subir a la pagina: el Tab se consumia moviendo el foco al
+// boton Buscar y la pagina no lo veia nunca. Interceptando en el campo (el
+// receptor) no hay nada por medio.
+bool SearchPage::fieldKey(QKeyEvent *event)
 {
-    const bool open = m_suggestPanel && !m_suggestPanel->isHidden();
-    if (open) {
-        switch (event->key()) {
-        case Qt::Key_Down:
-            // Con el desplegable abierto, Abajo entra en el. Abajo sin panel
-            // sigue siendo el QLineEdit normal (historial del campo, vacio).
-            moveHighlight(1);
-            return;
-        case Qt::Key_Up:
-            moveHighlight(-1);
-            return;
-        case Qt::Key_Tab:
-        case Qt::Key_Backtab:
-            // Tab salta al desplegable, como en el mockup. Shift+Tab tambien
-            // (que en X11 llega como Key_Backtab), que si no dejaria al usuario
-            // sin salida hacia atras.
-            focusRow(m_highlight >= 0 ? m_highlight : 0);
-            return;
-        case Qt::Key_Escape:
-            // Cierra SIN borrar lo escrito y devuelve el foco al campo.
-            hideSuggestPanel();
-            m_field->setFocus(Qt::OtherFocusReason);
-            return;
-        default:
-            break;
-        }
+    if (!m_suggestPanel || m_suggestPanel->isHidden())
+        return false; // desplegable cerrado: el QLineEdit trabaja normal
+    switch (event->key()) {
+    case Qt::Key_Down:
+        // Con el desplegable abierto, Abajo entra en el. Abajo sin panel
+        // sigue siendo el QLineEdit normal (historial del campo, vacio).
+        moveHighlight(1);
+        return true;
+    case Qt::Key_Up:
+        moveHighlight(-1);
+        return true;
+    case Qt::Key_Tab:
+    case Qt::Key_Backtab:
+        // Tab salta al desplegable, como en el mockup. Shift+Tab tambien
+        // (que en X11 llega como Key_Backtab), que si no dejaria al usuario
+        // sin salida hacia atras.
+        focusRow(m_highlight >= 0 ? m_highlight : 0);
+        return true;
+    case Qt::Key_Escape:
+        // Cierra SIN borrar lo escrito y devuelve el foco al campo.
+        hideSuggestPanel();
+        m_field->setFocus(Qt::OtherFocusReason);
+        return true;
+    default:
+        break;
     }
     // Enter, y todo lo demas, pasa al QLineEdit. Ojo: aqui NO se mira el
     // resaltado. Buscar es buscar lo escrito.
-    QWidget::keyPressEvent(event);
+    return false;
 }
 
 void SearchPage::setHighlight(int index)
@@ -882,6 +908,13 @@ void SearchPage::onRowFocused(SuggestRow *row)
 
 bool SearchPage::eventFilter(QObject *watched, QEvent *event)
 {
+    // Teclado del campo, resuelto aqui (ver fieldKey). Va en el filtro y no en
+    // SearchPage::keyPressEvent porque el campo esta dentro del QFrame del
+    // "card" y ese QFrame se come el Tab con focusNextPrevChild antes de que la
+    // tecla llegue a la pagina.
+    if (watched == m_field && event->type() == QEvent::KeyPress)
+        return fieldKey(static_cast<QKeyEvent *>(event));
+
     if (event->type() == QEvent::MouseButtonPress && m_suggestPanel
         && !m_suggestPanel->isHidden()) {
         auto *w = qobject_cast<QWidget *>(watched);
@@ -1287,9 +1320,20 @@ bool searchSuggestPanelSelfTest(SearchPage *page)
         "con pocas filas el alto es el del contenido (sin barra)");
 
     // --- Teclado del desplegable --------------------------------------------
+    // OJO: se entrega con qApp->notify() al CAMPO, no se llama a
+    // SearchPage::keyPressEvent() directamente. El campo no es hijo directo de
+    // la pagina (esta dentro de un QFrame, el "card" del buscador), y para el
+    // Tab eso importa: QWidget::event() hace focusNextPrevChild() cuando keyPressEvent
+    // no acepta la tecla, y lo hace ANTES de que el evento pueda subir a la
+    // pagina. Llamando al handler a mano se saltaba justo el tramo donde se
+    // perdia la tecla, y el test pasaba con el gesto roto en la app.
     const auto press = [page](int key) {
         QKeyEvent ev(QEvent::KeyPress, key, Qt::NoModifier);
-        page->keyPressEvent(&ev);
+        qApp->notify(page->m_field, &ev);
+    };
+    const auto pressRow = [](SuggestRow *row, int key) {
+        QKeyEvent ev(QEvent::KeyPress, key, Qt::NoModifier);
+        qApp->notify(row, &ev);
     };
     // Al repoblar se reinicia el resaltado: las filas son nuevas y el indice
     // viejo apuntaria a un widget ya borrado.
@@ -1348,18 +1392,12 @@ bool searchSuggestPanelSelfTest(SearchPage *page)
         "Tab salta a la primera fila del desplegable");
 
     // Abajo desde dentro de la fila mueve el foco real entre filas.
-    {
-        QKeyEvent ev(QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier);
-        QApplication::sendEvent(page->m_rows.at(0), &ev);
-    }
+    pressRow(page->m_rows.at(0), Qt::Key_Down);
     chk(QApplication::focusWidget() == page->m_rows.at(1),
         "Abajo dentro del desplegable mueve el foco a la fila siguiente");
 
     // Esc desde dentro de la fila devuelve el foco al campo.
-    {
-        QKeyEvent ev(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
-        QApplication::sendEvent(QApplication::focusWidget(), &ev);
-    }
+    pressRow(page->m_rows.at(1), Qt::Key_Escape);
     chk(panel->isHidden() && QApplication::focusWidget() == page->m_field,
         "Esc desde una fila cierra y devuelve el foco al campo");
 
@@ -1370,13 +1408,55 @@ bool searchSuggestPanelSelfTest(SearchPage *page)
     page->onSuggestReady(QStringLiteral("Will"), items);
     page->focusRow(1);
     chk(QApplication::focusWidget() == page->m_rows.at(1), "focusRow mueve el foco");
-    {
-        QKeyEvent ev(QEvent::KeyPress, Qt::Key_Tab, Qt::NoModifier);
-        QApplication::sendEvent(page->m_rows.at(1), &ev);
-    }
+    pressRow(page->m_rows.at(1), Qt::Key_Tab);
     chk(panel->isHidden(), "Tab desde una fila cierra el desplegable");
     chk(QApplication::focusWidget() != page->m_field,
         "Tab desde una fila NO devuelve el foco al campo");
+
+    // --- Clic con el raton --------------------------------------------------
+    // Lo que decide el clic NO es como se propaga el evento, sino A QUIEN se lo
+    // entrega la plataforma: eso lo dice QApplication::widgetAt(), que es el
+    // mismo hit-test que hace el servidor de ventanas. Las etiquetas (icono,
+    // consulta, detalle, insignia) son HIJAS de la fila y cubren casi todo su
+    // ancho: sin WA_TransparentForMouseEvents el punto que pincha el usuario
+    // cae sobre la etiqueta y no sobre la fila.
+    page->m_field->setText(QStringLiteral("Will"));
+    page->m_suggestQuery = QStringLiteral("Will");
+    page->onSuggestReady(QStringLiteral("Will"), items);
+    {
+        SuggestRow *row = page->m_rows.at(1);
+        // OJO: tiene que ser la fila MISMA, no "la fila o algo suyo". Con
+        // isAncestorOf() la comprobacion pasaria aunque el hit-test cayese en
+        // una etiqueta, que es justo el fallo.
+        const auto hitIsRow = [row](QWidget *child) {
+            const QPoint g = child->mapToGlobal(child->rect().center());
+            return QApplication::widgetAt(g) == row;
+        };
+        chk(hitIsRow(row->findChild<QLabel *>(QStringLiteral("suggestQuery"))),
+            "el hit-test del texto de la fila cae en la fila, no en la etiqueta");
+        chk(hitIsRow(row->findChild<QLabel *>(QStringLiteral("suggestDetail"))),
+            "el hit-test del detalle cae en la fila, no en la etiqueta");
+        // Y el invariante de fondo, para las etiquetas que el hit-test de arriba
+        // no puede cubrir (la insignia cae fuera de la ventana en el offscreen):
+        // NINGUNA etiqueta de la fila puede quedarse el raton. La fila 3 es del
+        // historial y lleva la insignia "Tab".
+        int opacas = 0;
+        for (QLabel *l : page->m_rows.at(3)->findChildren<QLabel *>())
+            if (!l->testAttribute(Qt::WA_TransparentForMouseEvents))
+                ++opacas;
+        chk(opacas == 0 && page->m_rows.at(3)->findChildren<QLabel *>().size() == 3,
+            "ninguna etiqueta de la fila se queda el clic");
+        int pickedCount = 0;
+        QMetaObject::Connection c = QObject::connect(
+            row, &SuggestRow::picked, [&pickedCount](SuggestRow *) { ++pickedCount; });
+        for (int i = 0; i < 3; ++i) {
+            QMouseEvent ev(QEvent::MouseButtonPress, QPointF(row->rect().center()),
+                           Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            qApp->notify(row, &ev);
+        }
+        QObject::disconnect(c);
+        chk(pickedCount == 3, "la pulsacion sobre la fila emite picked()");
+    }
 
     std::fprintf(stderr, "SUGGEST PANEL %s\n", fail == 0 ? "OK" : "FAIL");
     return fail == 0;
