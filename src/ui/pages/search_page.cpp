@@ -23,6 +23,7 @@
 #include <QStackedWidget>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QWindow>
 #include <QRegularExpression>
 
 #include <utility>
@@ -919,15 +920,20 @@ bool SearchPage::eventFilter(QObject *watched, QEvent *event)
 
     if (event->type() == QEvent::MouseButtonPress && m_suggestPanel
         && !m_suggestPanel->isHidden()) {
-        auto *w = qobject_cast<QWidget *>(watched);
-        // El panel y el campo se quedan; cualquier otra pulsacion lo cierra.
-        // NO se mira editingFinished porque al pulsar una fila se dispara
-        // ANTES que su clicked(), y el panel se cerraria sin poder leer la
-        // sugerencia.
-        const bool inPanel = w && (w == m_suggestPanel
-                                   || m_suggestPanel->isAncestorOf(w));
-        const bool inField = w && (w == m_field || m_field->isAncestorOf(w));
-        if (!inPanel && !inField)
+        // La decision NO se toma por el receptor (watched). Una pulsacion real
+        // se entrega PRIMERO a la QWindow del tope, que no es un QWidget: con
+        // qobject_cast<QWidget*> daba null, "no esta ni en el campo ni en el
+        // panel" se cumplia en falso y el panel se cerraba ANTES de que la
+        // pulsacion llegara a la fila. El clic sobre una sugerencia no hacia
+        // nada porque el panel ya no estaba cuando el evento bajaba.
+        // Se decide por la POSICION, que es la misma que usa Qt para repartir
+        // el evento y no depende de a quien se le entregue primero.
+        auto *me = static_cast<QMouseEvent *>(event);
+        const QPoint g = me->globalPos();
+        const QRect panelRect(m_suggestPanel->mapToGlobal(QPoint(0, 0)),
+                              m_suggestPanel->size());
+        const QRect fieldRect(m_field->mapToGlobal(QPoint(0, 0)), m_field->size());
+        if (!panelRect.contains(g) && !fieldRect.contains(g))
             hideSuggestPanel();
     }
     return QWidget::eventFilter(watched, event);
@@ -1513,7 +1519,13 @@ bool searchSuggestGesturesSelfTest(SearchPage *page, QStackedWidget *stack,
         QCoreApplication::processEvents();
     };
     const auto clic = [](QWidget *w) {
-        QMouseEvent ev(QEvent::MouseButtonPress, QPointF(w->rect().center()),
+        // Posicion GLOBAL real: el filtro decide por globalPos(), y con el
+        // constructor corto de QMouseEvent la global acababa siendo la local de
+        // la fila (coordenadas de otro sistema), asi que la prueba media algo
+        // que no pasa en la app.
+        const QPoint local = w->rect().center();
+        const QPoint global = w->mapToGlobal(local);
+        QMouseEvent ev(QEvent::MouseButtonPress, QPointF(local), QPointF(global),
                        Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
         qApp->notify(w, &ev);
         QCoreApplication::processEvents();
@@ -1548,6 +1560,39 @@ bool searchSuggestGesturesSelfTest(SearchPage *page, QStackedWidget *stack,
         clic(row);
         QObject::disconnect(c);
         chk(picked == 1, "el clic sobre la fila se convierte en busqueda");
+    }
+
+    // --- 1b) La pulsacion llega PRIMERO a la QWindow ------------------------
+    // En la app, un clic real se entrega antes que nada a la QWindow del tope,
+    // que NO es un QWidget. Decidir por el receptor hacia que ahi se cerrara el
+    // panel (qobject_cast<QWidget*> daba null -> "fuera del panel y del campo")
+    // y el clic no llegaba nunca a la fila. La decision tiene que ser por
+    // POSICION, no por quien recibe.
+    abrir(QStringLiteral("Will"));
+    {
+        QWindow *win = page->window()->windowHandle();
+        chk(win != nullptr, "existe la QWindow del tope");
+        SuggestRow *row = page->m_rows.at(0);
+        const QPoint enFila = row->mapToGlobal(row->rect().center());
+        QMouseEvent ev(QEvent::MouseButtonPress, QPointF(0, 0), QPointF(enFila),
+                       Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        qApp->notify(win, &ev);
+        chk(!panel->isHidden(),
+            "una pulsacion sobre el panel no lo cierra (llegando a la QWindow)");
+        // Y fuera del panel y del campo SI tiene que cerrarlo.
+        const QPoint fuera =
+            page->mapToGlobal(QPoint(page->width() / 2, page->height() - 20));
+        QMouseEvent ev2(QEvent::MouseButtonPress, QPointF(0, 0), QPointF(fuera),
+                        Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        qApp->notify(win, &ev2);
+        chk(panel->isHidden(), "una pulsacion fuera del panel y del campo si lo cierra");
+        // El campo tambien se queda.
+        abrir(QStringLiteral("Will"));
+        const QPoint enCampo = page->m_field->mapToGlobal(QPoint(4, 4));
+        QMouseEvent ev3(QEvent::MouseButtonPress, QPointF(0, 0), QPointF(enCampo),
+                        Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        qApp->notify(win, &ev3);
+        chk(!panel->isHidden(), "una pulsacion sobre el campo no cierra el panel");
     }
 
     // --- 2) Tab entra en el desplegable (el bug del QFrame) ----------------
