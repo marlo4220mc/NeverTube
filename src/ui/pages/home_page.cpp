@@ -967,9 +967,13 @@ void HomePage::adjustGridHeight(VideoListView *grid)
     const int cellH = grid->gridSize().height() > 0
                           ? grid->gridSize().height()
                           : kGridH;
+    // En IconMode las filas van exactamente una detrás de otra, sin separaciones
+    // (medido: celda 177x195 -> rect 177x195 y paso 195), así que el alto del
+    // contenido es rows*cellH clavado. Lo que importa es que ese cellH sea el
+    // tamaño REAL de la celda: ver VideoListView::applyGridGeometry.
     const int newH = rows * cellH;
-    NT_DEBUG("E2E adjustGridHeight count=%d width=%d cols=%d rows=%d height=%d\n",
-             count, w, cols, rows, newH);
+    NT_DEBUG("E2E adjustGridHeight count=%d width=%d cols=%d rows=%d cellH=%d height=%d\n",
+             count, w, cols, rows, cellH, newH);
     grid->setFixedHeight(newH);
 }
 

@@ -142,6 +142,24 @@ como en caliente):
   resto en vez de un corte en seco. El modo **lista** no se toca (sigue a 2
   líneas con el interlineado natural de la fuente, porque su altura de fila es
   fija y no deriva de la celda).
+- **La celda tiene que medir lo mismo en los TRES sitios que la usan**: el
+  `sizeHint` que lleva cada item del modelo, `gridSize()` (de donde la página
+  saca la altura de la sección) y el rect que acaba pintando QListView. En
+  `IconMode` **manda el `sizeHint` del MODELO por encima de `gridSize()`**, así
+  que cuando divergen las filas ocupan una cosa y la sección se dimensiona con
+  otra, y **la última fila se sale de la vista** (con ella la línea de canal):
+  era un bug PREEXISTENTE con el `sizeHint` clavado en la constante `kGridH`
+  (258) mientras `applyGridGeometry` calculaba otro `cellH` (195 a celda de
+  177), o sea filas de 258 dentro de secciones de `rows*195`. La única fuente es
+  `applyGridGeometry`, que escribe además el `sizeHint` de todos los items
+  (`m_gridCell`, y `gridItemSize()` para los items nuevos); por eso se llama
+  DESPUÉS de crearlos. La altura de sección sigue siendo `rows * cellH` porque
+  en `IconMode` las filas van clavadas una detrás de otra: `setSpacing(4)` **no**
+  suma nada (medido: celda 177x195 -> rect 177x195 y paso 195) y el hueco visual
+  entre miniaturas es el margen interno de 6 px que pinta el delegate. Lo
+  comprueba `--selftest-grid` con un `VideoListView` de verdad (19 vídeos, 5
+  columnas): `sizeHint` == `gridSize` == rect real, la última fila cabe en
+  `rows*cellH` y las filas no se solapan.
 - OJO: el texto ya escala, pero el ajuste de la **columna** sigue siendo
   decision del usuario (4/5/6). Con celdas muy estrechas el título se cortará
   igual: ahí el que decide cuántas líneas caben es el ajuste, no la fuente.
@@ -199,7 +217,7 @@ arriba-izquierda, fuera del scroll (fijo) y se oculta en fullscreen.
 ./build/nevertube_qt2 --selftest-search    # búsqueda Innertube REAL: vídeos con id no vacío
 ./build/nevertube_qt2 --selftest-browse    # endpoints Innertube: canal + tabs (videos/shorts/live) + detalle + playlist
 ./build/nevertube_qt2 --selftest-feeds     # canal por Innertube + trending (protocolo y cadena)
-./build/nevertube_qt2 --selftest-grid      # tope de columnas de las rejillas (puro, sin red ni GPU: va en el CI)
+./build/nevertube_qt2 --selftest-grid      # rejillas: tope de columnas (puro) + celda coherente modelo/gridSize/seccion (monta un VideoListView; sin red ni GPU: va en el CI)
 ./build/nevertube_qt2 --selftest-theme     # QSS puro: ningún selector declarado dos veces (duplicado silencioso): va en el CI
 ```
 

@@ -78,6 +78,19 @@ public:
     static int clampGridColumns(int wanted, int viewportW,
                                 int minCellW = kMinCellW);
 
+    // Rect REAL de la celda de la fila `row` tal y como la coloca QListView. En
+    // IconMode manda el sizeHint del MODELO, no gridSize(), así que este rect
+    // puede no coincidir con gridSize() si divergen: eso es justo lo que hay que
+    // mirar, porque la página dimensiona la sección con gridSize() y la última
+    // fila se salía de la vista. Lo usa --selftest-grid.
+    QRect gridItemRect(int row) const;
+
+    // Separación declarada entre celdas de la rejilla. OJO: en IconMode
+    // QListView NO la suma a la rejilla (medido: con celda 177x195 los items
+    // salen con rect 177x195 y paso 195 entre filas, sin hueco). El hueco que se
+    // ve entre miniaturas es el margen interno de 6 px que pinta el delegate.
+    static constexpr int kGridSpacing = 4;
+
     // Tamaño del título de la celda de rejilla DERIVADO del ancho de la celda.
     // Antes eran 13 px fijos con un bloque de texto de 34 px fijos, y como la
     // rejilla tiene columnas FIJAS la miniatura crece con la ventana mientras el
@@ -126,6 +139,11 @@ private:
     // Recalcula el ancho de celda del modo rejilla cuando está activo el
     // relleno de ancho (setGridFillWidth). No hace nada en modo lista.
     void applyGridGeometry();
+    // Tamaño que deben llevar los items de la rejilla: el que calculó
+    // applyGridGeometry, o la base fija si aún no se ha calculado (aún sin ancho
+    // de viewport). Único lugar donde se decide, para que showVideos y
+    // appendVideos no puedan dejar items con un alto distinto al de la celda.
+    QSize gridItemSize() const;
 
     ThumbnailCache *m_thumbs;
     QStandardItemModel *m_model;
@@ -140,5 +158,10 @@ private:
     int m_metaLines = 1;
     int m_gridMinCellW = 0;
     int m_gridColumns = 0;
+    // Tamaño de celda que ha calculado applyGridGeometry. Es la única fuente: el
+    // sizeHint del modelo, el gridSize, el delegate y el alto de sección del Home
+    // (HomePage::adjustGridHeight usa gridSize) tienen que salir de aquí, o las
+    // filas miden una cosa y la sección reserva otra.
+    QSize m_gridCell;
     QHash<QString, double> m_progress;
 };

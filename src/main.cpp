@@ -14,6 +14,7 @@
 #include "player_selftest.h"
 #include "ffmpeg_selftest.h"
 #include "ui/video_list_view.h"
+#include "ui/thumbnail_cache.h"
 #include "ui/pages/search_page.h"
 #include "ui/theme.h"
 #include "yt.h"
@@ -335,6 +336,89 @@ static bool gridGeometrySelfTest()
         }
         prevPx = px;
         prevBh = bh;
+    }
+
+    // La celda de la rejilla tiene que medir LO MISMO en los tres sitios que la
+    // usan: el sizeHint que lleva cada item del modelo, gridSize() (del que la
+    // página saca la altura de la sección) y el rect que acaba pintando
+    // QListView. En IconMode manda el sizeHint del MODELO, así que cuando
+    // divergían las filas ocupaban una cosa y la sección se dimensionaba con
+    // otra: con 19 vídeos (4 filas) la última quedaba entera fuera de la vista,
+    // y con ella la línea de canal del vídeo. Aquí se monta un VideoListView de
+    // verdad y se comprueba que no se solapa y que la altura de sección alcanza
+    // para todas las filas. Sin red: el ThumbnailCache no pide nada hasta que
+    // se le pinta una miniatura.
+    {
+        ThumbnailCache thumbs(QStringLiteral("selftest_grid"), 8 * 1024 * 1024);
+        VideoListView v(&thumbs);
+        v.setGridColumns(5);
+        QVector<VideoInfo> vids(19);
+        for (int i = 0; i < vids.size(); ++i) {
+            vids[i].id = QStringLiteral("id%1").arg(i);
+            vids[i].title = QStringLiteral("Titulo de prueba numero %1").arg(i);
+        }
+        v.resize(903, 4 * 400);
+        v.show();
+        v.showVideos(vids, VideoListView::GridMode);
+        QCoreApplication::processEvents();
+        const QSize cell = v.gridSize();
+        if (cell.width() <= 0 || cell.height() <= 0) {
+            std::fprintf(stderr,
+                         "SELFTEST grid FAIL gridSize vacio (%dx%d) con la "
+                         "ventana ya dimensionada\n",
+                         cell.width(), cell.height());
+            return false;
+        }
+        // El sizeHint que ve la vista (SizeHintRole), que en IconMode es el que
+        // manda por encima de gridSize().
+        const QSize hint = v.model()->index(0, 0).data(Qt::SizeHintRole).toSize();
+        if (hint != cell) {
+            std::fprintf(stderr,
+                         "SELFTEST grid FAIL sizeHint del item (%dx%d) != "
+                         "gridSize (%dx%d): la celda mide dos cosas\n",
+                         hint.width(), hint.height(), cell.width(), cell.height());
+            return false;
+        }
+        // Y el rect real de la primera celda, que es lo que tiene que coincidir
+        // con gridSize() ahora que los tres van al mismo cálculo.
+        if (v.gridItemRect(0).size() != cell) {
+            std::fprintf(stderr,
+                         "SELFTEST grid FAIL rect real de la celda %dx%d != "
+                         "gridSize %dx%d\n",
+                         v.gridItemRect(0).width(), v.gridItemRect(0).height(),
+                         cell.width(), cell.height());
+            return false;
+        }
+        // La altura que el Home le da a la sección tiene que alcanzar para las
+        // 4 filas: si no, la última no se ve.
+        const int cols = v.gridColumns();
+        const int rows = (int(vids.size()) + cols - 1) / cols;
+        const int sectionH = rows * cell.height();
+        const QRect lastRect = v.gridItemRect(int(vids.size()) - 1);
+        if (lastRect.bottom() + 1 > sectionH) {
+            std::fprintf(stderr,
+                         "SELFTEST grid FAIL la ultima fila se sale de la "
+                         "seccion: rect hasta %d, seccion %d (celda %dx%d, %d "
+                         "filas)\n",
+                         lastRect.bottom(), sectionH, cell.width(), cell.height(),
+                         rows);
+            return false;
+        }
+        // Y las filas contiguas no pueden pisarse (el título de una celda no
+        // puede caer encima de la línea de canal de la de encima).
+        const QRect prevRect = v.gridItemRect(cols - 1);
+        if (lastRect.top() < prevRect.bottom()) {
+            std::fprintf(stderr,
+                         "SELFTEST grid FAIL las filas se solapan: fila 1 hasta "
+                         "%d, fila 2 empieza en %d\n",
+                         prevRect.bottom(), lastRect.top());
+            return false;
+        }
+        std::fprintf(stderr,
+                     "SELFTEST grid -> celda %dx%d, %d filas, seccion %d, "
+                     "ultima fila hasta %d (con sizeHint %dx%d): cabe\n",
+                     cell.width(), cell.height(), rows, sectionH,
+                     lastRect.bottom(), hint.width(), hint.height());
     }
 
     std::fprintf(stderr,

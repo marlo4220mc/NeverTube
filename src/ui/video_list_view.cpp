@@ -699,7 +699,7 @@ void VideoListView::applyGridGeometry()
     const int vw = viewport()->width();
     if (vw <= 0)
         return;
-    const int spacing = 4;
+    const int spacing = kGridSpacing;
     const int cols = gridColumns();
     const int avail = vw - (cols - 1) * spacing;
     const int cellW = qMax(1, avail / qMax(1, cols));
@@ -712,8 +712,36 @@ void VideoListView::applyGridGeometry()
     const int cellH = qRound(qreal(cellW - 12 * m_scale) * 9.0 / 16.0)
                       + qRound(6 * m_scale) + 8 + gridTextBlockH(cellW);
     setGridSize(QSize(cellW, cellH));
+    // En IconMode el tamaño de la celda lo manda el sizeHint del MODELO, no
+    // gridSize(): dejando el kGridH fijo (258) en el sizeHint mientras aquí se
+    // calcula otro cellH, las filas ocupaban 258 y la página dimensionaba la
+    // sección con este cellH, así que la sección se quedaba más corta que el
+    // contenido y la ÚLTIMA fila no se veía (y con ella la línea de canal del
+    // vídeo). Se escribe aquí para que sizeHint, gridSize, delegate y alto de
+    // sección salgan todos del mismo cálculo.
+    const QSize cell(cellW, cellH);
+    if (cell != m_gridCell) {
+        m_gridCell = cell;
+        for (int r = 0; r < m_model->rowCount(); ++r)
+            if (QStandardItem *it = m_model->item(r))
+                it->setSizeHint(cell);
+    }
     static_cast<VideosDelegate *>(itemDelegate())->setCellSize(cellW, cellH);
     viewport()->update();
+}
+
+QRect VideoListView::gridItemRect(int row) const
+{
+    // visualRect (público) devuelve el rect del item YA COLOCADO por el layout,
+    // que es lo que hay que comparar con la altura de la sección.
+    return visualRect(m_model->index(row, 0));
+}
+
+QSize VideoListView::gridItemSize() const
+{
+    return m_gridCell.isValid()
+               ? m_gridCell
+               : QSize(qRound(kGridW * m_scale), qRound(kGridH * m_scale));
 }
 
 void VideoListView::showVideos(const QVector<VideoInfo> &videos, Mode mode)
@@ -729,7 +757,7 @@ void VideoListView::showVideos(const QVector<VideoInfo> &videos, Mode mode)
             setViewMode(QListView::IconMode);
             setGridSize(QSize(qRound(kGridW * m_scale), qRound(kGridH * m_scale)));
             setResizeMode(QListView::Adjust);
-            setSpacing(4);
+            setSpacing(kGridSpacing);
         } else {
             setViewMode(QListView::ListMode);
             setGridSize(QSize());
@@ -737,18 +765,19 @@ void VideoListView::showVideos(const QVector<VideoInfo> &videos, Mode mode)
         }
     }
 
-    if (mode == GridMode)
-        applyGridGeometry();
-
     for (const VideoInfo &v : m_videos) {
         auto *item = new QStandardItem;
         item->setData(QVariant::fromValue(v), Qt::UserRole);
         item->setSizeHint(mode == GridMode
-                              ? QSize(qRound(kGridW * m_scale),
-                                      qRound(kGridH * m_scale))
+                              ? gridItemSize()
                               : QSize(0, qRound(kListH * m_scale)));
         m_model->appendRow(item);
     }
+    // applyGridGeometry escribe el sizeHint de los items con el tamaño de celda
+    // REAL, así que se llama DESPUÉS de crearlos: si se llama antes (con el
+    // modelo ya vaciado) no tendría items que corregir.
+    if (mode == GridMode)
+        applyGridGeometry();
     refreshThumbnails();
     viewport()->update();
 }
@@ -833,12 +862,16 @@ void VideoListView::appendVideos(const QVector<VideoInfo> &videos)
         auto *item = new QStandardItem;
         item->setData(QVariant::fromValue(v), Qt::UserRole);
         item->setSizeHint(m_mode == GridMode
-                              ? QSize(qRound(kGridW * m_scale),
-                                      qRound(kGridH * m_scale))
+                              ? gridItemSize()
                               : QSize(0, qRound(kListH * m_scale)));
         m_model->appendRow(item);
     }
     m_videos += videos;
+    // Por el mismo motivo que en showVideos: el sizeHint de la rejilla lo fija
+    // applyGridGeometry con el tamaño de celda real, y los items nuevos ya
+    // nazcan con el (gridItemSize) pero la geometría puede haber cambiado.
+    if (m_mode == GridMode)
+        applyGridGeometry();
     refreshThumbnails();
     viewport()->update();
 }
