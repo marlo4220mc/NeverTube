@@ -3999,7 +3999,10 @@ bool suggestSelfTest()
     };
     // A = Innertube: POST con contexto y visitorData. B = suggestqueries: GET
     // plano, sin cliente ni visitorData. Mismo prefijo y misma red, para que la
-    // comparacion sea justa.
+    // comparacion sea justa. En B solo cambia client (firefox vs chrome): el
+    // dataset de música (ds=ytmusic) devolvio 0 sugerencias en todas las
+    // pruebas, asi que no se sonda. Y client=youtube devuelve una respuesta
+    // JavaScript, no JSON, por lo que tampoco sirve.
     const Probe probes[] = {
         {"A1 innertube WEB_REMIX", kSuggestEndpoint, nullptr, "WEB_REMIX", 67,
          "1.20240723.01.00", "https://music.youtube.com/"},
@@ -4009,14 +4012,21 @@ bool suggestSelfTest()
          "https://suggestqueries.google.com/complete/search"
          "?client=firefox&ds=yt",
          nullptr, 0, nullptr, nullptr},
-        {"B2 suggestqueries youtube", nullptr,
+        {"B2 suggestqueries chrome", nullptr,
          "https://suggestqueries.google.com/complete/search"
-         "?client=youtube&ds=yt",
+         "?client=chrome&ds=yt",
          nullptr, 0, nullptr, nullptr},
     };
-    // Dos prefijos: el largo que motiva el cambio ("busca") y uno corto ("mus"),
-    // donde las sugerencias suelen ser mas precisas.
-    const QStringList queries{QStringLiteral("busca"), QStringLiteral("mus")};
+    // Prefijos de theme claro (tutorial/receta/codigo), de musica, y corto.
+    // "receta de tarta" lleva espacios A PROPOSITO: medido con curl, un espacio
+    // crudo en la query hace que suggestqueries conteste HTTP 400. El type-ahead
+    // tiene que funcionar con lo que se escribe de verdad (una frase), no solo
+    // con prefijos de una palabra, asi que este caso DEBE quedar verde: si C2 no
+    // codifica bien la query, aqui se ve.
+    const QStringList queries{QStringLiteral("musica"),
+                              QStringLiteral("tutorial blender"),
+                              QStringLiteral("receta de tarta"),
+                              QStringLiteral("busca")};
     const int probeCount = int(sizeof(probes) / sizeof(probes[0]));
     const int total = 1 + int(queries.size()) * probeCount;
 
