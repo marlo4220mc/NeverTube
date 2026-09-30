@@ -383,22 +383,36 @@ QPushButton#historyRow:hover { background: #1F1F1F; border-radius: 6px; }
 
 /* Desplegable de sugerencias del buscador. Reaprovecha las variables de color
    del popover (#202020) y el hover de historyRow para que no introduce tonos
-   nuevos. suggestRow es la fila pulsable; suggestGroupTitle separa los dos
-   grupos (sugerencias de YouTube / tu historial). */
+   nuevos. suggestRow es la fila pulsable; suggestDivider separa los dos
+   grupos (lo que sugiere YouTube arriba, lo que ya buscaste abajo). */
 QFrame#suggestPanel {
     background-color: @POPOVER@; border: 1px solid @BORDER@; border-radius: 10px;
 }
+/* Rotulo del segundo grupo, en mayusculas con la linea al lado (CSS ::after
+   no existe en QSS, asi que la linea es un QFrame hermano: suggestDividerRule).
+   El texto se pone en mayusculas en codigo, no aqui. */
+QWidget#suggestDivider { background: transparent; }
 QLabel#suggestGroupTitle {
-    color: @MUTED@; font-size: 12px; font-weight: 600; padding: 6px 10px 2px 10px;
+    color: @MUTED@; font-size: 9px; font-weight: 600;
 }
-QPushButton#suggestRow {
-    text-align: left; background: transparent; border: none;
-    color: #ECECEC; padding: 7px 10px;
+QFrame#suggestDividerRule { color: @BORDER@; background: @BORDER@; border: none; }
+/* Fila del desplegable. Es un QWidget (no un boton) porque necesita negrita
+   parcial, que Qt no dibuja en un boton. El hover es del raton y el
+   resaltado [highlight] es del teclado: son estados distintos y el segundo
+   tiene que poder moverse con las flechas sin que el raton lo pise. */
+QWidget#suggestRow {
+    background: transparent; border: none; border-radius: 6px; color: @TEXTSOFT@;
 }
-QPushButton#suggestRow:hover { background: #1F1F1F; border-radius: 6px; }
+QWidget#suggestRow:hover { background: #1F1F1F; }
+QWidget#suggestRow[highlight="true"] { background: #1F1F1F; }
 /* Detalle de entidad ("Cantante y compositor peruano") a la derecha, en
    tenue, para que la consulta mande. */
 QLabel#suggestDetail { color: @MUTED@; font-size: 12px; }
+/* Insignia "Tab" de las filas del historial: es la tecla con la que se toman.
+   Con caja, como el <kbd> del mockup. */
+QLabel#suggestBadge {
+    color: @MUTED@; font-size: 11px; border: 1px solid @BORDER@; border-radius: 4px;
+}
 /* El desplegable lleva barra cuando las filas pasan del tope de altura. La
    superficie va transparente para que se vea el fondo del panel, no el gris
    por defecto del viewport. */

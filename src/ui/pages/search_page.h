@@ -19,6 +19,8 @@ class SettingsRepo;
 class ChannelRow;
 class Yt;
 class QPushButton;
+class QKeyEvent;
+class SuggestRow;
 
 class SearchPage : public QWidget
 {
@@ -29,6 +31,15 @@ public:
                         ThumbnailCache *thumbs, QWidget *parent = nullptr);
     ~SearchPage() override;
     void startSearch(const QString &query);
+
+    // Medidas del desplegable. El endpoint devuelve hasta 14 sugerencias y el
+    // historial suma mas; sin tope el panel crecia hacia abajo y tapaba los
+    // resultados. La fila y el separador se necesitan ademas para el alto
+    // cuando el layout aun no ha calculado nada (ver showSuggestPanel), y las
+    // usa tambien SuggestRow, que es una clase aparte.
+    static constexpr int kSuggestPanelMaxH = 320;
+    static constexpr int kSuggestRowH = 32;
+    static constexpr int kSuggestDividerH = 22;
 
     // Panel de sugerencias, solo lectura. Lo usa el selftest del desplegable
     // para comprobar que se abre con los dos grupos sin depender de la red.
@@ -52,6 +63,12 @@ private slots:
     void onHistoryClear();
     void onHistoryQuery(const QString &query);
     void onHistoryRemove(const QString &query);
+    // Del desplegable, desde la navegacion por teclado.
+    void onRowPicked(SuggestRow *row);
+    void onRowStepFocus(SuggestRow *row, int delta);
+    void onRowEscape();
+    void onRowTabOut();
+    void onRowFocused(SuggestRow *row);
 
 protected:
     // Cierra el desplegable al pulsar fuera. Ver el installEventFilter del
@@ -60,6 +77,15 @@ protected:
     // Al cambiar el ancho de la pagina el campo se ensancha; el desplegable va
     // anclado a el, asi que hay que recolocarlo o se queda desalineado.
     void resizeEvent(QResizeEvent *event) override;
+    // Al cambiar de pestana se cierra. Sin esto el panel se queda con su
+    // estado de "mostrado" y reaparece al volver a Buscar con sugerencias
+    // viejas de lo que se escribio la ultima vez.
+    void hideEvent(QHideEvent *event) override;
+    // Teclado del campo: flechas mueven el resaltado, Tab entra en el
+    // desplegable y Esc lo cierra. Enter NO se toca a proposito: el campo
+    // busca SIEMPRE el texto literal, resaltado o no (ver el comentario del
+    // constructor y acceptSuggestion).
+    void keyPressEvent(QKeyEvent *event) override;
 
 private:
     void showHistory();
@@ -79,6 +105,13 @@ private:
     // Pulsa una fila del desplegable: pone el texto LITERAL en el campo (sin
     // sustituirlo por la sugerencia) y lanza la busqueda.
     void acceptSuggestion(const QString &query);
+    // Resaltado por teclado. -1 = ninguno. Solo cambia el fondo de la fila: el
+    // texto del campo nunca se sustituye por la sugerencia resaltada.
+    void setHighlight(int index);
+    void moveHighlight(int delta);
+    // Mueve el foco real a la fila index (o al campo con -1). Es lo que hace
+    // Tab al entrar en el desplegable.
+    void focusRow(int index);
 
     Yt *m_yt;
     SettingsRepo *m_settings;
@@ -102,11 +135,6 @@ private:
     bool m_searching = false;
     QString m_activeQuery;
 
-    // Tope de altura del desplegable. El endpoint devuelve hasta 14
-    // sugerencias y el historial suma mas; sin tope el panel crecia hacia abajo
-    // y tapaba los resultados.
-    static constexpr int kSuggestPanelMaxH = 320;
-
     // Type-ahead. m_suggestPanel flota sobre la pagina; m_suggestItems son las
     // consultas de YouTube (con su detalle de entidad) y m_historyRows las del
     // historial ya filtradas. m_suggestScroll lleva las filas con barra cuando
@@ -117,6 +145,11 @@ private:
     QWidget *m_suggestRowsBox = nullptr;
     QVector<Suggestion> m_suggestItems;
     QStringList m_historyRows;
+    // Las filas como widgets, en el orden en que se pintan, y el indice de la
+    // resaltada (-1 = ninguna). El orden es: grupo de YouTube y luego de
+    // historial, asi que el indice es plano.
+    QVector<SuggestRow *> m_rows;
+    int m_highlight = -1;
     // Texto para el que se pidio la ultima tanda de sugerencias: permite
     // ignorar tanto respuestas tardias como la peticion en si misma si el
     // campo ya no coincide.

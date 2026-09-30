@@ -14,6 +14,8 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QHideEvent>
+#include <QKeyEvent>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSignalBlocker>
@@ -34,6 +36,206 @@
 #include "../theme.h"
 #include "../thumbnail_cache.h"
 #include "../video_list_view.h"
+
+// --- Fila del desplegable de sugerencias -----------------------------------
+//
+// Es un QWidget y no un QPushButton por dos razones, ambas del mockup aprobado:
+//   1. la negrita en el tramo escrito. Qt dibuja el texto de un boton con
+//      QStyle::drawItemText, que NO parsea rich text, asi que con un boton la
+//      negrita parcial es imposible. Un QLabel con Qt::RichText si la da.
+//   2. el resaltado por teclado tiene que ser un estado aparte del hover del
+//      raton, para poder moverlo con las flechas sin que el raton lo pise.
+// El hover y el resaltado se resuelven con QSS (#suggestRow:hover y
+// #suggestRow[highlight="true"]), por eso el WA_Hover: sin el, Qt no emite el
+// cambio de hover a un QWidget normal.
+class SuggestRow : public QWidget
+{
+    Q_OBJECT
+
+public:
+    SuggestRow(const QString &query, const QString &detail, const QString &badge,
+               const QString &typed, int textW, int detailW, QWidget *parent);
+
+    void setHighlighted(bool on);
+    QString query() const { return m_query; }
+
+signals:
+    void picked(SuggestRow *row);
+    void stepFocus(SuggestRow *row, int delta);
+    void escapeFrom(SuggestRow *row);
+    // Tab sale del desplegable: se cierra pero el foco continua donde toque.
+    void tabOutOf(SuggestRow *row);
+    void focusedRow(SuggestRow *row);
+
+protected:
+    // Tab/Backtab se interceptan en event(), no en keyPressEvent: QWidget::event()
+    // los resuelve con focusNextPrevChild ANTES de llamar a keyPressEvent, asi
+    // que un case Qt::Key_Tab en el switch no se ejecutaria nunca.
+    bool event(QEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    void focusInEvent(QFocusEvent *event) override;
+
+private:
+    QString m_query;
+    QLabel *m_text = nullptr;
+};
+
+namespace {
+// El tramo escrito va en negrita. Se elida ANTES de aplicar la negrita: el
+// recorte solo toca el final y el prefijo esta al principio, así que negritar
+// los primeros n caracteres del texto ya recortado sigue siendo el prefijo
+// correcto. Si el texto completo no cabe, el prefijo se recorta con el y se
+// negrita entero, que es lo unico representable.
+QString boldPrefix(const QString &text, const QString &typed, int textW,
+                   QFontMetrics &fm)
+{
+    const QString elided = fm.elidedText(text, Qt::ElideRight, qMax(40, textW));
+    int n = 0;
+    if (!typed.isEmpty() && elided.startsWith(typed, Qt::CaseInsensitive))
+        n = typed.size();
+    const QString head = elided.left(n).toHtmlEscaped();
+    const QString tail = elided.mid(n).toHtmlEscaped();
+    if (n <= 0)
+        return elided.toHtmlEscaped();
+    // El tramo escrito va mas claro que el resto (kText sobre el kTextSoft de la
+    // fila): es el gesto del mockup, ver bien la intencion sin haber pagado la
+    // peticion. El color sale de la paleta del tema, no de un literal.
+    return QStringLiteral("<span style=\"font-weight:600;color:%1;\">%2"
+                          "</span>%3").arg(nt::kText.name(), head, tail);
+}
+} // namespace
+
+SuggestRow::SuggestRow(const QString &query, const QString &detail,
+                       const QString &badge, const QString &typed, int textW,
+                       int detailW, QWidget *parent)
+    : QWidget(parent)
+    , m_query(query)
+{
+    setObjectName(QStringLiteral("suggestRow"));
+    setFocusPolicy(Qt::StrongFocus);
+    setAttribute(Qt::WA_Hover, true);
+    // Imprescindible en un QWidget que no es QFrame: sin WA_StyledBackground el
+    // QSS hace "match" pero QWidget::paintEvent no pinta nada, y el fondo del
+    // hover/resaltado se queda invisible (el QSS solo pinta en el QFrame).
+    setAttribute(Qt::WA_StyledBackground, true);
+    setCursor(Qt::PointingHandCursor);
+    setToolTip(query);
+    setFixedHeight(SearchPage::kSuggestRowH);
+
+    auto *lay = new QHBoxLayout(this);
+    lay->setContentsMargins(10, 0, 10, 0);
+    lay->setSpacing(10);
+
+    auto *ico = new QLabel(this);
+    ico->setPixmap(nt::icon(nt::Icon::Search, nt::kMuted, 14).pixmap(14, 14));
+    ico->setFixedSize(14, 14);
+    lay->addWidget(ico, 0, Qt::AlignVCenter);
+
+    QFontMetrics fm(font());
+    m_text = new QLabel(this);
+    m_text->setObjectName(QStringLiteral("suggestQuery"));
+    m_text->setTextFormat(Qt::RichText);
+    // NoWrap + tamaño fijo: el texto se recorta con elipsis, no pasa a dos
+    // lineas (una fila de 32 px con dos lineas descuadra todo el panel).
+    m_text->setWordWrap(false);
+    m_text->setFixedWidth(qMax(40, textW));
+    m_text->setText(boldPrefix(query, typed, textW, fm));
+    m_text->setToolTip(query);
+    lay->addWidget(m_text, 0, Qt::AlignVCenter);
+    // El hueco sobrante va AQUI, justo despues de la consulta: es lo que
+    // empuja el detalle de entidad y la insignia "Tab" al borde derecho (en el
+    // mockup es un margin-left:auto). Si el stretch se pusiera al final se
+    // quedarian pegados a la consulta, en mitad de la fila.
+    lay->addStretch(1);
+
+    if (!detail.isEmpty() && detailW > 0) {
+        auto *d = new QLabel(this);
+        d->setObjectName(QStringLiteral("suggestDetail"));
+        d->setToolTip(detail);
+        d->setText(fm.elidedText(detail, Qt::ElideRight, detailW));
+        d->setFixedWidth(detailW);
+        d->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+        lay->addWidget(d, 0, Qt::AlignVCenter);
+    }
+    if (!badge.isEmpty()) {
+        auto *b = new QLabel(badge, this);
+        b->setObjectName(QStringLiteral("suggestBadge"));
+        b->setAlignment(Qt::AlignCenter);
+        b->setToolTip(QStringLiteral("Toma esta búsqueda con Tab"));
+        b->setFixedWidth(30);
+        lay->addWidget(b, 0, Qt::AlignVCenter);
+    }
+}
+
+void SuggestRow::setHighlighted(bool on)
+{
+    if (on)
+        setProperty("highlight", true);
+    else
+        setProperty("highlight", false);
+    // Hay que re-polish: cambiar una propiedad dinamica no repinta por si solo.
+    style()->unpolish(this);
+    style()->polish(this);
+    update();
+}
+
+void SuggestRow::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton) {
+        setFocus(Qt::MouseFocusReason);
+        emit picked(this);
+        return;
+    }
+    QWidget::mousePressEvent(event);
+}
+
+bool SuggestRow::event(QEvent *event)
+{
+    // Tab y Backtab se atienden AQUI y no en keyPressEvent: QWidget::event()
+    // los gestiona antes de llegar a keyPressEvent (focusNextPrevChild), asi
+    // que un case Qt::Key_Tab en el switch no se ejecutaria nunca. Se avisa
+    // para cerrar el panel y se deja que la clase base mueva el foco; el foco
+    // SIGUE su curso, no vuelve al campo como con Esc.
+    if (event->type() == QEvent::KeyPress) {
+        const int key = static_cast<QKeyEvent *>(event)->key();
+        if (key == Qt::Key_Tab || key == Qt::Key_Backtab)
+            emit tabOutOf(this);
+    }
+    return QWidget::event(event);
+}
+
+void SuggestRow::keyPressEvent(QKeyEvent *event)
+{
+    switch (event->key()) {
+    case Qt::Key_Return:
+    case Qt::Key_Enter:
+    case Qt::Key_Space:
+        // Aqui SI se toma la sugerencia: el foco ya esta dentro del desplegable
+        // (se entro con Tab), que es lo que distingue este Enter del del
+        // campo, donde la busqueda es siempre del texto literal.
+        emit picked(this);
+        return;
+    case Qt::Key_Up:
+        emit stepFocus(this, -1);
+        return;
+    case Qt::Key_Down:
+        emit stepFocus(this, 1);
+        return;
+    case Qt::Key_Escape:
+        emit escapeFrom(this);
+        return;
+    default:
+        QWidget::keyPressEvent(event);
+        return;
+    }
+}
+
+void SuggestRow::focusInEvent(QFocusEvent *event)
+{
+    QWidget::focusInEvent(event);
+    emit focusedRow(this);
+}
 
 SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
                        QWidget *parent)
@@ -103,6 +305,10 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     };
     connect(m_field, &QLineEdit::textChanged, this, syncClear);
     connect(m_clearBtn, &QPushButton::clicked, this, [this]() {
+        // Cerrar el panel aqui y no esperar al debounce: si no, tras limpiar
+        // el campo se quedaban ~300 ms las sugerencias del texto anterior.
+        m_suggestDebounce->stop();
+        hideSuggestPanel();
         m_field->clear();
         m_field->setFocus();
     });
@@ -547,6 +753,133 @@ void SearchPage::resizeEvent(QResizeEvent *event)
     }
 }
 
+void SearchPage::hideEvent(QHideEvent *event)
+{
+    QWidget::hideEvent(event);
+    hideSuggestPanel();
+}
+
+void SearchPage::keyPressEvent(QKeyEvent *event)
+{
+    const bool open = m_suggestPanel && !m_suggestPanel->isHidden();
+    if (open) {
+        switch (event->key()) {
+        case Qt::Key_Down:
+            // Con el desplegable abierto, Abajo entra en el. Abajo sin panel
+            // sigue siendo el QLineEdit normal (historial del campo, vacio).
+            moveHighlight(1);
+            return;
+        case Qt::Key_Up:
+            moveHighlight(-1);
+            return;
+        case Qt::Key_Tab:
+        case Qt::Key_Backtab:
+            // Tab salta al desplegable, como en el mockup. Shift+Tab tambien
+            // (que en X11 llega como Key_Backtab), que si no dejaria al usuario
+            // sin salida hacia atras.
+            focusRow(m_highlight >= 0 ? m_highlight : 0);
+            return;
+        case Qt::Key_Escape:
+            // Cierra SIN borrar lo escrito y devuelve el foco al campo.
+            hideSuggestPanel();
+            m_field->setFocus(Qt::OtherFocusReason);
+            return;
+        default:
+            break;
+        }
+    }
+    // Enter, y todo lo demas, pasa al QLineEdit. Ojo: aqui NO se mira el
+    // resaltado. Buscar es buscar lo escrito.
+    QWidget::keyPressEvent(event);
+}
+
+void SearchPage::setHighlight(int index)
+{
+    if (index == m_highlight)
+        return;
+    if (m_highlight >= 0 && m_highlight < m_rows.size()
+        && m_rows.at(m_highlight))
+        m_rows.at(m_highlight)->setHighlighted(false);
+    m_highlight = (index >= 0 && index < m_rows.size()) ? index : -1;
+    if (m_highlight >= 0)
+        m_rows.at(m_highlight)->setHighlighted(true);
+}
+
+void SearchPage::moveHighlight(int delta)
+{
+    if (m_rows.isEmpty())
+        return;
+    int next = m_highlight + delta;
+    // Sin resaltado, la primera flecha entra por el extremo que toca: Abajo por
+    // la primera fila, Arriba por la ultima.
+    if (m_highlight < 0)
+        next = delta > 0 ? 0 : m_rows.size() - 1;
+    else if (next < 0)
+        next = m_rows.size() - 1;
+    else if (next >= m_rows.size())
+        next = 0;
+    setHighlight(next);
+    // Moverse con las flechas mantiene el foco en el campo (no se lo roba a
+    // la fila), que es lo que espera quien esta tecleando.
+    m_suggestScroll->ensureWidgetVisible(m_rows.at(next), 0, 0);
+}
+
+void SearchPage::focusRow(int index)
+{
+    if (index < 0 || index >= m_rows.size())
+        return;
+    setHighlight(index);
+    m_rows.at(index)->setFocus(Qt::TabFocusReason);
+    m_suggestScroll->ensureWidgetVisible(m_rows.at(index), 0, 0);
+}
+
+void SearchPage::onRowPicked(SuggestRow *row)
+{
+    if (row)
+        acceptSuggestion(row->query());
+}
+
+void SearchPage::onRowStepFocus(SuggestRow *row, int delta)
+{
+    if (!row)
+        return;
+    const int idx = m_rows.indexOf(row);
+    if (idx < 0)
+        return;
+    int next = idx + delta;
+    if (next < 0)
+        next = m_rows.size() - 1;
+    else if (next >= m_rows.size())
+        next = 0;
+    focusRow(next);
+}
+
+void SearchPage::onRowEscape()
+{
+    // Esc desde dentro del desplegable: lo cierra y devuelve el foco al campo
+    // sin tocar el texto escrito.
+    hideSuggestPanel();
+    m_field->setFocus(Qt::OtherFocusReason);
+}
+
+void SearchPage::onRowTabOut()
+{
+    // Tab sale del desplegable. Solo se cierra: el foco lo lleva el QWidget de
+    // base, que sigue con su recorrido normal por los widgets.
+    hideSuggestPanel();
+}
+
+void SearchPage::onRowFocused(SuggestRow *row)
+{
+    // El resaltado sigue al foco real: al entrar con Tab se ve en que fila
+    // estas, y al volver al campo con Esc se queda en la ultima.
+    if (!row)
+        return;
+    const int idx = m_rows.indexOf(row);
+    if (idx >= 0)
+        setHighlight(idx);
+}
+
 bool SearchPage::eventFilter(QObject *watched, QEvent *event)
 {
     if (event->type() == QEvent::MouseButtonPress && m_suggestPanel
@@ -604,59 +937,68 @@ void SearchPage::populateSuggestPanel()
         delete item->widget();
         delete item;
     }
+    m_rows.clear();
+    setHighlight(-1);
+
     const int panelW = m_field->width();
     m_suggestPanel->setFixedWidth(panelW);
-    // El detalle de entidad se recorta para que la consulta mande: sin tope un
-    // "Cantante y compositor peruano" largo empuja el texto fuera del panel.
-    const int detailW = qMax(60, panelW / 2);
+    const QString typed = m_field->text().trimmed();
+    // Anchos: el detalle se recorta para que la consulta mande (sin tope, un
+    // "Cantante y compositor peruano" largo empujaria el texto fuera del
+    // panel). La insignia se mide y el resto es para la consulta.
+    const int badgeW = 34;
+    const bool anyDetail = [&] {
+        for (const Suggestion &s : m_suggestItems)
+            if (!s.detail.isEmpty())
+                return true;
+        return false;
+    }();
+    const int detailW = anyDetail ? qMax(60, panelW / 3) : 0;
+    const int textW = qMax(80, panelW - 30 - badgeW - (detailW ? detailW + 12 : 0));
 
-    const auto addGroup = [&](const QString &title) {
-        auto *lab = new QLabel(title, m_suggestRowsBox);
+    // Separador de grupo. El mockup solo rotula el SEGUNDO grupo ("Tus
+    // busquedas", en mayusculas y con una linea al lado) y deja el primero sin
+    // encabezado por implicito, asi que se copia tal cual: sin titulo para
+    // YouTube, separador para el historial.
+    const auto addDivider = [&](const QString &title) {
+        auto *box = new QWidget(m_suggestRowsBox);
+        box->setObjectName(QStringLiteral("suggestDivider"));
+        auto *bl = new QHBoxLayout(box);
+        bl->setContentsMargins(10, 6, 10, 3);
+        bl->setSpacing(8);
+        box->setFixedHeight(SearchPage::kSuggestDividerH);
+        auto *lab = new QLabel(title.toUpper(), box);
         lab->setObjectName(QStringLiteral("suggestGroupTitle"));
-        lay->addWidget(lab);
+        bl->addWidget(lab, 0);
+        auto *rule = new QFrame(box);
+        rule->setObjectName(QStringLiteral("suggestDividerRule"));
+        rule->setFrameShape(QFrame::HLine);
+        rule->setFixedHeight(1);
+        bl->addWidget(rule, 1);
+        lay->addWidget(box);
     };
+
     const auto addRow = [&](const QString &text, const QString &detail,
                             const QString &badge) {
-        auto *row = new QWidget(m_suggestRowsBox);
-        auto *rl = new QHBoxLayout(row);
-        rl->setContentsMargins(0, 0, 0, 0);
-        rl->setSpacing(6);
-        auto *btn = new QPushButton(text, row);
-        btn->setObjectName(QStringLiteral("suggestRow"));
-        btn->setIcon(nt::icon(nt::Icon::Search, nt::kMuted, 14));
-        btn->setCursor(Qt::PointingHandCursor);
-        btn->setToolTip(QStringLiteral("Buscar esta sugerencia"));
-        connect(btn, &QPushButton::clicked, this,
-                [this, text]() { acceptSuggestion(text); });
-        rl->addWidget(btn, 1);
-        if (!detail.isEmpty()) {
-            auto *d = new QLabel(m_suggestRowsBox);
-            d->setObjectName(QStringLiteral("suggestDetail"));
-            // El texto completo va al tooltip; en la fila va recortado.
-            d->setToolTip(detail);
-            QFontMetrics fm(d->font());
-            d->setText(fm.elidedText(detail, Qt::ElideRight, detailW));
-            d->setFixedWidth(detailW);
-            d->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
-            rl->addWidget(d, 0, Qt::AlignVCenter);
-        }
-        if (!badge.isEmpty()) {
-            auto *b = new QLabel(badge, row);
-            b->setObjectName(QStringLiteral("suggestDetail"));
-            rl->addWidget(b, 0, Qt::AlignVCenter);
-        }
+        auto *row = new SuggestRow(text, detail, badge, typed, textW, detailW,
+                                   m_suggestRowsBox);
+        m_rows.append(row);
+        connect(row, &SuggestRow::picked, this, &SearchPage::onRowPicked);
+        connect(row, &SuggestRow::stepFocus, this, &SearchPage::onRowStepFocus);
+        connect(row, &SuggestRow::escapeFrom, this, &SearchPage::onRowEscape);
+        connect(row, &SuggestRow::tabOutOf, this, &SearchPage::onRowTabOut);
+        connect(row, &SuggestRow::focusedRow, this, &SearchPage::onRowFocused);
         lay->addWidget(row);
     };
 
     // Grupo 1: sugerencias de YouTube (con el detalle de entidad si viene).
-    if (!m_suggestItems.isEmpty()) {
-        addGroup(QStringLiteral("Sugerencias de YouTube"));
-        for (const Suggestion &s : std::as_const(m_suggestItems))
-            addRow(s.query, s.detail, QString());
-    }
-    // Grupo 2: tu historial, con la insignia "Tab" que lo distingue.
+    // Sin encabezado, como en el mockup.
+    for (const Suggestion &s : std::as_const(m_suggestItems))
+        addRow(s.query, s.detail, QString());
+    // Grupo 2: lo que el usuario ya busco, con la insignia "Tab" que lo
+    // distingue y que es la tecla con la que se toma.
     if (!m_historyRows.isEmpty()) {
-        addGroup(QStringLiteral("Tu historial"));
+        addDivider(QStringLiteral("Tus búsquedas"));
         for (const QString &q : m_historyRows)
             addRow(q, QString(), QStringLiteral("Tab"));
     }
@@ -668,14 +1010,38 @@ void SearchPage::showSuggestPanel()
         return;
     // El alto del contenido manda, con tope: el desplegable nunca tapa toda la
     // pagina, por muchas filas que traiga el endpoint.
-    const int contentH = m_suggestRowsBox->sizeHint().height();
-    m_suggestScroll->setFixedHeight(qMin(contentH, kSuggestPanelMaxH));
-    m_suggestPanel->setFixedHeight(m_suggestScroll->height()
-                                   + m_suggestPanel->contentsMargins().top()
+    //
+    // ORDEN IMPORTA: primero se MUESTRA y despues se mide. QLayoutItem::isEmpty()
+    // devuelve true para widgets ocultos, asi que mientras el panel esta
+    // escondido el layout se Cree vacio y sizeHint() da 0 (o un QSize invalido
+    // -1, y qMin(-1, tope) daria un alto NEGATIVO). Con 14 filas eso dejaba el
+    // desplegable de alto 0 y, sin barra, las 4 ultimas quedaban inalcanzables.
+    m_suggestPanel->show();
+    m_suggestPanel->raise();
+    if (QLayout *lay = m_suggestRowsBox->layout())
+        lay->activate();
+    int contentH = m_suggestRowsBox->sizeHint().height();
+    if (contentH <= 0) {
+        // El layout sigue sin decir nada: se calcula a mano con las filas
+        // puestas, que es exacto porque SuggestRow tiene alto fijo.
+        contentH = m_rows.size() * kSuggestRowH;
+        if (!m_historyRows.isEmpty() && !m_suggestItems.isEmpty())
+            contentH += kSuggestDividerH; // hay separador entre los grupos
+    }
+    const int scrollH = qBound(kSuggestRowH,
+                               qMin(contentH, kSuggestPanelMaxH),
+                               kSuggestPanelMaxH);
+    // El minimo del area de filas se fija A MANO con el alto del contenido, en
+    // vez de fiarse del minimumSizeHint() del layout. Con widgetResizable(true)
+    // el QScrollArea decide el alto del hijo a partir del sizeHint del layout, y
+    // con 14 filas se quedaba en el alto del viewport: sin barra y con las 4
+    // ultimas filas inalcanzables. Con el minimo explicito, el hijo mide lo
+    // que miden las filas y sale la barra cuando no cabe.
+    m_suggestRowsBox->setMinimumHeight(contentH);
+    m_suggestScroll->setFixedHeight(scrollH);
+    m_suggestPanel->setFixedHeight(scrollH + m_suggestPanel->contentsMargins().top()
                                    + m_suggestPanel->contentsMargins().bottom());
     positionSuggestPanel();
-    m_suggestPanel->raise();
-    m_suggestPanel->show();
 }
 
 void SearchPage::positionSuggestPanel()
@@ -714,6 +1080,11 @@ void SearchPage::hideSuggestPanel()
         m_suggestPanel->hide();
     m_suggestItems.clear();
     m_historyRows.clear();
+    // Las filas se destruyen con el layout en el siguiente populate, pero el
+    // indice de resaltado hay que soltarlo YA: si no, un setHighlight posterior
+    // tocaria un widget ya borrado.
+    m_rows.clear();
+    m_highlight = -1;
 }
 
 void SearchPage::acceptSuggestion(const QString &query)
@@ -773,23 +1144,75 @@ bool searchSuggestPanelSelfTest(SearchPage *page)
     // isHidden() y no isVisible(): la pagina no esta mostrada en el selftest,
     // asi que isVisible() daria falso aunque el panel este abierto.
     chk(!panel->isHidden(), "el panel se abre con sugerencias");
-    // Dos grupos: dos titulos (Sugerencias / Tu historial).
-    int groupTitles = 0;
+
+    // Sin WA_StyledBackground el QSS hace match pero QWidget::paintEvent no
+    // pinta nada: el fondo del hover y del resaltado se quedan invisibles. Es un
+    // fallo que no se ve leyendo el texto de las filas, solo mirando la
+    // pantalla, asi que se comprueba el atributo directamente.
+    chk(!page->m_rows.isEmpty()
+            && page->m_rows.first()->testAttribute(Qt::WA_StyledBackground),
+        "la fila tiene WA_StyledBackground (si no, el QSS no se pinta)");
+    // Estructura del panel: 3 sugerencias de YouTube + 2 del historial, un
+    // unico separador ("Tus busquedas", que rotula solo el segundo grupo como
+    // en el mockup) y la insignia Tab en las 2 filas de historial.
+    int dividers = 0;
     int entityLabels = 0;
     int historyBadges = 0;
     for (QLabel *lab : panel->findChildren<QLabel *>()) {
         if (lab->objectName() == QLatin1String("suggestGroupTitle"))
-            ++groupTitles;
-        if (lab->objectName() == QLatin1String("suggestDetail")) {
-            if (lab->text() == QLatin1String("Tab"))
-                ++historyBadges;
-            else if (!lab->text().isEmpty())
-                ++entityLabels;
-        }
+            ++dividers;
+        if (lab->objectName() == QLatin1String("suggestDetail")
+            && !lab->text().isEmpty())
+            ++entityLabels;
+        if (lab->objectName() == QLatin1String("suggestBadge"))
+            ++historyBadges;
     }
-    chk(groupTitles == 2, "dos grupos (Sugerencias + Tu historial)");
+    chk(page->m_rows.size() == 5, "3 sugerencias + 2 de historial = 5 filas");
+    chk(dividers == 1, "un solo separador (rotula el grupo del historial)");
     chk(entityLabels == 2, "detalle de entidad en las 2 filas que lo traen");
     chk(historyBadges == 2, "insignia Tab en las 2 entradas de historial");
+    // El detalle y la insignia van al BORDE DERECHO de la fila (margin-left:auto
+    // del mockup), no pegados a la consulta. Depende de que el addStretch(1) vaya
+    // justo despues de la etiqueta de texto: si se pusiera al final de la fila se
+    // quedarian en mitad, que es como estaba y no se ve leyendo el texto.
+    {
+        QCoreApplication::processEvents();
+        const int rowW = page->m_rows.at(0)->width();
+        QLabel *detail = page->m_rows.at(0)->findChild<QLabel *>(
+            QStringLiteral("suggestDetail"));
+        QLabel *badge = page->m_rows.at(3)->findChild<QLabel *>(
+            QStringLiteral("suggestBadge"));
+        chk(detail && detail->x() > rowW / 2,
+            "el detalle de entidad se alinea a la derecha");
+        chk(badge && badge->x() > rowW / 2
+                && badge->x() + badge->width() >= rowW - 12,
+            "la insignia Tab se pega al borde derecho de la fila");
+    }
+    // El separador va ENTRE los dos grupos, no al principio: la 4a fila es la
+    // primera de historial, luego el separador es el indice 3.
+    {
+        const QVector<SuggestRow *> &r = page->m_rows;
+        chk(r.at(0)->query() == QStringLiteral("willie colón")
+                && r.at(2)->query() == QStringLiteral("william luna"),
+            "las 3 primeras filas son las de YouTube, en orden");
+        chk(r.at(3)->query() == QStringLiteral("Will smith")
+                && r.at(4)->query() == QStringLiteral("Willie colon"),
+            "las 2 ultimas son las del historial filtrado");
+    }
+    // La negrita del prefijo: el mockup la pone en el tramo escrito, y es lo
+    // que hace visible la diferencia entre escribir bien y escribir mal sin
+    // haber gastado una peticion.
+    {
+        QLabel *txt = page->m_rows.at(0)->findChild<QLabel *>(
+            QStringLiteral("suggestQuery"));
+        const QString rich = txt ? txt->text() : QString();
+        chk(txt && txt->textFormat() == Qt::RichText,
+            "el texto de la fila es rich text (permite la negrita)");
+        // La consulta es "willie colón" y el prefijo "Will": la negrita cubre
+        // los 4 primeros caracteres ("will") y el resto queda fuera.
+        chk(rich.contains(QLatin1String(">will</span>ie col")),
+            "solo el prefijo escrito va en negrita");
+    }
 
     // El historial filtrado: "Will smith" y "Willie colon" empiezan por Will;
     // "receta de tarta" no y queda fuera.
@@ -838,11 +1261,20 @@ bool searchSuggestPanelSelfTest(SearchPage *page)
     page->m_field->setText(QStringLiteral("sug"));
     page->m_suggestQuery = QStringLiteral("sug");
     page->onSuggestReady(QStringLiteral("sug"), many);
+    // setFixedHeight no redimensiona al instante: encola un LayoutRequest que
+    // el bucle de eventos aplicara. En la app no se nota (ocurre antes del
+    // siguiente pintado), pero para leer el rango de la barra hay que forzarlo.
+    QCoreApplication::processEvents();
     chk(!panel->isHidden(), "con 14 sugerencias el panel se abre");
     chk(panel->height() <= page->kSuggestPanelMaxH + 8,
         "el alto del panel respeta el tope con 14 filas");
-    chk(page->m_suggestScroll->height() == page->kSuggestPanelMaxH,
-        "el area de filas se queda en el tope (sale la barra)");
+    chk(page->m_suggestScroll->height() <= page->kSuggestPanelMaxH,
+        "el area de filas no pasa del tope");
+    // Y con 14 filas de 32 px el contenido NO cabe: tiene que haber barra, que
+    // es lo que evita que el panel crezca tapando la pagina y deje las 4
+    // ultimas filas inalcanzables.
+    chk(page->m_suggestScroll->verticalScrollBar()->maximum() > 0,
+        "con 14 filas sale la barra (el contenido excede el area)");
     // Y la posicion no lo deja salirse de la pagina.
     chk(panel->y() >= 0 && panel->y() + panel->height() <= page->height() + 1,
         "el panel cabe dentro de la pagina");
@@ -853,6 +1285,98 @@ bool searchSuggestPanelSelfTest(SearchPage *page)
     page->onSuggestReady(QStringLiteral("Will"), items);
     chk(page->m_suggestScroll->height() < page->kSuggestPanelMaxH,
         "con pocas filas el alto es el del contenido (sin barra)");
+
+    // --- Teclado del desplegable --------------------------------------------
+    const auto press = [page](int key) {
+        QKeyEvent ev(QEvent::KeyPress, key, Qt::NoModifier);
+        page->keyPressEvent(&ev);
+    };
+    // Al repoblar se reinicia el resaltado: las filas son nuevas y el indice
+    // viejo apuntaria a un widget ya borrado.
+    chk(page->m_highlight == -1, "al poblar el panel no hay nada resaltado");
+
+    page->moveHighlight(1);
+    chk(page->m_highlight == 0, "Abajo resalta la primera fila");
+    page->moveHighlight(1);
+    chk(page->m_highlight == 1, "Abajo avanza");
+    page->moveHighlight(-1);
+    chk(page->m_highlight == 0, "Arriba retrocede");
+    page->moveHighlight(-1);
+    chk(page->m_highlight == page->m_rows.size() - 1, "Arriba envuelve al final");
+    page->moveHighlight(1);
+    chk(page->m_highlight == 0, "Abajo envuelve al principio");
+
+    // El resaltado se ve en la fila (propiedad de QSS) y solo en una.
+    {
+        int on = 0;
+        for (SuggestRow *r : page->m_rows)
+            if (r->property("highlight").toBool())
+                ++on;
+        chk(on == 1, "el resaltado se marca en exactamente una fila");
+        chk(page->m_rows.at(0)->property("highlight").toBool(),
+            "la fila resaltada es la primera");
+    }
+
+    // REGLA DURA: mover el resaltado NO toca el campo. Enter en el campo
+    // busca el texto literal, nunca la sugerencia resaltada.
+    chk(page->m_field->text() == QLatin1String("Will"),
+        "resaltar una fila no sustituye el texto del campo");
+
+    // Esc cierra el desplegable SIN borrar lo escrito.
+    press(Qt::Key_Escape);
+    chk(panel->isHidden(), "Esc cierra el desplegable");
+    chk(page->m_field->text() == QLatin1String("Will"),
+        "Esc no borra lo escrito");
+    chk(page->m_highlight == -1, "Esc suelta el resaltado");
+
+    // Con el panel cerrado, las flechas y Esc NO se interceptan (pasan al
+    // QLineEdit): si no, se comerian teclas del campo.
+    chk(page->m_highlight == -1, "con el panel cerrado las flechas no resaltan");
+
+    // Tab entra en el desplegable. Con el panel cerrado, Tab no se toca: el
+    // campo lo usa para el recorrido normal de foco.
+    press(Qt::Key_Tab);
+    chk(panel->isHidden() && page->m_highlight == -1,
+        "Tab con el panel cerrado no hace nada del desplegable");
+
+    page->m_field->setText(QStringLiteral("Will"));
+    page->m_suggestQuery = QStringLiteral("Will");
+    page->onSuggestReady(QStringLiteral("Will"), items);
+    press(Qt::Key_Tab);
+    chk(!panel->isHidden(), "Tab con el panel abierto no lo cierra");
+    chk(QApplication::focusWidget() == page->m_rows.at(0),
+        "Tab salta a la primera fila del desplegable");
+
+    // Abajo desde dentro de la fila mueve el foco real entre filas.
+    {
+        QKeyEvent ev(QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier);
+        QApplication::sendEvent(page->m_rows.at(0), &ev);
+    }
+    chk(QApplication::focusWidget() == page->m_rows.at(1),
+        "Abajo dentro del desplegable mueve el foco a la fila siguiente");
+
+    // Esc desde dentro de la fila devuelve el foco al campo.
+    {
+        QKeyEvent ev(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QApplication::sendEvent(QApplication::focusWidget(), &ev);
+    }
+    chk(panel->isHidden() && QApplication::focusWidget() == page->m_field,
+        "Esc desde una fila cierra y devuelve el foco al campo");
+
+    // Tab desde dentro de la fila cierra el desplegable y deja seguir al foco
+    // (no lo devuelve al campo como Esc).
+    page->m_field->setText(QStringLiteral("Will"));
+    page->m_suggestQuery = QStringLiteral("Will");
+    page->onSuggestReady(QStringLiteral("Will"), items);
+    page->focusRow(1);
+    chk(QApplication::focusWidget() == page->m_rows.at(1), "focusRow mueve el foco");
+    {
+        QKeyEvent ev(QEvent::KeyPress, Qt::Key_Tab, Qt::NoModifier);
+        QApplication::sendEvent(page->m_rows.at(1), &ev);
+    }
+    chk(panel->isHidden(), "Tab desde una fila cierra el desplegable");
+    chk(QApplication::focusWidget() != page->m_field,
+        "Tab desde una fila NO devuelve el foco al campo");
 
     std::fprintf(stderr, "SUGGEST PANEL %s\n", fail == 0 ? "OK" : "FAIL");
     return fail == 0;
@@ -875,7 +1399,14 @@ bool searchSuggestPanelSelfTestRun()
     Yt yt;
     SearchPage page(&yt, &settings, &thumbs);
     // Tamano explicito: la comprobacion de que el panel cabe en la pagina
-    // depende de las dimensiones, y sin esto serian las por defecto.
+    // depende de las dimensiones, y sin esto serian las por defecto. Se
+    // muestra porque los casos de teclado comprueban el foco real, y un
+    // widget sin mostrar no puede tener foco.
     page.resize(1000, 700);
+    page.show();
+    QCoreApplication::processEvents();
     return searchSuggestPanelSelfTest(&page);
 }
+
+// SuggestRow está definida en este .cpp (necesita el moc aquí).
+#include "search_page.moc"
