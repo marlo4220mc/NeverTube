@@ -296,6 +296,15 @@ jobs:
           # que recortarlas si la celda baja de 130 px.
           $rc = Invoke-Selftest '--selftest-grid'
           if ($rc -ne 0) { exit $rc }
+          # Parser del autocompletado de youtube.com (función pura, sin red):
+          # fija el formato de los dos tipos de item que devuelve el endpoint.
+          $rc = Invoke-Selftest '--selftest-suggest-parse'
+          if ($rc -ne 0) { exit $rc }
+          # Desplegable de sugerencias del buscador (offline, sin red): los
+          # dos grupos, el filtrado del historial, el descarte de respuestas
+          # tardías y el tope de altura del panel.
+          $rc = Invoke-Selftest '--selftest-suggest-panel'
+          if ($rc -ne 0) { exit $rc }
           # qoffscreen se quita solo al final (todos los selftests lo necesitan).
           # Búsqueda real por Innertube: vídeos con id (y canal) no vacíos.
           $rc = Invoke-Selftest '--selftest-search'

@@ -381,6 +381,30 @@ QPushButton#historyRow {
 }
 QPushButton#historyRow:hover { background: #1F1F1F; border-radius: 6px; }
 
+/* Desplegable de sugerencias del buscador. Reaprovecha las variables de color
+   del popover (#202020) y el hover de historyRow para que no introduce tonos
+   nuevos. suggestRow es la fila pulsable; suggestGroupTitle separa los dos
+   grupos (sugerencias de YouTube / tu historial). */
+QFrame#suggestPanel {
+    background-color: @POPOVER@; border: 1px solid @BORDER@; border-radius: 10px;
+}
+QLabel#suggestGroupTitle {
+    color: @MUTED@; font-size: 12px; font-weight: 600; padding: 6px 10px 2px 10px;
+}
+QPushButton#suggestRow {
+    text-align: left; background: transparent; border: none;
+    color: #ECECEC; padding: 7px 10px;
+}
+QPushButton#suggestRow:hover { background: #1F1F1F; border-radius: 6px; }
+/* Detalle de entidad ("Cantante y compositor peruano") a la derecha, en
+   tenue, para que la consulta mande. */
+QLabel#suggestDetail { color: @MUTED@; font-size: 12px; }
+/* El desplegable lleva barra cuando las filas pasan del tope de altura. La
+   superficie va transparente para que se vea el fondo del panel, no el gris
+   por defecto del viewport. */
+QScrollArea#suggestScroll { background: transparent; border: none; }
+QWidget#suggestRows { background: transparent; }
+
 /* --- Ajustes ------------------------------------------------------------
    Tres niveles de encabezado, y a proposito NO se reutilizan entre si:
      pageHeading           18 px, titulo de la pagina entera

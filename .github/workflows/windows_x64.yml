@@ -266,7 +266,11 @@ jobs:
             Write-Host "smoke $flag exit=$($p.ExitCode)"
             return $p.ExitCode
           }
+          # --selftest-suggest-parse y --selftest-suggest-panel son offline y
+          # deterministas (parser del autocompletado y construcción del
+          # desplegable del buscador), así que sí van en el smoke.
           foreach ($t in @('--selftest-tls', '--selftest-db', '--selftest-grid',
+                           '--selftest-suggest-parse', '--selftest-suggest-panel',
                            '--selftest-search', '--selftest-browse', '--selftest-feeds')) {
             $rc = Invoke-Selftest $t
             if ($rc -ne 0) {

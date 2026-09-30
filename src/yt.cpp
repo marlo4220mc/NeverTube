@@ -142,6 +142,7 @@ Yt::Yt(QObject *parent)
     connect(&m_innertube, &Innertube::searchReady, this,
             [this](const QString &query, const QVector<VideoInfo> &videos,
                    bool) { emit searchFinished(query, videos); });
+    connect(&m_innertube, &Innertube::suggestReady, this, &Yt::suggestReady);
     connect(&m_innertube, &Innertube::channelInfoReady, this,
             &Yt::channelInfoReady);
     connect(&m_innertube, &Innertube::channelTabReady, this,
@@ -314,6 +315,11 @@ void Yt::search(const QString &query, int limit, int offset)
     } else {
         m_innertube.fetchSearchMore(limit);
     }
+}
+
+void Yt::suggest(const QString &query)
+{
+    m_innertube.fetchSuggest(query);
 }
 
 void Yt::trending(int limit)

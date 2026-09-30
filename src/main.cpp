@@ -14,6 +14,7 @@
 #include "player_selftest.h"
 #include "ffmpeg_selftest.h"
 #include "ui/video_list_view.h"
+#include "ui/pages/search_page.h"
 #include "yt.h"
 #include "yt_innertube.h"
 
@@ -418,6 +419,15 @@ int main(int argc, char *argv[])
         // puede ir en el smoke del CI (a diferencia del selftest completo).
         const bool ok = suggestParseSelfTest();
         std::fprintf(stderr, "SELFTEST suggest-parse -> %s\n", ok ? "OK" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-suggest-panel"))) {
+        // El desplegable en si (offline): construye una SearchPage y comprueba
+        // los dos grupos, el filtrado del historial y el descarte de respuestas
+        // tardias, sin pedir nada a la red.
+        const bool ok = searchSuggestPanelSelfTestRun();
+        std::fprintf(stderr, "SELFTEST suggest-panel -> %s\n", ok ? "OK" : "FAIL");
         return ok ? 0 : 1;
     }
 

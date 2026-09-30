@@ -40,6 +40,10 @@ public:
     void setVisitorStorage(SettingsRepo *settings);
 
     void search(const QString &query, int limit = 20, int offset = 0);
+    // Sugerencias de type-ahead del buscador. No lanza una búsqueda: solo pide
+    // las sugerencias del prefijo y las entrega por suggestReady(). Es un GET
+    // plano que no toca la sesión Innertube (ver Innertube::fetchSuggest).
+    void suggest(const QString &query);
     void trending(int limit = 30);
     void channelVideos(const QString &channelId, int limit = 20);
     void channelTabVideos(const QString &channelId, const QString &tab,
@@ -126,6 +130,7 @@ public:
 
 signals:
     void searchFinished(const QString &query, const QVector<VideoInfo> &videos);
+    void suggestReady(const QString &query, const QVector<Suggestion> &suggestions);
     void trendingFinished(const QVector<VideoInfo> &videos);
     void channelVideosFinished(const QVector<VideoInfo> &videos);
     void channelTabVideosFinished(const QString &channelId, const QString &tab,
