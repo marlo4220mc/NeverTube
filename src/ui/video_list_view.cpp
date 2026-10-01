@@ -286,26 +286,26 @@ public:
             drawBadge(p, r, duration);
     }
 
-    // Título con salto de línea: si no cabe en una fila, usa las siguientes
-    // (wrap voraz por palabras) en lugar de cortarse con "…" a media palabra. En
-    // la ÚLTIMA línea entra todo lo que queda desde el principio de esa línea,
-    // elidado, para que se lea el arranque del resto y no un corte en seco. La
-    // caja la reserva la celda (applyGridGeometry usa la misma
-    // gridTextBlockH), así que no hay solape con la línea de canal.
-    static void drawGridTitle(QPainter *p, const QRect &r, const QString &text,
-                              int lineH, int lines)
+    // Reparte el texto en `lines` líneas con wrap voraz por palabras; la ÚLTIMA
+    // lleva todo lo que queda desde el principio de esa línea, elidado. Lo usan
+    // la PINTURA (drawGridTitle) y la GEOMETRÍA (paintList decide con size()
+    // cuántas líneas ocupa el título para pegar la meta justo debajo): una sola
+    // función, así no pueden divergir.
+    static QStringList wrapTitle(const QFontMetricsF &fm, const QString &text,
+                                 qreal w, int lines)
     {
-        const QFontMetricsF fm(p->font());
-        const qreal w = r.width();
+        QStringList out;
         lines = qMax(1, lines);
+        if (w <= 0)
+            return out;
         if (fm.horizontalAdvance(text) <= w) {
-            p->drawText(r, Qt::AlignLeft | Qt::AlignTop, text);
-            return;
+            out << text;
+            return out;
         }
         const QStringList words =
             text.split(QLatin1Char(' '), Qt::SkipEmptyParts);
         if (words.isEmpty())
-            return;
+            return out;
         int i = 0;
         for (int ln = 0; ln < lines; ++ln) {
             const int start = i;
@@ -322,7 +322,6 @@ public:
                 line = cand;
                 ++i;
             }
-            const QRect lr(r.left(), r.top() + ln * lineH, r.width(), lineH);
             if (ln == lines - 1) {
                 QString rest;
                 for (int k = start; k < words.size(); ++k) {
@@ -330,13 +329,30 @@ public:
                         rest += QLatin1Char(' ');
                     rest += words.at(k);
                 }
-                p->drawText(lr, Qt::AlignLeft | Qt::AlignTop,
-                            fm.elidedText(rest, Qt::ElideRight, w));
-                return;
+                out << fm.elidedText(rest, Qt::ElideRight, w);
+                return out;
             }
-            p->drawText(lr, Qt::AlignLeft | Qt::AlignTop, line);
+            out << line;
             if (i >= words.size())
-                return;
+                return out;
+        }
+        return out;
+    }
+
+    // Título con salto de línea: si no cabe en una fila, usa las siguientes
+    // (wrap voraz por palabras) en lugar de cortarse con "…" a media palabra. En
+    // la ÚLTIMA línea entra todo lo que queda desde el principio de esa línea,
+    // elidado, para que se lea el arranque del resto y no un corte en seco. La
+    // caja la reserva la celda (applyGridGeometry usa la misma
+    // gridTextBlockH), así que no hay solape con la línea de canal.
+    static void drawGridTitle(QPainter *p, const QRect &r, const QString &text,
+                              int lineH, int lines)
+    {
+        const QFontMetricsF fm(p->font());
+        const QStringList ls = wrapTitle(fm, text, r.width(), lines);
+        for (int ln = 0; ln < ls.size(); ++ln) {
+            const QRect lr(r.left(), r.top() + ln * lineH, r.width(), lineH);
+            p->drawText(lr, Qt::AlignLeft | Qt::AlignTop, ls.at(ln));
         }
     }
 
@@ -408,9 +424,9 @@ private:
         QFont title;
         QFont meta;
         qreal lineH = 0;      // interlineado del título
+        qreal metaH = 0;      // alto de la línea de meta
         qreal metaAscent = 0; // ascendencia de la meta (para su línea base)
         qreal gap = 0;        // hueco entre título y meta
-        qreal blockH = 0;     // alto total del bloque, para centrarlo
     };
 
     ListTextMetrics listMetrics(const QFont &base) const
@@ -421,11 +437,11 @@ private:
         m.lineH = qMax(1.0, QFontMetricsF(m.title).height());
         m.meta = shrunkFont(base, 0.5);
         const QFontMetricsF metaFm(m.meta);
+        m.metaH = metaFm.height();
         m.metaAscent = metaFm.ascent();
         // Hueco entre el título y la meta: 6 px, para que no se lean como una
         // sola línea de texto.
         m.gap = 6 * m_scale;
-        m.blockH = m.lineH * 2 + m.gap + metaFm.height();
         return m;
     }
 
@@ -434,7 +450,8 @@ private:
     // secciones de Biblioteca. Antes esta fila pintaba solo "canal • visitas"
     // a 11,3 px: el mismo vídeo se leía distinto según la página.
     void paintListMeta(QPainter *p, const QRect &r, const VideoInfo &v,
-                       const ListTextMetrics &m, qreal blockTop) const
+                       const ListTextMetrics &m, qreal blockTop,
+                       int titleLines) const
     {
         const qreal x = r.left() + kListTextX * m_scale;
         const qreal avail = textWidth(r, kListTextX * m_scale);
@@ -444,7 +461,8 @@ private:
         p->setFont(m.meta);
         p->setPen(nt::kMuted);
         const QFontMetricsF fm(m.meta);
-        p->drawText(QPointF(x, blockTop + m.lineH * 2 + m.gap + m.metaAscent),
+        p->drawText(QPointF(x, blockTop + m.lineH * titleLines + m.gap
+                                      + m.metaAscent),
                     fm.elidedText(metaLine(v), Qt::ElideRight,
                                   qRound(avail)));
         p->restore();
@@ -504,22 +522,27 @@ private:
         // la fuente y son 2 líneas (no las 3 de la rejilla): la fila de lista
         // tiene altura fija.
         const ListTextMetrics m = listMetrics(p->font());
-        // El bloque (2 líneas de título + meta) se CENTRA en la fila: pegado al
-        // borde superior dejaba 8 px arriba y 31 px abajo (medido en el render),
-        // que descentraba la fila frente a la miniatura, que sí va centrada.
-        const qreal blockTop = r.top() + (r.height() - m.blockH) / 2.0;
+        const qreal titleW = textWidth(r, kListTextX * m_scale);
+        // Líneas que ocupa REALMENTE el título (1 o 2). El bloque se centra con
+        // esa altura y la meta va pegada a su última línea: antes se reservaban
+        // 2 líneas siempre, así que con un título de una línea la meta quedaba
+        // un renglón entero más abajo (el usuario lo pidió pegado al título).
+        const int titleLines = titleW >= 20
+            ? qMax(1, wrapTitle(QFontMetricsF(m.title), v.title, titleW, 2).size())
+            : 1;
+        const qreal blockH = titleLines * m.lineH + m.gap + m.metaH;
+        const qreal blockTop = r.top() + (r.height() - blockH) / 2.0;
         p->save();
         p->setFont(m.title);
         p->setPen(nt::kText);
-        const qreal titleW = textWidth(r, kListTextX * m_scale);
         const QRect titleR(r.left() + qRound(kListTextX * m_scale),
                            qRound(blockTop), qRound(titleW),
-                           qRound(m.lineH * 2));
+                           qRound(titleLines * m.lineH));
         if (titleW >= 20)
             drawGridTitle(p, titleR, v.title, m.lineH, 2);
         p->restore();
 
-        paintListMeta(p, r, v, m, blockTop);
+        paintListMeta(p, r, v, m, blockTop, titleLines);
 
         if (m_showRemove) {
             p->save();
