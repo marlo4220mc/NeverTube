@@ -721,6 +721,22 @@ Los dos últimos datos los escribe el reproductor, no la red:
 - Overlay de los controles NO es un widget separado: vive dentro de
   `WatchPage::m_overlay`/`PlayerContainer` (src/ui/pages/watch_page.cpp).
   Cualquier cambio ahí que afecte el área de video requiere el selftest.
+- **Los botones multimedia NO llevan marco** (regla del usuario). Ni en reposo
+  ni **al pulsarlos**. El chip de calidad (`QPushButton#chip`, el que al pulsarlo
+  abre el menú de resoluciones) lo tenía y se veía como una caja más **dentro**
+  de la caja de controles. Su borde ahora es `1px solid transparent` y no
+  `none`: no se ve ninguno, pero se conservan los 2 px para que el contenido no
+  se desplace. **El `:focus` hay que anularlo a mano** (`border-color:
+  transparent`): la regla global `QPushButton:focus { border-color: @ACCENT@; }`
+  se le aplica igual y encendía un marco en el acento en cuanto se pulsaba el
+  botón — que es justo cuando se abre el menú. El foco se marca SOLO con el
+  relleno (`@HANDLE_HOVER@`), que es lo único que se puede tocar sin dibujar un
+  borde. Lo que marca el chip como control es el **relleno**, no el marco (el
+  resto de la barra, `#iconBtn`, nunca lo tuvo).
+  Lo vigila `--selftest-theme`: `#chip`, `#iconBtn` y los items de
+  `#qualityMenu` no pueden declarar un borde visible **en ningún estado**
+  (recursea por `:hover`/`:pressed`/`:focus`; comprobado que FALLA tanto si se
+  devuelve el marco en la base como si se devuelve solo en `:focus`).
 
 ## Cobertura de ventanas y escala en x86 (FfmpegBackend)
 

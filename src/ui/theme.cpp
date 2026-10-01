@@ -352,17 +352,28 @@ QPushButton#actionSegR[active="true"]:hover { background: @SELECTION@; }
 
 /* Chip de calidad. Antes llevaba objectName="iconBtn", que es el estilo de un
    boton cuadrado de icono (padding 6, sin borde), pero lleva texto: sin
-   relleno ni borde no se leia como control. Ancho por contenido, no 98 fijos. */
+   relleno no se leia como control. Ancho por contenido, no 98 fijos.
+
+   REGLA (del usuario): los botones multimedia NO llevan marco. Ni en reposo ni
+   al pulsarlos: por eso el borde va "transparent" y no "none" (no se ve ninguno
+   pero conserva los 2 px para que el contenido no se desplace) y el :focus lo
+   anula en vez de pintar el acento, que es lo que hace la regla global
+   QPushButton:focus y lo que hacia que el chip encendiera un marco al
+   pulsarlo. El foco se marca SOLO con el relleno, que es lo unico que se puede
+   tocar sin dibujar un borde. El relleno es lo que marca el boton como control,
+   no el marco. */
 QPushButton#chip {
     background-color: #1F1F1F;
-    border: 1px solid @BORDER@;
+    border: 1px solid transparent;
     border-radius: 6px;
     padding: 5px 10px;
     color: #ECECEC;
 }
-QPushButton#chip:hover { background-color: @HOVER@; border-color: @HANDLE_HOVER@; }
+QPushButton#chip:hover { background-color: @HOVER@; }
 QPushButton#chip:pressed { background-color: @SELECTION@; }
-QPushButton#chip:focus { border-color: @ACCENT@; }
+QPushButton#chip:focus {
+    border-color: transparent; background-color: @HANDLE_HOVER@;
+}
 
 /* Pista de los dos sliders de la caja. Selector PROPIO (#ovSeek / #ovVolume) a
    proposito: la regla QSlider global es compartida con el de volumen de la mini
@@ -646,6 +657,9 @@ bool themeSelfTest()
     }
 
     QHash<QString, int> veces;
+    // selector -> cuerpo, para poder comprobar el contenido de una regla concreta
+    // (no solo que el selector exista).
+    QVector<QPair<QString, QString>> cuerpos;
     int reglas = 0;
     int i = 0;
     while (i < qss.size()) {
@@ -659,6 +673,7 @@ bool themeSelfTest()
         if (!sel.isEmpty()) {
             ++reglas;
             veces[sel] += 1;
+            cuerpos.append(qMakePair(sel, qss.mid(abre + 1, cierra - abre - 1)));
         }
         i = cierra + 1;
     }
@@ -713,6 +728,49 @@ bool themeSelfTest()
         const QString bloque = qss.mid(a, b - a);
         chk(bloque.contains(accentHex()),
             "la sugerencia resaltada lleva el acento (barra y velo)");
+    }
+
+    // REGLA del usuario: los botones multimedia NO llevan marco visible. El chip
+    // de calidad (el que abre el menu de resoluciones) si lo llevaba y se veia
+    // como una caja mas dentro de la caja de controles. Se admite "none" o
+    // "transparent": este ultimo conserva los 2 px para que el foco, que en esta
+    // app se senala pintando el color del borde, no desplace el contenido.
+    const QStringList multimedia{
+        QStringLiteral("QPushButton#chip"), QStringLiteral("QPushButton#iconBtn"),
+        QStringLiteral("QFrame#qualityMenu QPushButton")};
+    for (const QString &sel : multimedia) {
+        // TODOS los estados del boton, no solo la regla base: el marco al
+        // pulsarlo venia de :focus (que ademas hereda la global
+        // QPushButton:focus), y un check solo sobre la base lo dejaba pasar.
+        int estados = 0;
+        QString culpable;
+        for (const auto &par : cuerpos) {
+            if (!par.first.startsWith(sel))
+                continue;
+            // Lo que venga detras del nombre tiene que ser un pseudo-estado o
+            // una propiedad, nunca otro nombre: "#chip" no es "#chipFoo".
+            const QChar sig = par.first.size() > sel.size()
+                                  ? par.first.at(sel.size())
+                                  : QChar();
+            if (!sig.isNull() && sig != QLatin1Char(':') && sig != QLatin1Char('[')
+                && !sig.isSpace())
+                continue;
+            ++estados;
+            const QString &cuerpo = par.second;
+            const bool transparente =
+                cuerpo.contains(QStringLiteral("border: none"))
+                || cuerpo.contains(QStringLiteral("border: 1px solid transparent"))
+                || cuerpo.contains(QStringLiteral("border-color: transparent"));
+            if (!cuerpo.contains(QStringLiteral("border")) || transparente)
+                continue;
+            culpable = par.first;
+        }
+        chk(estados > 0, qPrintable(QStringLiteral("existe la regla %1").arg(sel)));
+        chk(culpable.isEmpty(),
+            qPrintable(QStringLiteral("%1 no declara un borde visible en ningun "
+                                      "estado (marco en: %2)")
+                           .arg(sel,
+                                culpable.isEmpty() ? QStringLiteral("-") : culpable)));
     }
 
     std::fprintf(stderr, "THEME %s (%d reglas, %d selectores)\n",
