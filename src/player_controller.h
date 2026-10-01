@@ -34,6 +34,13 @@ public:
     // repetir relacionados que ya estaban en la lista). Emite queueChanged()
     // si algo fue añadido. No toca el ítem en reproducción.
     void appendVideos(const QVector<VideoInfo> &videos);
+    // Quita un vídeo de la cola (el botón de opciones "⋯" de "A continuación").
+    // NO admite el índice del vídeo en reproducción: quitarlo dejaría la cola
+    // apuntando al siguiente con el estado de reproducción del que se fue.
+    // Si el quitado estaba antes, el índice actual y las posiciones de
+    // reanudación se desplazan con él. Emite queueChanged() si lo quita.
+    // Devuelve false si no se quitó nada.
+    bool removeFromQueue(int index);
     void playIndex(int index);
     void next();
     void previous();

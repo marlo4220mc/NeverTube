@@ -50,6 +50,12 @@ public:
     // filas. Lo llama MainWindow junto al applyAccent() de las demás páginas.
     void applyAccent();
 
+    // Abre el popup "Nueva playlist" de esta página para un vídeo concreto.
+    // Lo llama MainWindow desde el menú compartido de fila (Búsqueda, Canal,
+    // Playlist): el popup es el único con el estilo de la app, así que se
+    // reutiliza en vez de tener uno por página.
+    void createPlaylistPopupFor(const QString &videoId);
+
 signals:
     void channelRequested(const QString &channelId, const QString &channelName);
     void openRequested(const QVector<VideoInfo> &videos, int startIndex);

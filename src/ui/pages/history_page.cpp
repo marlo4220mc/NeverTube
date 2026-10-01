@@ -9,11 +9,13 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QPushButton>
+#include <QTimer>
 #include <QToolTip>
 #include <QVBoxLayout>
 
 #include "../../db/repositories.h"
 #include "../icons.h"
+#include "../row_menu.h"
 #include "../theme.h"
 #include "../video_list_view.h"
 
@@ -78,12 +80,9 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
             });
     m_list->setRowMoreVisible(true);
     connect(m_list, &VideoListView::moreRequested, this,
-            [this](int index, const VideoInfo &v) {
+            [this](int index, const VideoInfo &v, const QPoint &pos) {
                 if (index < 0 || index >= m_videos.size())
                     return;
-                const QPoint pos = m_list->mapToGlobal(
-                    m_list->visualRect(m_list->model()->index(index, 0))
-                        .bottomRight());
                 showMoreMenu(v, pos);
             });
     root->addWidget(m_list, 1);
@@ -93,31 +92,22 @@ void HistoryPage::showMoreMenu(const VideoInfo &v, const QPoint &globalPos)
 {
     QMenu menu(this);
 
-    menu.addAction(QStringLiteral("Quitar del historial"));
-    connect(menu.actions().last(), &QAction::triggered, this, [this, v]() {
-        m_history->remove(v.id);
-        emit historyChanged();
-        reload();
+    // Acción propia de esta página: el resto del menú es el compartido por
+    // todas las superficies con fila (nt::addRowMenuActions), con sus mismos
+    // textos y en el mismo orden.
+    QAction *rem = menu.addAction(QStringLiteral("Quitar del historial"));
+    connect(rem, &QAction::triggered, this, [this, v]() {
+        // En el bucle siguiente, con el menú ya cerrado: quitar el vídeo borra
+        // la fila de la lista de la que nació el popup.
+        QTimer::singleShot(0, this, [this, v]() {
+            m_history->remove(v.id);
+            emit historyChanged();
+            reload();
+        });
     });
 
-    menu.addAction(QStringLiteral("Guardar en Ver más tarde"));
-    connect(menu.actions().last(), &QAction::triggered, this, [this, v]() {
-        if (!m_watchLater->isWatchLater(v.id))
-            m_watchLater->toggle(v.id);
-    });
-
-    QMenu *plMenu = new QMenu(&menu);
-    plMenu->setTitle(QStringLiteral("Añadir a playlist"));
-    for (const PlaylistItem &p : m_playlists->all()) {
-        QAction *a = plMenu->addAction(p.title);
-        connect(a, &QAction::triggered, this,
-                [this, pid = p.id, vid = v.id]() {
-                    m_playlists->addVideo(pid, vid);
-                });
-    }
-    plMenu->addSeparator();
-    QAction *newAct = plMenu->addAction(QStringLiteral("+ Nueva playlist"));
-    connect(newAct, &QAction::triggered, this, [this, v]() {
+    nt::RowMenuHooks hooks;
+    hooks.onNewPlaylist = [this](const QString &videoId) {
         bool ok = false;
         const QString title = QInputDialog::getText(
             this, QStringLiteral("Nueva playlist"),
@@ -126,27 +116,12 @@ void HistoryPage::showMoreMenu(const VideoInfo &v, const QPoint &globalPos)
             return;
         const QString id = m_playlists->create(title.trimmed());
         if (!id.isEmpty())
-            m_playlists->addVideo(id, v.id);
-    });
-    menu.addMenu(plMenu);
-
-    menu.addSeparator();
-
-    QAction *shareAct =
-        menu.addAction(QStringLiteral("Compartir"));
-    connect(shareAct, &QAction::triggered, this, [v]() {
-        const QString url =
-            QStringLiteral("https://www.youtube.com/watch?v=%1").arg(v.id);
-        QGuiApplication::clipboard()->setText(url);
-        QToolTip::showText(QCursor::pos(),
-                           QStringLiteral("Enlace copiado"));
-    });
-
-    if (!v.channelId.isEmpty()) {
-        QAction *chanAct = menu.addAction(QStringLiteral("Ver canal"));
-        connect(chanAct, &QAction::triggered, this,
-                [this, v]() { emit channelRequested(v.channelId); });
-    }
+            m_playlists->addVideo(id, videoId);
+    };
+    hooks.onChannel = [this](const QString &channelId, const QString &) {
+        emit channelRequested(channelId);
+    };
+    nt::addRowMenuActions(&menu, v, m_watchLater, m_playlists, hooks);
 
     menu.exec(globalPos);
 }

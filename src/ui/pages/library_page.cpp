@@ -32,6 +32,7 @@
 #include "../channel_row.h"
 #include "../format.h"
 #include "../icons.h"
+#include "../row_menu.h"
 #include "../theme.h"
 #include "../thumbnail_cache.h"
 
@@ -806,46 +807,23 @@ void LibraryPage::rebuildHistory()
               progress);
 }
 
+// La lista de acciones es la compartida por TODAS las superficies con fila
+// (nt::addRowMenuActions); aquí solo se pasan las piezas que son de esta
+// página: su popup de "Nueva playlist" y la recarga de la sección al escribir.
 void LibraryPage::addStandardMenuActions(QMenu *menu, const VideoInfo &v,
                                          bool withWatchLater)
 {
-    if (withWatchLater) {
-        addMenuAction(menu, QStringLiteral("Guardar en Ver más tarde"),
-                      [this, id = v.id]() {
-                          if (!m_watchLater->isWatchLater(id))
-                              m_watchLater->toggle(id);
-                          reload();
-                      });
-    }
-
-    QMenu *plMenu = new QMenu(menu);
-    plMenu->setTitle(QStringLiteral("Añadir a playlist"));
-    for (const PlaylistItem &p : m_playlists->all()) {
-        addMenuAction(plMenu, p.title, [this, pid = p.id, id = v.id]() {
-            m_playlists->addVideo(pid, id);
-        });
-    }
-    plMenu->addSeparator();
-    addMenuAction(plMenu, QStringLiteral("Nueva playlist"),
-                  [this, id = v.id]() {
-                      m_pendingVideoId = id;
-                      openCreatePlaylistPopup();
-                  });
-    menu->addMenu(plMenu);
-
-    addMenuAction(menu, QStringLiteral("Compartir"), [this, menu, id = v.id]() {
-        const QString url = QStringLiteral(
-            "https://www.youtube.com/watch?v=%1").arg(id);
-        QGuiApplication::clipboard()->setText(url);
-        QToolTip::showText(QCursor::pos(),
-                           QStringLiteral("Enlace copiado"), menu);
-    });
-
-    if (!v.channelId.isEmpty()) {
-        addMenuAction(menu, QStringLiteral("Ver canal"), [this, v]() {
-            emit channelRequested(v.channelId, v.channel);
-        });
-    }
+    nt::RowMenuHooks hooks;
+    hooks.onNewPlaylist = [this](const QString &videoId) {
+        m_pendingVideoId = videoId;
+        openCreatePlaylistPopup();
+    };
+    hooks.onChannel = [this](const QString &channelId, const QString &name) {
+        emit channelRequested(channelId, name);
+    };
+    hooks.onChanged = [this]() { reload(); };
+    nt::addRowMenuActions(menu, v, m_watchLater, m_playlists, hooks,
+                          withWatchLater);
 }
 
 // --------------------------------------------------------------------------
@@ -920,6 +898,12 @@ void LibraryPage::layoutCards(QGridLayout *grid, const QVector<QWidget *> &cards
 void LibraryPage::createPlaylist()
 {
     m_pendingVideoId.clear();
+    openCreatePlaylistPopup();
+}
+
+void LibraryPage::createPlaylistPopupFor(const QString &videoId)
+{
+    m_pendingVideoId = videoId;
     openCreatePlaylistPopup();
 }
 

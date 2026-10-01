@@ -106,6 +106,14 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
         tabLayout->setSpacing(6);
         auto *list = new VideoListView(m_thumbs, tabWrap);
         list->showVideos(QVector<VideoInfo>(), VideoListView::ListMode);
+        // Botón de opciones por fila (mismo criterio que Search): la página
+        // re-emite el vídeo y es MainWindow quien tiene los repos y muestra el
+        // menú.
+        list->setRowMoreVisible(true);
+        connect(list, &VideoListView::moreRequested, this,
+                [this](int, const VideoInfo &v, const QPoint &pos) {
+                    emit rowMenuRequested(v, pos);
+                });
         m_lists.append(list);
         m_videos.append(QVector<VideoInfo>());
         m_tabKeys.append(keys.at(i));

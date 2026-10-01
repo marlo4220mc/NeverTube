@@ -135,6 +135,34 @@ void PlayerController::appendVideos(const QVector<VideoInfo> &videos)
         emit queueChanged();
 }
 
+bool PlayerController::removeFromQueue(int index)
+{
+    if (index < 0 || index >= m_queue.size())
+        return false;
+    // El vídeo en reproducción no se quita: hacerlo dejaría la cola apuntando
+    // al siguiente con el estado de reproducción del que se fue, y "A
+    // continuación" marcaría como sonando uno que el usuario no eligió.
+    if (index == m_index)
+        return false;
+
+    m_queue.remove(index);
+    // Todo lo que estaba por detrás del quitado se desplaza un índice hacia
+    // atrás, así que hay que reindexar la tabla de posiciones de reanudación:
+    // si no, un "continuar viendo" arrancaría en la posición de otro vídeo.
+    QHash<int, qlonglong> shifted;
+    for (auto it = m_indexStartMs.constBegin();
+         it != m_indexStartMs.constEnd(); ++it) {
+        if (it.key() == index)
+            continue; // el vídeo quitado
+        shifted.insert(it.key() > index ? it.key() - 1 : it.key(), it.value());
+    }
+    m_indexStartMs = shifted;
+    if (index < m_index)
+        --m_index;
+    emit queueChanged();
+    return true;
+}
+
 void PlayerController::playIndex(int index)
 {
     if (index < 0 || index >= m_queue.size())

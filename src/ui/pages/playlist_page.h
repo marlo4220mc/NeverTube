@@ -26,6 +26,9 @@ public:
 signals:
     void backRequested();
     void openRequested(const QVector<VideoInfo> &videos, int startIndex);
+    // Click en el "⋯" de una fila de la playlist: MainWindow muestra el menú
+    // compartido.
+    void rowMenuRequested(const VideoInfo &video, const QPoint &globalPos);
 
 private:
     void reload();

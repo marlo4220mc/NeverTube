@@ -83,6 +83,13 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
                 m_removeBtn->setEnabled(index >= 0 && index < m_videos.size());
                 emit openRequested(m_videos, index);
             });
+    // Botón de opciones por fila, igual que Search/Canal/Historial: la página
+    // pide el vídeo y MainWindow muestra el menú compartido.
+    m_list->setRowMoreVisible(true);
+    connect(m_list, &VideoListView::moreRequested, this,
+            [this](int, const VideoInfo &v, const QPoint &pos) {
+                emit rowMenuRequested(v, pos);
+            });
     root->addWidget(m_list, 1);
 }
 

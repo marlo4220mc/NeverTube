@@ -70,6 +70,11 @@ private slots:
     // app, acotado a este error y con guard anti-bucle.
     void onRecoveryExhausted();
     void onRecoveryHealthy();
+    // Menú de opciones ("⋯") de una fila de vídeo en las superficies que no
+    // tienen los repos (Búsqueda, Canal, Playlist): la ventana sí, así que el
+    // menú se construye aquí, una sola vez, con las mismas acciones que
+    // Biblioteca, Historial y "A continuación".
+    void showVideoRowMenu(const VideoInfo &video, const QPoint &globalPos);
 
 private:
     void setupNav();

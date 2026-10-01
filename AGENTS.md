@@ -181,6 +181,62 @@ como en caliente):
   decision del usuario (4/5/6). Con celdas muy estrechas el título se cortará
   igual: ahí el que decide cuántas líneas caben es el ajuste, no la fuente.
 
+## Fila de vídeo en listas: UNA forma en todas las páginas
+
+La fila de `VideoListView` en `ListMode` (Búsqueda, Canal, Playlist,
+Historial/"Ver todo", "A continuación" y las secciones de Biblioteca) es la
+MISMA forma en todas partes: **miniatura + título + "canal • visitas • fecha" +
+botón de opciones ⋮**. Lo único que cambia entre páginas es el TAMAÑO de la
+miniatura y de la fila (Búsqueda/Canal/Playlist/cola a escala 1.0, Historial a
+1.21, Biblioteca con su miniatura de 236x133): el usuario pidió "mismo estilo,
+no mismo tamaño de letra o negrita", así que la tipografía es la que ya tenía
+cada superficie (título en negrita con la fuente de la app y meta reducida en
+las listas; 14/600 y 12 px en Biblioteca). NO unificar tamaños ni pesos.
+
+- **`format::metaLine(v)`** (`src/ui/format.*`) es la única función que compone
+  la línea de meta. La usan el delegate (rejilla y lista) y las filas de
+  Biblioteca. Antes estaba triplicada (dos copias en el delegate y una en
+  Biblioteca) y la fila de lista pintaba solo "canal • visitas": el mismo vídeo
+  se leía distinto según la página.
+- **El bloque de texto va CENTRADO en la fila** (título de 2 líneas + meta), no
+  pegado arriba: medido en el render, pegado arriba dejaba 8 px arriba y 31
+  abajo. Las medidas del bloque están en `VideosDelegate::listMetrics`, y la
+  caja del título y la línea base de la meta salen de ahí.
+- **Nada de texto debajo de los botones**: `textWidth(r, ...)` descuenta el
+  hueco real de la X y/o el ⋮, con la misma cuenta que `removeButtonRect`/
+  `moreButtonRect`. Medido: sin descontar el ⋮ el título llegaba a x=839 con los
+  puntos del botón en 838-841.
+- **El ⋮ va pegado al borde derecho cuando no hay X** (como el botón de
+  Biblioteca) y a la izquierda de la X cuando la hay. Antes reservaba siempre el
+  hueco de la X aunque no se pintara, y le robaba 34 px de texto a la fila (se
+  nota sobre todo en la columna estrecha de "A continuación").
+- Se borró el modo de meta de 2 bloques (`setMetaLines`/`paintRichMeta`/avatar
+  de canal): no lo llamaba nadie y pintaba una fila distinta, justo la
+  divergencia que se estaba quitando.
+
+### Menú ⋮: uno solo para todas las superficies
+
+`nt::addRowMenuActions` (`src/ui/row_menu.*`) añade las acciones estándar con
+los mismos textos y en el mismo orden: **Ver más tarde** (toggle; etiqueta
+"Guardar" o "Quitar de Ver más tarde" según el estado), **Añadir a playlist**
+(con "+ Nueva playlist" si la superficie pasa el callback) y **Compartir** y
+**Ver canal**. Cada superficie antepone su acción propia: Historial "Quitar del
+historial", "A continuación" "Quitar de la cola". Las acciones que escriben en
+la BD se ejecutan con `QTimer::singleShot(0)`: en el `triggered()` la lista de
+la que nació el menú puede quedarse sin la fila con el popup abierto.
+
+- Biblioteca, Historial y "A continuación" construyen el menú en la propia
+  página (tienen los repos y, la cola, el `PlayerController`).
+- Búsqueda, Canal y Playlist **no** tienen los repos: emiten
+  `rowMenuRequested(video, pos)` y `MainWindow::showVideoRowMenu` monta el menú
+  UNA vez (mismo helper) con los suyos. "Nueva playlist" reutiliza el popup de
+  Biblioteca (`LibraryPage::createPlaylistPopupFor`), que es el único con el
+  estilo de la app.
+- "Quitar de la cola" usa `PlayerController::removeFromQueue(index)`, que NO
+  admite el índice en reproducción (dejaría la cola apuntando al siguiente con
+  el estado del que se fue) y reindexa las posiciones de reanudación
+  (`m_indexStartMs`) al desplazarse.
+
 ## Página Player: scroll único (vídeo + descripción + A continuación)
 
 La página Player scrollea como YouTube: vídeo, descripción y "A continuación"

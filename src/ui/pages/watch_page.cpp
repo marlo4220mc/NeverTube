@@ -40,6 +40,7 @@
 #include "../format.h"
 #include "../icons.h"
 #include "../flow_layout.h"
+#include "../row_menu.h"
 #include "../theme.h"
 #include "../thumbnail_cache.h"
 #include "../video_list_view.h"
@@ -931,6 +932,13 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             &WatchPage::onAvatarReady);
     connect(m_nextUpList, &VideoListView::videoActivated, this,
             &WatchPage::onNextUpActivated);
+    // Botón de opciones por fila, como en el resto de superficies con fila. Aquí
+    // la página SÍ tiene los repos (ver más tarde, playlists) y el controlador
+    // de la cola, así que añade su acción propia ("Quitar de la cola") delante
+    // del menú compartido.
+    m_nextUpList->setRowMoreVisible(true);
+    connect(m_nextUpList, &VideoListView::moreRequested, this,
+            &WatchPage::showQueueRowMenu);
 
     m_nextUpList->showVideos(QVector<VideoInfo>(), VideoListView::ListMode);
     bottomWidget->hide();
@@ -1202,6 +1210,40 @@ void WatchPage::updateActionButtons()
     paint(m_starBtn, m_isStarred ? m_starFilledIcon : m_starIcon, m_isStarred);
     paint(m_watchLaterBtn, m_watchLaterIcon, m_watchLaterMarked);
     paint(m_playlistBtn, m_playlistIcon, false);
+}
+
+void WatchPage::showQueueRowMenu(int index, const VideoInfo &video,
+                                 const QPoint &globalPos)
+{
+    if (video.id.isEmpty())
+        return;
+    QMenu menu(this);
+
+    // Acción propia de la cola. El vídeo en reproducción no se quita de la
+    // cola (ver PlayerController::removeFromQueue), así que en su fila la
+    // acción no aparece en vez de aparecer sin hacer nada.
+    if (index != m_player->index()) {
+        QAction *rem = menu.addAction(QStringLiteral("Quitar de la cola"));
+        connect(rem, &QAction::triggered, this, [this, index]() {
+            // En el bucle siguiente, con el menú cerrado: quitarlo borra la fila
+            // de la lista de la que nació el popup.
+            QTimer::singleShot(0, this, [this, index]() {
+                m_player->removeFromQueue(index);
+            });
+        });
+    }
+
+    nt::RowMenuHooks hooks;
+    hooks.onNewPlaylist = [this](const QString &videoId) {
+        m_plPendingVideoId = videoId;
+        openCreatePlaylistPopup();
+    };
+    hooks.onChannel = [this](const QString &channelId, const QString &name) {
+        emit channelRequested(channelId, name);
+    };
+    nt::addRowMenuActions(&menu, video, m_watchLater, m_playlists, hooks);
+
+    menu.exec(globalPos);
 }
 
 void WatchPage::showPlaylistMenu()

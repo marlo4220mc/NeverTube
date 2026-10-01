@@ -98,6 +98,8 @@ add_executable(nevertube_qt2
   src/ui/channel_row.h
   src/ui/video_list_view.cpp
   src/ui/video_list_view.h
+  src/ui/row_menu.cpp
+  src/ui/row_menu.h
   src/ui/flow_layout.cpp
   src/ui/flow_layout.h
   src/ui/pages/home_page.cpp

@@ -58,6 +58,10 @@ public:
 signals:
     void openRequested(const QVector<VideoInfo> &videos, int startIndex);
     void channelRequested(const QString &channelId);
+    // Click en el "⋯" de una fila de resultados: la página no tiene los repos
+    // (ver más tarde, playlists), así que pide el vídeo y MainWindow muestra el
+    // menú compartido.
+    void rowMenuRequested(const VideoInfo &video, const QPoint &globalPos);
 
 private slots:
     void doSearch();

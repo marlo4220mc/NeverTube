@@ -410,6 +410,14 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     m_channelBox->hide();
     m_list = new VideoListView(m_thumbs, this);
     m_list->showVideos(QVector<VideoInfo>(), VideoListView::ListMode);
+    // Botón de opciones por fila, como en el resto de superficies con fila. El
+    // menú no se construye aquí: la página no tiene los repos, así que pide el
+    // vídeo y la ventana lo muestra (MainWindow::showVideoRowMenu).
+    m_list->setRowMoreVisible(true);
+    connect(m_list, &VideoListView::moreRequested, this,
+            [this](int, const VideoInfo &v, const QPoint &pos) {
+                emit rowMenuRequested(v, pos);
+            });
     m_moreButton = new QPushButton(QStringLiteral("Mostrar más"), this);
     m_moreButton->setObjectName(QStringLiteral("primary"));
     m_moreButton->setCursor(Qt::PointingHandCursor);

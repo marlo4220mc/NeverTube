@@ -137,6 +137,11 @@ private:
     // que llegan tarde, de un vídeo ya reemplazado).
     bool isCurrentVideo(const QString &videoId) const;
     void showPlaylistMenu();
+    // Menú de opciones ("⋯") de una fila de "A continuación": "Quitar de la
+    // cola" (no offered para el vídeo en reproducción) más las acciones
+    // estándar compartidas con el resto de superficies con fila.
+    void showQueueRowMenu(int index, const VideoInfo &video,
+                          const QPoint &globalPos);
     // Popup estilado "Nueva playlist" (mismo popupDialog que Biblioteca):
     // tras crearla, si hay vídeo pendiente se añade a la playlist nueva.
     void openCreatePlaylistPopup();

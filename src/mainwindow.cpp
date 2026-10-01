@@ -7,6 +7,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPixmap>
 #include <QPlainTextEdit>
 #include <QProgressBar>
@@ -41,6 +42,7 @@
 #include "ui/pages/history_page.h"
 #include "ui/pages/search_page.h"
 #include "ui/pages/watch_page.h"
+#include "ui/row_menu.h"
 #include "ui/theme.h"
 #include "ui/thumbnail_cache.h"
 #include "ui/video_list_view.h"
@@ -594,6 +596,14 @@ MainWindow::MainWindow(QWidget *parent)
             &MainWindow::showPreviousTab);
     connect(m_playlist, &PlaylistPage::openRequested, this,
             &MainWindow::openWatch);
+    // Botón de opciones de fila en las tres superficies sin repos: el menú
+    // compartido se muestra desde la ventana, una sola implementación.
+    connect(m_search, &SearchPage::rowMenuRequested, this,
+            &MainWindow::showVideoRowMenu);
+    connect(m_channel, &ChannelPage::rowMenuRequested, this,
+            &MainWindow::showVideoRowMenu);
+    connect(m_playlist, &PlaylistPage::rowMenuRequested, this,
+            &MainWindow::showVideoRowMenu);
     connect(m_library, &LibraryPage::historyAllRequested, this,
             &MainWindow::openHistory);
     connect(m_historyPage, &HistoryPage::backRequested, this,
@@ -1226,6 +1236,28 @@ void MainWindow::openHistory()
     m_currentTab = 7;
     m_historyPage->reload();
     m_pages->setCurrentIndex(7);
+}
+
+// Menú de opciones de una fila de vídeo para las superficies que no tienen los
+// repos (Búsqueda, Canal, Playlist): la ventana sí, y por eso el menú se
+// construye AQUÍ y no otra vez en cada página. Las acciones son las MISMAS que
+// ofrecen Biblioteca, Historial y "A continuación" (nt::addRowMenuActions), y
+// lo único que aporta esta ventana es el popup de "Nueva playlist" (el de
+// Biblioteca) y la navegación al canal.
+void MainWindow::showVideoRowMenu(const VideoInfo &video, const QPoint &globalPos)
+{
+    if (video.id.isEmpty())
+        return;
+    QMenu menu(this);
+    nt::RowMenuHooks hooks;
+    hooks.onNewPlaylist = [this](const QString &videoId) {
+        m_library->createPlaylistPopupFor(videoId);
+    };
+    hooks.onChannel = [this](const QString &channelId, const QString &) {
+        openChannel(channelId);
+    };
+    nt::addRowMenuActions(&menu, video, &m_watchLater, &m_playlists, hooks);
+    menu.exec(globalPos);
 }
 
 void MainWindow::goSettings()

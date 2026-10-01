@@ -37,6 +37,9 @@ protected:
 signals:
     void backRequested();
     void openRequested(const QVector<VideoInfo> &videos, int startIndex);
+    // Click en el "⋯" de una fila de vídeo: la página no tiene los repos, así
+    // que MainWindow muestra el menú compartido.
+    void rowMenuRequested(const VideoInfo &video, const QPoint &globalPos);
 
 private slots:
     void onChannelInfo(const ChannelInfo &channel);
