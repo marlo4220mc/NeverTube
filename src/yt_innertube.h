@@ -221,6 +221,11 @@ private:
     void requestPlayer();
     void requestNext();
     void requestRadio();
+    // Segunda petición del fallback de radio: el mismo /next con el cliente
+    // WEB, que devuelve lockupViewModel (con visitas y fecha) donde VISIONOS
+    // devuelve compactVideoRenderer (sin fecha).
+    void requestRadioWeb(const QString &videoId);
+    void handleRadioWeb(const QString &videoId, bool ok, const QByteArray &body);
     void requestHome(const QString &continuation);
     void requestChannel();
     void requestTrending();
@@ -403,6 +408,9 @@ private:
     QString m_radioContinuation;
     // Mezcla de recomendaciones del primer cliente sin panel RDAMVM (fallback).
     QVector<VideoInfo> m_radioFallback;
+    // Mezcla que devolvió VISIONOS cuando no había panel: se guarda mientras se
+    // pide la versión WEB (con visitas y fecha) y es el respaldo si esa falla.
+    QVector<VideoInfo> m_radioVisionFallback;
     int m_radioClientIndex = 0;
 
     // Detalle traducido del vídeo actual (/next normal): título y descripción

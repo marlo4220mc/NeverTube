@@ -1335,6 +1335,7 @@ void Innertube::fetchRadio(const QString &videoId)
     m_radioVideoId = videoId;
     m_radioContinuation.clear();
     m_radioFallback.clear();
+    m_radioVisionFallback.clear();
     m_radioClientIndex = 0;
     NT_DEBUG("E2E innertube fetchRadio id=%s\n", videoId.toUtf8().constData());
     if (!hasFreshVisitor()) {
@@ -1453,17 +1454,18 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
         // primera mezcla vista y se sigue cascadeando por si otro cliente
         // trae el panel real; si ninguno lo trae, se emite la mezcla.
         const QVector<VideoInfo> fb = parseRelated(jsonRoot);
-        // Cliente principal (VISIONOS): si ya responde mezcla de
-        // recomendaciones, es la misma que emitiría el final de la cascada,
-        // así que se entrega de inmediato. Ahorra hasta 4 peticiones secuenciales
-        // (~12-15 s) por cada vídeo normal con "A continuación". La cascada
-        // solo continúa si VISIONOS va vacío (música: el panel real solo lo
-        // traen IOS/otros clientes).
+        // Cliente principal (VISIONOS): responde la mezcla como
+        // recomendaciones (compactVideoRenderer, SIN fecha y con el texto de
+        // visitas localizado). En vez de emitirla ya, se pide UNA vez el mismo
+        // /next al cliente WEB, que devuelve lockupViewModel con visitas y
+        // fecha; si esa petición falla, se emite la de VISIONOS tal cual. Sigue
+        // siendo una sola petición extra, no las 4 de la cascada completa
+        // (~12-15 s), y el panel real de música lo siguen trayendo IOS/otros.
         if (m_radioClientIndex == 0 && !fb.isEmpty()) {
-            NT_DEBUG("E2E innertube radio final recomendaciones id=%s n=%d\n",
+            NT_DEBUG("E2E innertube radio vision fallback id=%s n=%d -> web\n",
                      videoId.toUtf8().constData(), fb.size());
-            emit radioReady(videoId, fb);
-            m_radioFallback.clear();
+            m_radioVisionFallback = fb;
+            requestRadioWeb(videoId);
             return;
         }
         if (!fb.isEmpty() && m_radioFallback.isEmpty()) {
@@ -1493,6 +1495,59 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
              videoId.toUtf8().constData(), videos.size(),
              m_radioContinuation.isEmpty() ? "no" : "si");
     emit radioReady(videoId, videos);
+}
+
+// Segunda petición del fallback de radio: el mismo /next con el cliente WEB.
+// Su layout moderno (lockupViewModel) trae las visitas y la fecha que el
+// compactVideoRenderer de VISIONOS no tiene; es lo único que hace que "A
+// continuación" muestre los tres campos como el resto de la app. Sin API key
+// (igual que el browse de pestañas de canal).
+void Innertube::requestRadioWeb(const QString &videoId)
+{
+    // La radio sigue "en vuelo" (handleRadio acaba de bajar el flag): sin esto
+    // un fetchRadio concurrente lanzaría otra petición y pisaría estos
+    // callbacks.
+    m_radioInFlight = true;
+    m_http->setResult([this, videoId](int status, const QByteArray &body) {
+        NT_DEBUG("E2E innertube radioWeb HTTP status=%d size=%d\n", status,
+                 body.size());
+        handleRadioWeb(videoId, status == 200, body);
+    });
+    m_http->setError([this, videoId](const QString &reason) {
+        handleRadioWeb(videoId, false, reason.toUtf8());
+    });
+    m_http->setTimeoutMs(kPlayerTimeoutMs);
+    m_http->setVisitorId(m_visitorData);
+
+    const QJsonObject client = webClientContext(m_visitorData, m_hl);
+    const QJsonObject body{
+        {QStringLiteral("context"),
+         QJsonObject{{QStringLiteral("client"), client}}},
+        {QStringLiteral("videoId"), videoId},
+    };
+    const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    m_http->post(kNextEndpoint, json, kChromeUA, kWebClientId, kWebClientVersion,
+                 nullptr, nullptr, nullptr);
+}
+
+void Innertube::handleRadioWeb(const QString &videoId, bool ok,
+                               const QByteArray &body)
+{
+    m_radioInFlight = false;
+    QVector<VideoInfo> out;
+    if (ok) {
+        QJsonObject root;
+        if (parseJsonObject(body, &root))
+            out = parseRelated(root); // lockupViewModel -> visitas + fecha
+    }
+    // Si el WEB no dio lista utilizable, se usa la que ya trajo VISIONOS: la
+    // cola se sirve igual, solo que sin fecha.
+    if (out.isEmpty())
+        out = m_radioVisionFallback;
+    m_radioVisionFallback.clear();
+    NT_DEBUG("E2E innertube radioWeb ok id=%s n=%d\n",
+             videoId.toUtf8().constData(), out.size());
+    emit radioReady(videoId, out);
 }
 
 // Límites del feed del Home (browse FEwhat_to_watch): hasta kHomeShelfCap
@@ -2340,12 +2395,15 @@ int homeDurationOf(const QJsonArray &overlays)
     return 0;
 }
 
-// "hace 3 días" / "3 giorni fa" → fecha ISO aproximada (para ordenar feeds
-// sin depender de una marca exacta). Si no reconoce el texto, devuelve vacío.
+// "hace 3 días" / "hace 8 h" / "2 months ago" → fecha ISO aproximada (para
+// ordenar feeds sin depender de una marca exacta). Si no reconoce el texto,
+// devuelve vacío. Acepta las unidades abreviadas del lockupViewModel del /next
+// ("hace 8 h", "hace 2 m", "hace 3 d"): sin ellas, la fecha se perdía y "A
+// continuación" salía sin ella.
 QString relativeToIso(const QString &text)
 {
     const QString t = text.trimmed().toLower();
-    QStringList parts = t.split(QLatin1Char(' '));
+    QStringList parts = t.split(QLatin1Char(' '), Qt::SkipEmptyParts);
     if (parts.size() < 3)
         return QString();
     QString countText;
@@ -2356,29 +2414,48 @@ QString relativeToIso(const QString &text)
     } else if (parts.at(1) == QLatin1String("hace")) {  // "X hace"
         countText = parts.at(0);
         unit = parts.at(2);
+    } else if (parts.at(2) == QLatin1String("ago")) {   // "X unidad ago"
+        countText = parts.at(0);
+        unit = parts.at(1);
     } else {
         return QString();
     }
     bool ok = false;
     double n = countText.toDouble(&ok);
-    if (!ok)
-        return QString();
+    if (!ok) {
+        // "hace un mes" / "hace una hora": el lockup usa cifras, pero por si
+        // acaso se acepta el artículo.
+        if (countText == QLatin1String("un") || countText == QLatin1String("una")
+            || countText == QLatin1String("an") || countText == QLatin1String("a"))
+            n = 1;
+        else
+            return QString();
+    }
     qint64 secs = 0;
-    if (unit.contains(QStringLiteral("segundo")))
+    if (unit.contains(QStringLiteral("segund")) || unit.startsWith(QLatin1Char('s'))
+        || unit.startsWith(QLatin1String("sec")))
         secs = qint64(n);
-    else if (unit.contains(QStringLiteral("minuto")))
+    else if (unit.contains(QStringLiteral("min")))
         secs = qint64(n * 60);
-    else if (unit.contains(QStringLiteral("hora")))
+    else if (unit.contains(QStringLiteral("hora")) || unit.startsWith(QLatin1Char('h'))
+             || unit.startsWith(QLatin1String("hour")))
         secs = qint64(n * 3600);
     else if (unit.contains(QStringLiteral("día"))
-             || unit.contains(QStringLiteral("dia")))
+             || unit.contains(QStringLiteral("dia"))
+             || unit.startsWith(QLatin1Char('d'))
+             || unit.startsWith(QLatin1String("day")))
         secs = qint64(n * 86400);
-    else if (unit.contains(QStringLiteral("semana")))
+    else if (unit.contains(QStringLiteral("sem"))
+             || unit.startsWith(QLatin1String("week")))
         secs = qint64(n * 7 * 86400);
-    else if (unit.contains(QStringLiteral("mes")))
+    else if (unit.contains(QStringLiteral("mes"))
+             || unit.startsWith(QLatin1String("month"))
+             || unit == QLatin1String("m"))
         secs = qint64(n * 30 * 86400);
     else if (unit.contains(QStringLiteral("año"))
-             || unit.contains(QStringLiteral("ano")))
+             || unit.contains(QStringLiteral("ano"))
+             || unit.startsWith(QLatin1String("year"))
+             || unit == QLatin1String("a"))
         secs = qint64(n * 365 * 86400);
     else
         return QString();
@@ -2751,6 +2828,28 @@ VideoInfo videoFromWebShorts(const QJsonObject &sl)
     return v;
 }
 
+// ¿El texto es un recuento tipo "21 K", "5,4 M", "684"? El lockup del /next
+// da las vistas como número + multiplicador, SIN la palabra "vistas" (esa
+// palabra solo aparece en el layout de canal). Se exige que empiece por dígito
+// y que lo que queda sea solo el sufijo del multiplicador, para no confundir el
+// nombre del canal ("3 Doors Down" empieza por dígito pero sigue con letras).
+bool looksLikeCountText(const QString &raw)
+{
+    const QString t = raw.simplified();
+    if (t.isEmpty() || !t.at(0).isDigit())
+        return false;
+    int i = 0;
+    while (i < t.size()
+           && (t.at(i).isDigit() || t.at(i) == QLatin1Char(',')
+               || t.at(i) == QLatin1Char('.') || t.at(i) == QLatin1Char(' ')))
+        ++i;
+    const QString rest = t.mid(i).trimmed().toLower();
+    return rest.isEmpty() || rest == QLatin1String("k")
+        || rest == QLatin1String("m") || rest == QLatin1String("b")
+        || rest == QLatin1String("mil") || rest.startsWith(QLatin1String("millon"))
+        || rest == QLatin1String("bn");
+}
+
 // lockupViewModel: id=contentId, título en lockupMetadataViewModel, vistas y
 // fecha en metadataRows, miniatura+duración en contentImage.
 VideoInfo videoFromWebLockup(const QJsonObject &lv)
@@ -2772,14 +2871,31 @@ VideoInfo videoFromWebLockup(const QJsonObject &lv)
         for (const QJsonValue &p : parts) {
             const QString t = p.toObject().value(QStringLiteral("text")).toObject()
                                   .value(QStringLiteral("content")).toString();
-            if (t.contains(QStringLiteral("visualizacion"))
-                || t.contains(QStringLiteral("view")))
-                v.viewCount = countFromText(t);
-            else if (t.contains(QStringLiteral("hace"))
-                     || t.contains(QStringLiteral("ago")))
+            if (t.contains(QStringLiteral("hace"))
+                || t.contains(QStringLiteral("ago")))
                 v.publishedAt = relativeToIso(t);
+            else if (t.contains(QStringLiteral("visualizacion"))
+                     || t.contains(QStringLiteral("view")))
+                v.viewCount = countFromText(t);
+            else if (looksLikeCountText(t))
+                v.viewCount = countFromText(t);
+            else if (v.channel.isEmpty())
+                v.channel = t; // el primer dato que no es visitas ni fecha
         }
     }
+    // Canal: el avatar del lockup lleva el browseEndpoint del canal, así que se
+    // resuelve también el id (lo necesita el menú "Ver canal" de la fila).
+    const QJsonObject channelEndpoint =
+        md.value(QStringLiteral("image")).toObject()
+            .value(QStringLiteral("decoratedAvatarViewModel")).toObject()
+            .value(QStringLiteral("avatar")).toObject()
+            .value(QStringLiteral("rendererContext")).toObject()
+            .value(QStringLiteral("commandContext")).toObject()
+            .value(QStringLiteral("onTap")).toObject()
+            .value(QStringLiteral("innertubeCommand")).toObject()
+            .value(QStringLiteral("browseEndpoint")).toObject();
+    if (v.channelId.isEmpty())
+        v.channelId = channelEndpoint.value(QStringLiteral("browseId")).toString();
     const QJsonObject contentImage = lv.value(QStringLiteral("contentImage")).toObject();
     v.thumbnailUrl = webLockupThumb(contentImage);
     v.durationSeconds = webLockupDuration(contentImage);
@@ -3097,8 +3213,12 @@ void Innertube::parseWatchQueue(const QJsonObject &root, QVector<VideoInfo> *out
                                     + parts.at(1).toInt() * 60
                                     + parts.at(2).toInt();
             }
-            v.viewCount =
-                homeTextOf(pvr.value(QStringLiteral("viewCountText"))).toInt();
+            // Mismo parser localizado que el resto ("1,2 M de visitas"): con
+            // toInt() directo un panel con texto daba visitas=0.
+            v.viewCount = static_cast<int>(countFromText(
+                homeTextOf(pvr.value(QStringLiteral("viewCountText")))));
+            v.publishedAt = relativeToIso(homeTextOf(
+                pvr.value(QStringLiteral("publishedTimeText"))));
             out->append(v);
         }
     };
@@ -3176,22 +3296,12 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
     };
 
     auto viewCountOf = [](const QString &s) {
-        QString t = s;
-        t.remove(QLatin1Char('.'));
-        t.remove(QLatin1Char(','));
-        t.remove(QLatin1Char(' '));
-        QLocale locale;
-        if (t.contains(QLatin1Char('M'))) {
-            t.remove(QLatin1Char('M'));
-            return qRound(t.toDouble() * 1e6);
-        }
-        if (t.contains(QLatin1Char('K'))) {
-            t.remove(QLatin1Char('K'));
-            return qRound(t.toDouble() * 1e3);
-        }
-        bool ok = false;
-        const qlonglong n = t.toLongLong(&ok);
-        return ok ? static_cast<int>(n) : 0;
+        // Reutiliza el parser de texto localizado: "85.805 visualizaciones",
+        // "1,2 M de vistas", "85 mil visualizaciones". El parser propio que
+        // había aquí quitaba puntos/comas/espacios y hacía toLongLong del
+        // resultado, así que "85.805 visualizaciones" daba 0 y "A continuación"
+        // se quedaba SIN las visitas (medido en el render).
+        return static_cast<int>(countFromText(s));
     };
 
     auto pushRenderer = [&](const QJsonObject &item) {
@@ -3237,6 +3347,8 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
         v.durationSeconds = durationSecondsOf(
             r->value(QStringLiteral("thumbnailOverlays")).toArray());
         v.viewCount = viewCountOf(homeTextOf(r->value(QStringLiteral("viewCountText"))));
+        v.publishedAt = relativeToIso(homeTextOf(
+            r->value(QStringLiteral("publishedTimeText"))));
         out.append(v);
     };
 
@@ -3309,6 +3421,15 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
         if (!avr.isEmpty())
             pushRenderer(avr);
     }
+
+    // Cliente WEB: la lista de recomendaciones viene en el layout moderno
+    // (lockupViewModel), no en compactVideoRenderer. Es el layout que SÍ trae
+    // las visitas y la fecha en la metadata del lockup, así que sin esta rama
+    // un /next del cliente WEB salía vacío y "A continuación" se quedaba sin
+    // esos dos campos (que es lo que hace el cliente VISIONOS, cuyo
+    // compactVideoRenderer no tiene fecha).
+    if (out.isEmpty())
+        out = collectWebLockups(root, 20);
 
     // Dedupe por id (un mismo recomendado puede aparecer en ambos contenedores).
     QVector<VideoInfo> unique;

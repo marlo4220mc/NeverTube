@@ -1471,8 +1471,9 @@ void MainWindow::onRadioReadyDiscover(const QString &videoId,
         m_radioSeedsRequested.remove(videoId);
         return;
     }
-    if (m_discoverRadios.hasRadio(videoId))
-        return;
+    // Metadatos de la caché: se hace ANTES de tocar la radio guardada, porque
+    // esta llegada también puede ser un REFRESCO (la radio guardada tenía los
+    // metadatos incompletos y "A continuación" la volvió a pedir).
     QVector<VideoInfo> valid;
     for (const VideoInfo &v : videos) {
         if (v.id.size() != 11)
@@ -1483,6 +1484,15 @@ void MainWindow::onRadioReadyDiscover(const QString &videoId,
     m_radioSeedsRequested.remove(videoId);
     if (valid.isEmpty())
         return;
+    if (m_discoverRadios.hasRadio(videoId)) {
+        // Radio ya guardada: esta llegada es un refresco de metadatos, así que
+        // se reescribe su lista de ids (saveRadio no sobrescribe a propósito).
+        // Sin esto, la radio seguiría apuntando a los ids viejos (sin visitas
+        // ni fecha) y cada apertura volvería a refrescar en vano.
+        NT_DEBUG("E2E discover radio refresh seed=%s n=%d\n",
+                 videoId.toUtf8().constData(), (int)valid.size());
+        m_discoverRadios.clearForSeed(videoId);
+    }
     m_discoverRadios.saveRadio(videoId, valid);
     // El sistema ya generó radios alguna vez: Descubre vacío (p. ej. tras
     // "Borrar todo" el historial) no vuelve a auto-sembrarse solo.
@@ -1543,17 +1553,37 @@ void MainWindow::openWatchAt(const QVector<VideoInfo> &videos, int startIndex,
         m_watch->setWatchData(m_player.queue(), m_player.index());
         const QString &id = videos.at(startIndex).id;
         // La radio de este vídeo ya se generó antes: se reusa desde la BD para
-        // "A continuación" sin volver a pedirla a YouTube.
+        // "A continuación" sin volver a pedirla a YouTube. Solo si los
+        // metadatos de sus vídeos están completos (canal + visitas o fecha):
+        // una radio guardada por una versión anterior del parser no los trae y
+        // se refresca una vez al abrirla (el fetch nuevo sí, ver
+        // Innertube::requestRadioWeb). Tras ese refresco la caché queda con
+        // metadatos y los siguientes arranques reusan sin red.
         bool reused = false;
         if (id.size() == 11 && m_discoverRadios.hasRadio(id)
             && !m_discoverRadios.radioVideoIdsForSeed(id).isEmpty()) {
             const QStringList saved = m_discoverRadios.radioVideoIdsForSeed(id);
             const QVector<VideoInfo> fromCache = m_videoCache.getMany(saved);
-            if (!fromCache.isEmpty()) {
+            // Basta con que la radio traiga canal y ALGÚN metadato (visitas o
+            // fecha): una radio guardada por un parser que no los traía tiene
+            // todas las filas a 0/vacías y se refresca una vez; los vídeos que
+            // YouTube devuelve sin fecha (directos, estrenos) no fuerzan nada.
+            bool anyMeta = false;
+            bool anyChannel = false;
+            for (const VideoInfo &cv : fromCache) {
+                if (!cv.channel.isEmpty())
+                    anyChannel = true;
+                if (cv.viewCount > 0 || !cv.publishedAt.isEmpty())
+                    anyMeta = true;
+            }
+            if (!fromCache.isEmpty() && anyMeta && anyChannel) {
                 NT_DEBUG("E2E nextUp radio reuse id=%s n=%d\n",
                          id.toUtf8().constData(), (int)fromCache.size());
                 m_player.appendVideos(fromCache);
                 reused = true;
+            } else {
+                NT_DEBUG("E2E nextUp radio stale id=%s n=%d -> refresh\n",
+                         id.toUtf8().constData(), (int)fromCache.size());
             }
         }
         if (!reused)

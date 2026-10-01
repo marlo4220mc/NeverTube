@@ -400,6 +400,36 @@ para "A continuación" (`MainWindow` con `DiscoverRepo::radioVideoIdsForSeed` +
 `WatchPage::triggerRadio` cuando no hay radio guardada (o sus metadatos no
 están en la caché). Para Descubre, `hasRadio` ya evitaba re-pedir.
 
+**Visitas y fecha de la cola (metadatos)**: el `compactVideoRenderer` del
+cliente VISIONOS (la mezcla de recomendaciones del `/next`) trae las visitas
+como texto localizado (`"85.805 visualizaciones"`, `"1,2 M de vistas"`) y NO
+trae fecha. Por eso:
+
+- Las visitas se leen con `countFromText` (el parser propio que había en
+  `parseRelated` hacía `toLongLong` del texto entero y daba 0: la cola salía sin
+  visitas). Lo mismo en `parseWatchQueue` (panel), que hacía `toInt()` directo.
+- La fecha del lockup moderno viene ABREVIADA (`"hace 8 h"`, `"hace 3 d"`,
+  `"hace 2 m"`): `relativeToIso` acepta esas unidades (y las inglesas
+  `"2 months ago"`). Ojo, `m` = meses (medido: vídeos de millones de visitas no
+  pueden ser de hace 2 minutos).
+- El lockup da las visitas SIN la palabra "vistas" (`"21 K"`): `looksLikeCountText`
+  las reconoce solo si el texto es número + multiplicador (así un canal que
+  empieza por dígito, "3 Doors Down", no se confunde con un recuento). El lockup
+  también da el CANAL (primer dato que no es visitas ni fecha) y su id (en
+  `metadata.image.decoratedAvatarViewModel...browseEndpoint`).
+- Para que la cola tenga fecha, `handleRadio` no emite la mezcla de VISIONOS
+  directamente: pide UNA vez el mismo `/next` al cliente WEB
+  (`requestRadioWeb`), cuyo layout moderno (`lockupViewModel`) sí trae visitas y
+  fecha. Si esa petición falla, se emite la de VISIONOS (sin fecha). Es una
+  petición extra, no la cascada completa (~12-15 s).
+- **Refresco de radios viejas**: una radio guardada por un parser que no traía
+  ni visitas ni fecha se detecta al abrirla (`openWatchAt`: canal + algún
+  metadato) y se refresca UNA vez; `onRadioReadyDiscover` reescribe entonces su
+  lista de ids (`clearForSeed` + `saveRadio`, porque `saveRadio` no sobrescribe).
+  Así converge en una sola apertura y luego reusa sin red. Los vídeos que
+  YouTube devuelve sin fecha (directos, estrenos) no fuerzan refrescos: el
+  umbral es "algún metadato", no "todos".
+
 ## AV1 por HLS (sintético)
 
 YouTube **no publica AV1 en su master HLS** (`hlsManifestUrl`): solo VP9/h264
