@@ -186,12 +186,11 @@ QFrame#popupDialog {
     border: 1px solid @BORDER@;
     border-radius: 12px;
 }
-/* El diálogo de confirmación (nt::confirm) es un QDialog sin marco cuyo fondo
-   visible es el QFrame#popupDialog de dentro. Sin esta regla un QDialog no
-   recibe la regla global QWidget (el selector de tipo no casa con la subclase) y
-   pinta el fondo de su paleta, así que el marco se ve con las esquinas
-   cuadradas. */
-QDialog { background: transparent; }
+/* El diálogo de confirmación (nt::confirm) NO es un QDialog: es un QWidget hijo
+   de la ventana (una ventana propia es un toplevel y le roba el foco y el
+   puntero al usuario). Por eso ya no hace falta la regla QDialog { background:
+   transparent } que existed solo para que su marco se vieran con las esquinas
+   redondeadas. */
 QLabel#popupTitle { font-size: 15px; font-weight: 600; color: #ECECEC; }
 QComboBox::drop-down { border: none; width: 24px; }
 QComboBox::down-arrow {
