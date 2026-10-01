@@ -243,6 +243,52 @@ la que nació el menú puede quedarse sin la fila con el popup abierto.
   el estado del que se fue) y reindexa las posiciones de reanudación
   (`m_indexStartMs`) al desplazarse.
 
+## Página Canal: ficha en caja y pestañas propias
+
+Lo que gobierna la página:
+
+- **La ficha va dentro de una caja** (`QFrame#channelCard`, #181818 + borde
+  #262626 + radio 12, como `#settingsCard` y `#watchDescCard`). Antes avatar,
+  título, suscriptores y "Suscribirse" iban sueltos sobre el fondo de la
+  página, y la descripción en una línea gris propia debajo. Ahora el avatar (80
+  px, circular), el nombre (`#channelName` 19px/700), la línea de
+  suscriptores (`#channelMeta` 12px `kMetaText`) y las dos acciones van en una
+  fila, y la descripción (`#channelDesc`, mismo color/peso que `#watchMeta`)
+  cierra la caja. El nombre es 19px porque es el H1 al que se entra; el resto de
+  superficies conservan su tipografía (aquí NO se unifica nada con Buscar,
+  Biblioteca o Player, solo la forma).
+- **Suscriptores con `compactCount`** (`format.h`), no el `long long` en crudo:
+  antes ponía tal cual "1234567 suscriptores".
+- **El avatar va circular de verdad**: `nt::circularAvatar` (`src/ui/icons.*`)
+  escala, recorta el centro y enmascara con un círculo. El `border-radius` del
+  QSS solo redondea el fondo de un QLabel, y el `setScaledContents` deformaba
+  cualquier avatar no cuadrado. Esta función sustituye a las dos copias idénticas
+  que tenía `channel_row.cpp` y `watch_page.cpp` (la del Player además estiraba
+  el pixmap).
+- **La descripción se recorta por LÍNEAS, no por píxeles**: 3 (`kDescLines`),
+  igual que el Player. El tope anterior eran 165 px, que dependen del
+  interlineado de la fuente. El botón "…más"/"…menos" es `#descToggle` (enlace
+  discreto, no cápsula) y el degradado `#descFade` (26 px arriba del borde
+  inferior de la caja, `positionDescFade`, el mismo floats-out-of-layout que en
+  el Player).
+- **Las pestañas ya no son un `QTabWidget`**: eran lo ÚNICO de la app sin estilo
+  (no hay regla `QTabWidget`/`QTabBar` en el QSS) y el "pane" pintaba una
+  columna casi negra `#020303` bajo la lista, más oscura que el fondo de la
+  página. Ahora son tres `QPushButton#tabBtn` dentro de una cápsula
+  `#channelTabs`; la seleccionada lleva el acento en el texto (como la nav) y
+  todas anulan el `:focus`. El contenido son tres widgets que `showTab()`
+  muestra a mano (no un `QStackedWidget`, que volvería a traer el fondo del tema
+  del escritorio). `#tabBtn` y su `:focus` los vigila `--selftest-theme`.
+- **Contador de vídeos** de la pestaña activa como pastilla `#tabCount`
+  (misma forma que `#queueCount`), oculto con 0 vídeos porque entonces ya sale
+  el estado vacío.
+- **"Cargar más vídeos" es `#ghost` centrado** (alto 34). Era `#primary` con
+  `setFixedWidth(180)`, una barra roja ancha bajo la lista; cargar más no es la
+  acción principal de la página. Solo visible si la respuesta vino llena (25).
+- **Añadido botón "Compartir"** (chip `#actionChip` con `nt::Icon::Share`): copia
+  `https://www.youtube.com/channel/<id>`. Al re-tintar el acento hay que rehacer
+  el icono a mano (`applyAccent`): los `QIcon` llevan el color embebido.
+
 ## Página Player: scroll único (vídeo + descripción + A continuación)
 
 La página Player scrollea como YouTube: vídeo, descripción y "A continuación"
