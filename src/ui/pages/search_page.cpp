@@ -739,7 +739,13 @@ void SearchPage::showHistory()
         rowLay->addWidget(del);
         m_historyBox->layout()->addWidget(row);
     }
-    auto *clear = new QPushButton(QStringLiteral("Borrar historial"), this);
+    // "Borrar historial de búsquedas", no "Borrar historial": la app tiene dos
+    // historiales (este, de consultas, y el de vídeos vistos en Biblioteca) y a
+    // solas el nombre no decía cuál se borraba. El dialogo ya lo decía en el
+    // cuerpo; ahora también lo dice el botón. Sigue siendo más corto que el
+    // "historial de búsqueda" que compone nt::metaLine para las filas.
+    auto *clear = new QPushButton(QStringLiteral("Borrar historial de búsquedas"),
+                                  this);
     // Ghost como el "Borrar todo" de la página Historial (misma acción, misma
     // jerarquía). Era #primary de 180 px: un botón rojo de acción principal
     // para una limpieza secundaria, y la confirmación es la parte que tiene que
@@ -760,8 +766,8 @@ void SearchPage::onHistoryClear()
     // salía con el tema del escritorio, el único resto de aspecto ajeno que
     // quedaba. Cancelar viene enfocado y no hay botón por defecto, así que un
     // Enter perdido no borra el historial.
-    nt::confirm(this, QStringLiteral("Borrar historial"),
-                QStringLiteral("¿Borrar todo el historial de búsquedas? Esta "
+    nt::confirm(this, QStringLiteral("Borrar historial de búsquedas"),
+                QStringLiteral("Se borrarán las consultas guardadas. Esta "
                                "acción no se puede deshacer."),
                 QStringLiteral("Borrar"), [this]() {
                     setHistory(QStringList());
