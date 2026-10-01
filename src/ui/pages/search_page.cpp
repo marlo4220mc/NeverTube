@@ -746,18 +746,26 @@ void SearchPage::showHistory()
     // "historial de búsqueda" que compone nt::metaLine para las filas.
     auto *clear = new QPushButton(QStringLiteral("Borrar historial de búsquedas"),
                                   this);
-    // Ghost como el "Borrar todo" de la página Historial (misma acción, misma
-    // jerarquía). Era #primary de 180 px: un botón rojo de acción principal
-    // para una limpieza secundaria, y la confirmación es la parte que tiene que
-    // llamar la atención.
-    clear->setObjectName(QStringLiteral("ghost"));
+    // #sectionLink y no #ghost: las filas de esta sección NO tienen caja (el QSS
+    // las pone con `background: transparent`, solo se ven al pasar el ratón), así
+    // que una cápsula con borde era lo único enmarcado del bloque y se leía como
+    // un control suelto de la página, colado al pie de la lista. Medido por
+    // píxeles: las filas ocupan y=113..250 con separadores y sin fondo, y el
+    // borde del #ghost se veía en x=709..924 y=218..251, o sea fuera de la
+    // columna. Sin marco, y alineado a la izquierda como las filas, pasa a ser
+    // el pie de la sección; el foco se marca con el texto más claro (sin borde
+    // no hay dónde encenderse un anillo de foco), igual que los "Ver todo" de
+    // Biblioteca.
+    clear->setObjectName(QStringLiteral("sectionLink"));
     clear->setCursor(Qt::PointingHandCursor);
-    clear->setFixedHeight(34);
+    clear->setFixedHeight(28);
     connect(clear, &QPushButton::clicked, this, &SearchPage::onHistoryClear);
-    if (auto *box = qobject_cast<QBoxLayout *>(m_historyBox->layout()))
-        box->addWidget(clear, 0, Qt::AlignHCenter);
-    if (auto *box = qobject_cast<QBoxLayout *>(m_historyBox->layout()))
-        box->addStretch(1);
+    if (auto *hLayout =
+            qobject_cast<QBoxLayout *>(m_historyBox->layout())) {
+        hLayout->addSpacing(2); // respiro respecto al último separador
+        hLayout->addWidget(clear, 0, Qt::AlignLeft);
+        hLayout->addStretch(1);
+    }
 }
 
 void SearchPage::onHistoryClear()
