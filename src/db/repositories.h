@@ -61,6 +61,13 @@ public:
     // Posición inicial de reanudación para un vídeo del historial: 0 si está
     // completo (o no tiene progreso), su posición de otro modo.
     static qlonglong resumeStartMs(const VideoInfo &v, qlonglong positionMs);
+    // Fracción de reproducción de un vídeo del historial (0..1) para la barra
+    // de progreso que dibuja el delegado: 0 si no se puede reanudar (sin
+    // posición, sin duración conocida, ya completo, o al final). Es LA MISMA
+    // regla en los tres sitios donde se ve un vídeo con progreso —el "Continuar
+    // viendo" del Home, la página de Historial y su sección en Biblioteca— para
+    // que un vídeo se lea igual en todos.
+    static double progressFraction(const VideoInfo &v, qlonglong positionMs);
 
 signals:
     // Cambió el historial (nuevo vídeo reproducido, posición actualizada,

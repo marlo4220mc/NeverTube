@@ -463,15 +463,8 @@ void HomePage::loadContinueWatching()
         VideoInfo v;
         if (!m_videoCache->get(id, v))
             continue;
-        if (v.durationSeconds <= 0)
-            continue;
-        // Completado (visto o con ≤2:30 pendientes): no aparece en "Continuar
-        // viendo"; se reproduce desde el inicio si se abre desde el historial.
-        if (HistoryRepo::isCompleted(v, pos))
-            continue;
-        const double frac =
-            double(pos) / (double(v.durationSeconds) * 1000.0);
-        if (frac <= 0.0 || frac >= 1.0)
+        const double frac = HistoryRepo::progressFraction(v, pos);
+        if (frac <= 0.0)
             continue;
         out.append(v);
         m_continuePositions.append(pos);

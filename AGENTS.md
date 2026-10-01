@@ -634,8 +634,31 @@ la pantalla del usuario. 64 ficheros, ~3350 literales, 18 glifos.
 
 ## "Continuar viendo" (duración + posición en el historial)
 
+**La regla de "estado de reproducción" vive en UN sitio**:
+`HistoryRepo::progressFraction(v, positionMs)` (src/db/repositories.cpp) devuelve
+la fracción 0..1 de la barra, o 0 si no se puede mostrar (sin posición, sin
+duración conocida, ya completado, o fracción fuera de (0,1)). La llaman los TRES
+sitios donde se ve un vídeo con progreso, y no hay una cuarta copia:
+
+| sitio | quién pinta la barra |
+|---|---|
+| Home, "Continuar viendo" | delegado de `VideoListView` (`drawProgressBar`) |
+| página Historial ("Ver todo") | el mismo delegado, en `ListMode` |
+| sección Historial de **Biblioteca** | `AsyncThumb::paintEvent` |
+
+La sección de Biblioteca la pintaba a mano porque sus filas son `RowItem`
+(miniatura `QLabel` + texto), no el delegado; por eso usa las MISMAS medidas que
+`drawProgressBar` (2 px de margen, 3 px de alto, 1 px por encima del borde,
+radio 1,5) recortada al rectángulo redondeado de la miniatura. Como se pinta a
+mano con `nt::kAccent` (el QSS no alcanza un `paintEvent`), existe
+`LibraryPage::applyAccent()` para repintar las miniaturas al cambiar el acento en
+caliente, y `MainWindow` lo llama con las demás páginas. `buildRows` recibe un
+`QHash<videoId, fracción>`; vacío = sin barra, y solo la sección de Historial lo
+pasa.
+
 `HomePage::loadContinueWatching` exige, para cada id reciente: `pos > 0`, fila
-en `videos` (la caché), **`durationSeconds > 0`**, no completado y 0 < frac < 1.
+en `videos` (la caché), **`durationSeconds > 0`**, no completado y 0 < frac < 1
+(las tres últimas cosas son lo que devuelve `progressFraction`).
 Los dos últimos datos los escribe el reproductor, no la red:
 
 - **Duración**: `PlayerWidget::durationUpdated` (lo emiten los DOS motores:

@@ -45,6 +45,11 @@ public:
 
     void reload();
 
+    // La barra de progreso de las miniaturas se pinta a mano con nt::kAccent
+    // (no la alcanza el QSS), así que al cambiar el acento hay que repintar las
+    // filas. Lo llama MainWindow junto al applyAccent() de las demás páginas.
+    void applyAccent();
+
 signals:
     void channelRequested(const QString &channelId, const QString &channelName);
     void openRequested(const QVector<VideoInfo> &videos, int startIndex);
@@ -92,7 +97,8 @@ private:
     void updateSubsRowGeometry();
     void buildRows(QVBoxLayout *lay, const QVector<VideoInfo> &videos, int visible,
                    const std::function<void(int)> &activate,
-                   const std::function<void(QMenu *, const VideoInfo &)> &fillMenu);
+                   const std::function<void(QMenu *, const VideoInfo &)> &fillMenu,
+                   const QHash<QString, double> &progress = {});
 
     bool eventFilter(QObject *watched, QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;

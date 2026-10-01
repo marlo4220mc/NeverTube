@@ -132,6 +132,46 @@ public:
         }
     }
 
+    // Fracción de reproducción (0..1) que se pinta al pie de la miniatura, el
+    // mismo "estado de reproducción" que dibuja el delegado de VideoListView
+    // en el Home y la página de Historial. 0 = sin barra.
+    void setProgress(double fraction)
+    {
+        const double f = qBound(0.0, fraction, 1.0);
+        if (qFuzzyCompare(m_frac + 1.0, f + 1.0))
+            return;
+        m_frac = f;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *e) override
+    {
+        QLabel::paintEvent(e);
+        if (m_frac <= 0.0)
+            return;
+        // Mismas medidas que VideoListView::drawProgressBar (2 px de margen,
+        // 3 px de alto, 1 px por encima del borde) para que la barra se lea
+        // igual en todos los sitios. Se recorta al rectángulo redondeado de la
+        // miniatura para no asomar por las esquinas.
+        const QRectF bar(2, height() - 4, width() - 4, 3);
+        if (bar.width() <= 0)
+            return;
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        QPainterPath clip;
+        clip.addRoundedRect(QRectF(rect()), m_avatar ? m_h / 2 : m_r,
+                            m_avatar ? m_h / 2 : m_r);
+        p.setClipPath(clip);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0, 0, 0, 170));
+        p.drawRoundedRect(bar, 1.5, 1.5);
+        p.setBrush(nt::kAccent);
+        p.drawRoundedRect(QRectF(bar.left(), bar.top(), bar.width() * m_frac,
+                                  bar.height()),
+                          1.5, 1.5);
+    }
+
 private:
     void apply(const QPixmap &pm)
     {
@@ -156,6 +196,7 @@ private:
     int m_h;
     int m_r;
     bool m_avatar;
+    double m_frac = 0.0;
 };
 
 // Fila genérica: miniatura/avatar a la izquierda, texto y botón de acción.
@@ -546,6 +587,14 @@ void LibraryPage::reload()
     rebuildPlaylists();
 }
 
+void LibraryPage::applyAccent()
+{
+    // La barra de progreso de la miniatura la pinta AsyncThumb::paintEvent con
+    // nt::kAccent, que el QSS no alcanza: hay que repintar las miniaturas.
+    for (AsyncThumb *t : m_body->findChildren<AsyncThumb *>())
+        t->update();
+}
+
 // --------------------------------------------------------------------------
 // Suscripciones
 // --------------------------------------------------------------------------
@@ -645,7 +694,8 @@ void LibraryPage::onChannelInfo(const ChannelInfo &channel)
 void LibraryPage::buildRows(
     QVBoxLayout *lay, const QVector<VideoInfo> &videos, int visible,
     const std::function<void(int)> &activate,
-    const std::function<void(QMenu *, const VideoInfo &)> &fillMenu)
+    const std::function<void(QMenu *, const VideoInfo &)> &fillMenu,
+    const QHash<QString, double> &progress)
 {
     const int n = qMin(visible, videos.size());
     for (int i = 0; i < n; ++i) {
@@ -657,6 +707,10 @@ void LibraryPage::buildRows(
         auto *thumb = new AsyncThumb(m_thumbs, QString(),
                                      QStringLiteral("v_%1").arg(v.id), url,
                                      kThumbW, kThumbH, 8, false, row);
+        // Estado de reproducción: barra de progreso al pie de la miniatura
+        // (vacío el mapa = sin barra). Solo lo pasan las secciones que saben
+        // la posición: el Historial.
+        thumb->setProgress(progress.value(v.id, 0.0));
         row->setLeading(thumb);
         row->setTitle(v.title);
         row->setMeta(metaLine(v));
@@ -736,6 +790,15 @@ void LibraryPage::rebuildHistory()
     setSectionCount(m_historySec.title, m_historySec.videos.size());
     if (!has)
         return;
+    // Estado de reproducción, igual que en el Home: barra de progreso al pie
+    // de la miniatura de cada fila que se puede reanudar.
+    QHash<QString, double> progress;
+    for (const VideoInfo &v : m_historySec.videos) {
+        const double f =
+            HistoryRepo::progressFraction(v, m_history->positionOf(v.id));
+        if (f > 0.0)
+            progress.insert(v.id, f);
+    }
     buildRows(m_historySec.lay, m_historySec.videos,
               qMin<int>(kVisibleRows, m_historySec.videos.size()),
               [this](int index) {
@@ -752,7 +815,8 @@ void LibraryPage::rebuildHistory()
                                     reload();
                                 });
                   addStandardMenuActions(menu, v, true);
-              });
+              },
+              progress);
 }
 
 void LibraryPage::addStandardMenuActions(QMenu *menu, const VideoInfo &v,

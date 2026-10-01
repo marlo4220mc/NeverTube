@@ -507,6 +507,18 @@ qlonglong HistoryRepo::resumeStartMs(const VideoInfo &v, qlonglong positionMs)
     return positionMs;
 }
 
+double HistoryRepo::progressFraction(const VideoInfo &v, qlonglong positionMs)
+{
+    if (positionMs <= 0 || v.durationSeconds <= 0)
+        return 0.0;
+    if (HistoryRepo::isCompleted(v, positionMs))
+        return 0.0;
+    const double f = double(positionMs) / (double(v.durationSeconds) * 1000.0);
+    if (f <= 0.0 || f >= 1.0)
+        return 0.0;
+    return f;
+}
+
 FavoritesRepo::FavoritesRepo(AppDatabase &db)
     : m_db(db)
 {

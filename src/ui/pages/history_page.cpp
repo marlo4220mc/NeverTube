@@ -164,13 +164,9 @@ void HistoryPage::reload()
 void HistoryPage::applyProgress()
 {
     for (const VideoInfo &v : m_videos) {
-        const qlonglong pos = m_history->positionOf(v.id);
-        if (pos <= 0 || v.durationSeconds <= 0)
-            continue;
-        if (HistoryRepo::isCompleted(v, pos))
-            continue;
-        const double frac = double(pos) / (double(v.durationSeconds) * 1000.0);
-        if (frac > 0.0 && frac < 1.0)
+        const double frac =
+            HistoryRepo::progressFraction(v, m_history->positionOf(v.id));
+        if (frac > 0.0)
             m_list->setProgress(v.id, frac);
     }
 }

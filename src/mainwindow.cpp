@@ -507,6 +507,7 @@ MainWindow::MainWindow(QWidget *parent)
                 m_watch->applyAccent();
                 m_channel->applyAccent();
                 m_home->applyAccent();
+                m_library->applyAccent();
                 m_settingsPage->applyAccent();
             });
     connect(m_settingsPage, &SettingsPage::clearThumbsRequested,
