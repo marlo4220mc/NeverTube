@@ -125,10 +125,12 @@ como en caliente):
   `gridTitleLineH` = 1,28 × tamaño. Antes eran 13 px y una caja de 34 px fijos
   mientras la miniatura sí crecía, que en un monitor grande dejaba el texto
   pequeño y descoyente. Con celda de 177 px (5 columnas a 903 px de viewport)
-  salen 13 px, y con 340 px o más 16 px (tope). Va en **negrita**: se probó sin
-  ella y el usuario pidió volver a ella. Lo que no le gustaba era el TAMAÑO, no
-  el grosor (con la letra ya 1 px más pequeña la negrita solo ayuda a
-  distinguir el título de la línea de canal).
+  salen 13 px, y con 340 px o más 16 px (tope). El título va en **negrita**: se
+  probó sin ella y el usuario pidió volver a ella. Lo que no le gustaba era el
+  TAMAÑO, no el grosor (con la letra ya 1 px más pequeña la negrita solo ayuda a
+  distinguir el título de la línea de canal). La **línea de meta** (canal ·
+  visitas · fecha) va **2 px por debajo del tamaño del título** (suelo 10 px):
+  el usuario la pidió más discreta que el título.
 - **`kGridTitleLines` = 2 líneas, con la fuente 1 px más pequeña y sin
   negrita.** Son las tres cosas que pidió el usuario al ver 14 px en negrita a 3
   líneas: la celda queda bastante más compacta (175 px de alto en vez de 195 con

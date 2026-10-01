@@ -381,7 +381,10 @@ private:
 
         p->save();
         QFont m = p->font();
-        m.setPixelSize(qMax(10, titlePx - 1));
+        // La línea de canal/vistas/fecha del Home va un poco más pequeña que el
+        // título (2 px menos, con suelo de 10): el usuario la pidió más discreta
+        // que la del título, y a 1 px menos cantaba igual que él.
+        m.setPixelSize(qMax(10, titlePx - 2));
         p->setFont(m);
         p->setPen(nt::kMuted);
         const QFontMetricsF fm(m);
