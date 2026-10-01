@@ -2,7 +2,6 @@
 
 #include <QFrame>
 #include <QHBoxLayout>
-#include <QInputDialog>
 #include <QLabel>
 #include <QListView>
 #include <QPushButton>
@@ -192,15 +191,15 @@ void PlaylistPage::onRemoveSelected()
 
 void PlaylistPage::onRename()
 {
-    bool ok = false;
-    const QString newTitle =
-        QInputDialog::getText(this, QStringLiteral("Renombrar playlist"),
-                              QStringLiteral("Nuevo nombre:"),
-                              QLineEdit::Normal, m_title->text(), &ok);
-    if (!ok || newTitle.trimmed().isEmpty())
-        return;
-    m_playlists->rename(m_playlistId, newTitle.trimmed());
-    m_title->setText(newTitle.trimmed());
+    QString newTitle;
+    if (nt::inputText(this, QStringLiteral("Renombrar playlist"),
+                      QStringLiteral("Nuevo nombre:"),
+                      m_title->text(), QStringLiteral("Guardar"), &newTitle)) {
+        if (newTitle.isEmpty())
+            return;
+        m_playlists->rename(m_playlistId, newTitle);
+        m_title->setText(newTitle);
+    }
 }
 
 void PlaylistPage::onDelete()

@@ -8,9 +8,9 @@
 #include <QHBoxLayout>
 #include <QEvent>
 #include <QFontMetrics>
-#include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>

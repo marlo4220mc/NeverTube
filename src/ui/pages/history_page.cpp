@@ -4,7 +4,6 @@
 #include <QCursor>
 #include <QGuiApplication>
 #include <QHBoxLayout>
-#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -174,15 +173,16 @@ void HistoryPage::showMoreMenu(const VideoInfo &v, const QPoint &globalPos)
 
     nt::RowMenuHooks hooks;
     hooks.onNewPlaylist = [this](const QString &videoId) {
-        bool ok = false;
-        const QString title = QInputDialog::getText(
-            this, QStringLiteral("Nueva playlist"),
-            QStringLiteral("Nombre:"), QLineEdit::Normal, QString(), &ok);
-        if (!ok || title.trimmed().isEmpty())
-            return;
-        const QString id = m_playlists->create(title.trimmed());
-        if (!id.isEmpty())
-            m_playlists->addVideo(id, videoId);
+        QString title;
+        if (nt::inputText(this, QStringLiteral("Nueva playlist"),
+                          QStringLiteral("Nombre:"),
+                          QString(), QStringLiteral("Crear"), &title)) {
+            if (title.isEmpty())
+                return;
+            const QString id = m_playlists->create(title);
+            if (!id.isEmpty())
+                m_playlists->addVideo(id, videoId);
+        }
     };
     hooks.onChannel = [this](const QString &channelId, const QString &) {
         emit channelRequested(channelId);
