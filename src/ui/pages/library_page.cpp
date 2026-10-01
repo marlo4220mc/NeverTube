@@ -43,19 +43,6 @@ constexpr int kThumbH = 133;
 constexpr int kCardMinW = 400;   // ancho mínimo de cada tarjeta (grid)
 constexpr int kMaxCardCols = 4;
 
-QString metaLine(const VideoInfo &v)
-{
-    QStringList parts;
-    if (!v.channel.isEmpty())
-        parts << v.channel;
-    if (v.viewCount > 0)
-        parts << viewsLabel(v.viewCount);
-    const QString pub = publishedLabel(v.publishedAt);
-    if (!pub.isEmpty())
-        parts << pub;
-    return parts.join(QStringLiteral("  •  "));
-}
-
 // Recorta manteniendo el centro y aplica esquinas redondeadas.
 QPixmap coverCrop(const QPixmap &pm, const QSize &sz, int radius)
 {

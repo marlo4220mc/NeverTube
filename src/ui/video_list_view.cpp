@@ -19,6 +19,10 @@ namespace {
 const int kGridW = 320;
 const int kGridH = 258;
 const int kListH = 86;
+// Hueco a la izquierda del bloque de texto de una fila de lista: miniatura
+// (136 px) + 6 px de margen + 10 px de aire. Lo comparten el título y la meta,
+// y de él se parte el ancho útil que calculan removeButtonRect/moreButtonRect.
+const qreal kListTextX = 152;
 
 QString cacheKeyFor(const VideoInfo &v)
 {
@@ -49,12 +53,20 @@ QRectF removeButtonRect(const QRect &cell, qreal scale)
                   side, side);
 }
 
-// Rectángulo del botón de opciones "⋯", justo a la izquierda de la X.
-QRectF moreButtonRect(const QRect &cell, qreal scale)
+// Rectángulo del botón de opciones "⋯". Cuando la fila también lleva la X va
+// justo a su izquierda; sin X ocupa el borde derecho, como el botón de opciones
+// de Biblioteca (que es un widget del layout, pegado al borde). Reservar el
+// hueco de una X que no se pinta le robaba 34 px de texto a la fila.
+QRectF moreButtonRect(const QRect &cell, qreal scale, bool withRemove)
 {
     const qreal side = 26 * scale;
-    const QRectF rem = removeButtonRect(cell, scale);
-    return QRectF(rem.left() - 8 * scale - side, rem.top(), side, side);
+    if (withRemove) {
+        const QRectF rem = removeButtonRect(cell, scale);
+        return QRectF(rem.left() - 8 * scale - side, rem.top(), side, side);
+    }
+    const qreal right = cell.right() - 12 * scale;
+    return QRectF(right - side, cell.top() + (cell.height() - side) / 2.0,
+                  side, side);
 }
 
 class VideosDelegate : public QStyledItemDelegate
@@ -103,13 +115,6 @@ public:
     void setShowMore(bool show)
     {
         m_showMore = show;
-    }
-
-    // 1 = bloque de meta clásico; 2 = bloque enriquecido de Search (ver
-    // VideoListView::setMetaLines). Solo afecta al modo lista.
-    void setMetaLines(int lines)
-    {
-        m_metaLines = qBound(1, lines, 2);
     }
 
     // Mapa (opcional) de fracciones de progreso por videoId que el delegado
@@ -281,14 +286,6 @@ public:
             drawBadge(p, r, duration);
     }
 
-    static void elideTitle(QPainter *p, const QRect &r, const QString &text)
-    {
-        const QFontMetricsF fm(p->font());
-        const QString first = fm.elidedText(text, Qt::ElideRight,
-                                            r.width(), Qt::TextWordWrap);
-        p->drawText(r, Qt::TextWordWrap | Qt::AlignTop, first);
-    }
-
     // Título con salto de línea: si no cabe en una fila, usa las siguientes
     // (wrap voraz por palabras) en lugar de cortarse con "…" a media palabra. En
     // la ÚLTIMA línea entra todo lo que queda desde el principio de esa línea,
@@ -387,142 +384,106 @@ private:
         m.setPixelSize(qMax(10, titlePx - 1));
         p->setFont(m);
         p->setPen(nt::kMuted);
-        QStringList meta;
-        if (!v.channel.isEmpty())
-            meta << v.channel;
-        if (v.viewCount > 0)
-            meta << viewsLabel(v.viewCount);
-        const QString pub = publishedLabel(v.publishedAt);
-        if (!pub.isEmpty())
-            meta << pub;
         const QFontMetricsF fm(m);
-        const QString line = fm.elidedText(meta.join(QStringLiteral("  •  ")),
-                                           Qt::ElideRight,
-                                           qRound(gw - 16 * m_scale));
         p->drawText(QPointF(r.left() + 8 * m_scale, titleR.bottom() + 14),
-                    line);
+                    fm.elidedText(metaLine(v), Qt::ElideRight,
+                                  qRound(gw - 16 * m_scale)));
         p->restore();
     }
 
-    // Meta clásica de la fila de lista: una sola línea "canal • vistas" a
-    // 11,3 px bajo el título. Es el aspecto del resto de páginas.
-    void paintPlainMeta(QPainter *p, const QRect &r, const VideoInfo &v) const
+    // Métricas del bloque de texto de una fila de lista. La tipografía NO se
+    // toca: la que ya usaban las listas (título en la fuente de la app y en
+    // negrita, meta reducida). Lo único que unifica con Biblioteca es la FORMA
+    // de la fila (miniatura, canal • visitas • fecha y botón de opciones), no el
+    // tamaño de letra ni la negrita.
+    //
+    // QFontMetricsF no tiene constructor por defecto, así que aquí van las
+    // medidas (alto y ascendencia) y no la métrica en sí: quien pinta crea la
+    // suya con la misma fuente.
+    struct ListTextMetrics
     {
-        p->save();
-        QFont m = shrunkFont(p->font(), 0.5);
-        p->setFont(m);
-        p->setPen(nt::kMuted);
-        QStringList meta;
-        if (!v.channel.isEmpty())
-            meta << v.channel;
-        if (v.viewCount > 0)
-            meta << viewsLabel(v.viewCount);
-        const QFontMetricsF fm(m);
-        const QString line = fm.elidedText(meta.join(QStringLiteral("  •  ")),
-                                           Qt::ElideRight,
-                                           qRound(r.width() - 170 * m_scale));
-        p->drawText(QPointF(r.left() + 152 * m_scale, r.top() + 56 * m_scale),
-                    line);
-        p->restore();
+        QFont title;
+        QFont meta;
+        qreal lineH = 0;      // interlineado del título
+        qreal metaAscent = 0; // ascendencia de la meta (para su línea base)
+        qreal gap = 0;        // hueco entre título y meta
+        qreal blockH = 0;     // alto total del bloque, para centrarlo
+    };
+
+    ListTextMetrics listMetrics(const QFont &base) const
+    {
+        ListTextMetrics m;
+        m.title = base;
+        m.title.setBold(true);
+        m.lineH = qMax(1.0, QFontMetricsF(m.title).height());
+        m.meta = shrunkFont(base, 0.5);
+        const QFontMetricsF metaFm(m.meta);
+        m.metaAscent = metaFm.ascent();
+        // Hueco entre el título y la meta: 6 px, para que no se lean como una
+        // sola línea de texto.
+        m.gap = 6 * m_scale;
+        m.blockH = m.lineH * 2 + m.gap + metaFm.height();
+        return m;
     }
 
-    // Meta enriquecida de Search: la fila de 86 px deja ~28 px libres bajo la
-    // línea de meta clásica (el título se pintaba en una sola línea dentro de
-    // una caja de 34), así que aquí se aprovechan con "vistas • fecha" y el
-    // canal (avatar + nombre) en su propia línea. La fila NO crece: no se gana
-    // scroll, se gana información por fila.
-    void paintRichMeta(QPainter *p, const QRect &r, const VideoInfo &v) const
+    // Meta de la fila de lista: UNA línea "canal • visitas • fecha" con la
+    // misma función format::metaLine que usa la rejilla del Home y las
+    // secciones de Biblioteca. Antes esta fila pintaba solo "canal • visitas"
+    // a 11,3 px: el mismo vídeo se leía distinto según la página.
+    void paintListMeta(QPainter *p, const QRect &r, const VideoInfo &v,
+                       const ListTextMetrics &m, qreal blockTop) const
     {
-        const qreal x = r.left() + 152 * m_scale;
-        const qreal w = qRound(r.width() - 162 * m_scale);
-
-        p->save();
-        QFont m = shrunkFont(p->font(), 0.5);
-        p->setFont(m);
-        p->setPen(nt::kMuted);
-        QStringList meta;
-        if (v.viewCount > 0)
-            meta << viewsLabel(v.viewCount);
-        const QString pub = publishedLabel(v.publishedAt);
-        if (!pub.isEmpty())
-            meta << pub;
-        if (!meta.isEmpty()) {
-            const QFontMetricsF fm(m);
-            p->drawText(QPointF(x, r.top() + 57 * m_scale),
-                        fm.elidedText(meta.join(QStringLiteral("  •  ")),
-                                      Qt::ElideRight, qRound(w)));
-        }
-        p->restore();
-
-        if (v.channel.isEmpty())
+        const qreal x = r.left() + kListTextX * m_scale;
+        const qreal avail = textWidth(r, kListTextX * m_scale);
+        if (avail < 20)
             return;
-        // Canal en su línea, con avatar si ya está en la caché (lo pide la
-        // sección "Canales" de la página); si no llegó, disco neutro: el
-        // pintado nunca dispara red.
-        const qreal av = qRound(14 * m_scale);
-        const QRectF avR(x, r.top() + 64 * m_scale, av, av);
-        drawChannelAvatar(p, avR, v.channelId);
         p->save();
-        QFont cf = p->font();
-        cf.setPixelSize(qMax(10, qRound(11 * m_scale)));
-        p->setFont(cf);
+        p->setFont(m.meta);
         p->setPen(nt::kMuted);
-        const qreal tx = avR.right() + 6 * m_scale;
-        const QFontMetricsF cfm(cf);
-        p->drawText(QRectF(tx, avR.top() - 1, r.right() - tx - 8 * m_scale,
-                           av + 2),
-                    Qt::AlignLeft | Qt::AlignVCenter,
-                    cfm.elidedText(v.channel, Qt::ElideRight,
-                                   qRound(r.right() - tx - 8 * m_scale)));
+        const QFontMetricsF fm(m.meta);
+        p->drawText(QPointF(x, blockTop + m.lineH * 2 + m.gap + m.metaAscent),
+                    fm.elidedText(metaLine(v), Qt::ElideRight,
+                                  qRound(avail)));
         p->restore();
     }
 
-    // Avatar de canal de 14 px dentro de una fila. Usa el mismo cacheo de
-    // escalado que las miniaturas (clave "ch_<id>", tamaño de destino en la
-    // clave) para no reescalar en cada paint.
-    void drawChannelAvatar(QPainter *p, const QRectF &r,
-                           const QString &channelId) const
+    // Ancho útil del texto de la fila: el de la celda menos la miniatura (por
+    // la izquierda) y los botones de la derecha, con la MISMA cuenta que
+    // removeButtonRect/moreButtonRect, para que el título y la meta nunca
+    // queden debajo de ellos. Es lo que hace la fila de Biblioteca, donde el
+    // botón es un widget del layout y el texto no puede invadir su hueco.
+    //
+    // La cuenta es la de los rectángulos de arriba: 12 px de margen y, si hay
+    // botones, sus 26 px (más los 8 de separación cuando van los dos). Medido:
+    // sin descontar el botón, el título llegaba a x=839 y los puntos del ⋯ están
+    // en 838-841, o sea el texto se metía debajo.
+    qreal textWidth(const QRect &r, qreal leftGutter) const
     {
-        if (channelId.isEmpty() || r.width() < 1)
-            return;
-        const QString key = QStringLiteral("ch_%1").arg(channelId);
-        const QPixmap pm = m_thumbs->pixmap(key);
-        p->save();
-        p->setRenderHint(QPainter::Antialiasing);
-        QPainterPath clip;
-        clip.addEllipse(r);
-        p->setClipPath(clip);
-        if (pm.isNull()) {
-            p->fillRect(r, nt::kElevated);
-        } else {
-            const QSize dst = r.size().toSize();
-            const QPixmap &scaled = thumbEscalada(key, dst, pm);
-            const QRectF src((scaled.width() - r.width()) / 2.0,
-                             (scaled.height() - r.height()) / 2.0,
-                             r.width(), r.height());
-            p->drawPixmap(r, scaled, src);
-        }
-        p->restore();
+        qreal right = 12 * m_scale; // margen del borde
+        if (m_showMore)
+            right += 26 * m_scale; // hueco del botón de opciones
+        if (m_showMore && m_showRemove)
+            right += 8 * m_scale; // separación de los dos botones
+        if (m_showRemove)
+            right += 26 * m_scale;
+        return r.width() - leftGutter - right;
     }
 
     void paintList(QPainter *p, const QStyleOptionViewItem &opt,
                    const VideoInfo &v, int row) const
     {
         const QRect r = opt.rect;
-        // En la fila enriquecida (Search) el hover va redondeado y con 2 px de
-        // aire, para que se lea como una tarjeta destacada y no como una franja
-        // de color a sangre. El resto de listas mantienen el relleno cuadrado.
+        // Hover redondeado con 2 px de aire: se lee como una tarjeta
+        // destacada y no como una franja de color a sangre (es lo que ya
+        // llevaba la fila enriquecida de Search y lo que mejor casa con las
+        // secciones de Biblioteca, cuya fila también va sobre una tarjeta).
         if (opt.state & QStyle::State_MouseOver) {
-            if (m_metaLines >= 2) {
-                p->save();
-                p->setRenderHint(QPainter::Antialiasing);
-                p->setPen(Qt::NoPen);
-                p->setBrush(nt::kHover);
-                p->drawRoundedRect(QRectF(r).adjusted(2, 2, -2, -2), 8, 8);
-                p->restore();
-            } else {
-                p->fillRect(r, nt::kHover);
-            }
+            p->save();
+            p->setRenderHint(QPainter::Antialiasing);
+            p->setPen(Qt::NoPen);
+            p->setBrush(nt::kHover);
+            p->drawRoundedRect(QRectF(r).adjusted(2, 2, -2, -2), 8, 8);
+            p->restore();
         }
         if (row == m_currentRow)
             drawCurrentMark(p, r);
@@ -535,29 +496,27 @@ private:
         drawThumb(p, thumbR, cacheKeyFor(v), durationLabel(v.durationSeconds));
         drawProgressBar(p, thumbR, v);
 
+        // Título: la fuente de la app en negrita (la que ya tenía la fila) y 2
+        // líneas, como la fila de Biblioteca. El interlineado es el natural de
+        // la fuente y son 2 líneas (no las 3 de la rejilla): la fila de lista
+        // tiene altura fija.
+        const ListTextMetrics m = listMetrics(p->font());
+        // El bloque (2 líneas de título + meta) se CENTRA en la fila: pegado al
+        // borde superior dejaba 8 px arriba y 31 px abajo (medido en el render),
+        // que descentraba la fila frente a la miniatura, que sí va centrada.
+        const qreal blockTop = r.top() + (r.height() - m.blockH) / 2.0;
         p->save();
-        QFont t = p->font();
-        t.setBold(true);
-        p->setFont(t);
+        p->setFont(m.title);
         p->setPen(nt::kText);
-        const QRect titleR(r.left() + 152 * m_scale, r.top() + 10 * m_scale,
-                           qRound(r.width() - 162 * m_scale), 34);
-        // Con la meta de 2 líneas el título también puede partir en dos: la
-        // caja de 34 px ya daba para dos líneas de 13 px, solo se usaba una.
-        // Aquí el interlineado es el natural de la fuente y son 2 líneas, no las
-        // 3 de la rejilla: la fila de lista tiene altura fija de lista y su
-        // bloque de meta no crece con la celda.
-        if (m_metaLines >= 2)
-            drawGridTitle(p, titleR, v.title,
-                          qMax(1, qRound(QFontMetricsF(t).height())), 2);
-        else
-            elideTitle(p, titleR, v.title);
+        const qreal titleW = textWidth(r, kListTextX * m_scale);
+        const QRect titleR(r.left() + qRound(kListTextX * m_scale),
+                           qRound(blockTop), qRound(titleW),
+                           qRound(m.lineH * 2));
+        if (titleW >= 20)
+            drawGridTitle(p, titleR, v.title, m.lineH, 2);
         p->restore();
 
-        if (m_metaLines >= 2)
-            paintRichMeta(p, r, v);
-        else
-            paintPlainMeta(p, r, v);
+        paintListMeta(p, r, v, m, blockTop);
 
         if (m_showRemove) {
             p->save();
@@ -578,7 +537,7 @@ private:
         if (m_showMore) {
             p->save();
             p->setRenderHint(QPainter::Antialiasing);
-            const QRectF mr = moreButtonRect(r, m_scale);
+            const QRectF mr = moreButtonRect(r, m_scale, m_showRemove);
             const QColor col((opt.state & QStyle::State_MouseOver)
                                  ? nt::kText : nt::kMuted);
             p->setPen(Qt::NoPen);
@@ -601,7 +560,6 @@ private:
     int m_currentRow = -1;
     bool m_showRemove = false;
     bool m_showMore = false;
-    int m_metaLines = 1;
     int m_cellW = 0;
     int m_cellH = 0;
     qreal m_scale = 1.0;
@@ -830,16 +788,6 @@ void VideoListView::setRowMoreVisible(bool visible)
     viewport()->update();
 }
 
-void VideoListView::setMetaLines(int lines)
-{
-    lines = qBound(1, lines, 2);
-    if (lines == m_metaLines)
-        return;
-    m_metaLines = lines;
-    static_cast<VideosDelegate *>(itemDelegate())->setMetaLines(lines);
-    viewport()->update();
-}
-
 void VideoListView::setProgress(const QString &videoId, double fraction)
 {
     m_progress.insert(videoId, fraction);
@@ -912,8 +860,12 @@ void VideoListView::mouseReleaseEvent(QMouseEvent *event)
             // de reproducir.
             if (m_rowMore && m_mode == ListMode) {
                 const QRect cell = visualRect(idx);
-                if (moreButtonRect(cell, m_scale).contains(event->pos())) {
-                    emit moreRequested(idx.row(), m_videos.at(idx.row()));
+                if (moreButtonRect(cell, m_scale, m_rowRemove)
+                        .contains(event->pos())) {
+                    const QPoint pos = mapToGlobal(
+                        moreButtonRect(cell, m_scale, m_rowRemove)
+                            .bottomLeft().toPoint());
+                    emit moreRequested(idx.row(), m_videos.at(idx.row()), pos);
                     return;
                 }
             }

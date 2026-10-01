@@ -47,13 +47,6 @@ public:
     // videoActivated(). Puede combinarse con la X; el botón de opciones queda
     // a la izquierda de la X.
     void setRowMoreVisible(bool visible);
-    // Líneas del bloque de meta de cada fila (modo lista):
-    //   1 (defecto) = una sola línea "canal • vistas", como hoy;
-    //   2 = bloque enriquecido que aprovecha el hueco libre de la fila de 86 px
-    //       (no crece): título a 2 líneas, "vistas • fecha" y el canal con su
-    //       avatar en una tercera línea, más hover redondeado.
-    // Solo lo pide Search; el resto de listas se quedan en 1 y no cambian.
-    void setMetaLines(int lines);
     // Hace que las celdas del modo rejilla se estiren para llenar todo el ancho
     // disponible (0 desactiva: se usa el tamaño base fijo). El ancho mínimo de
     // celda fija cuántas columnas entran; el sobrante se reparte entre ellas.
@@ -124,8 +117,11 @@ signals:
     // Click sobre el botón "X" de una fila (solo si setRowRemoveVisible(true)).
     void removeRequested(int index, const VideoInfo &video);
     // Click sobre el botón de opciones "⋯" de una fila
-    // (solo si setRowMoreVisible(true)).
-    void moreRequested(int index, const VideoInfo &video);
+    // (solo si setRowMoreVisible(true)). La posición global del botón la
+    // acompaña en la señal porque la vista sabe dónde está: la página que
+    // re-emite hacia arriba la pasa tal cual en vez de recalcularla.
+    void moreRequested(int index, const VideoInfo &video,
+                       const QPoint &globalPos);
 
 protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
@@ -154,7 +150,6 @@ private:
     qreal m_density = 1.0;
     bool m_rowRemove = false;
     bool m_rowMore = false;
-    int m_metaLines = 1;
     int m_gridMinCellW = 0;
     int m_gridColumns = 0;
     // Tamaño de celda que ha calculado applyGridGeometry. Es la única fuente: el

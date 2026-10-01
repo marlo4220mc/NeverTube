@@ -1,5 +1,7 @@
 #include "format.h"
 
+#include "../models.h"
+
 #include <cmath>
 
 #include <QDateTime>
@@ -67,4 +69,17 @@ QString publishedLabel(const QString &publishedAt)
     if (days < 365)
         return QStringLiteral("hace %1 mes").arg(days / 30);
     return QStringLiteral("hace %1 año").arg(days / 365);
+}
+
+QString metaLine(const VideoInfo &v)
+{
+    QStringList parts;
+    if (!v.channel.isEmpty())
+        parts << v.channel;
+    if (v.viewCount > 0)
+        parts << viewsLabel(v.viewCount);
+    const QString pub = publishedLabel(v.publishedAt);
+    if (!pub.isEmpty())
+        parts << pub;
+    return parts.join(QStringLiteral("  •  "));
 }
