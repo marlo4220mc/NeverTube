@@ -45,5 +45,9 @@ private:
     QLabel *m_title = nullptr;
     QLabel *m_meta = nullptr;
     VideoListView *m_list = nullptr;
+    QLabel *m_empty = nullptr;
+    // Contenedor con stretch que comparten la lista y la caja de estado vacío
+    // (ver el comentario del constructor).
+    QWidget *m_area = nullptr;
     QVector<VideoInfo> m_videos;
 };

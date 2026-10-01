@@ -42,9 +42,13 @@ private:
     ThumbnailCache *m_thumbs;
     QString m_playlistId;
     QFrame *m_card = nullptr;
+    // Contenedor con stretch que comparten la lista y la caja de estado vacío
+    // (ver el comentario del constructor).
+    QWidget *m_area = nullptr;
     QLabel *m_title = nullptr;
     QLabel *m_meta = nullptr;
     VideoListView *m_list = nullptr;
+    QLabel *m_empty = nullptr;
     QPushButton *m_removeBtn = nullptr;
     QPushButton *m_renameBtn = nullptr;
     QPushButton *m_deleteBtn = nullptr;

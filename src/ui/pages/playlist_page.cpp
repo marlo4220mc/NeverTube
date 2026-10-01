@@ -120,7 +120,42 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
             [this](int, const VideoInfo &v, const QPoint &pos) {
                 emit rowMenuRequested(v, pos);
             });
-    root->addWidget(m_list, 1);
+    // Estado vacío: una playlist sin vídeos no dejaba más que la lista en negro
+    // pelado. Es la misma caja punteada #emptyState de la Biblioteca, de las
+    // pestañas del Canal y del Historial, con el alto FIJO de 96 px para que no
+    // se estire a todo el alto del área.
+    // Sin el glifo U+22EE (tres puntos verticales) en el texto: no está en la
+    // fuente de la app y saldría el marcador de glifo ausente. De ahí que se
+    // diga "el menú" y no "el ⋮"; --selftest-glyphs avisa de esto.
+    m_empty = new QLabel(
+        QStringLiteral("Esta playlist todavía no tiene vídeos. Añádelos desde el menú de cualquier vídeo."),
+        this);
+    m_empty->setObjectName(QStringLiteral("emptyState"));
+    m_empty->setAlignment(Qt::AlignCenter);
+    m_empty->setWordWrap(true);
+    m_empty->setFixedHeight(96);
+    m_empty->hide();
+
+    // Lista y caja vacía van en un CONTENEDOR con stretch 1, y no sueltas en el
+    // layout de la página. Motivo medido: al ocultar la lista, un QVBoxLayout
+    // reparte el sobrante vertical como separación EXTRA entre sus elementos, así
+    // que la cabecera se iba hacia abajo (con la lista vacía, "Volver" caía a
+    // y=195 en vez de y=16 y la ficha a y=417 en vez de y=59). Con el contenedor
+    // el sobrante se lo queda él y la cabecera no se mueve: la lista y la caja
+    // vacía empiezan siempre en el mismo sitio.
+    m_area = new QWidget(this);
+    auto *areaLay = new QVBoxLayout(m_area);
+    areaLay->setContentsMargins(0, 0, 0, 0);
+    areaLay->setSpacing(0);
+    areaLay->addWidget(m_list, 1);
+    // La caja vacía va con stretch 1 y SIN alineación, a propósito: con
+    // Qt::AlignHCenter el layout le da solo el sizeHint y la caja sale estrecha
+    // (medido: 174 px) con el texto cortado, y la política Expanding no lo
+    // cambia. Sin alineación ocupa todo el ancho del área y, como el alto es
+    // fijo de 96, Qt la centra en el hueco que le reparte (medido: 909x96 en
+    // y=500 dentro del área de y=141..956), igual que las pestañas del Canal.
+    areaLay->addWidget(m_empty, 1);
+    root->addWidget(m_area, 1);
 }
 
 void PlaylistPage::openPlaylist(const QString &id, const QString &title)
@@ -140,6 +175,9 @@ void PlaylistPage::reload()
     m_list->setCurrentRow(-1);
     m_removeBtn->setEnabled(false);
     m_meta->setText(QStringLiteral("%1 vídeos").arg(m_videos.size()));
+    // Lista o caja vacía, nunca las dos (ver el comentario del constructor).
+    m_empty->setVisible(m_videos.isEmpty());
+    m_list->setVisible(!m_videos.isEmpty());
 }
 
 void PlaylistPage::onRemoveSelected()

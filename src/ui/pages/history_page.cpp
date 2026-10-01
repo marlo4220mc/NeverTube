@@ -120,7 +120,34 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
                     return;
                 showMoreMenu(v, pos);
             });
-    root->addWidget(m_list, 1);
+    // Estado vacío: el historial sin ningún vídeo no dejaba más que la lista en
+    // negro pelado y una línea de texto arriba. Es la misma caja punteada
+    // #emptyState de la Biblioteca, de las pestañas del Canal y de la Playlist.
+    m_empty = new QLabel(
+        QStringLiteral("Todavía no has visto ningún vídeo. Los que abras aparecerán aquí."),
+        this);
+    m_empty->setObjectName(QStringLiteral("emptyState"));
+    m_empty->setAlignment(Qt::AlignCenter);
+    m_empty->setWordWrap(true);
+    m_empty->setFixedHeight(96);
+    m_empty->hide();
+
+    // Lista y caja vacía en un contenedor con stretch 1, por el mismo motivo que
+    // en PlaylistPage: sueltas en el layout de la página, al ocultar la lista el
+    // sobrante vertical se reparte como separación EXTRA y la cabecera se hunde
+    // (medido: el título bajaba de y=59 a y=195). Con el contenedor la cabecera
+    // no se mueve. La caja vacía va con stretch 1 y sin alineación, para que
+    // ocupe todo el ancho (con Qt::AlignHCenter el layout le da solo su
+    // sizeHint y sale estrecha, medido 174 px con el texto cortado); con el alto
+    // fijo de 96 queda centrada en el área (medido: 909x96 en y=493 de un área
+    // de y=124..956).
+    m_area = new QWidget(this);
+    auto *areaLay = new QVBoxLayout(m_area);
+    areaLay->setContentsMargins(0, 0, 0, 0);
+    areaLay->setSpacing(0);
+    areaLay->addWidget(m_list, 1);
+    areaLay->addWidget(m_empty, 1);
+    root->addWidget(m_area, 1);
 }
 
 void HistoryPage::showMoreMenu(const VideoInfo &v, const QPoint &globalPos)
@@ -168,6 +195,9 @@ void HistoryPage::reload()
     m_list->showVideos(m_videos, VideoListView::ListMode);
     m_list->setCurrentRow(-1);
     m_meta->setText(QStringLiteral("%1 vídeos").arg(m_videos.size()));
+    // Lista o caja vacía, nunca las dos (ver el comentario del constructor).
+    m_empty->setVisible(m_videos.isEmpty());
+    m_list->setVisible(!m_videos.isEmpty());
     applyProgress();
 }
 
