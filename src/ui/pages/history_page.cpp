@@ -63,13 +63,13 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
     titleRow->addWidget(m_title, 0, Qt::AlignVCenter);
     titleRow->addStretch(1);
 
-    auto *clearAllBtn = new QPushButton(QStringLiteral("Borrar historial de vídeos"),
-                                        this);
-    clearAllBtn->setObjectName(QStringLiteral("ghost"));
-    clearAllBtn->setCursor(Qt::PointingHandCursor);
+    m_clearBtn = new QPushButton(QStringLiteral("Borrar historial de vídeos"),
+                              this);
+    m_clearBtn->setObjectName(QStringLiteral("ghost"));
+    m_clearBtn->setCursor(Qt::PointingHandCursor);
     // 30 y no 34: es un control de cabecera, no el botón grande de la página. El
     // padding global (7px 14px) más 13 px de línea entran justos sin recortar.
-    clearAllBtn->setFixedHeight(30);
+    m_clearBtn->setFixedHeight(30);
     // Sin icono, como el de la página Buscar: el de "Clear" (una X) con una
     // etiqueta que ya dice "borrar" era redundante, y con el texto largo
     // empujaba el ancho.
@@ -80,7 +80,7 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
     // Confirmación antes de tirar el historial entero: son hasta kMaxHistory
     // (200) vídeos y no hay vuelta atrás. El diálogo de la app (nt::confirm) y no
     // QMessageBox, por el mismo motivo que el de la página Buscar.
-    connect(clearAllBtn, &QPushButton::clicked, this, [this]() {
+    connect(m_clearBtn, &QPushButton::clicked, this, [this]() {
         if (m_videos.isEmpty())
             return;
         nt::confirm(this, QStringLiteral("Borrar historial de vídeos"),
@@ -93,7 +93,11 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
                         reload();
                     });
     });
-    titleRow->addWidget(clearAllBtn, 0, Qt::AlignVCenter);
+    // Miembro, no local, porque reload() lo esconde con la lista vacía: un
+    // "borrar historial" junto a la caja de "no has visto ningún vídeo" se
+    // contradice (y el diálogo ya no tenía nada que confirmar). Con vídeos sale
+    // igual que hasta ahora.
+    titleRow->addWidget(m_clearBtn, 0, Qt::AlignVCenter);
     root->addLayout(titleRow);
 
     m_meta = new QLabel(this);
@@ -198,6 +202,9 @@ void HistoryPage::reload()
     // Lista o caja vacía, nunca las dos (ver el comentario del constructor).
     m_empty->setVisible(m_videos.isEmpty());
     m_list->setVisible(!m_videos.isEmpty());
+    // "Borrar historial de vídeos" tampoco sale sin vídeos: no hay nada que
+    // borrar y la caja de estado vacío ya lo dice.
+    m_clearBtn->setVisible(!m_videos.isEmpty());
     applyProgress();
 }
 
