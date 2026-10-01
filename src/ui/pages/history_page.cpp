@@ -15,6 +15,7 @@
 #include "../../db/repositories.h"
 #include "../confirm_dialog.h"
 #include "../row_menu.h"
+#include "../icons.h"
 #include "../theme.h"
 #include "../video_list_view.h"
 
@@ -39,11 +40,14 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
     root->setContentsMargins(16, 16, 16, 16);
     root->setSpacing(10);
 
+    // "Volver" con el token #backLink, igual que Canal, Playlist y el Player.
     auto *top = new QHBoxLayout;
     auto *back = new QPushButton(QStringLiteral("Volver"), this);
-    back->setObjectName(QStringLiteral("ghost"));
+    back->setObjectName(QStringLiteral("backLink"));
+    back->setIcon(nt::icon(nt::Icon::Back, nt::kMuted, 13));
     connect(back, &QPushButton::clicked, this, &HistoryPage::backRequested);
     top->addWidget(back);
+    top->addSpacing(4);
     top->addStretch(1);
     root->addLayout(top);
 

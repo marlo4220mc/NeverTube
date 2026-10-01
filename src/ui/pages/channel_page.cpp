@@ -62,14 +62,17 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     root->setContentsMargins(16, 16, 16, 16);
     root->setSpacing(12);
 
-    // Mismo "Volver" que las demás páginas con vuelta atrás (Historial,
-    // Playlist): un ghost discreto arriba a la izquierda.
+    // Mismo "Volver" en las cuatro superficies con vuelta atrás (Historial,
+    // Playlist y el Player): el token #backLink, que es un enlace discreto y
+    // no una cápsula. Es navegación, no un control de la página.
     auto *top = new QHBoxLayout;
     auto *back = new QPushButton(QStringLiteral("Volver"), this);
-    back->setObjectName(QStringLiteral("ghost"));
+    back->setObjectName(QStringLiteral("backLink"));
+    back->setIcon(nt::icon(nt::Icon::Back, nt::kMuted, 13));
     back->setCursor(Qt::PointingHandCursor);
     connect(back, &QPushButton::clicked, this, &ChannelPage::backRequested);
     top->addWidget(back);
+    top->addSpacing(4);
     top->addStretch(1);
     root->addLayout(top);
 

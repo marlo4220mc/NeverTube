@@ -26,13 +26,16 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
     root->setContentsMargins(16, 16, 16, 16);
     root->setSpacing(10);
 
+    // "Volver" con el token #backLink, igual que Canal, Historial y el Player.
     auto *top = new QHBoxLayout;
     auto *back = new QPushButton(QStringLiteral("Volver"), this);
-    back->setObjectName(QStringLiteral("ghost"));
+    back->setObjectName(QStringLiteral("backLink"));
+    back->setIcon(nt::icon(nt::Icon::Back, nt::kMuted, 13));
     back->setCursor(Qt::PointingHandCursor);
     connect(back, &QPushButton::clicked, this,
             &PlaylistPage::backRequested);
     top->addWidget(back);
+    top->addSpacing(4);
     top->addStretch(1);
     root->addLayout(top);
 

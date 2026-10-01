@@ -174,6 +174,9 @@ private:
     bool m_watchLaterMarked = false;
 
     QPushButton *m_back;
+    // Barra fija del "Volver", ARRIBA del scroll único (fuera del vídeo). Se
+    // oculta en fullscreen, donde solo debe quedar el vídeo.
+    QWidget *m_backBar = nullptr;
     QStackedWidget *m_overlay;
     QLabel *m_errorLabel;
     // Scroll ÚNICO de toda la página: vídeo arriba + fila con descripción y

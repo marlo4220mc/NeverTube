@@ -307,8 +307,23 @@ el scroll general la recorre). Ambos bloques se alinean ARRIBA y conservan su
 altura natural (`midLay->setAlignment(..., Qt::AlignTop)`): la fila crece con
 la cola, pero la descripción no se estira a esa altura — debajo de cada
 bloque solo queda espacio vacío scrollable, no un widget estirado. El botón
-"◀ Volver" es un botón FLOTANTE transparente (estilo `ghost`)
-arriba-izquierda, fuera del scroll (fijo) y se oculta en fullscreen.
+"Volver" del Player está en una **barra fija ARRIBA del scroll**
+(`m_backBar`, `splitOuter->insertWidget(0, …)`), o sea NUNCA encima de la
+imagen, y se oculta en fullscreen (se oculta la barra, no solo el botón: en
+fullscreen el scroll ocupa toda la página y la barra dejaría una franja).
+
+- **"Volver" es el MISMO token en las cuatro superficies** con vuelta atrás
+  (Canal, Historial, Playlist y el Player): `QPushButton#backLink`, que es un
+  ENLACE (sin marco, `padding: 4px 8px`, 13 px/600, `@MUTED@` → `@TEXT@` al
+  hover) y no una cápsula. Antes era `#ghost` (con borde) en las tres páginas
+  y un botón flotante sobre el vídeo en el Player. Es el mismo criterio que
+  `#sectionLink` de Biblioteca: "volver" es navegación, no un control de la
+  página. El icono es `nt::icon(nt::Icon::Back, nt::kMuted, 13)` en las cuatro
+  (dibujado con QPainter, nunca el glifo `◀`). Lo que sí cambia entre
+  superficies es solo DÓNDE va el enlace: en las tres páginas dentro de su
+  propio layout de raíz, y en el Player en la barra de arriba del scroll
+  (medido: texto en `x=27..89`, el vídeo arranca en `y=38`; en las páginas el
+  mismo texto cae en `y=23..32` por el margen de raíz de 16 px).
 
 - `PlayerContainer::updateMaxHeight()` fija `min = max = min(width/aspect,
   kMaxPlayerHeight=560)` (no solo el máximo, como el split antiguo): dentro
@@ -324,7 +339,7 @@ arriba-izquierda, fuera del scroll (fijo) y se oculta en fullscreen.
   (`sizeHintForRow(0)` × nº de filas) para que el scroll general de la página
   la recorra entera, sin scroll interno duplicado.
 - Fullscreen (solo vídeo): se ocultan botón Volver + descripción + cola
-  (`m_back`, `m_watchBody`, `m_bottomWidget`); con `widgetResizable` el
+  (`m_backBar`, `m_watchBody`, `m_bottomWidget`); con `widgetResizable` el
   contenido queda = solo vídeo y se estira a toda la página (sin reparent del
   player). Al salir se restauran y el scroll vuelve a 0.
 - Al cambiar de vídeo (`onCurrentChanged`) el scroll vuelve arriba (como
@@ -727,7 +742,7 @@ invisible. Cuatro glifos de la UI estaban en esa situación:
 | glifo | U+ | sitio | se ve como |
 |---|---|---|---|
 | `✕` | 2715 | botón X de limpiar del buscador | marco vacío con un punto |
-| `◀` | 25C0 | botón "◀ Volver" (además duplicaba el icono `Back` que ya tenía) | un punto antes de "Volver" |
+| `◀` | 25C0 | botón "◀ Volver" del Player (además duplicaba el icono `Back` que ya tenía) | un punto antes de "Volver" |
 | `▾` | 25BE | sufijo de los 3 botones de valor de Ajustes (`makeValueButton`) | un punto |
 | `✔` | 2714 | etiqueta "ya está" del menú de playlists | un punto |
 

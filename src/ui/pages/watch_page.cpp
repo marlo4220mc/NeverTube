@@ -811,20 +811,31 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // los bloques quedan pegados arriba, con hueco al final (como YouTube).
     top->addStretch(1);
 
-    // Botón "Volver" flotante sobre el área de vídeo: usa el estilo ghost
-    // transparente que ya tenía, sin ocupar una barra. Flota arriba-izquierda
-    // de la página (fijo, NO scrollea con el contenido) y se oculta en
-    // fullscreen. Se crea al final para quedar como sibling posterior (por
-    // encima del scroll).
+    // "Volver" del Player. Antes era un botón FLOATANTE que se pintaba encima
+    // del área de vídeo (move(12,8) + raise()), o sea encima de la imagen: el
+    // usuario pidió sacarlo de ahí. Ahora vive en una barra fija ARRIBA del
+    // scroll único, así que no se superpone al vídeo en ningún momento (ni al
+    // reproducir, ni con los controles del overlay, ni al salir del vídeo de la
+    // vista). Se sigue ocultando en fullscreen, donde solo debe quedar el
+    // vídeo. El token es #backLink, el mismo enlace discreto que Canal,
+    // Historial y Playlist.
+    m_backBar = new QWidget(this);
+    auto *backLay = new QHBoxLayout(m_backBar);
+    backLay->setContentsMargins(16, 6, 16, 6);
+    backLay->setSpacing(0);
+    m_back = new QPushButton(QStringLiteral("Volver"), m_backBar);
+    m_back->setObjectName(QStringLiteral("backLink"));
     // El icono Back (abajo) ya es la flecha: el "◀" del texto era un glifo
     // que no existe en la fuente por defecto y salia como un punto, ademas
     // duplicaba la misma affordance.
-    m_back = new QPushButton(QStringLiteral("Volver"), this);
-    m_back->setObjectName(QStringLiteral("ghost"));
-    m_back->setIcon(nt::icon(nt::Icon::Back, nt::kText, 14));
+    m_back->setIcon(nt::icon(nt::Icon::Back, nt::kMuted, 13));
     m_back->setCursor(Qt::PointingHandCursor);
-    m_back->move(12, 8);
-    m_back->raise();
+    backLay->addWidget(m_back);
+    backLay->addStretch(1);
+    // Índice 0: la barra va ANTES del scroll (que es lo que ocupa el resto con
+    // stretch 1), de modo que el vídeo empieza por debajo de ella y nunca queda
+    // debajo del botón.
+    splitOuter->insertWidget(0, m_backBar);
 
     connect(m_back, &QPushButton::clicked, this,
             &WatchPage::backRequested);
@@ -1821,8 +1832,10 @@ void WatchPage::enterFullscreen()
     // Fullscreen de SOLO vídeo: se ocultan botón Volver + descripción + cola.
     // Con todo en el scroll único, ocultarlos deja el contenido = solo vídeo y
     // widgetResizable lo estira a toda la página (sin reparent del player).
-    if (m_back)
-        m_back->hide();
+    // Se oculta la BARRA del "Volver", no solo el botón: en fullscreen el
+    // scroll ocupa toda la página y la barra dejaría una franja encima.
+    if (m_backBar)
+        m_backBar->hide();
     if (m_watchBody)
         m_watchBody->hide();
     if (m_bottomWidget)
@@ -1842,8 +1855,8 @@ void WatchPage::leaveFullscreen()
     m_inFullscreen = false;
     if (m_playerContainer)
         m_playerContainer->setFullscreen(false);
-    if (m_back)
-        m_back->show();
+    if (m_backBar)
+        m_backBar->show();
     if (m_watchBody)
         m_watchBody->show();
     if (m_bottomWidget)

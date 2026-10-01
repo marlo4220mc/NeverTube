@@ -331,6 +331,21 @@ QPushButton#sectionLink:hover { color: @TEXT@; }
    enlace se marca con el texto mas claro. Es lo que hace el hover, para que
    "tabular" por la Biblioteca se vea igual que pasar el raton. */
 QPushButton#sectionLink:focus { color: @TEXT@; }
+/* "Volver" de las cuatro superficies con vuelta atrás (Canal, Historial,
+   Playlist y el Player). Es un ENLACE, no una cápsula: mismo criterio que
+   #sectionLink, porque "volver" es una acción de navegación, no un control de
+   la página. Antes era #ghost (una cápsula con borde) en las tres páginas y un
+   botón flotante sobre el vídeo en el Player, que además tapaba la imagen.
+   El icono lo dibuja nt::icon (QPainter), no un glifo del texto: el "◀" del
+   "Volver" era un carácter que no existe en la fuente de la app. */
+QPushButton#backLink {
+    background: transparent; border: none; padding: 4px 8px;
+    color: @MUTED@; font-size: 13px; font-weight: 600; text-align: left;
+}
+QPushButton#backLink:hover { color: @TEXT@; }
+/* Sin borde no hay donde dibujar el anillo de foco (como #sectionLink): el
+   teclado se marca con el texto más claro, igual que el hover. */
+QPushButton#backLink:focus { color: @TEXT@; }
 /* Boton del canal bajo el titulo: icono a la izquierda y texto a la derecha.
    No es #ghost porque necesita padding de 8px en vez de 6px. */
 QPushButton#channelBtn {
