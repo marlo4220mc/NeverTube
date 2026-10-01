@@ -3121,6 +3121,18 @@ void Innertube::parsePlaylistBrowse(const QJsonObject &root, PlaylistInfo *info,
             v.id = pv.value(QStringLiteral("videoId")).toString();
             v.title = homeTextOf(pv.value(QStringLiteral("title")));
             v.channel = homeTextOf(pv.value(QStringLiteral("shortBylineText")));
+            if (v.channel.isEmpty())
+                v.channel =
+                    homeTextOf(pv.value(QStringLiteral("longBylineText")));
+            // Id del canal, igual que en la cola: sin él, un vídeo abierto
+            // desde una playlist no podía entrar al canal ni suscribirse hasta
+            // que llegara el detalle.
+            v.channelId = channelIdFromByline(
+                pv.value(QStringLiteral("shortBylineText")).toObject());
+            if (v.channelId.isEmpty()) {
+                v.channelId = channelIdFromByline(
+                    pv.value(QStringLiteral("longBylineText")).toObject());
+            }
             v.durationSeconds =
                 pv.value(QStringLiteral("lengthSeconds")).toString().toInt();
             const QJsonArray thumbs = pv.value(QStringLiteral("thumbnail"))
