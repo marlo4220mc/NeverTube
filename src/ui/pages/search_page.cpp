@@ -11,7 +11,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -35,6 +34,7 @@
 #include "../../yt.h"
 #include "../channel_row.h"
 #include "../format.h"
+#include "../confirm_dialog.h"
 #include "../icons.h"
 #include "../theme.h"
 #include "../thumbnail_cache.h"
@@ -419,10 +419,13 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
                 emit rowMenuRequested(v, pos);
             });
     m_moreButton = new QPushButton(QStringLiteral("Mostrar más"), this);
-    m_moreButton->setObjectName(QStringLiteral("primary"));
+    // Ghost centrado, como el "Cargar más vídeos" de la página Canal: era
+    // #primary (rojo) con 180 px fijos, una barra ancha bajo la lista para una
+    // acción que solo amplía lo que ya se ve.
+    m_moreButton->setObjectName(QStringLiteral("ghost"));
     m_moreButton->setCursor(Qt::PointingHandCursor);
     m_moreButton->hide();
-    m_moreButton->setFixedWidth(180);
+    m_moreButton->setFixedHeight(34);
     connect(m_moreButton, &QPushButton::clicked, this, [this]() {
         m_moreButton->setEnabled(false);
         m_yt->search(m_activeQuery, 20, m_results.size());
@@ -737,9 +740,13 @@ void SearchPage::showHistory()
         m_historyBox->layout()->addWidget(row);
     }
     auto *clear = new QPushButton(QStringLiteral("Borrar historial"), this);
-    clear->setObjectName(QStringLiteral("primary"));
+    // Ghost como el "Borrar todo" de la página Historial (misma acción, misma
+    // jerarquía). Era #primary de 180 px: un botón rojo de acción principal
+    // para una limpieza secundaria, y la confirmación es la parte que tiene que
+    // llamar la atención.
+    clear->setObjectName(QStringLiteral("ghost"));
     clear->setCursor(Qt::PointingHandCursor);
-    clear->setFixedWidth(180);
+    clear->setFixedHeight(34);
     connect(clear, &QPushButton::clicked, this, &SearchPage::onHistoryClear);
     if (auto *box = qobject_cast<QBoxLayout *>(m_historyBox->layout()))
         box->addWidget(clear, 0, Qt::AlignHCenter);
@@ -749,15 +756,17 @@ void SearchPage::showHistory()
 
 void SearchPage::onHistoryClear()
 {
-    const auto btn = QMessageBox::question(
-        this, QStringLiteral("Borrar historial"),
-        QStringLiteral("¿Borrar todo el historial de búsquedas? Esta acción no "
-                       "se puede deshacer."),
-        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-    if (btn != QMessageBox::Yes)
-        return;
-    setHistory(QStringList());
-    showHistory();
+    // Diálogo de la app (nt::confirm) y no QMessageBox: el mensaje del sistema
+    // salía con el tema del escritorio, el único resto de aspecto ajeno que
+    // quedaba. Cancelar viene enfocado y no hay botón por defecto, así que un
+    // Enter perdido no borra el historial.
+    nt::confirm(this, QStringLiteral("Borrar historial"),
+                QStringLiteral("¿Borrar todo el historial de búsquedas? Esta "
+                               "acción no se puede deshacer."),
+                QStringLiteral("Borrar"), [this]() {
+                    setHistory(QStringList());
+                    showHistory();
+                });
 }
 
 void SearchPage::onHistoryRemove(const QString &query)

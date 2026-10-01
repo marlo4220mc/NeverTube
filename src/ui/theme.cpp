@@ -186,6 +186,12 @@ QFrame#popupDialog {
     border: 1px solid @BORDER@;
     border-radius: 12px;
 }
+/* El diálogo de confirmación (nt::confirm) es un QDialog sin marco cuyo fondo
+   visible es el QFrame#popupDialog de dentro. Sin esta regla un QDialog no
+   recibe la regla global QWidget (el selector de tipo no casa con la subclase) y
+   pinta el fondo de su paleta, así que el marco se ve con las esquinas
+   cuadradas. */
+QDialog { background: transparent; }
 QLabel#popupTitle { font-size: 15px; font-weight: 600; color: #ECECEC; }
 QComboBox::drop-down { border: none; width: 24px; }
 QComboBox::down-arrow {
@@ -312,6 +318,20 @@ QPushButton#descToggle {
     color: @MUTED@; font-size: 12px; font-weight: 600; text-align: left;
 }
 QPushButton#descToggle:hover { color: @TEXT@; }
+/* Accion terciaria al final de una cabecera de seccion (Biblioteca: "Ver
+   todo", "Administrar"): enlace discreto, no la capsula #ghost con marco. Eran
+   cinco capsulas con borde alineadas a la derecha de cada titulo, que competian
+   con el contenido de la seccion. Sin borde en la base, asi que el :focus global
+   solo se ve si el boton llega a tener foco (igual que #descToggle). */
+QPushButton#sectionLink {
+    background: transparent; border: none; padding: 4px 8px;
+    color: @MUTED@; font-size: 12px; font-weight: 600;
+}
+QPushButton#sectionLink:hover { color: @TEXT@; }
+/* Sin borde no hay donde dibujar el anillo de foco, asi que con el teclado el
+   enlace se marca con el texto mas claro. Es lo que hace el hover, para que
+   "tabular" por la Biblioteca se vea igual que pasar el raton. */
+QPushButton#sectionLink:focus { color: @TEXT@; }
 /* Boton del canal bajo el titulo: icono a la izquierda y texto a la derecha.
    No es #ghost porque necesita padding de 8px en vez de 6px. */
 QPushButton#channelBtn {

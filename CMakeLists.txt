@@ -102,6 +102,8 @@ add_executable(nevertube_qt2
   src/ui/row_menu.h
   src/ui/flow_layout.cpp
   src/ui/flow_layout.h
+  src/ui/confirm_dialog.cpp
+  src/ui/confirm_dialog.h
   src/ui/pages/home_page.cpp
   src/ui/pages/home_page.h
   src/ui/pages/channel_page.cpp
