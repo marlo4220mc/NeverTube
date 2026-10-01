@@ -322,11 +322,16 @@ QPushButton#channelBtn {
 QPushButton#channelBtn:hover { background: #1F1F1F; }
 /* Botones de accion del player: icono solo, en pastilla circular. El estado lo
    decide la propiedad booleana `active`, igual que #subscribe con la suya; el
-   color del icono lo pinta updateActionButtons (el QSS no tinta QIcons). */
+   color del icono lo pinta updateActionButtons (el QSS no tinta QIcons).
+   SIN MARCO (regla del usuario, igual que Me gusta / No me gusta): el borde va
+   transparente y el :focus se lo queda transparente, porque el
+   QPushButton:focus global lo pinta en el acento y al pulsar salia un aro rojo. */
 QPushButton#actionChip {
-    background: #1F1F1F; border-radius: 22px; padding: 0;
+    background: #1F1F1F; border: 1px solid transparent; border-radius: 22px;
+    padding: 0;
 }
 QPushButton#actionChip:hover { background: @HOVER@; }
+QPushButton#actionChip:focus { border-color: transparent; }
 QPushButton#actionChip[active="true"] { background: @BORDER@; }
 QPushButton#actionChip[active="true"]:hover { background: @SELECTION@; }
 
@@ -737,6 +742,7 @@ bool themeSelfTest()
     // app se senala pintando el color del borde, no desplace el contenido.
     const QStringList multimedia{
         QStringLiteral("QPushButton#chip"), QStringLiteral("QPushButton#iconBtn"),
+        QStringLiteral("QPushButton#actionChip"),
         QStringLiteral("QFrame#qualityMenu QPushButton")};
     for (const QString &sel : multimedia) {
         // TODOS los estados del boton, no solo la regla base: el marco al

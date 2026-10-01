@@ -847,7 +847,15 @@ Los dos últimos datos los escribe el reproductor, no la red:
   relleno (`@HANDLE_HOVER@`), que es lo único que se puede tocar sin dibujar un
   borde. Lo que marca el chip como control es el **relleno**, no el marco (el
   resto de la barra, `#iconBtn`, nunca lo tuvo).
-  Lo vigila `--selftest-theme`: `#chip`, `#iconBtn` y los items de
+- **Los botones de acción de la página Player** (`#actionChip`: Compartir, Me
+  gusta (favoritos/estrella), Ver más tarde y Añadir a playlist) siguen la misma
+  regla que **Me gusta / No me gusta** (`#actionSegL`/`#actionSegR`, que ya
+  llevaban `border: none`): **sin marco en ningún estado**. `#actionChip` no
+  declaraba borde, así que heredaba el global `1px solid @BORDER@` y el
+  `QPushButton:focus` lo encendía en el acento al pulsarlo (un aro rojo). Ahora
+  declara `1px solid transparent` y su `:focus` se queda transparente; el estado
+  sigue marcándose por el relleno (`active` y `:hover`) y por el color del icono.
+  Lo vigila `--selftest-theme`: `#chip`, `#iconBtn`, `#actionChip` y los items de
   `#qualityMenu` no pueden declarar un borde visible **en ningún estado**
   (recursea por `:hover`/`:pressed`/`:focus`; comprobado que FALLA tanto si se
   devuelve el marco en la base como si se devuelve solo en `:focus`).
