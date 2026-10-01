@@ -15,7 +15,6 @@
 
 #include "../../db/repositories.h"
 #include "../confirm_dialog.h"
-#include "../icons.h"
 #include "../row_menu.h"
 #include "../theme.h"
 #include "../video_list_view.h"
@@ -47,14 +46,40 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
     connect(back, &QPushButton::clicked, this, &HistoryPage::backRequested);
     top->addWidget(back);
     top->addStretch(1);
-    auto *clearAllBtn = new QPushButton(QStringLiteral("Borrar todo"), this);
+    root->addLayout(top);
+
+    // Título y acción en la misma fila, con la acción a la derecha. Es la misma
+    // cabecera que se puso en la página Buscar ("Borrar historial de
+    // búsquedas"), y por los mismos dos motivos que se documentan allí: al pie
+    // de la lista la cápsula se leía como un control suelto de la página (las
+    // filas no tienen caja) y como enlace suelto se perdía, porque es el
+    // elemento más apagado de la página y la acción además es destructiva.
+    auto *titleRow = new QHBoxLayout;
+    titleRow->setContentsMargins(0, 0, 0, 0);
+    titleRow->setSpacing(8);
+
+    m_title = new QLabel(QStringLiteral("Historial"), this);
+    m_title->setObjectName(QStringLiteral("sectionTitle"));
+    titleRow->addWidget(m_title, 0, Qt::AlignVCenter);
+    titleRow->addStretch(1);
+
+    auto *clearAllBtn = new QPushButton(QStringLiteral("Borrar historial de vídeos"),
+                                        this);
     clearAllBtn->setObjectName(QStringLiteral("ghost"));
-    clearAllBtn->setIcon(nt::icon(nt::Icon::Clear, nt::kText, 15));
+    clearAllBtn->setCursor(Qt::PointingHandCursor);
+    // 30 y no 34: es un control de cabecera, no el botón grande de la página. El
+    // padding global (7px 14px) más 13 px de línea entran justos sin recortar.
+    clearAllBtn->setFixedHeight(30);
+    // Sin icono, como el de la página Buscar: el de "Clear" (una X) con una
+    // etiqueta que ya dice "borrar" era redundante, y con el texto largo
+    // empujaba el ancho.
+    //
+    // Etiqueta larga a propósito ("Borrar historial de vídeos", no "Borrar
+    // todo"): la app tiene dos historiales, este de vídeos vistos y el de
+    // consultas en la página Buscar. A solas, "Borrar todo" no decía cuál.
     // Confirmación antes de tirar el historial entero: son hasta kMaxHistory
     // (200) vídeos y no hay vuelta atrás. El diálogo de la app (nt::confirm) y no
-    // QMessageBox, por el mismo motivo que el de la página Buscar. El botón
-    // decía "Borrar todo" y el diálogo "historial de vídeos": aquí ya hay dos
-    // historiales en juego, así que el cuerpo los distingue.
+    // QMessageBox, por el mismo motivo que el de la página Buscar.
     connect(clearAllBtn, &QPushButton::clicked, this, [this]() {
         if (m_videos.isEmpty())
             return;
@@ -68,12 +93,8 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
                         reload();
                     });
     });
-    top->addWidget(clearAllBtn);
-    root->addLayout(top);
-
-    m_title = new QLabel(QStringLiteral("Historial"), this);
-    m_title->setObjectName(QStringLiteral("sectionTitle"));
-    root->addWidget(m_title);
+    titleRow->addWidget(clearAllBtn, 0, Qt::AlignVCenter);
+    root->addLayout(titleRow);
 
     m_meta = new QLabel(this);
     m_meta->setObjectName(QStringLiteral("sectionSub"));
