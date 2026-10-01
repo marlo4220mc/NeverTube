@@ -1,11 +1,14 @@
 #include "channel_page.h"
 
+#include <QClipboard>
+#include <QFrame>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
-#include <QTabWidget>
+#include <QStyle>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -14,19 +17,39 @@
 #include "../../db/repositories.h"
 #include "../../debug.h"
 #include "../../yt.h"
+#include "../format.h"
 #include "../icons.h"
 #include "../theme.h"
 #include "../thumbnail_cache.h"
 #include "../video_list_view.h"
 
-// Tope vertical de la caja de descripción del canal. Si el texto completo la
-// supera, la descripción se recorta a este alto y se muestra "Mostrar más"
-// (ver applyDescriptionCap).
-static const int kDescMaxHeight = 165;
-// Margen de tolerancia: si el texto completo solo excede el tope por menos de
-// este valor (~media línea), se muestra entero SIN botón "Mostrar más" (un
-// recorte de pocos píxeles no merece desplegable).
-static const qreal kDescSlack = 5.5;
+namespace {
+
+// Avatar de la ficha: 80 px y circular. Antes eran 64 px con setScaledContents,
+// que deforma cualquier avatar que no sea cuadrado y además lo pintaba en un
+// cuadrado (el radio del QSS solo redondea el fondo, no el pixmap).
+const int kAvatar = 80;
+// Líneas de la descripción antes de colapsar. El Player recorta a 3 (kDescLines
+// en watch_page.cpp) y aquí se adopta el mismo corte: el tope en píxeles que
+// usaba esta página dependía del interlineado de la fuente, así que cambiaba de
+// una máquina a otra.
+const int kDescLines = 3;
+// Vídeos por página. Es también lo que decide si hay más que cargar: si la
+// respuesta viene llena, existe una página siguiente.
+const int kTabPage = 25;
+
+// Texto del estado vacío de una pestaña sin vídeos. Cada pestaña tiene su
+// palabra, para que se sepa cuál se abrió.
+QString emptyTextFor(const QString &tab)
+{
+    if (tab == QLatin1String("shorts"))
+        return QStringLiteral("Este canal no tiene Shorts.");
+    if (tab == QLatin1String("live"))
+        return QStringLiteral("Este canal no tiene directos.");
+    return QStringLiteral("Este canal no tiene vídeos.");
+}
+
+} // namespace
 
 ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
                          SubscriptionsRepo *subs, QWidget *parent)
@@ -37,115 +60,189 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
 {
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(16, 16, 16, 16);
-    root->setSpacing(10);
+    root->setSpacing(12);
 
+    // Mismo "Volver" que las demás páginas con vuelta atrás (Historial,
+    // Playlist): un ghost discreto arriba a la izquierda.
     auto *top = new QHBoxLayout;
     auto *back = new QPushButton(QStringLiteral("Volver"), this);
     back->setObjectName(QStringLiteral("ghost"));
+    back->setCursor(Qt::PointingHandCursor);
     connect(back, &QPushButton::clicked, this, &ChannelPage::backRequested);
     top->addWidget(back);
     top->addStretch(1);
     root->addLayout(top);
 
-    auto *headerRow = new QHBoxLayout;
-    headerRow->setSpacing(12);
+    // --- Ficha del canal ---------------------------------------------------
+    // Caja #channelCard: avatar, nombre, suscriptores y las dos acciones (la
+    // pastilla de Suscribirse y el chip de Compartir), con la descripción
+    // debajo. Antes todo eso iba suelto sobre el fondo de la página.
+    m_card = new QFrame(this);
+    m_card->setObjectName(QStringLiteral("channelCard"));
+    m_card->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    auto *cardLay = new QVBoxLayout(m_card);
+    cardLay->setContentsMargins(16, 14, 16, 12);
+    cardLay->setSpacing(10);
 
-    m_avatar = new QLabel(this);
-    m_avatar->setFixedSize(64, 64);
-    m_avatar->setScaledContents(true);
-    m_avatar->setPixmap(nt::icon(nt::Icon::User, nt::kMuted, 40)
-                            .pixmap(64, 64));
+    auto *head = new QHBoxLayout;
+    head->setSpacing(14);
+
+    m_avatar = new QLabel(m_card);
     m_avatar->setObjectName(QStringLiteral("channelAvatar"));
-    headerRow->addWidget(m_avatar, 0, Qt::AlignVCenter);
+    m_avatar->setFixedSize(kAvatar, kAvatar);
+    m_avatar->setAlignment(Qt::AlignCenter);
+    setAvatar(QPixmap());
+    head->addWidget(m_avatar, 0, Qt::AlignVCenter);
 
     auto *titleCol = new QVBoxLayout;
-    titleCol->setSpacing(2);
-    m_title = new QLabel(QStringLiteral("Canal"), this);
-    m_title->setObjectName(QStringLiteral("sectionTitle"));
-    m_avatarKey.clear();
+    titleCol->setContentsMargins(0, 0, 0, 0);
+    titleCol->setSpacing(3);
+    m_title = new QLabel(QStringLiteral("Canal"), m_card);
+    m_title->setObjectName(QStringLiteral("channelName"));
+    m_title->setWordWrap(true);
     titleCol->addWidget(m_title);
-    m_meta = new QLabel(this);
-    m_meta->setObjectName(QStringLiteral("sectionSub"));
+    m_meta = new QLabel(m_card);
+    m_meta->setObjectName(QStringLiteral("channelMeta"));
     titleCol->addWidget(m_meta);
-    headerRow->addLayout(titleCol, 1);
+    head->addLayout(titleCol, 1);
 
-    m_subscribeBtn = new QPushButton(this);
+    m_subscribeBtn = new QPushButton(m_card);
     m_subscribeBtn->setObjectName(QStringLiteral("subscribe"));
     m_subscribeBtn->setCursor(Qt::PointingHandCursor);
-    m_subscribeBtn->setMinimumHeight(36);
-    headerRow->addWidget(m_subscribeBtn, 0, Qt::AlignVCenter);
+    m_subscribeBtn->setFixedHeight(38);
+    head->addWidget(m_subscribeBtn, 0, Qt::AlignVCenter);
 
-    root->addLayout(headerRow);
+    m_shareBtn = new QPushButton(m_card);
+    m_shareBtn->setObjectName(QStringLiteral("actionChip"));
+    m_shareBtn->setIconSize(QSize(18, 18));
+    m_shareBtn->setIcon(nt::icon(nt::Icon::Share, nt::kText, 18));
+    m_shareBtn->setCursor(Qt::PointingHandCursor);
+    m_shareBtn->setFixedSize(38, 38);
+    m_shareBtn->setToolTip(QStringLiteral("Copiar el enlace del canal"));
+    m_shareBtn->setAccessibleName(QStringLiteral("Compartir el canal"));
+    head->addWidget(m_shareBtn, 0, Qt::AlignVCenter);
+    cardLay->addLayout(head);
 
-    m_description = new QLabel(this);
-    m_description->setObjectName(QStringLiteral("sectionSub"));
+    m_description = new QLabel(m_card);
+    m_description->setObjectName(QStringLiteral("channelDesc"));
     m_description->setWordWrap(true);
-    root->addWidget(m_description);
+    m_description->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_description->hide();
+    cardLay->addWidget(m_description);
 
-    // Botón "Mostrar más/ menos" de la descripción: aparece solo cuando el
-    // texto completo supera el tope vertical (ver applyDescriptionCap).
-    m_descMore = new QPushButton(QStringLiteral("Mostrar más"), this);
-    m_descMore->setObjectName(QStringLiteral("ghost"));
-    m_descMore->setCursor(Qt::PointingHandCursor);
-    m_descMore->hide();
-    root->addWidget(m_descMore, 0, Qt::AlignLeft);
-    connect(m_descMore, &QPushButton::clicked, this,
+    // Degradado sobre las últimas líneas mientras la descripción está
+    // colapsada: es el mismo #descFade de la tarjeta del Player (y al fondo
+    // #181818, el mismo de la caja, así que funde sin costura).
+    m_descFade = new QFrame(m_card);
+    m_descFade->setObjectName(QStringLiteral("descFade"));
+    m_descFade->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_descFade->hide();
+
+    m_descToggle = new QPushButton(QStringLiteral("…más"), m_card);
+    m_descToggle->setObjectName(QStringLiteral("descToggle"));
+    m_descToggle->setCursor(Qt::PointingHandCursor);
+    m_descToggle->hide();
+    connect(m_descToggle, &QPushButton::clicked, this,
             &ChannelPage::toggleDescription);
+    cardLay->addWidget(m_descToggle, 0, Qt::AlignLeft);
+    root->addWidget(m_card);
 
-    m_tabs = new QTabWidget(this);
+    // --- Pestañas ----------------------------------------------------------
     const QStringList names{QStringLiteral("Videos"), QStringLiteral("Shorts"),
                             QStringLiteral("Directos")};
     const QStringList keys{QStringLiteral("videos"), QStringLiteral("shorts"),
                            QStringLiteral("live")};
+
+    auto *tabRow = new QHBoxLayout;
+    tabRow->setSpacing(10);
+    m_tabsBox = new QWidget(this);
+    m_tabsBox->setObjectName(QStringLiteral("channelTabs"));
+    auto *tabsLay = new QHBoxLayout(m_tabsBox);
+    tabsLay->setContentsMargins(3, 3, 3, 3);
+    tabsLay->setSpacing(2);
+    tabRow->addWidget(m_tabsBox, 0, Qt::AlignVCenter);
+    m_tabCount = new QLabel(this);
+    m_tabCount->setObjectName(QStringLiteral("tabCount"));
+    m_tabCount->hide();
+    tabRow->addWidget(m_tabCount, 0, Qt::AlignVCenter);
+    tabRow->addStretch(1);
+    root->addLayout(tabRow);
+
     for (int i = 0; i < names.size(); ++i) {
-        auto *tabWrap = new QWidget(m_tabs);
-        auto *tabLayout = new QVBoxLayout(tabWrap);
-        // Margen inferior: eleva el botón "Mostrar más" para que no quede
-        // recortado/pegado al borde inferior del cuadro de vídeos.
-        tabLayout->setContentsMargins(0, 0, 0, 8);
-        tabLayout->setSpacing(6);
-        auto *list = new VideoListView(m_thumbs, tabWrap);
+        auto *btn = new QPushButton(names.at(i), m_tabsBox);
+        btn->setObjectName(QStringLiteral("tabBtn"));
+        btn->setCursor(Qt::PointingHandCursor);
+        btn->setFocusPolicy(Qt::NoFocus);
+        btn->setProperty("selected", i == 0);
+        tabsLay->addWidget(btn);
+        m_tabButtons.append(btn);
+
+        auto *page = new QWidget(this);
+        auto *pageLay = new QVBoxLayout(page);
+        pageLay->setContentsMargins(0, 0, 0, 0);
+        pageLay->setSpacing(8);
+
+        auto *list = new VideoListView(m_thumbs, page);
         list->showVideos(QVector<VideoInfo>(), VideoListView::ListMode);
         // Botón de opciones por fila (mismo criterio que Search): la página
         // re-emite el vídeo y es MainWindow quien tiene los repos y muestra el
         // menú.
         list->setRowMoreVisible(true);
+        pageLay->addWidget(list, 1);
+
+        // Estado vacío de la pestaña (caja punteada, el mismo #emptyState de la
+        // Biblioteca). Solo se ve cuando la respuesta llegó vacía: por eso la
+        // lista se oculta a la vez, si no el stretches de los dos partiría la
+        // caja en dos.
+        auto *empty = new QLabel(emptyTextFor(keys.at(i)), page);
+        empty->setObjectName(QStringLiteral("emptyState"));
+        empty->setAlignment(Qt::AlignCenter);
+        empty->hide();
+        pageLay->addWidget(empty, 1);
+
+        // Paginación: un ghost centrado. El botón era #primary de 180 px fijos
+        // (una barra roja ancha bajo la lista); "cargar más" no es la acción
+        // principal de la página, es una ayuda para bajar.
+        auto *more = new QPushButton(QStringLiteral("Cargar más vídeos"), page);
+        more->setObjectName(QStringLiteral("ghost"));
+        more->setCursor(Qt::PointingHandCursor);
+        more->setFixedHeight(34);
+        more->hide();
+        pageLay->addWidget(more, 0, Qt::AlignHCenter);
+
+        page->setVisible(i == 0);
+        root->addWidget(page, 1);
+
+        m_pages.append(page);
+        m_lists.append(list);
+        m_moreButtons.append(more);
+        m_emptyLabels.append(empty);
+        m_videos.append(QVector<VideoInfo>());
+        m_tabKeys.append(keys.at(i));
+        m_tabLoaded.append(0);
+
+        connect(btn, &QPushButton::clicked, this, [this, i]() {
+            showTab(i);
+            loadTab(i);
+        });
+        connect(list, &VideoListView::videoActivated, this,
+                [this, i](int item, const VideoInfo &) {
+                    emit openRequested(m_videos.at(i), item);
+                });
         connect(list, &VideoListView::moreRequested, this,
                 [this](int, const VideoInfo &v, const QPoint &pos) {
                     emit rowMenuRequested(v, pos);
                 });
-        m_lists.append(list);
-        m_videos.append(QVector<VideoInfo>());
-        m_tabKeys.append(keys.at(i));
-        m_tabLoaded.append(0);
-        tabLayout->addWidget(list, 1);
-        auto *more = new QPushButton(QStringLiteral("Mostrar más"), tabWrap);
-        more->setObjectName(QStringLiteral("primary"));
-        more->setCursor(Qt::PointingHandCursor);
-        more->setFixedWidth(180);
-        more->hide();
-        tabLayout->addWidget(more, 0, Qt::AlignHCenter);
-        m_moreButtons.append(more);
-        m_tabs->addTab(tabWrap, names.at(i));
-        const int index = i;
-        connect(list, &VideoListView::videoActivated, this,
-                [this, index](int item, const VideoInfo &) {
-                    emit openRequested(m_videos.at(index), item);
-                });
-        connect(more, &QPushButton::clicked, this, [this, index]() {
-            m_yt->channelTabVideos(m_channelId, m_tabKeys.at(index), 25,
-                                   m_videos.at(index).size());
-            m_moreButtons.at(index)->setEnabled(false);
+        connect(more, &QPushButton::clicked, this, [this, i]() {
+            m_yt->channelTabVideos(m_channelId, m_tabKeys.at(i), kTabPage,
+                                   m_videos.at(i).size());
+            m_moreButtons.at(i)->setEnabled(false);
         });
     }
-    root->addWidget(m_tabs, 1);
 
     connect(m_yt, &Yt::channelInfoReady, this, &ChannelPage::onChannelInfo);
     connect(m_yt, &Yt::channelTabVideosFinished, this,
             &ChannelPage::onTabVideos);
-    // Carga perezosa: la pestaña que el usuario abre se pide en ese momento.
-    connect(m_tabs, &QTabWidget::currentChanged, this,
-            [this](int index) { loadTab(index); });
     connect(m_thumbs, &ThumbnailCache::ready, this,
             &ChannelPage::onAvatarReady);
     connect(m_subscribeBtn, &QPushButton::clicked, this, [this]() {
@@ -159,6 +256,12 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
         }
         updateSubscribeButton(!subscribed);
     });
+    connect(m_shareBtn, &QPushButton::clicked, this, [this]() {
+        if (m_channelId.isEmpty())
+            return;
+        QGuiApplication::clipboard()->setText(
+            QStringLiteral("https://www.youtube.com/channel/%1").arg(m_channelId));
+    });
 }
 
 void ChannelPage::openChannel(const QString &channelId)
@@ -169,14 +272,16 @@ void ChannelPage::openChannel(const QString &channelId)
     m_avatarUrl.clear();
     m_title->setText(QStringLiteral("Cargando canal…"));
     m_meta->clear();
-    m_description->clear();
+    m_description->hide();
+    m_description->setMaximumHeight(QWIDGETSIZE_MAX);
     // Nueva descripción: siempre arranca colapsada con el tope aplicado
     // (si el texto no cabe se re-evalúa en onChannelInfo).
     m_descExpanded = false;
-    m_descMore->setText(QStringLiteral("Mostrar más"));
-    m_descMore->hide();
-    m_avatar->setPixmap(nt::icon(nt::Icon::User, nt::kMuted, 40)
-                            .pixmap(64, 64));
+    m_descCollapsible = false;
+    m_descToggle->hide();
+    if (m_descFade)
+        m_descFade->hide();
+    setAvatar(QPixmap());
     updateSubscribeButton(m_subs->isSubscribed(channelId));
     for (auto *list : std::as_const(m_lists))
         list->clearVideos();
@@ -186,11 +291,13 @@ void ChannelPage::openChannel(const QString &channelId)
         button->setVisible(false);
         button->setEnabled(true);
     }
+    for (auto *empty : std::as_const(m_emptyLabels))
+        empty->hide();
     m_yt->channelInfo(channelId);
     // Carga perezosa: solo se piden los vídeos al abrir; shorts/directos al
     // entrar en su pestaña (cada respuesta pesa ~400-500 KB).
     m_tabLoaded.fill(0);
-    m_tabs->setCurrentIndex(0);
+    showTab(0);
     loadTab(0);
 }
 
@@ -198,14 +305,44 @@ void ChannelPage::loadTab(int index)
 {
     if (index < 0 || index >= m_tabKeys.size() || m_channelId.isEmpty())
         return;
-    if (index < m_tabLoaded.size() && m_tabLoaded.at(index))
+    if (m_tabLoaded.at(index))
         return;
-    if (index < m_tabLoaded.size())
-        m_tabLoaded[index] = 1;
+    m_tabLoaded[index] = 1;
     NT_DEBUG("E2E channel loadTab id=%s tab=%s\n",
              m_channelId.toUtf8().constData(),
              m_tabKeys.at(index).toUtf8().constData());
-    m_yt->channelTabVideos(m_channelId, m_tabKeys.at(index), 25);
+    m_yt->channelTabVideos(m_channelId, m_tabKeys.at(index), kTabPage);
+}
+
+void ChannelPage::showTab(int index)
+{
+    if (index < 0 || index >= m_pages.size())
+        return;
+    m_currentTab = index;
+    for (int i = 0; i < m_pages.size(); ++i) {
+        m_pages.at(i)->setVisible(i == index);
+        auto *btn = m_tabButtons.at(i);
+        btn->setProperty("selected", i == index);
+        // La propiedad elige el selector del QSS, así que hay que re-polish:
+        // sin esto Qt no vuelve a resolver las reglas y el botón se queda con
+        // el aspecto del estado anterior.
+        btn->style()->unpolish(btn);
+        btn->style()->polish(btn);
+        btn->update();
+    }
+    updateTabCount();
+}
+
+void ChannelPage::updateTabCount()
+{
+    const int n = m_currentTab < m_videos.size() ? m_videos.at(m_currentTab).size()
+                                                 : 0;
+    // Con 0 vídeos no se pone nada: el estado vacío de la pestaña ya lo dice (y
+    // el contador se conoce al vuelo, así que solo en un canal de verdad se ve
+    // "1 vídeo").
+    m_tabCount->setVisible(n > 0);
+    m_tabCount->setText(n == 1 ? QStringLiteral("1 vídeo")
+                                : QStringLiteral("%1 vídeos").arg(n));
 }
 
 void ChannelPage::onChannelInfo(const ChannelInfo &channel)
@@ -214,31 +351,38 @@ void ChannelPage::onChannelInfo(const ChannelInfo &channel)
         return;
     m_channelName = channel.name;
     m_title->setText(channel.name);
+    // Suscriptores con el mismo formato compacto que usa el resto de la app
+    // (compactCount): antes salía el número en crudo ("1234567 suscriptores").
     m_meta->setText(channel.subscriberCount > 0
-                        ? QStringLiteral("%1 suscriptores").arg(channel.subscriberCount)
+                        ? QStringLiteral("%1 suscriptores")
+                              .arg(compactCount(channel.subscriberCount))
                         : QString());
-    m_description->setText(channel.description);
-    // Tras el layout: aplicar el tope vertical (165 px) y medir la caja en
-    // E2E (solo con NEVERTUBE_DEBUG=1). El retardo deja asentar la geometría.
+    if (channel.description.isEmpty()) {
+        m_description->setText(QString());
+        m_description->hide();
+    } else {
+        m_description->setText(channel.description);
+        m_description->show();
+    }
+    // Tras el layout: aplicar el tope de líneas y medir la caja en E2E (solo
+    // con NEVERTUBE_DEBUG=1). El retardo deja asentar la geometría.
     QTimer::singleShot(120, this, [this]() {
         if (m_channelId.isEmpty())
             return;
         applyDescriptionCap();
-        NT_DEBUG("E2E canal descripcion caja: size=%dx%d global=(%d,%d) "
-                 "local=(%d,%d) page=%dx%d fullH=%d btn=%d\n",
-                 m_description->width(), m_description->height(),
-                 m_description->mapToGlobal(QPoint(0, 0)).x(),
-                 m_description->mapToGlobal(QPoint(0, 0)).y(),
-                 m_description->x(), m_description->y(), width(), height(),
-                 m_description->heightForWidth(m_description->width()),
-                 m_descMore->isVisible() ? 1 : 0);
+        NT_DEBUG("E2E canal descripcion caja: size=%dx%d page=%dx%d fullH=%d "
+                 "btn=%d card=%dx%d\n",
+                 m_description->width(), m_description->height(), width(),
+                 height(), m_description->heightForWidth(m_description->width()),
+                 m_descToggle->isVisible() ? 1 : 0, m_card->width(),
+                 m_card->height());
     });
     m_avatarKey = QStringLiteral("ch_%1").arg(channel.id);
     if (!channel.avatarUrl.isEmpty())
         m_avatarUrl = channel.avatarUrl;
     const QPixmap cached = m_thumbs->pixmap(m_avatarKey);
     if (!cached.isNull()) {
-        m_avatar->setPixmap(cached);
+        setAvatar(cached);
     } else if (!channel.avatarUrl.isEmpty()) {
         m_thumbs->requestChannelAvatar(channel.id, channel.avatarUrl);
     }
@@ -252,7 +396,15 @@ void ChannelPage::onAvatarReady(const QString &key)
         return;
     const QPixmap pm = m_thumbs->pixmap(key);
     if (!pm.isNull())
-        m_avatar->setPixmap(pm);
+        setAvatar(pm);
+}
+
+void ChannelPage::setAvatar(const QPixmap &pm)
+{
+    m_avatar->setPixmap(pm.isNull()
+                            ? nt::icon(nt::Icon::User, nt::kMuted, 40)
+                                  .pixmap(kAvatar, kAvatar)
+                            : nt::circularAvatar(pm, kAvatar));
 }
 
 void ChannelPage::updateSubscribeButton(bool subscribed)
@@ -277,6 +429,9 @@ void ChannelPage::updateSubscribeButton(bool subscribed)
 void ChannelPage::applyAccent()
 {
     updateSubscribeButton(m_subs->isSubscribed(m_channelId));
+    // El chip de Compartir pinta su icono a mano, y los iconos llevan el color
+    // embebido: hay que rehacerlos con el acento/cTexto vigente.
+    m_shareBtn->setIcon(nt::icon(nt::Icon::Share, nt::kText, 18));
 }
 
 void ChannelPage::onTabVideos(const QString &channelId, const QString &tab,
@@ -296,53 +451,53 @@ void ChannelPage::onTabVideos(const QString &channelId, const QString &tab,
     }
     if (m_videos.at(index).isEmpty()) {
         m_videos[index] = loaded;
-        m_lists[index]->showVideos(loaded, VideoListView::ListMode);
+        m_lists.at(index)->showVideos(loaded, VideoListView::ListMode);
     } else {
         m_videos[index] += loaded;
-        m_lists[index]->appendVideos(loaded);
+        m_lists.at(index)->appendVideos(loaded);
     }
-    m_moreButtons.at(index)->setVisible(videos.size() >= 25);
+    // Respuesta vacía = pestaña sin vídeos: sale el estado vacío y la lista se
+    // oculta (si no, los dos se partirían la caja con los dos stretch).
+    const bool empty = m_videos.at(index).isEmpty();
+    m_lists.at(index)->setVisible(!empty);
+    m_emptyLabels.at(index)->setVisible(empty);
+    m_moreButtons.at(index)->setVisible(!empty && videos.size() >= kTabPage);
+    updateTabCount();
 }
 
-// Tope vertical de la descripción: si el texto completo supera
-// kDescMaxHeight se recorta a ese alto y el botón "Mostrar más" permite
-// desplegarla a altura natural (y volver a colapsar con "Mostrar menos").
-// Se re-evalúa también en el resize (el re-wrap por ancho cambia la altura
-// necesaria) y al cambiar de canal.
+// Tope de la descripción: si el texto completo no cabe en kDescLines líneas se
+// recorta a ese alto, aparece "…más" y un degradado sobre la última línea. Con
+// el texto desplegado pasa a "…menos". Se re-evalúa también en el resize (el
+// re-wrap por ancho cambia elalto necesario) y al cambiar de canal.
 void ChannelPage::applyDescriptionCap()
 {
+    if (!m_description)
+        return;
     if (m_description->text().isEmpty()) {
-        m_descMore->hide();
-        m_description->setMinimumHeight(0);
-        m_description->setMaximumHeight(QWIDGETSIZE_MAX);
+        m_descToggle->hide();
+        if (m_descFade)
+            m_descFade->hide();
+        m_descCollapsible = false;
         return;
     }
-    if (m_descExpanded) {
-        // Desplegada: altura natural, el botón pasa a "Mostrar menos".
-        m_descMore->show();
-        m_descMore->setText(QStringLiteral("Mostrar menos"));
-        m_description->setMinimumHeight(0);
-        m_description->setMaximumHeight(QWIDGETSIZE_MAX);
-        return;
-    }
-    const int fullHeight =
-        m_description->heightForWidth(m_description->width());
-    const qreal overflow = fullHeight - kDescMaxHeight;
-    if (overflow <= kDescSlack) {
-        // Cabe dentro del tope (o casi: un exceso menor que el margen se
-        // muestra entero sin desplegable; ver kDescSlack).
-        m_descMore->hide();
-        m_description->setMinimumHeight(0);
-        m_description->setMaximumHeight(QWIDGETSIZE_MAX);
+    m_description->setMaximumHeight(QWIDGETSIZE_MAX);
+    const int w = m_description->width();
+    const int lineH = m_description->fontMetrics().lineSpacing();
+    const int maxH = lineH * kDescLines;
+    const int fullH = (w > 0 && lineH > 0) ? m_description->heightForWidth(w) : 0;
+    m_descCollapsible = fullH > maxH + lineH / 2;
+    if (!m_descCollapsible) {
+        m_descToggle->hide();
+        if (m_descFade)
+            m_descFade->hide();
     } else {
-        // Recortada a kDescMaxHeight con "Mostrar más" para ver el texto
-        // completo. El texto sobrante queda visualmente fuera de la caja
-        // (el QLabel con wordWrap recorta el pintado al rect del widget).
-        m_descMore->show();
-        m_descMore->setText(QStringLiteral("Mostrar más"));
-        m_description->setMinimumHeight(0);
-        m_description->setMaximumHeight(kDescMaxHeight);
+        m_descToggle->setText(m_descExpanded ? QStringLiteral("…menos")
+                                             : QStringLiteral("…más"));
+        m_descToggle->show();
+        if (!m_descExpanded)
+            m_description->setMaximumHeight(maxH);
     }
+    positionDescFade();
 }
 
 void ChannelPage::toggleDescription()
@@ -351,6 +506,25 @@ void ChannelPage::toggleDescription()
         return;
     m_descExpanded = !m_descExpanded;
     applyDescriptionCap();
+}
+
+// El degradado es un hijo de la caja FUERA del layout (como en el Player), así
+// que hay que colocarlo a mano sobre las últimas líneas del texto.
+void ChannelPage::positionDescFade()
+{
+    if (!m_descFade || !m_card)
+        return;
+    if (!(m_descCollapsible && !m_descExpanded && m_card->isVisible())) {
+        m_descFade->hide();
+        return;
+    }
+    const int fh = 26;
+    m_descFade->setGeometry(1, qMax(0, m_card->height() - fh - 1),
+                            qMax(0, m_card->width() - 2), fh);
+    m_descFade->show();
+    m_descFade->raise();
+    if (m_descToggle)
+        m_descToggle->raise();
 }
 
 void ChannelPage::resizeEvent(QResizeEvent *event)

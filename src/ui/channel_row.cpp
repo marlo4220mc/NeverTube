@@ -17,24 +17,8 @@
 
 namespace {
 
-QPixmap circularAvatar(const QPixmap &pm, int size)
-{
-    if (pm.isNull())
-        return QPixmap();
-    const QPixmap scaled = pm.scaled(size, size, Qt::KeepAspectRatioByExpanding,
-                                     Qt::SmoothTransformation);
-    const QPixmap base = scaled.copy((scaled.width() - size) / 2,
-                                     (scaled.height() - size) / 2, size, size);
-    QPixmap out(size, size);
-    out.fill(Qt::transparent);
-    QPainter p(&out);
-    p.setRenderHint(QPainter::Antialiasing);
-    QPainterPath clip;
-    clip.addEllipse(0, 0, size, size);
-    p.setClipPath(clip);
-    p.drawPixmap(0, 0, base);
-    return out;
-}
+// El recorte circular del avatar vive en nt::circularAvatar (src/ui/icons.*):
+// la ficha de canal y esta tarjeta lo comparten, así que son el mismo código.
 
 QPixmap placeholderAvatar(int size)
 {
@@ -140,7 +124,7 @@ void ChannelRow::setAvatarUrl(const QString &url)
         return;
     const QPixmap cached = m_thumbs->pixmap(m_avatarKey);
     if (!cached.isNull()) {
-        m_avatar->setPixmap(circularAvatar(cached, kChannelRowAvatar));
+        m_avatar->setPixmap(nt::circularAvatar(cached, kChannelRowAvatar));
         return;
     }
     m_thumbs->requestChannelAvatar(m_channelId, url);
@@ -172,7 +156,7 @@ void ChannelRow::onThumbReady(const QString &key)
         return;
     const QPixmap pm = m_thumbs->pixmap(key);
     if (!pm.isNull())
-        m_avatar->setPixmap(circularAvatar(pm, kChannelRowAvatar));
+        m_avatar->setPixmap(nt::circularAvatar(pm, kChannelRowAvatar));
 }
 
 void ChannelRow::paintEvent(QPaintEvent *event)

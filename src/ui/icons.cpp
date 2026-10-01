@@ -455,4 +455,23 @@ QIcon icon(Icon kind, const QColor &color, int size)
     return QIcon(pm);
 }
 
+QPixmap circularAvatar(const QPixmap &src, int size)
+{
+    if (src.isNull() || size <= 0)
+        return QPixmap();
+    const QPixmap scaled = src.scaled(size, size, Qt::KeepAspectRatioByExpanding,
+                                     Qt::SmoothTransformation);
+    const QPixmap base = scaled.copy((scaled.width() - size) / 2,
+                                     (scaled.height() - size) / 2, size, size);
+    QPixmap out(size, size);
+    out.fill(Qt::transparent);
+    QPainter p(&out);
+    p.setRenderHint(QPainter::Antialiasing);
+    QPainterPath clip;
+    clip.addEllipse(0, 0, size, size);
+    p.setClipPath(clip);
+    p.drawPixmap(0, 0, base);
+    return out;
+}
+
 } // namespace nt

@@ -280,20 +280,11 @@ private:
 namespace {
 
 // Avatar recortado en círculo para la fila del canal del reproductor.
-QPixmap circularAvatar(const QPixmap &src, int size)
-{
-    QPixmap out(size, size);
-    out.fill(Qt::transparent);
-    QPainter p(&out);
-    p.setRenderHint(QPainter::Antialiasing);
-    QPainterPath path;
-    path.addEllipse(0, 0, size, size);
-    p.setClipPath(path);
-    p.drawPixmap(0, 0, size, size,
-                 src.scaled(size, size, Qt::KeepAspectRatioByExpanding,
-                            Qt::SmoothTransformation));
-    return out;
-}
+// El recorte circular del avatar es nt::circularAvatar (src/ui/icons.*), el
+// mismo que usan la ficha de Canal y la tarjeta de Biblioteca/Search. Esta copia
+// además estiraba el pixmap al cuadrado (dibujo en un rect size x size de una
+// imagen escalada "KeepAspectRatioByExpanding"), así que un avatar no cuadrado
+// salía deformado; la compartida recorta el centro.
 
 // Icono del canal con gap px de separación a la derecha del círculo, para
 // que el nombre no quede pegado al avatar.
@@ -1150,7 +1141,7 @@ void WatchPage::updateChannelRow()
         m_channelAvatarKey = QStringLiteral("ch_%1").arg(v.channelId);
         const QPixmap pm = m_thumbs->pixmap(m_channelAvatarKey);
         if (!pm.isNull()) {
-            m_channelBtn->setIcon(avatarWithGap(circularAvatar(pm, 40), 40, 3));
+            m_channelBtn->setIcon(avatarWithGap(nt::circularAvatar(pm, 40), 40, 3));
         } else {
             m_channelBtn->setIcon(placeholder);
             // Pide datos del canal (nombre y avatar) si faltan.
@@ -1387,7 +1378,7 @@ void WatchPage::onAvatarReady(const QString &key)
         return;
     const QPixmap pm = m_thumbs->pixmap(key);
     if (!pm.isNull())
-        m_channelBtn->setIcon(avatarWithGap(circularAvatar(pm, 40), 40, 3));
+        m_channelBtn->setIcon(avatarWithGap(nt::circularAvatar(pm, 40), 40, 3));
 }
 
 // El backend ya conoce la duración real del medio (la de mpv o el reloj de

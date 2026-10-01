@@ -546,8 +546,46 @@ QLabel#placeholderHint { color: @MUTED@; font-size: 14px; padding: 40px; }
    #sectionTitle (16 px)"). Con un selector duplicado el QSS no avisa de nada y
    el override es mudo, asi que la regla de #sectionTitle vive en un solo sitio. */
 
-/* Avatar de la ficha de canal (64x64, radio 32) */
-QLabel#channelAvatar { border-radius: 32px; }
+/* --- Pagina Canal ---------------------------------------------------------
+   Antes era lo UNICO de la app sin estilo: las tres pestanas eran un
+   QTabWidget y no hay ninguna regla QTabWidget/QTabBar en este QSS, asi que
+   salian con el aspecto del tema del escritorio y el "pane" pintaba una columna
+   casi negra (medido #020303) por debajo de la lista, mas oscura que el fondo de
+   la pagina. Ahora las pestanas son botones dentro de una capsula con estilo
+   propio, como la navegacion inferior.
+   La ficha agrupa avatar, nombre, suscriptores, acciones y descripcion en una
+   caja (#181818), igual que #settingsCard y #watchDescCard. */
+QFrame#channelCard {
+    background: #181818; border: 1px solid @BORDER@; border-radius: 12px;
+}
+/* Nombre del canal: es el H1 de la pagina, un punto por encima de los 18 px de
+   #pageHeading porque es el dato al que se entra. */
+QLabel#channelName { font-size: 19px; font-weight: 700; color: @TEXT@; background: transparent; }
+QLabel#channelMeta { color: @METATEXT@; font-size: 12px; background: transparent; }
+QLabel#channelDesc { color: @METATEXT@; font-size: 12px; background: transparent; }
+/* Avatar de la ficha (80x80, radio 40). El circulo real lo hace
+   nt::circularAvatar (recorta el pixmap): este radio solo redondea el fondo. */
+QLabel#channelAvatar { border-radius: 40px; background: transparent; }
+/* Capsula de las pestanas: el fondo es el de la ficha, con un pelo de borde
+   igual que el resto de superficies. */
+QWidget#channelTabs { background: #181818; border: 1px solid @BORDER@; border-radius: 9px; }
+QPushButton#tabBtn {
+    background: transparent; border: none; border-radius: 6px;
+    padding: 6px 16px; color: @MUTED@; font-size: 12px; font-weight: 600;
+}
+/* El foco NO se marca: son pestanas, no botones de accion, y el aro del acento
+   al pulsarlas se leeria como un error (mismo criterio que #iconBtn). */
+QPushButton#tabBtn:focus { border-color: transparent; }
+QPushButton#tabBtn:hover { background: #1F1F1F; color: @TEXT@; }
+/* La seleccionada lleva el acento en el texto, como la nav inferior. El fondo no
+   puede distinguirse de la capsula: los dos son #181818. */
+QPushButton#tabBtn[selected="true"] { color: @ACCENT_HOVER@; }
+/* Contador de videos de la pestana activa: misma pastilla que #queueCount. */
+QLabel#tabCount {
+    color: @METATEXT@; font-size: 11px;
+    background: #1F1F1F; border: 1px solid @BORDER@; border-radius: 9px;
+    padding: 1px 8px;
+}
 
 /* Chip de acento plano: el boton "Ir a Buscar" del estado vacio del Home.
    Se migra tal cual estaba, SIN :hover ni :pressed a proposito: el QSS global
@@ -777,6 +815,31 @@ bool themeSelfTest()
                                       "estado (marco en: %2)")
                            .arg(sel,
                                 culpable.isEmpty() ? QStringLiteral("-") : culpable)));
+    }
+
+    // Las pestanas del canal: no pueden quedarse sin marcar la seleccionada (el
+    // QTabWidget no tenia ninguna regla y se veia como el escritorio), y el foco
+    // no debe encender un aro de acento al pulsarlas.
+    {
+        const QString sel = QStringLiteral("QPushButton#tabBtn");
+        chk(veces.value(sel) == 1, "QPushButton#tabBtn se declara exactamente una vez");
+        const int act = qss.indexOf(sel + QStringLiteral("[selected=\"true\"]"));
+        chk(act > 0, "existe la regla de la pestana seleccionada del canal");
+        if (act > 0) {
+            const int a = qss.indexOf(QLatin1Char('{'), act);
+            const int b = qss.indexOf(QLatin1Char('}'), a);
+            chk(qss.mid(a, b - a).contains(accentHex().toLower())
+                    || qss.mid(a, b - a).contains(accentHoverHex()),
+                "la pestana seleccionada del canal lleva el acento");
+        }
+        const int foc = qss.indexOf(sel + QStringLiteral(":focus"));
+        chk(foc > 0, "las pestanas del canal anulan el :focus");
+        if (foc > 0) {
+            const int a = qss.indexOf(QLatin1Char('{'), foc);
+            const int b = qss.indexOf(QLatin1Char('}'), a);
+            chk(qss.mid(a, b - a).contains(QStringLiteral("transparent")),
+                "el :focus de las pestanas del canal no pinta marco");
+        }
     }
 
     std::fprintf(stderr, "THEME %s (%d reglas, %d selectores)\n",
