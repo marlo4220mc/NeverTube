@@ -282,6 +282,13 @@ Lo que gobierna la página:
 - **Contador de vídeos** de la pestaña activa como pastilla `#tabCount`
   (misma forma que `#queueCount`), oculto con 0 vídeos porque entonces ya sale
   el estado vacío.
+- **Estado vacío por pestaña** = `#emptyState` (la misma caja punteada de la
+  Biblioteca) con el texto de esa pestaña, y la lista se oculta a la vez. Con
+  **alto FIJO de 96 px**, y NO con stretch: medido en un QVBoxLayout de 700 px,
+  una etiqueta con stretch 0 cuyo único hermano con stretch está oculto se
+  estira a los 700 px (una caja punteada gigante); con alto fijo queda en una
+  banda de 96 px centrada verticalmente y de ancho completo (medido: y=543..638
+  de un área de 258..920, x=17..923).
 - **"Cargar más vídeos" es `#ghost` centrado** (alto 34). Era `#primary` con
   `setFixedWidth(180)`, una barra roja ancha bajo la lista; cargar más no es la
   acción principal de la página. Solo visible si la respuesta vino llena (25).

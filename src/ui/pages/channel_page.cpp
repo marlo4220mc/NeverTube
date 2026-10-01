@@ -192,13 +192,17 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
 
         // Estado vacío de la pestaña (caja punteada, el mismo #emptyState de la
         // Biblioteca). Solo se ve cuando la respuesta llegó vacía: por eso la
-        // lista se oculta a la vez, si no el stretches de los dos partiría la
-        // caja en dos.
+        // lista se oculta a la vez (los dos con stretch partirían la caja).
+        // El alto FIJO de 96 px importa: medido, una etiqueta con stretch 0 en un
+        // QVBoxLayout cuyo único elemento con stretch está oculto se estira a
+        // TODO el alto del área (700 px de caja punteada); con alto fijo queda
+        // como una banda centrada verticalmente (y=302 de 700, ancho completo).
         auto *empty = new QLabel(emptyTextFor(keys.at(i)), page);
         empty->setObjectName(QStringLiteral("emptyState"));
         empty->setAlignment(Qt::AlignCenter);
+        empty->setFixedHeight(96);
         empty->hide();
-        pageLay->addWidget(empty, 1);
+        pageLay->addWidget(empty);
 
         // Paginación: un ghost centrado. El botón era #primary de 180 px fijos
         // (una barra roja ancha bajo la lista); "cargar más" no es la acción
@@ -291,6 +295,11 @@ void ChannelPage::openChannel(const QString &channelId)
         button->setVisible(false);
         button->setEnabled(true);
     }
+    // Cada pestaña vuelve a su lista: si la anterior estaba vacía, su estado
+    // vacío había ocultado la lista y sin esto el hueco se queda en negro
+    // hasta que llegue la respuesta del canal nuevo.
+    for (auto *list : std::as_const(m_lists))
+        list->show();
     for (auto *empty : std::as_const(m_emptyLabels))
         empty->hide();
     m_yt->channelInfo(channelId);
