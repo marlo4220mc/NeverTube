@@ -235,9 +235,10 @@ la que nació el menú puede quedarse sin la fila con el popup abierto.
   página (tienen los repos y, la cola, el `PlayerController`).
 - Búsqueda, Canal y Playlist **no** tienen los repos: emiten
   `rowMenuRequested(video, pos)` y `MainWindow::showVideoRowMenu` monta el menú
-  UNA vez (mismo helper) con los suyos. "Nueva playlist" reutiliza el popup de
-  Biblioteca (`LibraryPage::createPlaylistPopupFor`), que es el único con el
-  estilo de la app.
+  UNA vez (mismo helper) con los suyos. "Nueva playlist" sale por el diálogo
+  compartido `nt::inputText`, al que entra por
+  `LibraryPage::createPlaylistForVideo(videoId)` (el nombre ya no dice "popup"
+  porque es el overlay de la app, no un popover de la página).
 - "Quitar de la cola" usa `PlayerController::removeFromQueue(index)`, que NO
   admite el índice en reproducción (dejaría la cola apuntando al siguiente con
   el estado del que se fue) y reindexa las posiciones de reanudación
@@ -865,6 +866,20 @@ Los dos últimos datos los escribe el reproductor, no la red:
 - UI, lógica y reproducción separadas. `PlayerController` (estado/cola) vs
   `PlayerWidget` (render) vs páginas (vistas).
 - Repos SQLite en `src/db/`; infraestructura reutilizable en `src/ui/`.
+- **UN solo diálogo para confirmar y UNO solo para pedir un texto**, y son
+  `nt::confirm` / `nt::inputText` (`src/ui/confirm_dialog.*`). Los dos montan
+  un overlay **hijo de la VENTANA** (`page->window()`), con velo, modal, sin
+  `QDialog` y sin ventana flotante: una ventana propia secuestra el puntero.
+  Regla dura: si aparece una acción destructiva o un campo de texto, se llama a
+  uno de los dos; no se monta un `QFrame#popupDialog` por página. Hay siete
+  sitios de confirmación (las tres de Ajustes, borrar el historial de búsquedas,
+  borrar el historial de vídeos, y eliminar playlist en Biblioteca y en su
+  página) y cinco de texto (crear playlist en Biblioteca, Historial y Player,
+  y renombrar en Biblioteca y en su página). Los popovers que quedan son
+  deliberados y **no** son diálogos: son listas con scroll (gestionar
+  suscripciones, añadir a playlist, calidad). La caja mide 400 px en
+  `nt::confirm` (el cuerpo es un párrafo que envuelve) y 340 px en
+  `nt::inputText` (un campo suelto).
 - Resolución de streams: Innertube (cliente VISIONOS, `src/yt_innertube.*`) como única vía; si falla, `Yt::resolveError`.
 - Carga de canales: Innertube `fetchChannelVideos` (browse pestaña "Vídeos"), sin carrera ni fallback externo. Un resultado con 0 vídeos de id no vacío cuenta como vacío.
 - Búsqueda, ficha de canal, pestañas y detalle: TODO por Innertube (`src/yt_innertube.*`):
