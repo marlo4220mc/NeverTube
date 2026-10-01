@@ -6,12 +6,12 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
-#include <QResizeEvent>
 #include <QScrollArea>
 #include <QVBoxLayout>
 #include <QWidget>
 
 #include "../../db/repositories.h"
+#include "../confirm_dialog.h"
 #include "../theme.h"
 
 static const char *kQualityKey = "quality";
@@ -604,7 +604,8 @@ void SettingsPage::buildUI()
                     "permanente. Úsalo solo con altavoces externos y a un "
                     "nivel cómodo. Al cerrar la app el volumen volverá a 100% "
                     "aunque lo subas más alto. ¿Continuar?").arg(val);
-                showConfirmPopup(
+                nt::confirm(
+                    this,
                     QStringLiteral("Volumen por encima del 100%"),
                     confirmText, QStringLiteral("Aceptar"),
                     [this, val, text, applyVisual]() {
@@ -697,8 +698,8 @@ void SettingsPage::buildUI()
     QPushButton *clearBtn = addActionButton(
         QStringLiteral("Limpiar caché de miniaturas"), false);
     connect(clearBtn, &QPushButton::clicked, this, [this]() {
-        showConfirmPopup(
-            QStringLiteral("Limpiar caché de miniaturas"),
+        nt::confirm(
+            this, QStringLiteral("Limpiar caché de miniaturas"),
             QStringLiteral("¿Eliminar todas las miniaturas guardadas? "
                            "Las imágenes se volverán a descargar."),
             QStringLiteral("Eliminar"), [this]() { emit clearThumbsRequested(); });
@@ -710,8 +711,8 @@ void SettingsPage::buildUI()
     QPushButton *resetBtn = addActionButton(
         QStringLiteral("Restablecer aplicación"), true);
     connect(resetBtn, &QPushButton::clicked, this, [this]() {
-        showConfirmPopup(
-            QStringLiteral("Restablecer aplicación"),
+        nt::confirm(
+            this, QStringLiteral("Restablecer aplicación"),
             QStringLiteral("Esta acción borrará la base de datos local "
                            "(historial, búsquedas, suscripciones y ajustes) "
                            "y el caché de miniaturas. No se eliminarán "
@@ -742,82 +743,13 @@ void SettingsPage::buildUI()
     // abrian huecos grandes entre REPRODUCCION/INTERFAZ/DATOS.
     scrollLay->addStretch(1);
 
-    // --- Popup flotante de confirmación (no modal) ---
-    m_confirmPopup = new QFrame(this);
-    m_confirmPopup->setObjectName(QStringLiteral("popupDialog"));
-    m_confirmPopup->setFixedWidth(380);
-    m_confirmPopup->raise();
-    m_confirmPopup->hide();
-
-    auto *pv = new QVBoxLayout(m_confirmPopup);
-    pv->setContentsMargins(18, 16, 18, 14);
-    pv->setSpacing(10);
-
-    m_confirmTitle = new QLabel(QString(), m_confirmPopup);
-    m_confirmTitle->setObjectName(QStringLiteral("popupTitle"));
-    pv->addWidget(m_confirmTitle);
-
-    m_confirmText = new QLabel(QString(), m_confirmPopup);
-    m_confirmText->setObjectName(QStringLiteral("popupText"));
-    m_confirmText->setWordWrap(true);
-    pv->addWidget(m_confirmText);
-
-    auto *prow = new QHBoxLayout;
-    prow->addStretch(1);
-    m_confirmCancel = new QPushButton(QStringLiteral("Cancelar"), m_confirmPopup);
-    m_confirmCancel->setObjectName(QStringLiteral("ghost"));
-    m_confirmCancel->setCursor(Qt::PointingHandCursor);
-    connect(m_confirmCancel, &QPushButton::clicked, this,
-            &SettingsPage::closeConfirmPopup);
-    prow->addWidget(m_confirmCancel);
-    m_confirmOk = new QPushButton(QString(), m_confirmPopup);
-    m_confirmOk->setObjectName(QStringLiteral("primary"));
-    m_confirmOk->setCursor(Qt::PointingHandCursor);
-    connect(m_confirmOk, &QPushButton::clicked, this, [this]() {
-        std::function<void()> cb = m_confirmCb;
-        closeConfirmPopup();
-        if (cb)
-            cb();
-    });
-    prow->addWidget(m_confirmOk);
-    pv->addLayout(prow);
+    // Las confirmaciones ("Volumen por encima del 100%", "Limpiar caché de
+    // miniaturas" y "Restablecer aplicación") ya no se montan aquí: son
+    // nt::confirm, el overlay modal de la app, igual que en Biblioteca,
+    // Historial, Playlist y Búsqueda. No hay que construir nada al arrancar.
 }
 
-void SettingsPage::showConfirmPopup(const QString &title, const QString &text,
-                                    const QString &acceptText,
-                                    std::function<void()> onConfirm)
-{
-    if (!m_confirmPopup)
-        return;
-    m_confirmTitle->setText(title);
-    m_confirmText->setText(text);
-    m_confirmOk->setText(acceptText);
-    m_confirmCb = std::move(onConfirm);
-    centerPopup();
-    m_confirmPopup->raise();
-    m_confirmPopup->show();
-    m_confirmOk->setFocus(Qt::OtherFocusReason);
-}
-
-void SettingsPage::closeConfirmPopup()
-{
-    if (m_confirmPopup)
-        m_confirmPopup->hide();
-}
-
-void SettingsPage::centerPopup()
-{
-    if (!m_confirmPopup)
-        return;
-    m_confirmPopup->adjustSize();
-    const int x = (width() - m_confirmPopup->width()) / 2;
-    const int y = (height() - m_confirmPopup->height()) / 2;
-    m_confirmPopup->move(qMax(0, x), qMax(0, y));
-}
-
-void SettingsPage::resizeEvent(QResizeEvent *event)
-{
-    QWidget::resizeEvent(event);
-    if (m_confirmPopup && m_confirmPopup->isVisible())
-        centerPopup();
-}
+// showConfirmPopup, closeConfirmPopup, centerPopup y el resizeEvent que
+// recentraba el popup se han ido con él: nt::confirm construye su overlay cada
+// vez que se llama y lo destruye al terminar, así que no hay nada que Recentrar
+// ni que recordar entre llamadas.

@@ -4,11 +4,9 @@
 
 #include <functional>
 
-class QFrame;
 class QMenu;
 class QPushButton;
 class QLabel;
-class QResizeEvent;
 class SettingsRepo;
 
 class SettingsPage : public QWidget
@@ -51,9 +49,6 @@ signals:
     void resetRequested();
     void redetectHwRequested();
 
-protected:
-    void resizeEvent(QResizeEvent *event) override;
-
 private:
     void buildUI();
     // Fila "etiqueta + botón de valor": el botón abre un QMenu con las
@@ -77,22 +72,14 @@ private:
         const std::function<void(const QString &,
                                   const std::function<void(const QString &)> &)>
             &confirm);
-    // Popup flotante no modal (mismo patrón que Nueva playlist), centrado en
-    // la página; no bloquea ni secuestra el puntero.
-    void showConfirmPopup(const QString &title, const QString &text,
-                          const QString &acceptText,
-                          std::function<void()> onConfirm);
-    void closeConfirmPopup();
-    void centerPopup();
+    // Confirmaciones: nt::confirm, el MISMO overlay modal de la app que usan
+    // Biblioteca, Historial, Playlist y Búsqueda. Antes esta página tenía su
+    // propio popup (380 px en vez de los 400 de nt::confirm, sin velo, sin
+    // modal y con su propia pieza de recentrado), o sea un cuarto sitio donde
+    // "confirmar antes de borrar" se veía y se comportaba de otra manera.
 
     SettingsRepo *m_settings;
     QLabel *m_codecProfileLabel = nullptr;
     // Valor persistido de "Tamaño de las miniaturas" (ver thumbSize()).
     QString m_thumbSize;
-    QFrame *m_confirmPopup = nullptr;
-    QLabel *m_confirmTitle = nullptr;
-    QLabel *m_confirmText = nullptr;
-    QPushButton *m_confirmCancel = nullptr;
-    QPushButton *m_confirmOk = nullptr;
-    std::function<void()> m_confirmCb;
 };
