@@ -9,6 +9,7 @@
 #include <QVBoxLayout>
 
 #include "../../db/repositories.h"
+#include "../confirm_dialog.h"
 #include "../icons.h"
 #include "../theme.h"
 #include "../thumbnail_cache.h"
@@ -137,8 +138,25 @@ void PlaylistPage::onRename()
 
 void PlaylistPage::onDelete()
 {
-    m_playlists->deletePlaylist(m_playlistId);
-    m_playlistId.clear();
-    reload();
-    emit backRequested();
+    // Confirmación antes de borrar la playlist entera: es lo único que queda de
+    // ella, y los vídeos sí se pueden volver a añadir uno a uno. El diálogo de la
+    // app (nt::confirm) y no QMessageBox, por el mismo motivo que el de la
+    // página Buscar. El cuerpo lleva el nombre de la playlist y su recuento, que
+    // es lo que dice qué se va a perder.
+    if (m_playlistId.isEmpty())
+        return;
+    const QString name = m_title->text().trimmed();
+    const QString where = name.isEmpty()
+        ? QStringLiteral("esta playlist")
+        : QStringLiteral("«%1»").arg(name);
+    nt::confirm(this, QStringLiteral("Eliminar playlist"),
+                QStringLiteral("Se eliminará %1 con sus %2 vídeos. Esta acción "
+                               "no se puede deshacer.")
+                    .arg(where, QStringLiteral("%1").arg(m_videos.size())),
+                QStringLiteral("Eliminar"), [this]() {
+                    m_playlists->deletePlaylist(m_playlistId);
+                    m_playlistId.clear();
+                    reload();
+                    emit backRequested();
+                });
 }

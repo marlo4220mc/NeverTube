@@ -14,6 +14,7 @@
 #include <QVBoxLayout>
 
 #include "../../db/repositories.h"
+#include "../confirm_dialog.h"
 #include "../icons.h"
 #include "../row_menu.h"
 #include "../theme.h"
@@ -49,10 +50,23 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
     auto *clearAllBtn = new QPushButton(QStringLiteral("Borrar todo"), this);
     clearAllBtn->setObjectName(QStringLiteral("ghost"));
     clearAllBtn->setIcon(nt::icon(nt::Icon::Clear, nt::kText, 15));
+    // Confirmación antes de tirar el historial entero: son hasta kMaxHistory
+    // (200) vídeos y no hay vuelta atrás. El diálogo de la app (nt::confirm) y no
+    // QMessageBox, por el mismo motivo que el de la página Buscar. El botón
+    // decía "Borrar todo" y el diálogo "historial de vídeos": aquí ya hay dos
+    // historiales en juego, así que el cuerpo los distingue.
     connect(clearAllBtn, &QPushButton::clicked, this, [this]() {
-        m_history->clear();
-        emit historyChanged();
-        reload();
+        if (m_videos.isEmpty())
+            return;
+        nt::confirm(this, QStringLiteral("Borrar historial de vídeos"),
+                    QStringLiteral("Se borrarán los %1 vídeos de tu historial. "
+                                   "Esta acción no se puede deshacer.")
+                        .arg(m_videos.size()),
+                    QStringLiteral("Borrar"), [this]() {
+                        m_history->clear();
+                        emit historyChanged();
+                        reload();
+                    });
     });
     top->addWidget(clearAllBtn);
     root->addLayout(top);

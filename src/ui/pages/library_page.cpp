@@ -30,6 +30,7 @@
 #include "../../db/repositories.h"
 #include "../../yt.h"
 #include "../channel_row.h"
+#include "../confirm_dialog.h"
 #include "../format.h"
 #include "../icons.h"
 #include "../row_menu.h"
@@ -864,9 +865,24 @@ void LibraryPage::rebuildPlaylists()
         auto *menu = new QMenu(row);
         addMenuAction(menu, QStringLiteral("Renombrar"),
                       [this, p]() { openRenamePopup(p); });
-        addMenuAction(menu, QStringLiteral("Eliminar"), [this, p]() {
-            m_playlists->deletePlaylist(p.id);
-            rebuildPlaylists();
+        // Misma confirmación que el botón "Eliminar" de la página Playlist, y el
+        // motivo es el mismo: la playlist desaparece entera y no hay vuelta atrás.
+        // No hace falta un QTimer::singleShot(0) aquí: addMenuAction ya lo hace,
+        // para que la lista de la que nació el menú no se quede sin la fila con
+        // el diálogo abierto.
+        addMenuAction(menu, QStringLiteral("Eliminar"),
+                      [this, p, n = videos.size()]() {
+            const QString where = p.title.trimmed().isEmpty()
+                ? QStringLiteral("esta playlist")
+                : QStringLiteral("«%1»").arg(p.title.trimmed());
+            nt::confirm(this, QStringLiteral("Eliminar playlist"),
+                        QStringLiteral("Se eliminará %1 con sus %2 vídeos. Esta "
+                                       "acción no se puede deshacer.")
+                            .arg(where, QStringLiteral("%1").arg(n)),
+                        QStringLiteral("Eliminar"), [this, p]() {
+                            m_playlists->deletePlaylist(p.id);
+                            rebuildPlaylists();
+                        });
         });
         row->setAction(makeMoreButton(menu, row));
         row->setActivate([this, p]() { emit playlistRequested(p.id, p.title); });
