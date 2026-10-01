@@ -2418,17 +2418,22 @@ QString relativeToIso(const QString &text)
 {
     const QString t = text.trimmed().toLower();
     QStringList parts = t.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-    if (parts.size() < 3)
+    if (parts.size() < 2)
         return QString();
     QString countText;
     QString unit;
-    if (parts.at(0) == QLatin1String("hace")) {         // "hace X unidad"
-        countText = parts.at(1);
-        unit = parts.at(2);
-    } else if (parts.at(1) == QLatin1String("hace")) {  // "X hace"
-        countText = parts.at(0);
-        unit = parts.at(2);
-    } else if (parts.at(2) == QLatin1String("ago")) {   // "X unidad ago"
+    // "hace" puede ir en cualquier posición por el prefijo del texto: "hace 3
+    // días", "Emitido hace 6 horas", "Emitió en directo hace 2 días",
+    // "Estrenado hace 1 semana". Se busca el "hace" y se toman las dos palabras
+    // siguientes. (Antes se asumía "hace" en cabeza o en segunda posición con
+    // la cuenta delante, y con "Emitido hace 6 horas" tomaba "Emitido" como
+    // número: los directos y estrenos se quedaban sin fecha.)
+    const int hi = parts.indexOf(QLatin1String("hace"));
+    if (hi >= 0 && hi + 2 < parts.size()) {
+        countText = parts.at(hi + 1);
+        unit = parts.at(hi + 2);
+    } else if (parts.size() >= 3
+               && parts.last() == QLatin1String("ago")) { // "2 months ago"
         countText = parts.at(0);
         unit = parts.at(1);
     } else {
@@ -3056,6 +3061,12 @@ void Innertube::parseVideoDetail(const QJsonObject &root, VideoInfo *video,
             homeTextOf(vm.value(QStringLiteral("viewCountText"))));
         video->publishedAt = relativeToIso(
             homeTextOf(vm.value(QStringLiteral("dateText"))));
+        // Si dateText no da una fecha relativa, se prueba publishedTimeText
+        // ("Emitió en directo hace 6 horas").
+        if (video->publishedAt.isEmpty()) {
+            video->publishedAt = relativeToIso(homeTextOf(
+                vm.value(QStringLiteral("publishedTimeText"))));
+        }
         const QJsonObject owner = vm.value(QStringLiteral("owner")).toObject()
                                       .value(QStringLiteral("videoOwnerRenderer"))
                                       .toObject();
