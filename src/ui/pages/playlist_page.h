@@ -33,7 +33,7 @@ signals:
 
 private:
     void reload();
-    void onRemoveSelected();
+    void onRemoveMarked();
     void onRename();
     void onDelete();
 

@@ -78,13 +78,20 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
     });
     head->addWidget(playBtn, 0, Qt::AlignVCenter);
 
-    m_removeBtn = new QPushButton(QStringLiteral("Quitar seleccionado"), m_card);
+    // El botón quita la fila MARCADA, no una "seleccionada": la lista es
+    // NoSelection y el único estado es la fila activa (m_currentRow, la del
+    // último clic, que además es la que se está reproduciendo). Decir
+    // "seleccionado" prometía algo que no existe, así que el texto dice lo que
+    // hace. Sigue empezando deshabilitado: sin fila marcada no hay nada que
+    // quitar, y con el texto corto el botón no compite con "Reproducir".
+    m_removeBtn = new QPushButton(QStringLiteral("Quitar"), m_card);
     m_removeBtn->setObjectName(QStringLiteral("ghost"));
     m_removeBtn->setCursor(Qt::PointingHandCursor);
     m_removeBtn->setFixedHeight(38);
     m_removeBtn->setEnabled(false);
+    m_removeBtn->setToolTip(QStringLiteral("Quitar de la playlist el vídeo marcado"));
     connect(m_removeBtn, &QPushButton::clicked, this,
-            &PlaylistPage::onRemoveSelected);
+            &PlaylistPage::onRemoveMarked);
     head->addWidget(m_removeBtn, 0, Qt::AlignVCenter);
 
     m_renameBtn = new QPushButton(QStringLiteral("Renombrar"), m_card);
@@ -179,7 +186,10 @@ void PlaylistPage::reload()
     m_list->setVisible(!m_videos.isEmpty());
 }
 
-void PlaylistPage::onRemoveSelected()
+// Quita de la playlist la fila MARCADA (currentRow, la del último clic). La
+// lista es NoSelection: no hay selección múltiple, así que esto quita UN vídeo,
+// el que el botón muestra marcado con el borde de acento.
+void PlaylistPage::onRemoveMarked()
 {
     const int row = m_list->currentRow();
     if (row < 0 || row >= m_videos.size())
