@@ -10,6 +10,7 @@ class VideoCacheRepo;
 class VideoListView;
 class ThumbnailCache;
 
+class QFrame;
 class QLabel;
 class QPushButton;
 
@@ -40,6 +41,7 @@ private:
     VideoCacheRepo *m_cache;
     ThumbnailCache *m_thumbs;
     QString m_playlistId;
+    QFrame *m_card = nullptr;
     QLabel *m_title = nullptr;
     QLabel *m_meta = nullptr;
     VideoListView *m_list = nullptr;

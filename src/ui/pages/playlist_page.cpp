@@ -1,5 +1,6 @@
 #include "playlist_page.h"
 
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
@@ -29,53 +30,81 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
     auto *top = new QHBoxLayout;
     auto *back = new QPushButton(QStringLiteral("Volver"), this);
     back->setObjectName(QStringLiteral("ghost"));
+    back->setCursor(Qt::PointingHandCursor);
     connect(back, &QPushButton::clicked, this,
             &PlaylistPage::backRequested);
     top->addWidget(back);
     top->addStretch(1);
     root->addLayout(top);
 
-    m_title = new QLabel(this);
-    m_title->setObjectName(QStringLiteral("sectionTitle"));
-    root->addWidget(m_title);
+    // --- Ficha de la playlist ----------------------------------------------
+    // La MISMA caja que la ficha del canal (#channelCard, #channelName,
+    // #channelMeta): el nombre y el recuento en una columna, las cuatro
+    // acciones a la derecha. Antes iba todo suelto sobre el fondo de la página,
+    // en tres filas (título, meta, acciones), y la única caja de la superficie
+    // era la lista, así que la cabecera no se leía como una ficha.
+    // Los tokens son los mismos a propósito: es una sola forma para las dos
+    // superficies de detalle, no dos cosas parecidas.
+    m_card = new QFrame(this);
+    m_card->setObjectName(QStringLiteral("channelCard"));
+    m_card->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    auto *cardLay = new QVBoxLayout(m_card);
+    cardLay->setContentsMargins(16, 14, 16, 14);
 
-    m_meta = new QLabel(this);
-    m_meta->setObjectName(QStringLiteral("sectionSub"));
-    root->addWidget(m_meta);
+    auto *head = new QHBoxLayout;
+    head->setSpacing(14);
 
-    auto *actions = new QHBoxLayout;
-    auto *playBtn = new QPushButton(QStringLiteral("Reproducir"), this);
+    auto *titleCol = new QVBoxLayout;
+    titleCol->setContentsMargins(0, 0, 0, 0);
+    titleCol->setSpacing(3);
+    m_title = new QLabel(QStringLiteral("Playlist"), m_card);
+    m_title->setObjectName(QStringLiteral("channelName"));
+    m_title->setWordWrap(true);
+    titleCol->addWidget(m_title);
+    m_meta = new QLabel(m_card);
+    m_meta->setObjectName(QStringLiteral("channelMeta"));
+    titleCol->addWidget(m_meta);
+    head->addLayout(titleCol, 1);
+
+    // Reproducir es la acción principal de la página (#primary) y las otras tres
+    // son de gestión de la lista, no de reproducción: por eso van como ghosts
+    // al lado y no como cuatro botones del mismo peso.
+    auto *playBtn = new QPushButton(QStringLiteral("Reproducir"), m_card);
     playBtn->setObjectName(QStringLiteral("primary"));
     playBtn->setCursor(Qt::PointingHandCursor);
+    playBtn->setFixedHeight(38);
     connect(playBtn, &QPushButton::clicked, this, [this]() {
         if (!m_videos.isEmpty())
             emit openRequested(m_videos, 0);
     });
-    actions->addWidget(playBtn);
+    head->addWidget(playBtn, 0, Qt::AlignVCenter);
 
-    m_removeBtn = new QPushButton(QStringLiteral("Quitar seleccionado"), this);
+    m_removeBtn = new QPushButton(QStringLiteral("Quitar seleccionado"), m_card);
     m_removeBtn->setObjectName(QStringLiteral("ghost"));
     m_removeBtn->setCursor(Qt::PointingHandCursor);
+    m_removeBtn->setFixedHeight(38);
     m_removeBtn->setEnabled(false);
     connect(m_removeBtn, &QPushButton::clicked, this,
             &PlaylistPage::onRemoveSelected);
-    actions->addWidget(m_removeBtn);
+    head->addWidget(m_removeBtn, 0, Qt::AlignVCenter);
 
-    m_renameBtn = new QPushButton(QStringLiteral("Renombrar"), this);
+    m_renameBtn = new QPushButton(QStringLiteral("Renombrar"), m_card);
     m_renameBtn->setObjectName(QStringLiteral("ghost"));
     m_renameBtn->setCursor(Qt::PointingHandCursor);
+    m_renameBtn->setFixedHeight(38);
     connect(m_renameBtn, &QPushButton::clicked, this, &PlaylistPage::onRename);
-    actions->addWidget(m_renameBtn);
+    head->addWidget(m_renameBtn, 0, Qt::AlignVCenter);
 
-    m_deleteBtn = new QPushButton(QStringLiteral("Eliminar"), this);
+    m_deleteBtn = new QPushButton(QStringLiteral("Eliminar"), m_card);
     m_deleteBtn->setObjectName(QStringLiteral("ghost"));
     m_deleteBtn->setCursor(Qt::PointingHandCursor);
+    m_deleteBtn->setFixedHeight(38);
     connect(m_deleteBtn, &QPushButton::clicked, this,
             &PlaylistPage::onDelete);
-    actions->addWidget(m_deleteBtn);
+    head->addWidget(m_deleteBtn, 0, Qt::AlignVCenter);
 
-    actions->addStretch(1);
-    root->addLayout(actions);
+    cardLay->addLayout(head);
+    root->addWidget(m_card);
 
     m_list = new VideoListView(m_thumbs, this);
     connect(m_list, &VideoListView::videoActivated, this,
