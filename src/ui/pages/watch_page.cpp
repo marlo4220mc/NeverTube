@@ -1465,6 +1465,10 @@ void WatchPage::onDetailReady(const VideoInfo &video, const QString &desc,
     }
     meta << QStringLiteral("%1 me gusta").arg(likes);
     m_meta->setText(meta.join(QStringLiteral("  •  ")));
+    // El detalle acaba de rellenar lo que faltaba en el ítem de la cola (canal,
+    // id, visitas, fecha) vía applyCurrentDetail: se repinta la lista para que
+    // la fila del vídeo en reproducción muestre ya los tres campos.
+    updateQueue();
     // El videoMetadataRenderer del /next NO trae duración. Como el upsert es
     // INSERT OR REPLACE, guardarlo tal cual pondría duration=0 y borraría la
     // duración real que ya cacheó onDurationKnown(). "Continuar viendo" filtra

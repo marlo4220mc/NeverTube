@@ -356,6 +356,13 @@ void PlayerController::applyCurrentDetail(const VideoInfo &detail)
         cur.viewCount = detail.viewCount;
         changed = true;
     }
+    // La fecha del detalle (/next dateText) también se aplica. Faltaba: el
+    // item de la cola quedaba sin fecha aunque el detalle la trajera, y su fila
+    // de "A continuación" (y la meta de la página) salían sin ella.
+    if (cur.publishedAt.isEmpty() && !detail.publishedAt.isEmpty()) {
+        cur.publishedAt = detail.publishedAt;
+        changed = true;
+    }
     if (changed)
         emit metadataChanged();
 }
