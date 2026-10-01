@@ -713,9 +713,41 @@ void SearchPage::showHistory()
         return;
     }
     m_historyBox->show();
-    auto *hTitle = new QLabel(QStringLiteral("Búsquedas recientes"), this);
+    // Cabecera de la sección: título a la izquierda y la acción a la DERECHA, en
+    // la misma fila. Es donde va porque las dos cosas que se probaron fallaron:
+    //
+    //  - #ghost centrado al pie de la lista: las filas no tienen caja (el QSS las
+    //    pone con `background: transparent`), así que la cápsula era lo único
+    //    enmarcado del bloque y se leía como un control suelto de la página.
+    //    Medido: sus bordes ocupaban x=709..924 con las filas en x=22..157.
+    //  - #sectionLink al pie, alineado a la izquierda: bien colocado pero
+    //    invisible. Es @MUTED@ a 12 px, o sea el elemento más apagado de la
+    //    página para una acción además destructiva: el usuario no lo veía.
+    //
+    // En la cabecera el botón está a la vista (donde ya se mira el título) y su
+    // pareja de fila lo ancla a la sección, sin parecer un control suelto.
+    auto *head = new QWidget(m_historyBox);
+    auto *headLay = new QHBoxLayout(head);
+    headLay->setContentsMargins(0, 0, 0, 0);
+    headLay->setSpacing(8);
+    auto *hTitle = new QLabel(QStringLiteral("Búsquedas recientes"), head);
     hTitle->setObjectName(QStringLiteral("sectionSub"));
-    m_historyBox->layout()->addWidget(hTitle);
+    // "Borrar historial de búsquedas", no "Borrar historial": la app tiene dos
+    // historiales (este, de consultas, y el de vídeos vistos en Biblioteca) y a
+    // solas el nombre no decía cuál se borraba. El dialogo ya lo decía en el
+    // cuerpo; ahora también lo dice el botón. Sigue siendo más corto que el
+    // "historial de búsqueda" que compone nt::metaLine para las filas.
+    auto *clear = new QPushButton(QStringLiteral("Borrar historial de búsquedas"),
+                                  head);
+    clear->setObjectName(QStringLiteral("ghost"));
+    clear->setCursor(Qt::PointingHandCursor);
+    // 30 y no 34: es un control de cabecera, no el botón grande de la página. El
+    // padding global (7px 14px) más 13 px de línea entran justos sin recortar.
+    clear->setFixedHeight(30);
+    connect(clear, &QPushButton::clicked, this, &SearchPage::onHistoryClear);
+    headLay->addWidget(hTitle, 1);
+    headLay->addWidget(clear, 0, Qt::AlignVCenter);
+    m_historyBox->layout()->addWidget(head);
 
     for (const QString &q : hist) {
         auto *row = new QWidget(m_historyBox);
@@ -739,33 +771,8 @@ void SearchPage::showHistory()
         rowLay->addWidget(del);
         m_historyBox->layout()->addWidget(row);
     }
-    // "Borrar historial de búsquedas", no "Borrar historial": la app tiene dos
-    // historiales (este, de consultas, y el de vídeos vistos en Biblioteca) y a
-    // solas el nombre no decía cuál se borraba. El dialogo ya lo decía en el
-    // cuerpo; ahora también lo dice el botón. Sigue siendo más corto que el
-    // "historial de búsqueda" que compone nt::metaLine para las filas.
-    auto *clear = new QPushButton(QStringLiteral("Borrar historial de búsquedas"),
-                                  this);
-    // #sectionLink y no #ghost: las filas de esta sección NO tienen caja (el QSS
-    // las pone con `background: transparent`, solo se ven al pasar el ratón), así
-    // que una cápsula con borde era lo único enmarcado del bloque y se leía como
-    // un control suelto de la página, colado al pie de la lista. Medido por
-    // píxeles: las filas ocupan y=113..250 con separadores y sin fondo, y el
-    // borde del #ghost se veía en x=709..924 y=218..251, o sea fuera de la
-    // columna. Sin marco, y alineado a la izquierda como las filas, pasa a ser
-    // el pie de la sección; el foco se marca con el texto más claro (sin borde
-    // no hay dónde encenderse un anillo de foco), igual que los "Ver todo" de
-    // Biblioteca.
-    clear->setObjectName(QStringLiteral("sectionLink"));
-    clear->setCursor(Qt::PointingHandCursor);
-    clear->setFixedHeight(28);
-    connect(clear, &QPushButton::clicked, this, &SearchPage::onHistoryClear);
-    if (auto *hLayout =
-            qobject_cast<QBoxLayout *>(m_historyBox->layout())) {
-        hLayout->addSpacing(2); // respiro respecto al último separador
-        hLayout->addWidget(clear, 0, Qt::AlignLeft);
+    if (auto *hLayout = qobject_cast<QBoxLayout *>(m_historyBox->layout()))
         hLayout->addStretch(1);
-    }
 }
 
 void SearchPage::onHistoryClear()
