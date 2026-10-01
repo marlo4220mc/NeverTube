@@ -16,7 +16,6 @@ class QHBoxLayout;
 class QGridLayout;
 class QScrollArea;
 class QFrame;
-class QLineEdit;
 class QAction;
 class QMenu;
 class FavoritesRepo;
@@ -50,11 +49,11 @@ public:
     // filas. Lo llama MainWindow junto al applyAccent() de las demás páginas.
     void applyAccent();
 
-    // Abre el popup "Nueva playlist" de esta página para un vídeo concreto.
-    // Lo llama MainWindow desde el menú compartido de fila (Búsqueda, Canal,
-    // Playlist): el popup es el único con el estilo de la app, así que se
+    // Crea una playlist nueva y, si se pasa un vídeo, lo añade a ella. Lo llama
+    // MainWindow desde el menú compartido de fila (Búsqueda, Canal, Playlist):
+    // el diálogo es nt::inputText, el mismo de todas las superficies, así que se
     // reutiliza en vez de tener uno por página.
-    void createPlaylistPopupFor(const QString &videoId);
+    void createPlaylistForVideo(const QString &videoId);
 
 signals:
     void channelRequested(const QString &channelId, const QString &channelName);
@@ -87,11 +86,11 @@ private:
                                 bool withWatchLater);
 
     void createPlaylist();
-    void setupCreatePlaylistPopup();
-    void openCreatePlaylistPopup();
-    void openRenamePopup(const PlaylistItem &playlist);
-    void closeCreatePlaylistPopup();
-    void submitCreatePlaylist();
+    // Crear / renombrar playlist: nt::inputText (el diálogo de la app), no un
+    // popover propio. promptNewPlaylist añade además el vídeo pendiente si lo
+    // hay; promptRenamePlaylist parte del nombre actual.
+    void promptNewPlaylist(const QString &videoId);
+    void promptRenamePlaylist(const PlaylistItem &playlist);
     void centerPopup(QFrame *popup);
 
     void setupManageSubsPopup();
@@ -106,7 +105,6 @@ private:
                    const std::function<void(QMenu *, const VideoInfo &)> &fillMenu,
                    const QHash<QString, double> &progress = {});
 
-    bool eventFilter(QObject *watched, QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
 
     Yt *m_yt;
@@ -141,13 +139,6 @@ private:
     VideoSection m_fav;
     VideoSection m_later;
     VideoSection m_historySec;
-
-    QFrame *m_createPopup = nullptr;
-    QLabel *m_popupTitle = nullptr;
-    QLineEdit *m_createName = nullptr;
-    QPushButton *m_popupOk = nullptr;
-    QString m_renameId;         // playlistId en edición; vacío = modo "Nueva"
-    QString m_pendingVideoId;   // vídeo pendiente de añadir a la playlist nueva
 
     QFrame *m_managePopup = nullptr;
     QVBoxLayout *m_manageLay = nullptr;

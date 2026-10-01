@@ -1251,7 +1251,7 @@ void MainWindow::showVideoRowMenu(const VideoInfo &video, const QPoint &globalPo
     QMenu menu(this);
     nt::RowMenuHooks hooks;
     hooks.onNewPlaylist = [this](const QString &videoId) {
-        m_library->createPlaylistPopupFor(videoId);
+        m_library->createPlaylistForVideo(videoId);
     };
     hooks.onChannel = [this](const QString &channelId, const QString &) {
         openChannel(channelId);

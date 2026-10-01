@@ -10,7 +10,6 @@
 #include <QFontMetrics>
 #include <QKeyEvent>
 #include <QLabel>
-#include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
@@ -39,6 +38,7 @@
 #include "../../yt.h"
 #include "../format.h"
 #include "../icons.h"
+#include "../confirm_dialog.h"
 #include "../flow_layout.h"
 #include "../row_menu.h"
 #include "../theme.h"
@@ -1237,8 +1237,7 @@ void WatchPage::showQueueRowMenu(int index, const VideoInfo &video,
 
     nt::RowMenuHooks hooks;
     hooks.onNewPlaylist = [this](const QString &videoId) {
-        m_plPendingVideoId = videoId;
-        openCreatePlaylistPopup();
+        promptNewPlaylist(videoId);
     };
     hooks.onChannel = [this](const QString &channelId, const QString &name) {
         emit channelRequested(channelId, name);
@@ -1276,8 +1275,7 @@ void WatchPage::showPlaylistMenu()
     menu.addSeparator();
     QAction *newAct = menu.addAction(QStringLiteral("+ Nueva playlist"));
     connect(newAct, &QAction::triggered, this, [this, v]() {
-        m_plPendingVideoId = v.id;
-        openCreatePlaylistPopup();
+        promptNewPlaylist(v.id);
     });
     if (playlists.isEmpty() && !anyAdded)
         menu.addAction(QStringLiteral("Sin playlists todavía"))->setEnabled(false);
@@ -1286,83 +1284,26 @@ void WatchPage::showPlaylistMenu()
                   : QCursor::pos());
 }
 
-// Popup estilado "Nueva playlist" con el mismo popupDialog que Biblioteca,
-// para que el flujo de agregar a playlist tenga el mismo diseño en toda la app.
-void WatchPage::openCreatePlaylistPopup()
+// "Nueva playlist" del Player: nt::inputText, el MISMO diálogo que usan
+// Biblioteca, Historial y Playlist. Antes el Player tenía aquí su propio
+// QFrame#popupDialog con el campo (hijo de la página, sin velo y sin modal, y
+// sin cerrar con Escape), de modo que la misma acción se veía y se comportaba
+// de tres maneras según de dónde se pidiera. La playlist se crea DESPUÉS de
+// cerrar el diálogo, no antes: el texto solo llega si el usuario acepta.
+void WatchPage::promptNewPlaylist(const QString &videoId)
 {
-    if (!m_plPopup) {
-        m_plPopup = new QFrame(this);
-        m_plPopup->setObjectName(QStringLiteral("popupDialog"));
-        m_plPopup->setFixedWidth(340);
-        m_plPopup->raise();
-        m_plPopup->hide();
-
-        auto *v = new QVBoxLayout(m_plPopup);
-        v->setContentsMargins(18, 16, 18, 14);
-        v->setSpacing(10);
-
-        m_plPopupTitle = new QLabel(QStringLiteral("Nueva playlist"), m_plPopup);
-        m_plPopupTitle->setObjectName(QStringLiteral("popupTitle"));
-        v->addWidget(m_plPopupTitle);
-
-        m_plName = new QLineEdit(m_plPopup);
-        m_plName->setPlaceholderText(QStringLiteral("Nombre de la playlist"));
-        m_plName->setClearButtonEnabled(true);
-        m_plName->installEventFilter(this);
-        v->addWidget(m_plName);
-
-        auto *row = new QHBoxLayout;
-        row->addStretch(1);
-        auto *cancel = new QPushButton(QStringLiteral("Cancelar"), m_plPopup);
-        cancel->setObjectName(QStringLiteral("ghost"));
-        cancel->setCursor(Qt::PointingHandCursor);
-        connect(cancel, &QPushButton::clicked, this,
-                &WatchPage::closeCreatePlaylistPopup);
-        row->addWidget(cancel);
-        m_plOk = new QPushButton(QStringLiteral("Crear"), m_plPopup);
-        m_plOk->setObjectName(QStringLiteral("primary"));
-        m_plOk->setCursor(Qt::PointingHandCursor);
-        connect(m_plOk, &QPushButton::clicked, this,
-                &WatchPage::submitCreatePlaylist);
-        row->addWidget(m_plOk);
-        v->addLayout(row);
-
-        connect(m_plName, &QLineEdit::returnPressed, this,
-                &WatchPage::submitCreatePlaylist);
-    }
-    m_plPopupTitle->setText(QStringLiteral("Nueva playlist"));
-    m_plOk->setText(QStringLiteral("Crear"));
-    m_plName->clear();
-    m_plPopup->adjustSize();
-    const int x = (width() - m_plPopup->width()) / 2;
-    const int y = (height() - m_plPopup->height()) / 2;
-    m_plPopup->move(qMax(0, x), qMax(0, y));
-    m_plPopup->raise();
-    m_plPopup->show();
-    m_plName->setFocus(Qt::OtherFocusReason);
-}
-
-void WatchPage::closeCreatePlaylistPopup()
-{
-    if (m_plPopup)
-        m_plPopup->hide();
-}
-
-void WatchPage::submitCreatePlaylist()
-{
-    if (!m_plPopup || !m_plName)
+    QString name;
+    if (!nt::inputText(this, QStringLiteral("Nueva playlist"),
+                       QStringLiteral("Nombre:"), QString(),
+                       QStringLiteral("Crear"), &name))
         return;
-    const QString name = m_plName->text().trimmed();
     if (name.isEmpty())
         return;
     const QString id = m_playlists->create(name);
     if (id.isEmpty())
         return;
-    if (!m_plPendingVideoId.isEmpty()) {
-        m_playlists->addVideo(id, m_plPendingVideoId);
-        m_plPendingVideoId.clear();
-    }
-    closeCreatePlaylistPopup();
+    if (!videoId.isEmpty())
+        m_playlists->addVideo(id, videoId);
 }
 
 void WatchPage::onChannelInfo(const ChannelInfo &channel)

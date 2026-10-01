@@ -20,7 +20,6 @@ class Yt;
 
 class QFrame;
 class QLabel;
-class QLineEdit;
 class QListWidget;
 class QMenu;
 class QPushButton;
@@ -142,11 +141,10 @@ private:
     // estándar compartidas con el resto de superficies con fila.
     void showQueueRowMenu(int index, const VideoInfo &video,
                           const QPoint &globalPos);
-    // Popup estilado "Nueva playlist" (mismo popupDialog que Biblioteca):
-    // tras crearla, si hay vídeo pendiente se añade a la playlist nueva.
-    void openCreatePlaylistPopup();
-    void closeCreatePlaylistPopup();
-    void submitCreatePlaylist();
+    // "Nueva playlist": nt::inputText (el diálogo de la app, el mismo que
+    // Biblioteca, Historial y Playlist). Si se pasa un vídeo, se añade a la
+    // playlist nueva.
+    void promptNewPlaylist(const QString &videoId);
     void showOverlayControls();
     void hideOverlayControls();
     void updateOverlayIcons();
@@ -207,11 +205,6 @@ private:
     nt::Icon m_starFilledIcon = nt::Icon::StarFilled;
     nt::Icon m_watchLaterIcon = nt::Icon::WatchLater;
     nt::Icon m_playlistIcon = nt::Icon::ListAdd;
-    QFrame *m_plPopup = nullptr;
-    QLabel *m_plPopupTitle = nullptr;
-    QLineEdit *m_plName = nullptr;
-    QPushButton *m_plOk = nullptr;
-    QString m_plPendingVideoId;
     QPushButton *m_quality;
     QFrame *m_qualityMenu;
     QWidget *m_qualityMenuAnchor;

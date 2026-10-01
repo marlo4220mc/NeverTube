@@ -14,7 +14,6 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLayout>
-#include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
@@ -562,7 +561,9 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
 
     outer->addWidget(m_scroll);
 
-    setupCreatePlaylistPopup();
+    // "Crear / renombrar playlist" ya no necesita setup: es nt::inputText, que
+    // se construye en cada llamada. "Gestionar suscripciones" sí sigue siendo un
+    // popover propio (una lista con scroll, no un diálogo).
     setupManageSubsPopup();
 
     connect(m_yt, &Yt::channelInfoReady, this, &LibraryPage::onChannelInfo);
@@ -819,8 +820,7 @@ void LibraryPage::addStandardMenuActions(QMenu *menu, const VideoInfo &v,
 {
     nt::RowMenuHooks hooks;
     hooks.onNewPlaylist = [this](const QString &videoId) {
-        m_pendingVideoId = videoId;
-        openCreatePlaylistPopup();
+        promptNewPlaylist(videoId);
     };
     hooks.onChannel = [this](const QString &channelId, const QString &name) {
         emit channelRequested(channelId, name);
@@ -864,7 +864,7 @@ void LibraryPage::rebuildPlaylists()
 
         auto *menu = new QMenu(row);
         addMenuAction(menu, QStringLiteral("Renombrar"),
-                      [this, p]() { openRenamePopup(p); });
+                      [this, p]() { promptRenamePlaylist(p); });
         // Misma confirmación que el botón "Eliminar" de la página Playlist, y el
         // motivo es el mismo: la playlist desaparece entera y no hay vuelta atrás.
         // No hace falta un QTimer::singleShot(0) aquí: addMenuAction ya lo hace,
@@ -912,112 +912,56 @@ void LibraryPage::layoutCards(QGridLayout *grid, const QVector<QWidget *> &cards
 }
 
 // --------------------------------------------------------------------------
-// Popup: crear / renombrar playlist
+// Crear / renombrar playlist: el diálogo de la app (nt::inputText)
 // --------------------------------------------------------------------------
-void LibraryPage::createPlaylist()
+// Antes esta página tenía SU PROPIO QFrame#popupDialog con el campo
+// (setupCreatePlaylistPopup y compañía, ~105 líneas) y el Player tenía otro
+// idéntico. Los dos hacen ahora exactamente lo mismo que nt::confirm y que el
+// prompt de Historial y Playlist: una caja hija de la VENTANA (no de la
+// página), con velo, modal y sin ventana flotante. Antes los dos popoveres no
+// bloqueaban y el del Player ni siquiera cerraba con Escape, así que el mismo
+// "Añadir a playlist" se comportaba de tres maneras según la página.
+void LibraryPage::promptNewPlaylist(const QString &videoId)
 {
-    m_pendingVideoId.clear();
-    openCreatePlaylistPopup();
-}
-
-void LibraryPage::createPlaylistPopupFor(const QString &videoId)
-{
-    m_pendingVideoId = videoId;
-    openCreatePlaylistPopup();
-}
-
-void LibraryPage::setupCreatePlaylistPopup()
-{
-    m_createPopup = new QFrame(this);
-    m_createPopup->setObjectName(QStringLiteral("popupDialog"));
-    m_createPopup->setFixedWidth(340);
-    m_createPopup->raise();
-    m_createPopup->hide();
-
-    auto *v = new QVBoxLayout(m_createPopup);
-    v->setContentsMargins(18, 16, 18, 14);
-    v->setSpacing(10);
-
-    m_popupTitle = new QLabel(QStringLiteral("Nueva playlist"), m_createPopup);
-    m_popupTitle->setObjectName(QStringLiteral("popupTitle"));
-    v->addWidget(m_popupTitle);
-
-    m_createName = new QLineEdit(m_createPopup);
-    m_createName->setPlaceholderText(QStringLiteral("Nombre de la playlist"));
-    m_createName->setClearButtonEnabled(true);
-    m_createName->installEventFilter(this);
-    v->addWidget(m_createName);
-
-    auto *row = new QHBoxLayout;
-    row->addStretch(1);
-    auto *cancel = new QPushButton(QStringLiteral("Cancelar"), m_createPopup);
-    cancel->setObjectName(QStringLiteral("ghost"));
-    cancel->setCursor(Qt::PointingHandCursor);
-    connect(cancel, &QPushButton::clicked, this,
-            &LibraryPage::closeCreatePlaylistPopup);
-    row->addWidget(cancel);
-    m_popupOk = new QPushButton(QStringLiteral("Crear"), m_createPopup);
-    m_popupOk->setObjectName(QStringLiteral("primary"));
-    m_popupOk->setCursor(Qt::PointingHandCursor);
-    connect(m_popupOk, &QPushButton::clicked, this,
-            &LibraryPage::submitCreatePlaylist);
-    row->addWidget(m_popupOk);
-    v->addLayout(row);
-
-    connect(m_createName, &QLineEdit::returnPressed, this,
-            &LibraryPage::submitCreatePlaylist);
-}
-
-void LibraryPage::openCreatePlaylistPopup()
-{
-    m_renameId.clear();
-    m_popupTitle->setText(QStringLiteral("Nueva playlist"));
-    m_popupOk->setText(QStringLiteral("Crear"));
-    m_createName->clear();
-    centerPopup(m_createPopup);
-    m_createPopup->raise();
-    m_createPopup->show();
-    m_createName->setFocus(Qt::OtherFocusReason);
-}
-
-void LibraryPage::openRenamePopup(const PlaylistItem &playlist)
-{
-    m_renameId = playlist.id;
-    m_popupTitle->setText(QStringLiteral("Renombrar playlist"));
-    m_popupOk->setText(QStringLiteral("Guardar"));
-    m_createName->setText(playlist.title);
-    centerPopup(m_createPopup);
-    m_createPopup->raise();
-    m_createPopup->show();
-    m_createName->selectAll();
-    m_createName->setFocus(Qt::OtherFocusReason);
-}
-
-void LibraryPage::closeCreatePlaylistPopup()
-{
-    m_createPopup->hide();
-}
-
-void LibraryPage::submitCreatePlaylist()
-{
-    const QString name = m_createName->text().trimmed();
+    QString name;
+    if (!nt::inputText(this, QStringLiteral("Nueva playlist"),
+                       QStringLiteral("Nombre:"), QString(),
+                       QStringLiteral("Crear"), &name))
+        return;
     if (name.isEmpty())
         return;
-    if (!m_renameId.isEmpty()) {
-        if (!m_playlists->rename(m_renameId, name))
-            return;
-        m_renameId.clear();
-    } else {
-        const QString id = m_playlists->create(name);
-        if (id.isEmpty())
-            return;
-        if (!m_pendingVideoId.isEmpty()) {
-            m_playlists->addVideo(id, m_pendingVideoId);
-            m_pendingVideoId.clear();
-        }
-    }
-    closeCreatePlaylistPopup();
+    const QString id = m_playlists->create(name);
+    if (id.isEmpty())
+        return;
+    if (!videoId.isEmpty())
+        m_playlists->addVideo(id, videoId);
     rebuildPlaylists();
+}
+
+void LibraryPage::promptRenamePlaylist(const PlaylistItem &playlist)
+{
+    if (playlist.id.isEmpty())
+        return;
+    QString name;
+    if (!nt::inputText(this, QStringLiteral("Renombrar playlist"),
+                       QStringLiteral("Nuevo nombre:"), playlist.title,
+                       QStringLiteral("Guardar"), &name))
+        return;
+    if (name.isEmpty())
+        return;
+    if (!m_playlists->rename(playlist.id, name))
+        return;
+    rebuildPlaylists();
+}
+
+void LibraryPage::createPlaylist()
+{
+    promptNewPlaylist(QString());
+}
+
+void LibraryPage::createPlaylistForVideo(const QString &videoId)
+{
+    promptNewPlaylist(videoId);
 }
 
 void LibraryPage::centerPopup(QFrame *popup)
@@ -1110,23 +1054,17 @@ void LibraryPage::rebuildManageSubs()
     m_manageLay->addStretch(1);
 }
 
-bool LibraryPage::eventFilter(QObject *watched, QEvent *event)
-{
-    if (watched == m_createName && event->type() == QEvent::KeyPress) {
-        if (static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape) {
-            closeCreatePlaylistPopup();
-            return true;
-        }
-    }
-    return QWidget::eventFilter(watched, event);
-}
+// Antes este eventFilter solo existia para que Escape cerrara el QLineEdit del
+// popup de playlist. Ese popup es ahora nt::inputText, que gestiona su propio
+// Escape, asi que el filtro sobra entero y se elimina el override.
 
 void LibraryPage::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
     layoutCards(m_playlistGrid, m_playlistCards);
-    if (m_createPopup && m_createPopup->isVisible())
-        centerPopup(m_createPopup);
+    // El popup de crear/renombrar playlist ya no se recentra aquí: es
+    // nt::inputText, que es hijo de la VENTANA y no de esta página, así que su
+    // centro no depende del ancho de Biblioteca.
     if (m_managePopup && m_managePopup->isVisible())
         centerPopup(m_managePopup);
 }
