@@ -2376,6 +2376,20 @@ QString homeTextOf(const QJsonValue &val)
     return t;
 }
 
+// browseId del canal en un byline compartido (compactVideoRenderer /
+// playlistPanelVideoRenderer): runs[0].navigationEndpoint.browseEndpoint.
+// Sin esto, los vídeos que llegan por la cola se quedaban SIN id de canal y no
+// se podía ni entrar al canal ni suscribirse desde la página Player.
+QString channelIdFromByline(const QJsonObject &text)
+{
+    const QJsonArray runs = text.value(QStringLiteral("runs")).toArray();
+    if (runs.isEmpty())
+        return QString();
+    return runs.at(0).toObject().value(QStringLiteral("navigationEndpoint"))
+        .toObject().value(QStringLiteral("browseEndpoint")).toObject()
+        .value(QStringLiteral("browseId")).toString();
+}
+
 int homeDurationOf(const QJsonArray &overlays)
 {
     for (const QJsonValue &val : overlays) {
@@ -3050,6 +3064,19 @@ void Innertube::parseVideoDetail(const QJsonObject &root, VideoInfo *video,
                                .toObject().value(QStringLiteral("browseEndpoint"))
                                .toObject().value(QStringLiteral("browseId"))
                                .toString();
+        // Vídeos con varios canales de COLABORACIÓN: el owner no lleva
+        // navigationEndpoint (solo avatarStack + subscribeButton), así que el id
+        // sale del botón de suscripción. Sin esta vía, esos canales no se podían
+        // entrar ni suscribir desde la página Player (medido: channelId vacío
+        // en el detalle y el botón "Canal" sin hacer nada).
+        if (video->channelId.isEmpty()) {
+            video->channelId = owner.value(QStringLiteral("subscribeButton"))
+                                   .toObject()
+                                   .value(QStringLiteral("subscribeButtonRenderer"))
+                                   .toObject()
+                                   .value(QStringLiteral("channelId"))
+                                   .toString();
+        }
     }
     if (description)
         *description = homeTextOf(vm.value(QStringLiteral("description")));
@@ -3182,6 +3209,15 @@ void Innertube::parseWatchQueue(const QJsonObject &root, QVector<VideoInfo> *out
                 continue;
             v.title = homeTextOf(pvr.value(QStringLiteral("title")));
             v.channel = homeTextOf(pvr.value(QStringLiteral("longBylineText")));
+            if (v.channel.isEmpty())
+                v.channel =
+                    homeTextOf(pvr.value(QStringLiteral("shortBylineText")));
+            v.channelId = channelIdFromByline(
+                pvr.value(QStringLiteral("longBylineText")).toObject());
+            if (v.channelId.isEmpty()) {
+                v.channelId = channelIdFromByline(
+                    pvr.value(QStringLiteral("shortBylineText")).toObject());
+            }
             const QJsonArray thumbs = pvr.value(QStringLiteral("thumbnail"))
                                           .toObject()
                                           .value(QStringLiteral("thumbnails"))
@@ -3335,7 +3371,18 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
                               .value(QStringLiteral("browseId"))
                               .toString();
         } else {
+            // Byline compartido (compactVideoRenderer): el nombre va en
+            // longBylineText/shortBylineText y el id del canal en sus runs.
+            const QJsonObject longByline =
+                r->value(QStringLiteral("longBylineText")).toObject();
+            const QJsonObject shortByline =
+                r->value(QStringLiteral("shortBylineText")).toObject();
             v.channel = homeTextOf(r->value(QStringLiteral("longBylineText")));
+            if (v.channel.isEmpty())
+                v.channel = homeTextOf(r->value(QStringLiteral("shortBylineText")));
+            v.channelId = channelIdFromByline(longByline);
+            if (v.channelId.isEmpty())
+                v.channelId = channelIdFromByline(shortByline);
         }
         const QJsonArray thumbs = r->value(QStringLiteral("thumbnail"))
                                       .toObject()
