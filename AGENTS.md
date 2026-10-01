@@ -591,20 +591,23 @@ Cómo se arregla, por orden de preferencia:
 1. **Icono de `nt::icon()`** (`src/ui/icons.*`): dibuja con `QPainter`, no
    depende de ninguna fuente. Es lo que se usa para el X de limpiar y para el
    "Volver" (que ya tenía el icono `Back`: el `◀` del texto era redundante).
-2. **Un glifo que la fuente sí tenga**: `▼` (U+25BC) sí está, y es lo que usan
-   ahora los botones de valor de Ajustes (por `▾`). Antes de elegir un
-   carácter, comprobarlo (ver el selftest de abajo).
+2. **Un glifo que la fuente sí tenga** (comprobarlo antes, ver el selftest de
+   abajo).
 3. **Quitarlo**: si el texto ya dice lo mismo ("✔ ... (ya está)"), el glifo es
-   decorativo y sobra.
-
-Lo que **no** hay que hacer es confiar en que el glifo se ve: `✕`, `▾`, `◀` y
-`✔` no están en Liberation Sans y en pantalla salían como un punto.
+   decorativo y sobra. Es lo que acabó pasando con el `▾` de los botones de
+   valor de Ajustes: el `▼` (U+25BC) que se puso por él SÍ está en la fuente,
+   pero el usuario pidió quitarlo del todo — el botón ya es un control con su
+   caja y el menú marca la opción con un check, así que el triángulo era
+   decoración redundante. `makeValueButton` es hoy un envoltorio de
+   `makeActionButton` con un comentario que prohíbe reintroducirlo.
+4. Lo que **no** hay que hacer es confiar en que el glifo se ve: `✕`, `▾`, `◀` y
+   `✔` no están en Liberation Sans y en pantalla salían como un punto.
 
 `--selftest-glyphs` (`nt::glyphSelfTest` en `src/ui/theme.cpp`, en el smoke de
 los dos CI) recorre los **literales del propio árbol de fuentes** —los
 comentarios se descartan antes— y comprueba cada carácter no ASCII contra la
 fuente real de la app: un glifo nuevo que no exista sale en el CI en vez de en
-la pantalla del usuario. 64 ficheros, ~3350 literales, 18 glifos.
+la pantalla del usuario. 66 ficheros, ~3360 literales, 17 glifos.
 
 - **OJO: `QFontMetrics::inFont()` NO sirve para esto.** Consulta el *fallback*
   del sistema y devuelve true si **cualquier** fuente instalada tiene el

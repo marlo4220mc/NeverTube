@@ -263,9 +263,14 @@ QPushButton *SettingsPage::makeActionButton(const QString &text)
     return btn;
 }
 
+// Botón de VALOR: abre un QMenu con las alternativas. Va deliberadamente
+// igual que un botón de acción: sin triángulo, ni glifo de texto ("  ▼", el
+// que se le puso al principio) ni icono dibujado. El usuario pidió quitarlo y
+// es decoración redundante: el botón ya es un control con caja propia y el
+// menú marca la opción vigente con un check. NO reañadir ningún indicador.
 QPushButton *SettingsPage::makeValueButton(const QString &text)
 {
-    return makeActionButton(text + QStringLiteral("  ▼"));
+    return makeActionButton(text);
 }
 
 // Construye un menú de selección asociado al botón `btn`. La callback `onPick`
@@ -291,7 +296,7 @@ void SettingsPage::setupValueMenu(
     auto syncMenu = [menu, btn](const QString &opt) {
         for (QAction *a : menu->actions())
             a->setChecked(a->text() == opt);
-        btn->setText(opt + QStringLiteral("  ▼"));
+        btn->setText(opt);
     };
     // Al abrir el menú re-sincroniza checks y texto del botón con la opción
     // vigente; sin esto, Qt deja el check de la última acción marcada y el
@@ -341,7 +346,7 @@ void SettingsPage::setupValueMenuWithConfirm(
     auto syncMenu = [menu, btn](const QString &opt) {
         for (QAction *a : menu->actions())
             a->setChecked(a->text() == opt);
-        btn->setText(opt + QStringLiteral("  ▼"));
+        btn->setText(opt);
     };
     // applyVisual que recibe el caller: registra la opción aceptada y la
     // refleja. Al cancelar el modal el caller NO lo invoca, así currentOpt

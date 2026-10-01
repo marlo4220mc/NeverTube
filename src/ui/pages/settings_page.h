@@ -59,9 +59,11 @@ private:
     // Fila "etiqueta + botón de valor": el botón abre un QMenu con las
     // alternativas (mismo patrón que los tres puntos de Biblioteca). Al
     // elegir una opción llama a onPick(displayText).
-    // Botón de acción simple (mismo estilo y tamaño que los de valor, sin el
-    // sufijo "▼"): usado p. ej. por "Volver a detectar".
+    // Botón de acción simple: usado p. ej. por "Volver a detectar".
     QPushButton *makeActionButton(const QString &text);
+    // Botón de VALOR: abre un QMenu con las alternativas. Va con el mismo
+    // aspecto que el de acción y SIN triángulo final (decisión del usuario:
+    // el "▼" sobraba; ver el comentario en la definición).
     QPushButton *makeValueButton(const QString &text);
     void setupValueMenu(QPushButton *btn, const QStringList &options,
                         const QString &current,
