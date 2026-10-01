@@ -441,6 +441,8 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     // desplegable. La busqueda ocurre al pulsar Enter o el boton Buscar, y usa
     // el texto literal. Asi una palabra a medio escribir no gasta una /search.
     connect(m_field, &QLineEdit::textChanged, this, [this](const QString &) {
+        // Volver a escribir rehabilita las sugerencias para el texto nuevo.
+        m_suggestClosedFor.clear();
         m_suggestDebounce->start();
     });
     // Enter y el boton Buscar buscar SIEMPRE el texto literal del campo, sin
@@ -510,8 +512,14 @@ void SearchPage::setResultsMode(bool active)
 void SearchPage::doSearch()
 {
     // Buscar siempre cierra el desplegable: la pagina pasa a modo resultados.
+    // Se para tambien el debounce: si el usuario escribe rapido y pulsa Enter
+    // antes de los 300 ms, la peticion de sugerencias salia DESPUES y el panel
+    // reaparecia encima de los resultados. Y se marca la consulta como ya
+    // buscada, para que una respuesta en vuelo tampoco lo reabra.
+    m_suggestDebounce->stop();
     hideSuggestPanel();
     const QString q = m_field->text().trimmed();
+    m_suggestClosedFor = q;
     if (q.isEmpty()) {
         setResultsMode(false);
         showHistory();
@@ -992,8 +1000,11 @@ QStringList SearchPage::matchingHistory(const QString &prefix) const
 void SearchPage::onSuggestReady(const QString &query,
                                 const QVector<Suggestion> &suggestions)
 {
-    // Respuesta tardia: el campo ya no es el prefijo que se pidio.
+    // Respuesta tardia: el campo ya no es el prefijo que se pidio, o esa
+    // consulta ya se buscó (Enter): no se reabre el panel.
     if (query != m_suggestQuery || query != m_field->text().trimmed())
+        return;
+    if (query == m_suggestClosedFor)
         return;
     m_suggestItems = suggestions;
     m_historyRows = matchingHistory(query);

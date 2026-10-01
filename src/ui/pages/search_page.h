@@ -166,6 +166,11 @@ private:
     // ignorar tanto respuestas tardias como la peticion en si misma si el
     // campo ya no coincide.
     QString m_suggestQuery;
+    // Consulta ya BUSCADA (Enter o botón): un suggest que llegue después para
+    // esa misma consulta no debe reabrir el desplegable (pasaba al escribir
+    // rápido y pulsar Enter: el debounce de 300 ms disparaba después y el panel
+    // aparecía sobre los resultados). Se limpia al volver a escribir.
+    QString m_suggestClosedFor;
     // Aplicacion para el eventFilter del cierre por clic fuera.
     QObject *m_app = nullptr;
 };
