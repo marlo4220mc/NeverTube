@@ -200,10 +200,14 @@ las listas; 14/600 y 12 px en Biblioteca). NO unificar tamaños ni pesos.
   Biblioteca. Antes estaba triplicada (dos copias en el delegate y una en
   Biblioteca) y la fila de lista pintaba solo "canal • visitas": el mismo vídeo
   se leía distinto según la página.
-- **El bloque de texto va CENTRADO en la fila** (título de 2 líneas + meta), no
-  pegado arriba: medido en el render, pegado arriba dejaba 8 px arriba y 31
-  abajo. Las medidas del bloque están en `VideosDelegate::listMetrics`, y la
-  caja del título y la línea base de la meta salen de ahí.
+- **El bloque de texto va CENTRADO en la fila**, y con la altura REAL del
+  título (1 o 2 líneas): `wrapTitle` (la misma función que pinta
+  `drawGridTitle`) da las líneas que ocupa y `paintList` centra con esa altura,
+  así que la meta queda pegada a la última línea del título. Antes se
+  reservaban 2 líneas siempre y con un título de una línea la meta caía un
+  renglón entero por debajo (medido: hueco ~31 px; ahora ~12). Las medidas del
+  bloque están en `VideosDelegate::listMetrics`, y la caja del título y la
+  línea base de la meta salen de ahí.
 - **Nada de texto debajo de los botones**: `textWidth(r, ...)` descuenta el
   hueco real de la X y/o el ⋮, con la misma cuenta que `removeButtonRect`/
   `moreButtonRect`. Medido: sin descontar el ⋮ el título llegaba a x=839 con los
@@ -801,6 +805,12 @@ Los dos últimos datos los escribe el reproductor, no la red:
   - `Yt::channelTabVideos` → browse del canal con el cliente **WEB** para las tres pestañas (videos/shorts/live): VISIONOS solo expone "Vídeos" y su continuación devuelve páginas vacías, mientras que WEB sirve las tres con layout moderno (`lockupViewModel`/`shortsLockupViewModel`) y continuación funcional. El cliente WEB no necesita API key. `fetchChannelVideos` (feed de suscripciones, sin paginación) sigue por VISIONOS con `compactVideoRenderer`.
   - `Yt::getDetail` → `/next`: `videoMetadataRenderer` (título/descripción traducidos, vistas, fecha, canal) + `likeButtonRenderer` (me gusta). El **id del canal** sale de `owner.videoOwnerRenderer.navigationEndpoint.browseEndpoint.browseId` y, si falta (vídeos de COLABORACIÓN: el owner solo trae `avatarStack` + `subscribeButton`), de `owner.subscribeButton.subscribeButtonRenderer.channelId`: sin esa vía el `channelId` quedaba vacío y los botones "Canal" y "Suscribirse" no hacían nada (los dos salen temprano si está vacío). Los renderers de la cola (`compactVideoRenderer`/`playlistPanelVideoRenderer`) también sacan el id de `longBylineText`/`shortBylineText` → `runs[0].navigationEndpoint.browseEndpoint.browseId` (`channelIdFromByline`), que antes solo se leía el nombre.
   - `Yt::playlistDetail` → browse `VL<id>`: `playlistHeaderRenderer` + `playlistVideoRenderer`.
+- **Buscar con Enter cierra el desplegable de sugerencias de verdad**: `doSearch()`
+  para el debounce de 300 ms y marca la consulta como ya buscada
+  (`SearchPage::m_suggestClosedFor`), y `onSuggestReady` la ignora. Sin eso, al
+  escribir rápido y pulsar Enter la petición de sugerencias salía después y el
+  panel reaparecía encima de los resultados (también con una petición en vuelo).
+  Volver a escribir limpia la marca.
 - Empaquetado Windows (Win7 x86): la UCRT NO se copia app-local desde la Windows SDK — esa versión importa `GetSystemTimePreciseAsFileTime` (W8+) y ucrtbase no carga en Win7. En su lugar el setup empaqueta `VC_redist.x86.exe` (descargado en CI) y lo instala con `Exec` (`/install /passive /norestart`, códigos 0/1638/3010 aceptados) con `PrivilegesRequired=admin`. El CRT (msvcp140/vcruntime140) sí va junto al exe (`windeployqt --compiler-runtime`). ORDEN del setup: 1) app completa → 2) iconos (menú + acceso directo al escritorio, casilla `[Tasks] desktopicon` marcada por defecto) → 3) `InstallVcRedist` desde `CurStepChanged` → `ssPostInstall` (no en `AfterInstall` de un `[Files]`, que correría en mitad de la copia). El `[InstallDelete]` sigue purgando la UCRT app-local de instalaciones antiguas. El setup x86 **cancela en Windows de 64 bits 10/11** (`InitializeSetup` + `IsWin64` + `GetWindowsVersion >= $0A000000`) y dirige al build x64 (el `MsgBox` nombra `nevertube-setup-x64.exe`: cancelar sin decir dónde está el instalador que sí vale deja al usuario sin salida): el x86 ahí quedaría capado a h264 HW + VP9 software y sin AV1. Se permite en 32 bits y en 64 bits < 10 (donde el x64/mpv moderno no corre). **TOOLSET y REDIST (Win7)**: el x86 compila con `-T v142` (VS2019/14.29) sobre `runs-on: windows-2022` y el setup instala `vc_redist.x86` **2015-2019** (`aka.ms/vs/16`): el target (Win7) necesita ese CRT. `windows-latest` ya es VS2026 (MSVC 14.5x) y su runtime NO es Win7-compatible (imports W8+); un binario 14.5x tampoco enlaza contra el vs/16. No quitar el pin de toolset/imagen ni cambiar el redist a `vs/17`+ sin prueba en el target. Además, el CI purga `qtaudio_wasapi.dll` del paquete antes del gate: Qt5 Multimedia la despliega pero importa `RoGetActivationFactory` (W8+) y el gate de imports lo aborta; en Win7 el audio va por `qtaudio_windows.dll` (WaveOut), no WASAPI.
 - Empaquetado Windows x64 (Win10+): el entregable es un **setup.exe instalable**
   (`dist64.iss`, compilado con `iscc` en `windows_x64.yml`), NO un zip portátil.
