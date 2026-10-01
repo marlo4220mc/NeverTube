@@ -426,7 +426,10 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
         header->addWidget(l);
         header->addStretch(1);
         auto *b = new QPushButton(btnText, m_body);
-        b->setObjectName(QStringLiteral("ghost"));
+        // Enlace discreto y no #ghost con marco: son cinco botones (Administrar
+        // + tres "Ver todo") alineados a la derecha de cada titulo, y con
+        // capsula parecian botones de la pagina en vez de enlaces.
+        b->setObjectName(QStringLiteral("sectionLink"));
         b->setCursor(Qt::PointingHandCursor);
         header->addWidget(b);
         if (btn)
