@@ -243,9 +243,13 @@ jobs:
           Write-Host "el setup lleva $($packed.Count) ficheros"
           # VC_redist.x64.exe en la lista es además la prueba de que se compiló
           # dist64.iss: en el .iss del x86 eso es VC_redist.x86.exe.
+          # nt.ico en la lista: lo referencian los IconFilename de los accesos
+          # directos (y el .exe lo lleva embebido por resources/nt.rc). Si una
+          # edición de [Files] lo deja fuera, los accesos directos se crean con
+          # el icono por defecto de Windows y no hay quien se entere en local.
           $need = @('nevertube_qt2.exe', 'qwindows.dll', 'libmpv-2.dll',
             'vulkan-1.dll', 'libssl-1_1-x64.dll', 'libcrypto-1_1-x64.dll',
-            'libEGL.dll', 'libGLESv2.dll', 'VC_redist.x64.exe')
+            'libEGL.dll', 'libGLESv2.dll', 'VC_redist.x64.exe', 'nt.ico')
           $missing = $need | Where-Object { $packed -notcontains $_ }
           if ($missing) { Write-Host "el setup NO lleva: $missing"; exit 1 }
           Write-Host "gate del setup x64 OK: el instalador lleva los $($need.Count) ficheros clave"

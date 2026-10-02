@@ -25,6 +25,11 @@ OutputDir=setup-out
 OutputBaseFilename=nevertube-setup-x64
 Compression=lzma2
 SolidCompression=yes
+; Icono del propio setup (lo primero que se ve al lanzarlo) y de los accesos
+; directos. Rutas relativas al directorio del .iss, que es donde corre iscc.
+; El mismo nt.ico va embebido en el .exe (resources/nt.rc), asi que el icono
+; del acceso directo y el del binario son el mismo fichero.
+SetupIconFile=resources\icon\nt.ico
 ; DIFERENCIA 2 vs x86: este target es Win10+ en 64 bits, así que se declara
 ; explícitamente. ArchitecturesAllowed=x64compatible acepta x64 de 64 bits
 ; (WoW no es un objetivo) y Win11 ARM vía emulación, donde la app correría
@@ -57,6 +62,11 @@ Name: "desktopicon"; Description: "Crear un acceso directo en el escritorio"; Gr
 ; junto al exe cuando puede, pero en el runner de CI no (viene del VS del host),
 ; así que el setup lo instala y es la red de seguridad.
 Source: "dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs; Excludes: "VC_redist.x64.exe"
+; nt.ico: lo necesitan los accesos directos de [Icons] (IconFilename). No
+; puede venir de dist\* porque el CI copia allí solo el exe y las DLLs; se
+; toma del repo. Se instala plano en {app} (no en subcarpeta) porque es lo que
+; referencian los IconFilename de abajo.
+Source: "resources\icon\nt.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; El redist va a {tmp}: su INSTALACIÓN no corre aquí (AfterInstall), se lanza
 ; desde ssPostInstall, DESPUÉS de copiar la app y crear los iconos. Se ejecuta
 ; y bloquea con swWaitUntilTerminated para poder comprobar el código de salida: un
@@ -89,8 +99,11 @@ Type: filesandordirs; Name: "{localappdata}\nevertube\nevertube"
 ; Icono del grupo de programas + acceso directo al escritorio (casilla marcada
 ; por defecto, ver [Tasks] desktopicon). Ambos se crean en esta fase, ya con la
 ; app en disco; el runtime C++ corre después en ssPostInstall.
-Name: "{group}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"
-Name: "{autodesktop}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"; Tasks: desktopicon
+; IconFilename en los dos: sin esto los accesos directos salen con el icono
+; por defecto de Windows y la app no es reconocible en el escritorio. nt.ico
+; viene de [Files] y es el mismo que va embebido en el .exe (resources/nt.rc).
+Name: "{group}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"; IconFilename: "{app}\nt.ico"
+Name: "{autodesktop}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"; Tasks: desktopicon; IconFilename: "{app}\nt.ico"
 
 [Code]
 // DIFERENCIA 5 vs x86: aquí NO hay guard de arquitectura que cancele. El de x86

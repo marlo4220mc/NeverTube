@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QEventLoop>
+#include <QIcon>
 #include <QSslSocket>
 #include <QStyleFactory>
 #include <QTimer>
@@ -465,6 +466,16 @@ int main(int argc, char *argv[])
     app.setApplicationName(QStringLiteral("nevertube"));
     app.setOrganizationName(QStringLiteral("nevertube"));
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+
+    // Icono de la ventana. Van TODAS las alturas porque QIcon no escala: elige
+    // la entrada que más se parezca a lo que pide cada superficie (la barra del
+    // SO pide 16 o 24, el gestor de ventanas 32 o 48, el alt-tab 256). Con una
+    // sola entrada, la barra la muestra borrosa aunque el PNG sea de 1024.
+    // El .exe de Windows lo lleva embebido aparte (resources/nt.rc).
+    QIcon iconoApp;
+    for (int lado : {16, 24, 32, 48, 64, 128, 256})
+        iconoApp.addFile(QStringLiteral(":/icon/nt_%1.png").arg(lado));
+    app.setWindowIcon(iconoApp);
 
     // Selección de TEXTO en el gris de la app. Va aquí y no en el QSS porque hay
     // texto seleccionable que el QSS no alcanza: la descripción del Player es un

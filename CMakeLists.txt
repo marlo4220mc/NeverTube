@@ -215,6 +215,14 @@ endif()
 
 if(WIN32)
   set_target_properties(nevertube_qt2 PROPERTIES WIN32_EXECUTABLE TRUE)
+  # Icono del .exe (explorador, barra de tareas, lista de apps). nt.rc
+  # referencia "icon/nt.ico" y rc.exe lo resuelve con el include dir que se
+  # anade aqui; el .ico multirres lo genera tools/gen_app_icon.py.
+  # Win7 (0x0601) y Win10+ leen las 7 entradas sin problema.
+  target_include_directories(nevertube_qt2 PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources")
+  target_sources(nevertube_qt2 PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/nt.rc")
   if(MSVC)
     # Qt5.15.2, qlist.h:915 (QList::operator==): usa stdext::make_checked_array_iterator
     # vía QT_MAKE_CHECKED_ARRAY_ITERATOR de forma INCONDICIONAL en MSVC. VS2026

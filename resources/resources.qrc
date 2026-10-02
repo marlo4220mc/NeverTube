@@ -1,5 +1,15 @@
 <RCC>
     <qresource prefix="/">
+        <!-- Icono de la app. Se dan todas las alturas porque Qt elige la que
+             pide cada superficie (barra del SO, Explorador, alt-tab). El .ico
+             multirres lo genera tools/gen_app_icon.py desde nt_icon.png. -->
+        <file>icon/nt_16.png</file>
+        <file>icon/nt_24.png</file>
+        <file>icon/nt_32.png</file>
+        <file>icon/nt_48.png</file>
+        <file>icon/nt_64.png</file>
+        <file>icon/nt_128.png</file>
+        <file>icon/nt_256.png</file>
         <file>clips/h264.mp4</file>
         <file>clips/vp9.webm</file>
         <file>clips/av1.mkv</file>
