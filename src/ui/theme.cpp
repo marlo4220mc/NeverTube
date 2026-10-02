@@ -53,8 +53,15 @@ QString accentSuffix()
 
 QString styleSheet()
 {
-    QString qss = QStringLiteral(R"QSS(
-QWidget {
+    // El QSS es un bloque de ~30 KB. MSVC NO admite un literal de cadena de
+    // mas de 16380 bytes (error C2026, "string too big, trailing characters
+    // truncated"), asi que el literal entero no compila en Windows aunque en
+    // Linux/GCC no haya ese limite. Va partido en trozos en un array y se une
+    // aqui. Cada trozo esta muy por debajo del limite y el resultado es el
+    // MISMO qss de siempre, byte a byte, asi que --selftest-theme sigue viendo
+    // la hoja completa. NO volver a levantar este bloque en un solo literal.
+    static const char *const kTrozos[] = {
+        R"QSS(QWidget {
     background-color: transparent;
     color: #ECECEC;
     font-size: 13px;
@@ -208,7 +215,8 @@ QComboBox QAbstractItemView {
     outline: 0;
 }
 
-QScrollArea { border: none; background: transparent; }
+)QSS",
+        R"QSS(QScrollArea { border: none; background: transparent; }
 QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }
 QScrollBar::handle:vertical { background: @HANDLE@; border-radius: 5px; min-height: 24px; }
 QScrollBar::handle:vertical:hover { background: @HANDLE_HOVER@; }
@@ -369,7 +377,8 @@ QPushButton#actionChip:focus { border-color: transparent; }
 QPushButton#actionChip[active="true"] { background: @BORDER@; }
 QPushButton#actionChip[active="true"]:hover { background: @SELECTION@; }
 
-/* Grupo segmentado Me gusta / No me gusta: las esquinas exteriores redondeadas
+)QSS",
+        R"QSS(/* Grupo segmentado Me gusta / No me gusta: las esquinas exteriores redondeadas
    y un hairline entre los dos. El fondo del grupo es el del chip. */
 QWidget#actionSeg { background: #1F1F1F; border-radius: 22px; }
 QPushButton#actionSegL, QPushButton#actionSegR {
@@ -501,7 +510,8 @@ QLabel#suggestBadge {
 QScrollArea#suggestScroll { background: transparent; border: none; }
 QWidget#suggestRows { background: transparent; }
 
-/* --- Ajustes ------------------------------------------------------------
+)QSS",
+        R"QSS(/* --- Ajustes ------------------------------------------------------------
    Tres niveles de encabezado, y a proposito NO se reutilizan entre si:
      pageHeading           18 px, titulo de la pagina entera
      sectionTitle          16 px, titulo de seccion (compartido con las demas
@@ -621,7 +631,8 @@ QLabel#tabCount {
     padding: 1px 8px;
 }
 
-/* Chip de acento plano: el boton "Ir a Buscar" del estado vacio del Home.
+)QSS",
+        R"QSS(/* Chip de acento plano: el boton "Ir a Buscar" del estado vacio del Home.
    Se migra tal cual estaba, SIN :hover ni :pressed a proposito: el QSS global
    tiene reglas de estado para #primary y aqui no las habia, y anadirlas seria
    cambiar comportamiento en un refactor. */
@@ -678,7 +689,14 @@ QLabel#miniTitle {
    letterbox cuando el vídeo no llena la caja, y tiene que ser negro de verdad
    para que no se note el marco. Estaba en un setStyleSheet inline. */
 QWidget#playerArea { background-color: #000000; }
-)QSS");
+)QSS",
+    };
+
+    QString qss;
+    qss.reserve(30627);
+    for (const char *t : kTrozos)
+        qss += QString::fromUtf8(t);
+
     // Los placeholders se sustituyen en CADA llamada: un cambio de acento en
     // caliente (Ajustes → Color de acento) regenera el stylesheet al momento.
     // Los neutros también son placeholders: antes el QSS escribía #2A2A2A para
