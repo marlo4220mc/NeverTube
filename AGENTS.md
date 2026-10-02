@@ -56,6 +56,63 @@ error en vez de caer a SW (visto en la máquina de pruebas x86). Con el retry, e
 frame sale en software → hwdec="no" → la escalera reactiva baja
 `h264-hw → soft-all` (efímero) y re-resuelve.
 
+## Límite de literal de cadena de MSVC (C2026): el QSS va partido
+
+**MSVC no admite un literal de cadena de más de 16380 bytes** y avisa con
+`error C2026: string too big, trailing characters truncated`. GCC no tiene ese
+límite, así que un bloque que en Linux compila limpio puede no compilar en
+Windows sin que nada en local lo delate.
+
+El caso real: `nt::styleSheet()` (`src/ui/theme.cpp`) tenía el QSS entero —
+30 627 bytes, 624 líneas — en un único literal crudo `R"QSS(…)QSS"`. El
+build x86 usa **toolset v142** (VS2019, obligatorio para Win7) y ahí reventaba;
+el x64 con el toolset de `windows-latest` lo aceptaba, así que **solo se veía
+en el x86**. C2026 lo dispara el lexer al recorrer el literal, de modo que el
+arreglo tiene que estar en el literal, no en una compilación condicional.
+
+El QSS vive ahora en `static const char *const kTrozos[]` (cinco trozos, el
+mayor de 8359 bytes) que `styleSheet()` une con `QString::fromUtf8`. Reglas:
+
+- **NO volver a levantar el QSS en un solo literal.** Si crece, se añade otro
+  trozo al array.
+- El reparto cae **siempre entre reglas** (en línea en blanco), nunca dentro
+  de una, y el resultado es el mismo qss de antes byte a byte.
+- Se une con `fromUtf8` y no con `QStringLiteral` a propósito: así es el runtime
+  quien decodifica UTF-8 y no depende del charset con el que MSVC leyó el
+  fichero (aunque `/utf-8` sigue puesto en CMakeLists).
+- Comprobado que no queda ningún literal de más de 16380 bytes en `src/`, y
+  `--selftest-theme` sigue parseando la hoja completa y la valida igual.
+
+Para detectarlo sin esperar al CI, basta con mirar el tamaño de los literales
+crudos: cualquier `R"…(` de más de 16 KB es un C2026 en el x86.
+
+## Icono de la app
+
+La app tiene icono en cuatro superficies, todas desde los mismos ficheros:
+
+| superficie | mecanismo |
+|---|---|
+| `.exe` de Windows | `resources/nt.rc` (`IDI_ICON1 ICON DISCARDABLE "icon/nt.ico"`), añadido con `target_sources` dentro del `if(WIN32)` de CMakeLists; rc.exe resuelve la ruta con el `target_include_directories` a `resources/` |
+| Barra de tareas / Explorador | `nt.ico` multirres vía `IconFilename` en los accesos directos de `dist.iss` y `dist64.iss` |
+| El propio `setup.exe` | `SetupIconFile` en los dos `.iss` |
+| Ventana (Qt) | `app.setWindowIcon()` en `main.cpp` con los 7 PNG del `.qrc` |
+
+- Los ficheros viven en `resources/icon/` y los genera
+  `tools/gen_app_icon.py` desde el maestro `nt_icon.png` (1024, alfa real).
+  El generador **falla ruidosamente** si el maestro pierde transparencia o si
+  al `.ico` le falta alguna entrada, para que un cambio futuro no deje un
+  `.ico` de una sola entrada (barra borrosa) sin que nada se entere.
+- Las alturas son 16/24/32/48/64/128/256 porque **QIcon no escala**: elige la
+  entrada que más se parezca a lo que pide cada superficie. La de 16 es la barra
+  de tareas al 100 % y la más exigente: por eso el bisel del monitor es forma
+  **rellena** y no un contorno de 1 px (medido a 16 px, un contorno de 1/16
+  del lienzo da 0,33 px y desaparece).
+- `nt.ico` está en la lista `$need` del gate de manifiesto de iscc del x64: si
+  una edición de `[Files]` lo deja fuera, el CI lo dice en vez de crear los
+  accesos directos con el icono por defecto de Windows.
+- En Linux la ventana no muestra icono propio en el escritorio sin un
+  `.desktop` instalado; hoy no hay ninguno porque la app no se instala en Linux.
+
 ## Pieza protegida (NO modificar sin razón técnica y prueba)
 
 El reproductor funcional es una pieza protegida. Los siguientes elementos NO
@@ -373,6 +430,22 @@ fullscreen el scroll ocupa toda la página y la barra dejaría una franja).
 El selftest del player verifica invariantes del núcleo protegido sin
 reproducir ningún archivo. Ejecutar ambos antes de considerar estable un
 cambio que toque el reproductor.
+
+**Qué dispara cada workflow (importante para interpretar un tablero en rojo):**
+
+| workflow | se dispara |
+|---|---|
+| `windows.yml` (x86 / Win7) | en **cada** push a `main` |
+| `windows_x64.yml` (Win10+) | solo si el push toca **el propio fichero** del workflow (filtro `paths:`), o a mano con `gh workflow run windows_x64.yml --ref main` |
+
+O sea que un `main` en rojo **solo por x86** es normal, y un `main` donde solo
+corre el x64 significa que ese push tocó `windows_x64.yml`. Para validar un
+cambio en el build x64 hay que dispararlo a mano o tocar su workflow.
+
+Ojo también con el toolset: el x86 usa **v142** (VS2019) por el target Win7 y el
+x64 el de `windows-latest` (más nuevo). No compilan lo mismo: un literal que el
+x64 acepta puede dar C2026 en el x86 (ver la sección del límite de MSVC). Un
+fallo que aparece solo en x86 no hay que buscarlo solo ahí.
 
 ## Recuperación ante sesión gateada (403 de YouTube)
 
