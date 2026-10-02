@@ -168,7 +168,6 @@ QPushButton#iconBtn:pressed { background: @SELECTION@; }
 /* iconBtn no tiene borde, así que el foco va por fondo (igual que navBtn). */
 QPushButton#iconBtn:focus { background: @HOVER@; color: @ACCENT@; }
 QPushButton#iconBtn:disabled { color: @DISABLED@; }
-QPushButton#danger { color: @ACCENT@; }
 
 QLineEdit, QComboBox {
     background-color: #1F1F1F;
