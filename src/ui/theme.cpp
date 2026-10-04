@@ -122,7 +122,6 @@ QLabel#emptyState {
     background: #181818; border: 1px dashed @BORDER@; border-radius: 10px;
     padding: 18px;
 }
-QLabel#muted { color: #8F8F8F; }
 
 QPushButton {
     background-color: #1F1F1F;
@@ -726,6 +725,15 @@ QWidget#playerArea { background-color: #000000; }
               .replace(QStringLiteral("@OVERLAY_EDGE@"), overlayEdgeRgba());
 }
 
+namespace {
+// Definidas mas abajo, con glyphSelfTest que es su usuario principal. Se
+// adelantan aqui porque themeSelfTest las necesita tambien: los dos tests
+// tienen que quitar comentarios ANTES de mirar literales, si no basta con citar
+// un nombre en un "// este boton se llama X" para que cuente como vivo.
+QString sinComentarios(const QString &linea, bool &enBloque);
+QStringList literalesDe(const QString &linea);
+} // namespace
+
 bool themeSelfTest()
 {
     int fail = 0;
@@ -794,6 +802,96 @@ bool themeSelfTest()
     // paginas (Home, Descubre, Buscar, canal, historial, biblioteca, playlist).
     chk(veces.value(QStringLiteral("QLabel#sectionTitle")) == 1,
         "QLabel#sectionTitle se declara exactamente una vez");
+
+    // --- Selectores #nombre que ningun widget llega a usar --------------------
+    // Una regla cuyo #nombre no aparece como literal en NINGUN sitio de src/
+    // no puede pintar nada: nadie le pone ese objectName al widget. Asi que se
+    // pintaba y no se notaba. Esto es lo que habria cazado QPushButton#danger.
+    //
+    // Se miran los literales de TODO src/ y no solo los argumentos de
+    // setObjectName: hay helpers que reciben el nombre como parametro y lo
+    // aplican por dentro, y con el criterio estricto #actionSegL y #actionSegR
+    // salian como muertos sin serlo (los pone makeSeg en watch_page.cpp). Con
+    // un criterio laxo se puede dar el caso inverso (que el mismo nombre se
+    // cite de verdad en otro sitio y tape un selector muerto), pero eso es un
+    // falso negativo: avisa el CI y se mira. Un falso positivo en cambio
+    // enseña a ignorar el test, que es peor.
+    QStringList nombresQss;
+    for (const QString &sel : veces.keys()) {
+        for (int i = 0; i < sel.size(); ++i) {
+            if (sel.at(i) != QLatin1Char('#'))
+                continue;
+            int j = i + 1;
+            QString n;
+            while (j < sel.size() && (sel.at(j).isLetterOrNumber()
+                                      || sel.at(j) == QLatin1Char('_'))) {
+                n += sel.at(j);
+                ++j;
+            }
+            // Los ids de Qt empiezan por letra; "#1" no es un selector de objeto.
+            if (!n.isEmpty() && n.at(0).isLetter() && !nombresQss.contains(n))
+                nombresQss << n;
+            i = j - 1;
+        }
+    }
+    nombresQss.sort();
+    chk(nombresQss.size() > 40, "se han extraido los ids del QSS (mas de 40)");
+
+    {
+        // Raiz del arbol: este fichero es <raiz>/src/ui/theme.cpp.
+        QDir root = QFileInfo(QString::fromUtf8(__FILE__)).absolutePath();
+        root.cdUp();
+        root.cdUp();
+        const QString srcDir = root.filePath(QStringLiteral("src"));
+        if (!QFileInfo(srcDir).isDir()) {
+            std::fprintf(stderr,
+                         "  [info] sin arbol de fuentes junto al binario: no se "
+                         "comprueban los selectores sin widget\n");
+        } else {
+            QStringList literales;
+            QStringList pila{srcDir};
+            int ficheros = 0;
+            while (!pila.isEmpty()) {
+                const QString dir = pila.takeLast();
+                const QFileInfoList entradas = QDir(dir).entryInfoList(
+                    QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+                for (const QFileInfo &fi : entradas) {
+                    if (fi.isDir()) {
+                        pila << fi.filePath();
+                        continue;
+                    }
+                    const QString sufijo = fi.suffix();
+                    if (sufijo != QLatin1String("cpp") && sufijo != QLatin1String("h"))
+                        continue;
+                    QFile f(fi.filePath());
+                    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+                        continue;
+                    ++ficheros;
+                    // El estado de bloque NO cruza de un fichero a otro: un "/*"
+                    // sin cerrar dejaria el siguiente entero marcado como
+                    // comentario y sus literales no se verian (agujero
+                    // silencioso, que es justo lo que este test evita).
+                    bool enBloque = false;
+                    const QStringList lineas =
+                        QString::fromUtf8(f.readAll()).split(QLatin1Char('\n'));
+                    for (const QString &ln : lineas)
+                        literales += literalesDe(sinComentarios(ln, enBloque));
+                }
+            }
+            chk(ficheros > 20 && literales.size() > 1000,
+                "se ha recorrido el arbol de fuentes (literales incluidos)");
+            QStringList muertos;
+            for (const QString &n : nombresQss)
+                if (!literales.contains(n))
+                    muertos << n;
+            for (const QString &n : muertos)
+                std::fprintf(stderr,
+                             "  [info] selector sin widget: #%s  (el literal \"%s\" "
+                             "no aparece en src/)\n", qPrintable(n), qPrintable(n));
+            chk(muertos.isEmpty(),
+                "ningun selector #nombre se queda sin widget");
+        }
+    }
 
     // Regresion de las dos cosas que perdio el usuario de vista. La paleta no la
     // cubre el QSS (la descripcion del Player es un QLabel seleccionable y pinta

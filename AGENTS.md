@@ -423,7 +423,7 @@ fullscreen el scroll ocupa toda la página y la barra dejaría una franja).
 ./build/nevertube_qt2 --selftest-browse    # endpoints Innertube: canal + tabs (videos/shorts/live) + detalle + playlist
 ./build/nevertube_qt2 --selftest-feeds     # canal por Innertube + trending (protocolo y cadena)
 ./build/nevertube_qt2 --selftest-grid      # rejillas: tope de columnas (puro) + celda coherente modelo/gridSize/seccion (monta un VideoListView; sin red ni GPU: va en el CI)
-./build/nevertube_qt2 --selftest-theme     # QSS puro: ningún selector declarado dos veces (duplicado silencioso): va en el CI
+./build/nevertube_qt2 --selftest-theme     # QSS puro: selector duplicado, selector sin widget, paleta de selección y bordes de los botones: va en el CI
 ./build/nevertube_qt2 --selftest-glyphs    # todo glifo no ASCII de la UI existe en la fuente real de la app: va en el CI
 ```
 
@@ -804,6 +804,39 @@ Dosposites que se perdían de vista y que el usuario señaló:
 
 `--selftest-theme` cubre las dos: paleta en `kSelection`/`kText`, que el QSS no
 seleccione en el acento, y que el bloque `[highlight="true"]` lleve el acento.
+
+## Selectores del QSS sin widget detrás (`--selftest-theme`)
+
+Una regla cuyo `#nombre` no se lo pone **nadie** a ningún widget no pinta nada:
+se aplicaba a la nada y no se notaba. Por eso `QPushButton#danger` puede estar
+en la hoja sin que se note (se borró; además era malo por usar el acento para
+decir "peligroso", que solo funciona si el acento es rojo).
+`--selftest-theme` lo caza: extrae los ids del QSS y exige que cada uno aparezca
+como **literal** en algún sitio de `src/`.
+
+Dos decisiones que hacen que el gate sirva y no estorbe:
+
+- **Se miran los literales de TODO `src/`, no solo los argumentos de
+  `setObjectName`.** Hay helpers que reciben el nombre como parámetro y lo
+  aplican por dentro (`makeSeg` en `watch_page.cpp` pone `#actionSegL` y
+  `#actionSegR`): con el criterio estricto salían como muertos sin serlo, y un
+  falso positivo enseña a ignorar el test. El trade-off es el inverso — que el
+  mismo nombre se cite de verdad en otro sitio y tape un selector muerto —, pero
+  eso es un falso **negativo**: avisa el CI y se mira, mientras que el falso
+  positivo mata el gate.
+- **Los comentarios se descartan antes de mirar los literales**, con los mismos
+  `sinComentarios`/`literalesDe` que usa `glyphSelfTest`. Si no, bastaría con
+  citar el nombre en un `// este botón se llama X` para que un selector muerto
+  pasara por vivo, y el propio comentario del gate se autobloquearía.
+
+El estado de bloque **no cruza de fichero a otro**: un `/*` sin cerrar dejaría el
+fichero siguiente entero marcado como comentario y sus literales no se verían
+(agujero silencioso). Si el árbol de fuentes no está junto al binario se salta
+con un `[info]` y no falla, igual que hace `glyphSelfTest`.
+
+Lo ha encontrado de verdad: `QLabel#muted` estaba en la hoja y el literal
+`"muted"` no aparecía por ningún sitio (el color sigue disponible para quien lo
+necesite como `@MUTED@`/`kMuted`).
 
 ## Glifos: la fuente por defecto NO tiene todos los caracteres (medido)
 
