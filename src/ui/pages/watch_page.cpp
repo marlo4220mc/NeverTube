@@ -811,31 +811,33 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // los bloques quedan pegados arriba, con hueco al final (como YouTube).
     top->addStretch(1);
 
-    // "Volver" del Player. Antes era un botón FLOATANTE que se pintaba encima
-    // del área de vídeo (move(12,8) + raise()), o sea encima de la imagen: el
-    // usuario pidió sacarlo de ahí. Ahora vive en una barra fija ARRIBA del
-    // scroll único, así que no se superpone al vídeo en ningún momento (ni al
-    // reproducir, ni con los controles del overlay, ni al salir del vídeo de la
-    // vista). Se sigue ocultando en fullscreen, donde solo debe quedar el
-    // vídeo. El token es #backLink, el mismo enlace discreto que Canal,
-    // Historial y Playlist.
-    m_backBar = new QWidget(this);
-    auto *backLay = new QHBoxLayout(m_backBar);
-    backLay->setContentsMargins(16, 6, 16, 6);
-    backLay->setSpacing(0);
-    m_back = new QPushButton(QStringLiteral("Volver"), m_backBar);
+    // "Volver" del Player: un enlace flotante sobre el vídeo que SOLO aparece
+    // con el ratón. Vive dentro de la página del overlay (gl, OverlayHost
+    // transparente), así que comparte el mismo ciclo de 2,5 s que los controles
+    // (showOverlayControls/hideOverlayControls), sigue al reparent del mini
+    // player sin nada que hacer a mano (el overlay es hijo del player), y no
+    // necesita geometría propia al redimensionar: en la esquina superior
+    // izquierda la posición no cambia.
+    //
+    // Antes ocupaba una barra fija de 38 px a todo el ancho ENCIMA del scroll
+    // (m_backBar con splitOuter->insertWidget(0, ...)): un enlace de 63 px en
+    // una banda llena de hueco, que además empujaba el vídeo 38 px para abajo.
+    // El usuario la pidió fuera. La barra entera desaparece, con ella los 38 px
+    // y el hueco que dejaba.
+    //
+    // El token es #backLink, el mismo enlace discreto que Canal, Historial y
+    // Playlist; dentro del overlay su parte superior queda pegada al borde del
+    // vídeo (gl1 no gestiona este hijo, solo a m_ctrlBar y al stretch).
+    m_back = new QPushButton(QStringLiteral("Volver"), gl);
     m_back->setObjectName(QStringLiteral("backLink"));
     // El icono Back (abajo) ya es la flecha: el "◀" del texto era un glifo
     // que no existe en la fuente por defecto y salia como un punto, ademas
     // duplicaba la misma affordance.
     m_back->setIcon(nt::icon(nt::Icon::Back, nt::kMuted, 13));
     m_back->setCursor(Qt::PointingHandCursor);
-    backLay->addWidget(m_back);
-    backLay->addStretch(1);
-    // Índice 0: la barra va ANTES del scroll (que es lo que ocupa el resto con
-    // stretch 1), de modo que el vídeo empieza por debajo de ella y nunca queda
-    // debajo del botón.
-    splitOuter->insertWidget(0, m_backBar);
+    m_back->move(12, 8);
+    m_back->raise();
+    m_back->hide(); // aparece con los controles, no antes
 
     connect(m_back, &QPushButton::clicked, this,
             &WatchPage::backRequested);
@@ -1773,10 +1775,12 @@ void WatchPage::enterFullscreen()
     // Fullscreen de SOLO vídeo: se ocultan botón Volver + descripción + cola.
     // Con todo en el scroll único, ocultarlos deja el contenido = solo vídeo y
     // widgetResizable lo estira a toda la página (sin reparent del player).
-    // Se oculta la BARRA del "Volver", no solo el botón: en fullscreen el
-    // scroll ocupa toda la página y la barra dejaría una franja encima.
-    if (m_backBar)
-        m_backBar->hide();
+    // Se oculta el enlace "Volver" en fullscreen, donde solo debe quedar el
+    // vídeo. Ya no hay barra fija que dejar una franja: el enlace vive dentro
+    // del overlay y showOverlayControls no vuelve a mostrarlo aquí porque el
+    // guard de arriba (m_inFullscreen) lo tiene en cuenta.
+    if (m_back)
+        m_back->hide();
     if (m_watchBody)
         m_watchBody->hide();
     if (m_bottomWidget)
@@ -1796,8 +1800,11 @@ void WatchPage::leaveFullscreen()
     m_inFullscreen = false;
     if (m_playerContainer)
         m_playerContainer->setFullscreen(false);
-    if (m_backBar)
-        m_backBar->show();
+    // Al salir no se fuerza el enlace: si los controles están visibles (suelen
+    // moverse justo antes de salir) vuelve con ellos, y si no, aparecerá en el
+    // próximo movimiento de ratón sobre el vídeo, que es la regla nueva.
+    if (m_back && m_ctrlBar && m_ctrlBar->isVisible())
+        m_back->show();
     if (m_watchBody)
         m_watchBody->show();
     if (m_bottomWidget)
@@ -1934,6 +1941,11 @@ void WatchPage::showOverlayControls()
              m_overlay->currentIndex(), m_ctrlBar->isVisible());
     m_ctrlBar->show();
     m_ctrlBar->raise();
+    // "Volver" sale con los controles, pero NO en fullscreen: allí solo debe
+    // quedar el vídeo y este bloque también corre en fullscreen (es el mismo
+    // ciclo de 2,5 s), así que el estado se decide aquí y no en cada rama.
+    if (m_back)
+        m_back->setVisible(!m_inFullscreen);
     if (m_qualityMenuActive && m_qualityMenu->isVisible())
         m_qualityMenu->raise();
     updateOverlayIcons();
@@ -1957,6 +1969,9 @@ void WatchPage::hideOverlayControls()
     NT_DEBUG("E2E overlayHide idx=%d barVisible=%d\n",
              m_overlay->currentIndex(), m_ctrlBar->isVisible());
     m_ctrlBar->hide();
+    // El enlace "Volver" comparte el ciclo con la caja de controles.
+    if (m_back)
+        m_back->hide();
     // reaches a la guarda de m_ctrlPressed, así que aquí el estado ya no puede
     // estar atascado. Se pone a cero igualmente: si un release se perdiera
     // (el filtro está en el reproductor y sus hijos, pero por si acaso), la

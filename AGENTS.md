@@ -365,10 +365,9 @@ el scroll general la recorre). Ambos bloques se alinean ARRIBA y conservan su
 altura natural (`midLay->setAlignment(..., Qt::AlignTop)`): la fila crece con
 la cola, pero la descripción no se estira a esa altura — debajo de cada
 bloque solo queda espacio vacío scrollable, no un widget estirado. El botón
-"Volver" del Player está en una **barra fija ARRIBA del scroll**
-(`m_backBar`, `splitOuter->insertWidget(0, …)`), o sea NUNCA encima de la
-imagen, y se oculta en fullscreen (se oculta la barra, no solo el botón: en
-fullscreen el scroll ocupa toda la página y la barra dejaría una franja).
+"Volver" del Player es un enlace flotante **sobre el vídeo que solo aparece con
+el ratón** (detalle en el punto de `#backLink` de abajo): ya no hay barra fija
+que empuje la imagen para abajo.
 
 - **"Volver" es el MISMO token en las cuatro superficies** con vuelta atrás
   (Canal, Historial, Playlist y el Player): `QPushButton#backLink`, que es un
@@ -379,9 +378,24 @@ fullscreen el scroll ocupa toda la página y la barra dejaría una franja).
   página. El icono es `nt::icon(nt::Icon::Back, nt::kMuted, 13)` en las cuatro
   (dibujado con QPainter, nunca el glifo `◀`). Lo que sí cambia entre
   superficies es solo DÓNDE va el enlace: en las tres páginas dentro de su
-  propio layout de raíz, y en el Player en la barra de arriba del scroll
-  (medido: texto en `x=27..89`, el vídeo arranca en `y=38`; en las páginas el
-  mismo texto cae en `y=23..32` por el margen de raíz de 16 px).
+  propio layout de raíz, y en el Player **sobre el vídeo** en la esquina
+  superior izquierda (`m_back->move(12, 8)`), **solo mientras están visibles
+  los controles**: comparte el ciclo de 2,5 s con `m_ctrlBar`, o sea aparece al
+  mover el ratón encima de la imagen y se apaga solo con
+  `hideOverlayControls`. Vive como hijo de `gl` (el `OverlayHost` transparente
+  de la página 0 del overlay), no de la página: así el reparent del mini player
+  no necesita nada (el overlay ya es hijo del player) y `gl1`, que solo gestiona
+  el stretch y `m_ctrlBar`, no le toca la geometría.
+- **OJO con el histórico de este botón**, que ya dio dos vueltas: el usuario lo
+  pidió PRIMERO fuera de la imagen (vivía en un botón flotante `move(12,8)` +
+  `raise()`), entonces pasó a una barra fija de 38 px a todo el ancho encima
+  del scroll (`m_backBar`), y esa barra tampoco le gustó (banda llena de hueco
+  con un enlace de 63 px, y empujaba el vídeo a `y=38`). El estado actual es de
+  nuevo sobre la imagen pero **revelado con el ratón**, que es lo único que no
+  ocupa espacio propio. Si se vuelve a tocar, mirar el guard de
+  `m_inFullscreen` en `showOverlayControls`: `enterFullscreen()` llama a
+  `showOverlayControls()`, así que ocultar el botón SOLO desde
+  `enterFullscreen()` no basta (se vuelve a mostrar).
 
 - `PlayerContainer::updateMaxHeight()` fija `min = max = min(width/aspect,
   kMaxPlayerHeight=560)` (no solo el máximo, como el split antiguo): dentro
@@ -396,8 +410,8 @@ fullscreen el scroll ocupa toda la página y la barra dejaría una franja).
   vertical: en `WatchPage::updateQueue()` se fija su altura al contenido real
   (`sizeHintForRow(0)` × nº de filas) para que el scroll general de la página
   la recorra entera, sin scroll interno duplicado.
-- Fullscreen (solo vídeo): se ocultan botón Volver + descripción + cola
-  (`m_backBar`, `m_watchBody`, `m_bottomWidget`); con `widgetResizable` el
+- Fullscreen (solo vídeo): se ocultan el enlace Volver + descripción + cola
+  (`m_back`, `m_watchBody`, `m_bottomWidget`); con `widgetResizable` el
   contenido queda = solo vídeo y se estira a toda la página (sin reparent del
   player). Al salir se restauran y el scroll vuelve a 0.
 - Al cambiar de vídeo (`onCurrentChanged`) el scroll vuelve arriba (como

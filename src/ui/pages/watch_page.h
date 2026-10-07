@@ -171,10 +171,10 @@ private:
     bool m_isStarred = false;
     bool m_watchLaterMarked = false;
 
+    // "Volver" del Player: enlace flotante SOBRE el vídeo que solo aparece con
+    // el ratón. Vive en la página del overlay (gl) y comparte el ciclo de 2,5 s
+    // de los controles; se oculta en fullscreen, donde solo debe quedar el vídeo.
     QPushButton *m_back;
-    // Barra fija del "Volver", ARRIBA del scroll único (fuera del vídeo). Se
-    // oculta en fullscreen, donde solo debe quedar el vídeo.
-    QWidget *m_backBar = nullptr;
     QStackedWidget *m_overlay;
     QLabel *m_errorLabel;
     // Scroll ÚNICO de toda la página: vídeo arriba + fila con descripción y
