@@ -97,6 +97,14 @@ La app tiene icono en cuatro superficies, todas desde los mismos ficheros:
 | El propio `setup.exe` | `SetupIconFile` en los dos `.iss` |
 | Ventana (Qt) | `app.setWindowIcon()` en `main.cpp` con los 7 PNG del `.qrc` |
 
+- El icono ACTUAL es el que eligió el usuario (un monitor brillante con botón
+  de reproducción rojo, a juego con el acento por defecto). Salió de un PNG del
+  modelo con el **damero de "transparencia" PINTADO** en los píxeles: se quitó
+  con un relleno por inundación desde el borde (grises claros conectados) y se
+  rellenó el RGB de la zona transparente para que el reescalado no deje halo
+  blanco. El maestro de 1024 es lo único que se toca a mano; el resto lo
+  regenera el script. NO hay que "adaptar" el icono al estilo de la app: manda
+  el icono.
 - Los ficheros viven en `resources/icon/` y los genera
   `tools/gen_app_icon.py` desde el maestro `nt_icon.png` (1024, alfa real).
   El generador **falla ruidosamente** si el maestro pierde transparencia o si
@@ -104,9 +112,9 @@ La app tiene icono en cuatro superficies, todas desde los mismos ficheros:
   `.ico` de una sola entrada (barra borrosa) sin que nada se entere.
 - Las alturas son 16/24/32/48/64/128/256 porque **QIcon no escala**: elige la
   entrada que más se parezca a lo que pide cada superficie. La de 16 es la barra
-  de tareas al 100 % y la más exigente: por eso el bisel del monitor es forma
-  **rellena** y no un contorno de 1 px (medido a 16 px, un contorno de 1/16
-  del lienzo da 0,33 px y desaparece).
+  de tareas al 100 % y la más exigente: a ese tamaño el motivo tiene que seguir
+  leyéndose (en el icono anterior, un bisel de contorno de 1 px desaparecía:
+  medido, 1/16 del lienzo = 0,33 px).
 - `nt.ico` está en la lista `$need` del gate de manifiesto de iscc del x64: si
   una edición de `[Files]` lo deja fuera, el CI lo dice en vez de crear los
   accesos directos con el icono por defecto de Windows.
