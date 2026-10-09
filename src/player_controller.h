@@ -44,6 +44,15 @@ public:
     void playIndex(int index);
     void next();
     void previous();
+    // Modos del reproductor (botones de la fila de controles). Barajar
+    // reordena al azar SOLO la cola por delante del vídeo en reproducción (el
+    // actual no se mueve, como YouTube). Repetir vuelve al primer vídeo al
+    // terminar el último (con cola de uno, "repetir uno"). No se persisten: son
+    // estado de sesión, y la UI los lee al refrescar los iconos.
+    void setShuffle(bool on);
+    bool shuffle() const { return m_shuffle; }
+    void setRepeat(bool on);
+    bool repeat() const { return m_repeat; }
     void playPause();
     void toggleMute();
     // Fija el estado de silencio sin alternarlo (para restaurar el volumen del
@@ -158,6 +167,10 @@ private:
     bool m_muted = false;
     double m_volume = 100.0;
     int m_volumeMax = 100;
+    // Modos de reproducción (barajar/repetir). De memoria de sesión, sin señal
+    // propia: la UI los lee en updateOverlayIcons(), que es cuando cambian.
+    bool m_shuffle = false;
+    bool m_repeat = false;
     int m_maxHeight = 720;
     int m_resolveGen = 0;
     double m_seekBack = 0.0;

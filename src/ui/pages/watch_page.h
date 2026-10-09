@@ -124,14 +124,9 @@ private:
     // el stream cargado no trae (p.ej. Auto pide 360 de un vídeo 1080).
     void onStreamHeights(const QString &videoId, const QVector<int> &heights);
     // Pinta la descripción del vídeo como HTML enriquecido (enlaces + saltos
-    // de línea) y guarda el texto plano. Vacía = oculta la descripción.
+    // de línea) y guarda el texto plano. Vacía = oculta la descripción. Se
+    // muestra SIEMPRE completa (sin colapso ni "…más").
     void applyDescription(const QString &description);
-    // Aplica el colapso de la descripción (kDescLines) y decide si el botón
-    // "…más" hace falta para el ancho actual.
-    void updateDescCollapse();
-    // Coloca el degradado en el borde inferior de la tarjeta de descripción
-    // (solo con la descripción colapsada).
-    void positionDescFade();
     // True si el vídeo dado es el que está en reproducción (ignora respuestas
     // que llegan tarde, de un vídeo ya reemplazado).
     bool isCurrentVideo(const QString &videoId) const;
@@ -225,31 +220,29 @@ private:
     // baja. 0 = indeterminado (cae al techo del stream cargado).
     int m_availableMaxH = 0;
     QLabel *m_descLabel;
-    // Descripción colapsable: se recorta a kDescLines y un botón "…más"/"…menos"
-    // la despliega. m_descCollapsible se recalcula al vuelo (según el ancho)
-    // para no mostrar el botón cuando el texto ya cabe entero.
-    QPushButton *m_descToggle = nullptr;
-    // Tarjeta que agrupa la descripción (+ su "…más") y el degradado inferior
-    // que se muestra cuando está colapsada.
+    // Tarjeta que agrupa la descripción. El texto se muestra SIEMPRE completo:
+    // se quitó el colapso a 3 líneas y el control "…más"/"…menos".
     QFrame *m_descCard = nullptr;
-    QFrame *m_descFade = nullptr;
-    bool m_descExpanded = false;
-    bool m_descCollapsible = false;
-    bool m_inDescCollapse = false;
     VideoListView *m_nextUpList;
     // Contador de la cola, alineado a la derecha del título "A continuación".
     QLabel *m_queueCount = nullptr;
 
-    // Controles flotantes sobre el video (overlay).
+    // Controles flotantes sobre el video (overlay): fila única.
     QWidget *m_ctrlBar = nullptr;
+    QPushButton *m_ovShuffleBtn = nullptr;
     QPushButton *m_ovPlayBtn = nullptr;
     QPushButton *m_ovNextBtn = nullptr;
     QPushButton *m_ovPrevBtn = nullptr;
+    QPushButton *m_ovRepeatBtn = nullptr;
     SeekSlider *m_ovSeek = nullptr;
-    QLabel *m_ovTime = nullptr;
+    // El reloj va partido: transcurrido a la izquierda del slider, duración a
+    // la derecha (como el mockup). Antes era un solo "0:00 / 0:00".
+    QLabel *m_ovPos = nullptr;
+    QLabel *m_ovDur = nullptr;
     QPushButton *m_ovMuteBtn = nullptr;
     QSlider *m_ovVolume = nullptr;
     QPushButton *m_ovSubsBtn = nullptr;
+    QPushButton *m_ovPlaylistBtn = nullptr;
     QPushButton *m_ovFsBtn = nullptr;
     QTimer *m_overlayTimer = nullptr;
     QPoint m_lastMousePos = QPoint(-100000, -100000);

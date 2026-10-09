@@ -237,6 +237,13 @@ QSlider:disabled::handle:horizontal { background: @DISABLED@; }
 
 QProgressBar { border: none; background: @BORDER@; border-radius: 3px; text-align: center; color: transparent; }
 QProgressBar::chunk { background: @ACCENT@; border-radius: 3px; }
+/* Barra de progreso del mini player: 2 px (mas fina que la global), con radio 1
+   para que el chunk no asome por las esquinas. */
+QProgressBar#miniProgress { background: @HANDLE@; border: none; border-radius: 2px; }
+/* Relleno del mini en el ACENTO: sigue el color del ajuste (el QSS se regenera
+   al cambiarlo, como el resto del tema). Pista en gris. La altura (4 px) se fija
+   en MiniPlayerBar/setupMiniBar. */
+QProgressBar#miniProgress::chunk { background: @ACCENT@; border-radius: 2px; }
 
 QToolButton { background: transparent; border: none; border-radius: 6px; padding: 5px; }
 QToolButton:hover { background: @HOVER@; }
@@ -268,7 +275,15 @@ QStatusBar { background: #101010; color: #8F8F8F; border-top: 1px solid #1F1F1F;
 
 /* El mini player usaba kPanel (#181818), el mismo que la nav inferior, así que
    las dos barras se fundían en una sola línea. kElevated los separa. */
-QWidget#miniBar { background-color: #1F1F1F; border-top: 1px solid @BORDER@; }
+/* El mini player comparte el tono de la barra inferior (kTop #101010), no el
+   kElevated de antes: las dos barras se leen como una sola pieza. */
+QWidget#miniBar { background-color: #101010; border-top: 1px solid @BORDER@; }
+/* Hover de toda la barra: aclara el fondo para senalar que es clicable
+   (expande al Player). La propiedad la pone MiniPlayerBar. */
+QWidget#miniBar[hover="true"] { background-color: #181818; }
+/* Botones de la mini bar: mas densos que los de la fila del reproductor
+   (padding 4 en vez de 6), porque el mini es una superficie compacta. */
+QWidget#miniBar QPushButton#iconBtn { padding: 4px; }
 QWidget#watchBody { background-color: #0F0F0F; }
 QWidget#cardPanel { background-color: #181818; border: 1px solid @BORDER@; border-radius: 10px; }
 
@@ -283,7 +298,12 @@ QWidget#playerOverlay {
     border-top: 1px solid @OVERLAY_EDGE@;
     border-radius: 12px;
 }
-QLabel#ovTime { color: #ECECEC; font-size: 12px; }
+/* Reloj partido de la fila: transcurrido a la izquierda del slider y duracion a
+   la derecha (ver WatchPage). Texto secundario, por debajo de los iconos. */
+QLabel#ovPos, QLabel#ovDur { color: @TEXTSOFT@; font-size: 12px; }
+/* Separador vertical sutil entre los subgrupos de la fila (transporte / volumen
+   / acciones): 1x20 px, con el mismo canto claro que el borde del panel. */
+QFrame#ovSep { background: @OVERLAY_EDGE@; border: none; }
 
 /* --- Pagina Player ------------------------------------------------------
    Los dos overlays (spinner y error) viven dentro de m_overlay, sobre el
@@ -298,11 +318,13 @@ QLabel#ovError {
 /* Columna de informacion: metadatos y descripcion. */
 QLabel#watchMeta { color: @METATEXT@; font-size: 12px; }
 QLabel#watchDesc { color: @METATEXT@; font-size: 12px; background: transparent; }
-/* Tarjeta de la descripcion del Player (agrupa el texto y el "…mas"/"…menos"),
-   con el degradado inferior que se usa cuando la descripcion esta colapsada. */
+/* Tarjeta de la descripcion del Player: agrupa el texto, que se muestra
+   COMPLETO (sin colapso ni "…mas"). */
 QFrame#watchDescCard {
     background: #181818; border: 1px solid @BORDER@; border-radius: 10px;
 }
+/* Degradado inferior de la descripcion colapsada. Lo usa la pagina Canal (su
+   descripcion SI se recorta a 3 lineas con "…mas"); el Player ya no lo usa. */
 QFrame#descFade {
     border: none;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -316,8 +338,8 @@ QLabel#queueCount {
     padding: 1px 8px;
 }
 
-/* Boton "…mas"/"…menos" de la descripcion colapsada: enlace discreto, no una
-   capsula (no compite con las acciones). */
+/* Boton "…mas"/"…menos" de la descripcion colapsada (pagina Canal: su
+   descripcion SI se recorta). Enlace discreto, no una capsula. */
 QPushButton#descToggle {
     background: transparent; border: none; padding: 0;
     color: @MUTED@; font-size: 12px; font-weight: 600; text-align: left;
@@ -396,31 +418,6 @@ QPushButton#actionSegL[active="true"], QPushButton#actionSegR[active="true"] {
 QPushButton#actionSegL[active="true"]:hover,
 QPushButton#actionSegR[active="true"]:hover { background: @SELECTION@; }
 
-/* Chip de calidad. Antes llevaba objectName="iconBtn", que es el estilo de un
-   boton cuadrado de icono (padding 6, sin borde), pero lleva texto: sin
-   relleno no se leia como control. Ancho por contenido, no 98 fijos.
-
-   REGLA (del usuario): los botones multimedia NO llevan marco. Ni en reposo ni
-   al pulsarlos: por eso el borde va "transparent" y no "none" (no se ve ninguno
-   pero conserva los 2 px para que el contenido no se desplace) y el :focus lo
-   anula en vez de pintar el acento, que es lo que hace la regla global
-   QPushButton:focus y lo que hacia que el chip encendiera un marco al
-   pulsarlo. El foco se marca SOLO con el relleno, que es lo unico que se puede
-   tocar sin dibujar un borde. El relleno es lo que marca el boton como control,
-   no el marco. */
-QPushButton#chip {
-    background-color: #1F1F1F;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    padding: 5px 10px;
-    color: #ECECEC;
-}
-QPushButton#chip:hover { background-color: @HOVER@; }
-QPushButton#chip:pressed { background-color: @SELECTION@; }
-QPushButton#chip:focus {
-    border-color: transparent; background-color: @HANDLE_HOVER@;
-}
-
 /* Pista de los dos sliders de la caja. Selector PROPIO (#ovSeek / #ovVolume) a
    proposito: la regla QSlider global es compartida con el de volumen de la mini
    bar y el de Ajustes, que no van sobre un panel translucido y no necesitan
@@ -442,13 +439,19 @@ QSlider#ovSeek::handle:horizontal:hover, QSlider#ovVolume::handle:horizontal:hov
     background: @ACCENT@;
 }
 
-/* Menu de calidad: los tres stylesheet inline de watch_page.cpp pasan aqui. */
+/* Menu de calidad: MISMO lenguaje de borde que la caja del reproductor
+   (#playerOverlay) — fondo translucido de overlay, borde @BORDER@ y canto
+   superior claro (@OVERLAY_EDGE@), radio 12. Antes era #1F1F1F con borde
+   @SELECTION@ y radio 6, y desentonaba con el player. */
 QFrame#qualityMenu {
-    background-color: #1F1F1F; border: 1px solid @SELECTION@; border-radius: 6px;
+    background-color: @OVERLAY_BG@;
+    border: 1px solid @BORDER@;
+    border-top: 1px solid @OVERLAY_EDGE@;
+    border-radius: 12px;
 }
 QFrame#qualityMenu QPushButton {
     background: transparent; color: #ECECEC; border: none;
-    text-align: left; padding: 6px 8px; border-radius: 4px;
+    text-align: left; padding: 6px 8px; border-radius: 6px;
 }
 QFrame#qualityMenu QPushButton:hover { background: @SELECTION@; }
 
@@ -922,13 +925,13 @@ bool themeSelfTest()
             "la sugerencia resaltada lleva el acento (barra y velo)");
     }
 
-    // REGLA del usuario: los botones multimedia NO llevan marco visible. El chip
-    // de calidad (el que abre el menu de resoluciones) si lo llevaba y se veia
-    // como una caja mas dentro de la caja de controles. Se admite "none" o
-    // "transparent": este ultimo conserva los 2 px para que el foco, que en esta
-    // app se senala pintando el color del borde, no desplace el contenido.
+    // REGLA del usuario: los botones multimedia NO llevan marco visible (los
+    // #iconBtn de la fila del reproductor y de la mini bar, los #actionChip y
+    // los items del menu de resoluciones). Se admite "none" o "transparent":
+    // este ultimo conserva los 2 px para que el foco, que en esta app se senala
+    // pintando el color del borde, no desplace el contenido.
     const QStringList multimedia{
-        QStringLiteral("QPushButton#chip"), QStringLiteral("QPushButton#iconBtn"),
+        QStringLiteral("QPushButton#iconBtn"),
         QStringLiteral("QPushButton#actionChip"),
         QStringLiteral("QFrame#qualityMenu QPushButton")};
     for (const QString &sel : multimedia) {
@@ -941,7 +944,7 @@ bool themeSelfTest()
             if (!par.first.startsWith(sel))
                 continue;
             // Lo que venga detras del nombre tiene que ser un pseudo-estado o
-            // una propiedad, nunca otro nombre: "#chip" no es "#chipFoo".
+            // una propiedad, nunca otro nombre: "#iconBtn" no es "#iconBtnFoo".
             const QChar sig = par.first.size() > sel.size()
                                   ? par.first.at(sel.size())
                                   : QChar();

@@ -38,15 +38,13 @@
 #include "../../yt.h"
 #include "../format.h"
 #include "../icons.h"
+#include "../player_glyphs.h"
 #include "../confirm_dialog.h"
 #include "../flow_layout.h"
 #include "../row_menu.h"
 #include "../theme.h"
 #include "../thumbnail_cache.h"
 #include "../video_list_view.h"
-
-// Líneas visibles de la descripción cuando está colapsada (estilo YouTube).
-static const int kDescLines = 3;
 
 // Resoluciones del menú del reproductor, de menor a mayor. Fuente ÚNICA de
 // verdad: los índices del menú (m_qualityItems), idxToQuality,
@@ -56,6 +54,18 @@ namespace {
 const int kQualityHeights[] = {144, 240, 360, 480, 720, 1080, 1440, 2160};
 constexpr int kQualityCount =
     static_cast<int>(sizeof(kQualityHeights) / sizeof(kQualityHeights[0]));
+
+// Etiqueta de una resolución para el menú del engranaje: añade "HD" a 720p y
+// 1080p (y superiores) y "4K" a 2160p, como YouTube. Fuente única: la usan el
+// menú de resoluciones.
+QString qualityLabel(int height)
+{
+    if (height >= 2160)
+        return QStringLiteral("%1p 4K").arg(height);
+    if (height >= 720)
+        return QStringLiteral("%1p HD").arg(height);
+    return QStringLiteral("%1p").arg(height);
+}
 // Altura máxima del área de vídeo (PlayerContainer). En la página con scroll
 // único, un vídeo sin tope ocuparía width/aspect (768+ px en ventanas grandes
 // y maximizadas) y descripción + "A continuación" quedarían empujadas fuera de
@@ -64,22 +74,23 @@ constexpr int kQualityCount =
 // render ni el redibujado.
 constexpr int kMaxPlayerHeight = 560;
 
-// Ancho de vídeo por debajo del cual la fila completa de controles no cabe y se
-// esconde el slider de volumen. La suma sale del código, no es a ojo:
-//   6 botones iconBtn (icono + 12 de padding)  188
-//   chip de calidad por contenido                ~60
-//   slider de volumen                            80
-//   reloj "12:04 / 32:11" a 12 px               ~85
-//   8 huecos de btnRow x 6                       48
-//   márgenes laterales de barLay                 24
-//                                              -----
-//                                               ~485
-// 500 deja ~15 px de holgura y es deliberadamente conservador: en la banda
-// 485-500 el volumen se esconde aunque habría cabido. Preferimos esconderlo de
-// más que recortar, porque los setFixedWidth no ceden y el recorte caería en los
-// botones y el reloj. El mute sigue estando, así que no se pierde la capacidad
-// de silenciar.
-constexpr int kOverlayFullRowMinW = 500;
+// Anchos de vídeo por debajo de los cuales la fila de controles recorta
+// elementos, de menos prioritario a más (como YouTube: primero el slider de
+// volumen, luego las etiquetas de tiempo). La suma sale del código, no a ojo
+// (los botones iconBtn miden icono + 12 de padding del QSS; los relojes ~30 px
+// a 12 px; los separadores 1+12 px):
+//   transporte (5 botones: shuffle/prev/play/next/repeat)   162
+//   relojes transcurrido+duración                            ~60  (< kCtrlWithTimeMinW)
+//   separadores (2)                                          ~26
+//   volumen (mute 30 + slider fijo 80)                       110  (< kCtrlWithVolMinW)
+//   acciones (4 botones: captions/playlist/gear/fs)          120
+//   márgenes laterales de barLay                              24
+//   gaps (huecos x 6)                                        30-84
+// El slider de progreso es el único flexible (stretch) y se lleva el resto; los
+// umbrales dejan holgura para no recortar botones (los setFixedWidth del slider
+// de volumen no ceden y el recorte caería en los iconos y el reloj).
+constexpr int kCtrlWithVolMinW = 760;
+constexpr int kCtrlWithTimeMinW = 640;
 
 // Área de vídeo dentro del overlay. gl1 (el layout que lleva la caja) iba con
 // contentsMargins 0, así que la caja ocupaba el ancho entero sin separador. Esta
@@ -392,56 +403,89 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     barLay->setContentsMargins(12, 8, 12, 8);
     barLay->setSpacing(6);
 
-    auto *seekRow = new QHBoxLayout;
-    seekRow->setSpacing(8);
-    m_ovSeek = new SeekSlider(Qt::Horizontal, m_ctrlBar);
-    m_ovSeek->setObjectName(QStringLiteral("ovSeek"));
-    m_ovSeek->setCursor(Qt::PointingHandCursor);
-    connect(m_ovSeek, &QSlider::sliderMoved, this,
-            [this](int value) { m_player->seek(value); });
-    seekRow->addWidget(m_ovSeek, 1);
-    m_ovTime = new QLabel(QStringLiteral("0:00 / 0:00"), m_ctrlBar);
-    m_ovTime->setObjectName(QStringLiteral("ovTime"));
-    seekRow->addWidget(m_ovTime);
-    barLay->addLayout(seekRow);
-
+    // Fila ÚNICA de controles (estilo YouTube): transporte a la izquierda,
+    // tiempo transcurrido + slider de progreso + duración en el centro, y
+    // volumen/acciones a la derecha. Todos los controles son #iconBtn
+    // (transparentes, solo relleno al hover): sin marcos, sin cajas de botón,
+    // sin play circular. Los iconos son los de nt::playerIcon (Material Symbols
+    // dibujado con QPainter, vectorial).
     auto *btnRow = new QHBoxLayout;
     btnRow->setSpacing(6);
 
-    m_ovPrevBtn = new QPushButton(m_ctrlBar);
-    m_ovPrevBtn->setObjectName(QStringLiteral("iconBtn"));
-    m_ovPrevBtn->setCursor(Qt::PointingHandCursor);
-    m_ovPrevBtn->setIcon(nt::icon(nt::Icon::Prev, nt::kText, 20));
+    auto makeIconBtn = [this](QWidget *parent) {
+        auto *b = new QPushButton(parent);
+        b->setObjectName(QStringLiteral("iconBtn"));
+        b->setCursor(Qt::PointingHandCursor);
+        return b;
+    };
+
+    m_ovShuffleBtn = makeIconBtn(m_ctrlBar);
+    m_ovShuffleBtn->setToolTip(QStringLiteral("Barajar cola"));
+    connect(m_ovShuffleBtn, &QPushButton::clicked, this, [this]() {
+        m_player->setShuffle(!m_player->shuffle());
+        updateOverlayIcons();
+    });
+    btnRow->addWidget(m_ovShuffleBtn);
+
+    m_ovPrevBtn = makeIconBtn(m_ctrlBar);
+    m_ovPrevBtn->setToolTip(QStringLiteral("Anterior"));
     connect(m_ovPrevBtn, &QPushButton::clicked, this, [this]() {
         if (m_player->hasPrevious())
             m_player->previous();
     });
     btnRow->addWidget(m_ovPrevBtn);
 
-    m_ovPlayBtn = new QPushButton(m_ctrlBar);
-    m_ovPlayBtn->setObjectName(QStringLiteral("iconBtn"));
-    m_ovPlayBtn->setCursor(Qt::PointingHandCursor);
-    m_ovPlayBtn->setIcon(nt::icon(nt::Icon::Play, nt::kText, 22));
+    m_ovPlayBtn = makeIconBtn(m_ctrlBar);
+    m_ovPlayBtn->setToolTip(QStringLiteral("Reproducir/Pausa"));
     connect(m_ovPlayBtn, &QPushButton::clicked, this,
             &WatchPage::onPlayPause);
     btnRow->addWidget(m_ovPlayBtn);
 
-    m_ovNextBtn = new QPushButton(m_ctrlBar);
-    m_ovNextBtn->setObjectName(QStringLiteral("iconBtn"));
-    m_ovNextBtn->setCursor(Qt::PointingHandCursor);
-    m_ovNextBtn->setIcon(nt::icon(nt::Icon::Next, nt::kText, 20));
+    m_ovNextBtn = makeIconBtn(m_ctrlBar);
+    m_ovNextBtn->setToolTip(QStringLiteral("Siguiente"));
     connect(m_ovNextBtn, &QPushButton::clicked, this, [this]() {
         if (m_player->hasNext())
             m_player->next();
     });
     btnRow->addWidget(m_ovNextBtn);
 
-    btnRow->addStretch(1);
+    m_ovRepeatBtn = makeIconBtn(m_ctrlBar);
+    m_ovRepeatBtn->setToolTip(QStringLiteral("Repetir cola"));
+    connect(m_ovRepeatBtn, &QPushButton::clicked, this, [this]() {
+        m_player->setRepeat(!m_player->repeat());
+        updateOverlayIcons();
+    });
+    btnRow->addWidget(m_ovRepeatBtn);
 
-    m_ovMuteBtn = new QPushButton(m_ctrlBar);
-    m_ovMuteBtn->setObjectName(QStringLiteral("iconBtn"));
-    m_ovMuteBtn->setCursor(Qt::PointingHandCursor);
-    m_ovMuteBtn->setIcon(nt::icon(nt::Icon::Mute, nt::kText, 18));
+    // Tiempo transcurrido, progreso y duración en el centro: el slider se lleva
+    // todo el hueco flexible (stretch) entre las dos etiquetas.
+    m_ovPos = new QLabel(QStringLiteral("0:00"), m_ctrlBar);
+    m_ovPos->setObjectName(QStringLiteral("ovPos"));
+    btnRow->addWidget(m_ovPos);
+
+    m_ovSeek = new SeekSlider(Qt::Horizontal, m_ctrlBar);
+    m_ovSeek->setObjectName(QStringLiteral("ovSeek"));
+    m_ovSeek->setCursor(Qt::PointingHandCursor);
+    m_ovSeek->setMinimumWidth(60);
+    connect(m_ovSeek, &QSlider::sliderMoved, this,
+            [this](int value) { m_player->seek(value); });
+    btnRow->addWidget(m_ovSeek, 1);
+
+    m_ovDur = new QLabel(QStringLiteral("0:00"), m_ctrlBar);
+    m_ovDur->setObjectName(QStringLiteral("ovDur"));
+    btnRow->addWidget(m_ovDur);
+
+    // Separadores verticales sutiles (1 px) entre los subgrupos de la fila.
+    auto makeSep = [this](QWidget *parent) {
+        auto *sep = new QFrame(parent);
+        sep->setObjectName(QStringLiteral("ovSep"));
+        sep->setFixedSize(1, 20);
+        return sep;
+    };
+    btnRow->addWidget(makeSep(m_ctrlBar));
+
+    m_ovMuteBtn = makeIconBtn(m_ctrlBar);
+    m_ovMuteBtn->setToolTip(QStringLiteral("Silencio"));
     connect(m_ovMuteBtn, &QPushButton::clicked, this,
             &WatchPage::onToggleMute);
     btnRow->addWidget(m_ovMuteBtn);
@@ -462,9 +506,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     });
     btnRow->addWidget(m_ovVolume);
 
-    m_ovSubsBtn = new QPushButton(m_ctrlBar);
-    m_ovSubsBtn->setObjectName(QStringLiteral("iconBtn"));
-    m_ovSubsBtn->setCursor(Qt::PointingHandCursor);
+    btnRow->addWidget(makeSep(m_ctrlBar));
+
+    m_ovSubsBtn = makeIconBtn(m_ctrlBar);
     m_ovSubsBtn->setToolTip(QStringLiteral("Subtítulos (CC)"));
     connect(m_ovSubsBtn, &QPushButton::clicked, this, [this]() {
         m_subsVisible = !m_subsVisible;
@@ -474,51 +518,78 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     });
     btnRow->addWidget(m_ovSubsBtn);
 
-    m_quality = new QPushButton(
-        QStringLiteral("%1p").arg(idxToQuality(m_qualityIndex)), m_ctrlBar);
-    // Antes objectName="iconBtn" con setFixedWidth(98): el estilo de un botón
-    // cuadrado de icono (padding 6, sin borde) aplicado a un botón con texto, que
-    // sin relleno ni borde no se leía como control. Ahora tiene estilo propio y
-    // ancho por contenido — los 98 fijos además desperdiciaban hueco, y el menú
-    // se ancla a m_quality->width() para que siga cuadrando.
-    m_quality->setObjectName(QStringLiteral("chip"));
+    m_ovPlaylistBtn = makeIconBtn(m_ctrlBar);
+    m_ovPlaylistBtn->setToolTip(QStringLiteral("Añadir a playlist"));
+    connect(m_ovPlaylistBtn, &QPushButton::clicked, this,
+            &WatchPage::showPlaylistMenu);
+    btnRow->addWidget(m_ovPlaylistBtn);
+
+    // El menú de resoluciones se ancla a este botón, que dejó de ser el chip de
+    // texto "720p" para ser el icono de ajustes de la fila. La resolución activa
+    // vive ahora en el tooltip (ver onVideoSizeChanged/setQualityIndex).
+    m_quality = makeIconBtn(m_ctrlBar);
     m_quality->setToolTip(QStringLiteral("Calidad de vídeo"));
-    m_quality->setCursor(Qt::PointingHandCursor);
     connect(m_quality, &QPushButton::clicked, this,
             &WatchPage::toggleQualityMenu);
     btnRow->addWidget(m_quality);
 
-    m_ovFsBtn = new QPushButton(m_ctrlBar);
-    m_ovFsBtn->setObjectName(QStringLiteral("iconBtn"));
-    m_ovFsBtn->setCursor(Qt::PointingHandCursor);
-    m_ovFsBtn->setIcon(nt::icon(nt::Icon::Fullscreen, nt::kText, 18));
+    m_ovFsBtn = makeIconBtn(m_ctrlBar);
+    m_ovFsBtn->setToolTip(QStringLiteral("Pantalla completa"));
     connect(m_ovFsBtn, &QPushButton::clicked, this,
             &WatchPage::toggleFullscreen);
     btnRow->addWidget(m_ovFsBtn);
+
+    // Iconos base de la fila (nt::playerIcon). Los que dependen del estado
+    // (play/pausa, barajar, repetir, subtítulos) los refresca
+    // updateOverlayIcons().
+    m_ovShuffleBtn->setIcon(
+        nt::playerIcon(nt::PlayerIcon::Shuffle, nt::kText, 20));
+    m_ovPrevBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Prev, nt::kText, 20));
+    m_ovPlayBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Play, nt::kText, 22));
+    m_ovNextBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Next, nt::kText, 20));
+    m_ovRepeatBtn->setIcon(
+        nt::playerIcon(nt::PlayerIcon::Repeat, nt::kText, 20));
+    m_ovMuteBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Volume, nt::kText, 20));
+    m_ovSubsBtn->setIcon(
+        nt::playerIcon(nt::PlayerIcon::Captions, nt::kText, 20));
+    m_ovPlaylistBtn->setIcon(
+        nt::playerIcon(nt::PlayerIcon::PlaylistAdd, nt::kText, 20));
+    m_quality->setIcon(nt::playerIcon(nt::PlayerIcon::Settings, nt::kText, 20));
+    m_ovFsBtn->setIcon(
+        nt::playerIcon(nt::PlayerIcon::Fullscreen, nt::kText, 20));
 
     barLay->addLayout(btnRow);
     gl1->addWidget(m_ctrlBar);
     m_ctrlBar->hide();
 
     // Lógica responsive: si el ancho del vídeo no cabe la fila completa, se
-    // oculta el slider de volumen. El mute sigue estando, asi que no se pierde
-    // la capacidad de silenciar. LoCONNECTAMOS al widget que realmente conoce el
-    // ancho (OverlayHost), así no hay que adivinarlo por el parent.
+    // oculta primero el slider de volumen (el mute sigue estando) y después las
+    // etiquetas de tiempo. Se conecta al widget que conoce el ancho real
+    // (OverlayHost), no al parent.
     gl->onWidth = [this](int w) {
         if (!m_ovVolume)
             return;
         if (w <= 0) {
             if (m_ovVolume->isHidden())
                 m_ovVolume->setVisible(true);
+            if (m_ovPos->isHidden()) {
+                m_ovPos->setVisible(true);
+                m_ovDur->setVisible(true);
+            }
             return;
         }
-        const bool showVol = (w >= kOverlayFullRowMinW);
+        const bool showVol = (w >= kCtrlWithVolMinW);
+        const bool showTime = (w >= kCtrlWithTimeMinW);
         // isHidden() y NO isVisible(): la caja vive oculta casi todo el tiempo,
         // y isVisible() devuelve false en cuanto el padre está oculto, así que
-        // con isVisible() la guarda nunca se cumpliría (el volumen no se
-        // escondería nunca) y además se forzaría un relayout en cada resize.
+        // con isVisible() la guarda nunca se cumpliría (nada se escondería
+        // nunca) y además se forzaría un relayout en cada resize.
         if (m_ovVolume->isHidden() == showVol)
             m_ovVolume->setVisible(showVol);
+        if (m_ovPos->isHidden() == showTime) {
+            m_ovPos->setVisible(showTime);
+            m_ovDur->setVisible(showTime);
+        }
     };
 
     m_qualityMenu = new QFrame(gl);
@@ -539,8 +610,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
                == QStringLiteral("soft-all");
     m_qualityItems.reserve(kQualityCount);
     for (int i = 0; i < kQualityCount; ++i) {
-        auto *item = new QPushButton(
-            QStringLiteral("%1p").arg(kQualityHeights[i]), m_qualityMenu);
+        auto *item =
+            new QPushButton(qualityLabel(kQualityHeights[i]), m_qualityMenu);
         item->setFixedWidth(90);
         // soft-all: CPU solo, no se ofrecen 1440p/2160p. Cada item se
         // guarda en m_qualityItems para ocultarlo en caliente si el mpv
@@ -742,35 +813,15 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
                                          | Qt::TextSelectableByMouse);
     m_descLabel->setOpenExternalLinks(true);
     m_descLabel->setObjectName(QStringLiteral("watchDesc"));
-    // El colapso lo decide updateDescCollapse() según el ancho REAL (no un
-    // número fijo de caracteres). El filtro de eventos de la página re-evalúa
-    // al redimensionar la etiqueta, para que el botón no aparezca de más ni
-    // falte al cambiar el tamaño de la ventana.
-    // Tarjeta de la descripción: fondo #181818 con el texto y el control
-    // "…más"/"…menos", y un degradado en el borde inferior cuando está
-    // colapsada (el texto se funde con el fondo en vez de cortarse).
+    // Tarjeta de la descripción: fondo #181818 con el texto COMPLETO. Ya no hay
+    // colapso a 3 líneas ni control "…más"/"…menos": la descripción se muestra
+    // entera (lo pidió el usuario).
     m_descCard = new QFrame(this);
     m_descCard->setObjectName(QStringLiteral("watchDescCard"));
-    m_descCard->installEventFilter(this);
     auto *descLay = new QVBoxLayout(m_descCard);
     descLay->setContentsMargins(12, 10, 12, 10);
     descLay->setSpacing(4);
-    m_descLabel->installEventFilter(this);
     descLay->addWidget(m_descLabel);
-
-    m_descFade = new QFrame(m_descCard);
-    m_descFade->setObjectName(QStringLiteral("descFade"));
-    m_descFade->hide();
-
-    m_descToggle = new QPushButton(QStringLiteral("…más"), m_descCard);
-    m_descToggle->setObjectName(QStringLiteral("descToggle"));
-    m_descToggle->setCursor(Qt::PointingHandCursor);
-    m_descToggle->hide();
-    connect(m_descToggle, &QPushButton::clicked, this, [this]() {
-        m_descExpanded = !m_descExpanded;
-        updateDescCollapse();
-    });
-    descLay->addWidget(m_descToggle, 0, Qt::AlignLeft);
     infoLay->addWidget(m_descCard);
     midLay->addWidget(infoWidget, 7);
 
@@ -1084,7 +1135,7 @@ void WatchPage::updateQueue()
     if (rowH > 0)
         m_nextUpList->setFixedHeight(qMax(1, m_queue.size()) * rowH);
     if (m_bottomWidget)
-        m_bottomWidget->setVisible(!m_queue.isEmpty());
+        m_bottomWidget->setVisible(!m_queue.isEmpty() && !m_inFullscreen);
 }
 
 void WatchPage::onRelatedReady(const QString &videoId,
@@ -1467,10 +1518,6 @@ void WatchPage::applyDescription(const QString &description)
     m_description = description;
     if (description.isEmpty()) {
         m_descLabel->hide();
-        if (m_descToggle)
-            m_descToggle->hide();
-        if (m_descFade)
-            m_descFade->hide();
         if (m_descCard)
             m_descCard->hide();
         return;
@@ -1482,69 +1529,11 @@ void WatchPage::applyDescription(const QString &description)
         "<a href=\"\\1\" style=\"color:%1;\">\\1</a>").arg(nt::accentHex()));
     m_descLabel->setText(QStringLiteral(
         "<style>a { text-decoration:none; }</style>") + rich);
+    // Sin tope de altura: la descripción se muestra entera.
+    m_descLabel->setMaximumHeight(QWIDGETSIZE_MAX);
     m_descLabel->show();
     if (m_descCard)
         m_descCard->show();
-    // Cada vídeo arranca colapsado. El ancho real aún no está calculado en este
-    // punto, así que la decisión se toma en el siguiente ciclo del bucle.
-    m_descExpanded = false;
-    QTimer::singleShot(0, this, [this]() { updateDescCollapse(); });
-}
-
-// Recorta la descripción a kDescLines y muestra "…más"/"…menos" solo cuando el
-// texto no cabe. Se recalcula al cambiar el ancho (eventFilter) para que el
-// botón no aparezca de más ni falte al redimensionar la ventana.
-void WatchPage::updateDescCollapse()
-{
-    if (!m_descLabel || !m_descToggle || m_inDescCollapse)
-        return;
-    if (m_description.isEmpty()) {
-        m_descToggle->hide();
-        if (m_descFade)
-            m_descFade->hide();
-        m_descCollapsible = false;
-        return;
-    }
-    m_inDescCollapse = true;
-    m_descLabel->setMaximumHeight(QWIDGETSIZE_MAX);
-    const int w = m_descLabel->width();
-    const int lineH = m_descLabel->fontMetrics().lineSpacing();
-    const int maxH = lineH * kDescLines;
-    const int fullH = (w > 0 && lineH > 0) ? m_descLabel->heightForWidth(w) : 0;
-    m_descCollapsible = fullH > maxH + lineH / 2;
-    if (!m_descCollapsible) {
-        m_descToggle->hide();
-        if (m_descFade)
-            m_descFade->hide();
-    } else {
-        m_descToggle->setText(m_descExpanded ? QStringLiteral("…menos")
-                                             : QStringLiteral("…más"));
-        m_descToggle->show();
-        if (!m_descExpanded)
-            m_descLabel->setMaximumHeight(maxH);
-    }
-    m_inDescCollapse = false;
-    positionDescFade();
-}
-
-// Coloca el degradado en el borde inferior de la tarjeta (solo con la
-// descripción colapsada) y lo sube por encima del texto, dejando el botón
-// "…más" por delante.
-void WatchPage::positionDescFade()
-{
-    if (!m_descFade || !m_descCard)
-        return;
-    if (!(m_descCollapsible && !m_descExpanded && m_descCard->isVisible())) {
-        m_descFade->hide();
-        return;
-    }
-    const int fh = 26;
-    m_descFade->setGeometry(1, qMax(0, m_descCard->height() - fh - 1),
-                            qMax(0, m_descCard->width() - 2), fh);
-    m_descFade->show();
-    m_descFade->raise();
-    if (m_descToggle)
-        m_descToggle->raise();
 }
 
 void WatchPage::onPhaseChanged(const QString &phase)
@@ -1588,8 +1577,10 @@ void WatchPage::onPositionChanged(double position, double duration)
     m_ovSeek->setRange(0, duration > 0 ? qRound(duration) : 0);
     if (!m_ovSeek->isSeeking())
         m_ovSeek->setValue(qRound(position));
-    m_ovTime->setText(QStringLiteral("%1 / %2")
-                          .arg(fmtTime(position), fmtTime(duration)));
+    // El reloj va partido: transcurrido a la izquierda del slider y duración a
+    // la derecha, como el mockup.
+    m_ovPos->setText(fmtTime(position));
+    m_ovDur->setText(fmtTime(duration));
 }
 
 void WatchPage::onQualityChanged(int index)
@@ -1683,10 +1674,12 @@ void WatchPage::onVideoSizeChanged(int width, int height)
     // el botón debe mostrar esa calidad mientras el archivo la tenga.
     const int requested = idxToQuality(m_qualityIndex);
     const int visible = (requested <= height) ? requested : height;
-    m_quality->setText(QStringLiteral("%1p").arg(visible));
+    // El botón de calidad es el icono de ajustes: la resolución activa vive en
+    // el tooltip (el chip de texto se fue con la fila nueva).
+    m_quality->setToolTip(
+        QStringLiteral("Calidad de vídeo: %1p").arg(visible));
     // El menú se ancla con m_quality->mapTo(anchor, ...) al abrirse
-    // (toggleQualityMenu), así que sigue solo al ancho por contenido: no hace
-    // falta reajustar nada aquí al cambiar el texto.
+    // (toggleQualityMenu), así que sigue al botón sin reajustar nada aquí.
     NT_DEBUG("E2E combo sync %dx%d requested=%d button=%d\n",
              width, height, requested, visible);
 }
@@ -1702,7 +1695,8 @@ void WatchPage::setQualityIndex(int index)
 {
     m_qualityIndex = index;
     onQualityChanged(index);
-    m_quality->setText(QStringLiteral("%1p").arg(idxToQuality(index)));
+    m_quality->setToolTip(
+        QStringLiteral("Calidad de vídeo: %1p").arg(idxToQuality(index)));
 }
 
 void WatchPage::toggleQualityMenu()
@@ -1817,17 +1811,6 @@ void WatchPage::leaveFullscreen()
 // scroll) sobre el área de vídeo muestra los controles y reinicia el temporizador.
 bool WatchPage::eventFilter(QObject *watched, QEvent *event)
 {
-    // La descripción re-evalúa su colapso cuando cambia de ancho: así el botón
-    // "…más" aparece justo cuando el texto deja de caber y desaparece cuando
-    // vuelve a caber.
-    if (watched == m_descLabel && event->type() == QEvent::Resize) {
-        updateDescCollapse();
-        return false;
-    }
-    if (watched == m_descCard && event->type() == QEvent::Resize) {
-        positionDescFade();
-        return false;
-    }
     // En el mini player el PlayerWidget está reparentado al hueco del mini bar
     // (el filtro sigue instalado en él). Los eventos sobre el vídeo del mini no
     // deben alternar play/pausa ni mostrar el overlay: el mini bar gestiona el
@@ -1987,21 +1970,28 @@ void WatchPage::updateOverlayIcons()
 {
     if (!m_ovPlayBtn)
         return;
-    m_ovPlayBtn->setIcon(nt::icon(
-        m_player->isPaused() ? nt::Icon::Play : nt::Icon::Pause,
+    const QColor accent(nt::accentHex());
+    // Iconos del arte del reproductor (nt::playerIcon). Los modos activos
+    // (barajar, repetir, subtítulos) van en el color de acento.
+    m_ovPlayBtn->setIcon(nt::playerIcon(
+        m_player->isPaused() ? nt::PlayerIcon::Play : nt::PlayerIcon::Pause,
         nt::kText, 22));
     m_ovNextBtn->setEnabled(m_player->hasNext());
-    m_ovNextBtn->setIcon(nt::icon(nt::Icon::Next, nt::kText, 20));
+    m_ovNextBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Next, nt::kText, 20));
     if (m_ovPrevBtn) {
         m_ovPrevBtn->setEnabled(m_player->hasPrevious());
-        m_ovPrevBtn->setIcon(nt::icon(nt::Icon::Prev, nt::kText, 20));
+        m_ovPrevBtn->setIcon(
+            nt::playerIcon(nt::PlayerIcon::Prev, nt::kText, 20));
     }
-    m_ovMuteBtn->setIcon(nt::icon(
-        m_player->muted() ? nt::Icon::Unmute : nt::Icon::Mute,
-        nt::kText, 18));
-    m_ovSubsBtn->setIcon(nt::icon(
-        nt::Icon::Subtitles,
-        m_subsVisible ? QColor(nt::accentHex()) : nt::kText, 18));
+    m_ovShuffleBtn->setIcon(nt::playerIcon(
+        nt::PlayerIcon::Shuffle, m_player->shuffle() ? accent : nt::kText, 20));
+    m_ovRepeatBtn->setIcon(nt::playerIcon(
+        nt::PlayerIcon::Repeat, m_player->repeat() ? accent : nt::kText, 20));
+    m_ovMuteBtn->setIcon(nt::playerIcon(
+        m_player->muted() ? nt::PlayerIcon::Muted : nt::PlayerIcon::Volume,
+        nt::kText, 20));
+    m_ovSubsBtn->setIcon(nt::playerIcon(
+        nt::PlayerIcon::Captions, m_subsVisible ? accent : nt::kText, 20));
     QSignalBlocker block(m_ovVolume);
     m_ovVolume->setValue(qRound(m_player->volume()));
 }
@@ -2027,9 +2017,9 @@ void WatchPage::onVolumeChanged()
     // el valueChanged (que persistiría y re-aplicaría el volumen).
     QSignalBlocker block(m_ovVolume);
     m_ovVolume->setValue(qRound(m_player->volume()));
-    m_ovMuteBtn->setIcon(nt::icon(
-        m_player->muted() ? nt::Icon::Unmute : nt::Icon::Mute,
-        nt::kText, 18));
+    m_ovMuteBtn->setIcon(nt::playerIcon(
+        m_player->muted() ? nt::PlayerIcon::Muted : nt::PlayerIcon::Volume,
+        nt::kText, 20));
 }
 
 void WatchPage::applyAccent()

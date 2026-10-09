@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QRandomGenerator>
 #include <QTimer>
 
 #include "db/repositories.h"
@@ -268,6 +269,11 @@ void PlayerController::onPlayerState()
         if (hasNext()) {
             savePosition();
             playIndex(m_index + 1);
+        } else if (m_repeat && !m_queue.isEmpty()) {
+            // Repetir la cola entera: al terminar el último, se vuelve al
+            // primero (con cola de un solo vídeo, esto es "repetir uno").
+            savePosition();
+            playIndex(0);
         } else {
             setPhase(QStringLiteral("paused"));
         }
@@ -389,12 +395,53 @@ void PlayerController::next()
 {
     if (hasNext())
         playIndex(m_index + 1);
+    else if (m_repeat && !m_queue.isEmpty())
+        playIndex(0);
 }
 
 void PlayerController::previous()
 {
     if (hasPrevious())
         playIndex(m_index - 1);
+}
+
+// Barajar: reordena al azar SOLO la cola que queda por delante del vídeo en
+// reproducción; el actual no se mueve de sitio (como YouTube). Fisher-Yates con
+// QRandomGenerator::global. Las posiciones de reanudación van por ÍNDICE y el
+// reordenado invalida las de los índices que se mueven, así que se descartan
+// todas menos la del actual (que sigue donde estaba). Al reactivar el modo se
+// vuelve a barajar lo que quede.
+void PlayerController::setShuffle(bool on)
+{
+    if (m_shuffle == on)
+        return;
+    m_shuffle = on;
+    const int tail = (m_index >= 0) ? m_queue.size() - (m_index + 1) : 0;
+    if (!on || tail <= 1)
+        return;
+    QVector<VideoInfo> cola = m_queue.mid(m_index + 1);
+    for (int i = cola.size() - 1; i > 0; --i) {
+        const int j = QRandomGenerator::global()->bounded(i + 1);
+        if (j != i)
+            cola.swapItemsAt(i, j);
+    }
+    for (int i = m_index + 1; i < m_queue.size(); ++i)
+        m_queue[i] = cola.at(i - m_index - 1);
+    for (auto it = m_indexStartMs.begin(); it != m_indexStartMs.end();) {
+        if (it.key() != m_index)
+            it = m_indexStartMs.erase(it);
+        else
+            ++it;
+    }
+    emit queueChanged();
+}
+
+void PlayerController::setRepeat(bool on)
+{
+    if (m_repeat == on)
+        return;
+    m_repeat = on;
+    NT_DEBUG("E2E repeat=%d\n", m_repeat ? 1 : 0);
 }
 
 void PlayerController::savePosition()
