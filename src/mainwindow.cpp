@@ -2,12 +2,15 @@
 
 #include <QAbstractButton>
 #include <QButtonGroup>
+#include <QCursor>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QPainter>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QPlainTextEdit>
 #include <QProgressBar>
@@ -15,6 +18,7 @@
 #include <QScreen>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QStyle>
 #include <QTextEdit>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -34,6 +38,7 @@
 #include "../src/debug.h"
 #include "ui/format.h"
 #include "ui/icons.h"
+#include "ui/player_glyphs.h"
 #include "ui/pages/home_page.h"
 #include "ui/pages/channel_page.h"
 #include "ui/pages/library_page.h"
@@ -158,6 +163,10 @@ class MiniPlayerBar : public QWidget
 public:
     using QWidget::QWidget;
     std::function<void()> onActivate;
+    // Barra de progreso pegada al borde inferior y a todo el ancho. Va fuera
+    // del layout (que lleva márgenes laterales) y se recoloca aquí: es lo que
+    // la deja "flush" como en YouTube.
+    QProgressBar *progress = nullptr;
 
 protected:
     void mouseReleaseEvent(QMouseEvent *event) override
@@ -176,6 +185,76 @@ protected:
             return;
         }
         QWidget::keyPressEvent(event);
+    }
+
+    // Hover en toda la barra: aclara el fondo para señalar que es clicable
+    // (expande al Player). El estado va por propiedad dinámica para no meter un
+    // setStyleSheet inline; la regla vive en el QSS (QWidget#miniBar[hover]).
+    void enterEvent(QEvent *event) override
+    {
+        setHover(true);
+        QWidget::enterEvent(event);
+    }
+
+    void leaveEvent(QEvent *event) override
+    {
+        // No apagar el hover si el cursor sigue dentro de la barra: al pasar de
+        // la barra a un botón hijo, Qt manda Leave al padre y el fondo
+        // parpadearía.
+        if (!rect().contains(mapFromGlobal(QCursor::pos())))
+            setHover(false);
+        QWidget::leaveEvent(event);
+    }
+
+    void resizeEvent(QResizeEvent *event) override
+    {
+        QWidget::resizeEvent(event);
+        if (progress && progress->parentWidget() == this) {
+            progress->setGeometry(0, height() - progress->height(), width(),
+                                  progress->height());
+            progress->raise();
+        }
+    }
+
+private:
+    void setHover(bool on)
+    {
+        if (property("hover").toBool() == on)
+            return;
+        setProperty("hover", on);
+        // La propiedad dinámica solo repinta tras re-polish (obligatorio).
+        style()->unpolish(this);
+        style()->polish(this);
+    }
+};
+
+// Miniatura del mini player con las esquinas redondeadas DE VERDAD: el
+// border-radius del QSS solo redondea el FONDO del QLabel, no el QPixmap que se
+// pinta encima (se veían esquinas cuadradas, el mismo caso que circularAvatar).
+// Con pixmap, lo dibuja recortado a un rect redondeado; sin pixmap delega en
+// QLabel (estado "sin miniatura" con el fondo y el texto del QSS).
+class RoundedThumb : public QLabel
+{
+public:
+    using QLabel::QLabel;
+
+protected:
+    void paintEvent(QPaintEvent *event) override
+    {
+        const QPixmap pm = pixmap(Qt::ReturnByValue);
+        if (pm.isNull()) {
+            QLabel::paintEvent(event);
+            return;
+        }
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        QPainterPath clip;
+        clip.addRoundedRect(QRectF(rect()), 6.0, 6.0);
+        p.setClipPath(clip);
+        // Centrado y sin reescalar: el pixmap ya viene "cover" (>= label) y el
+        // clip recorta el sobrante, así no se deforma si el aspect no cuadra.
+        p.drawPixmap((width() - pm.width()) / 2, (height() - pm.height()) / 2,
+                     pm);
     }
 };
 
@@ -681,8 +760,15 @@ MainWindow::MainWindow(QWidget *parent)
     connect(&m_player, &PlayerController::positionChanged, this,
             [this](double pos, double dur) {
                 if (m_miniProgress) {
-                    m_miniProgress->setRange(0, dur > 0 ? qRound(dur) : 0);
-                    m_miniProgress->setValue(qRound(pos));
+                    // dur<=0 (aún sin duración) NO va en modo "busy": el rango
+                    // 0,0 dibuja un chunk animado. Se deja la pista vacía.
+                    if (dur > 0) {
+                        m_miniProgress->setRange(0, qRound(dur));
+                        m_miniProgress->setValue(qRound(pos));
+                    } else {
+                        m_miniProgress->setRange(0, 1);
+                        m_miniProgress->setValue(0);
+                    }
                 }
                 m_miniPos = pos;
                 m_miniDur = dur;
@@ -928,11 +1014,11 @@ void MainWindow::setupMiniBar()
     bar->onActivate = [this]() { goToPlayerPage(); };
 
     auto *lay = new QVBoxLayout(m_miniBar);
-    lay->setContentsMargins(12, 8, 12, 6);
-    lay->setSpacing(4);
+    lay->setContentsMargins(12, 8, 12, 4);
+    lay->setSpacing(3);
 
     auto *row = new QHBoxLayout;
-    row->setSpacing(10);
+    row->setSpacing(6);
 
     // Hueco fijo donde se incrusta el PlayerWidget en vivo cuando el mini está
     // activo; si no, muestra la miniatura estática.
@@ -943,15 +1029,18 @@ void MainWindow::setupMiniBar()
     auto *hostLay = new QVBoxLayout(m_miniVideoHost);
     hostLay->setContentsMargins(0, 0, 0, 0);
     hostLay->setSpacing(0);
-    m_miniThumb = new QLabel(m_miniVideoHost);
+    m_miniThumb = new RoundedThumb(m_miniVideoHost);
     m_miniThumb->setAlignment(Qt::AlignCenter);
     m_miniThumb->setObjectName(QStringLiteral("miniThumb"));
     m_miniThumb->setTextInteractionFlags(Qt::NoTextInteraction);
     hostLay->addWidget(m_miniThumb);
     row->addWidget(m_miniVideoHost);
 
+    // Bloque de texto: título arriba y, debajo, "Canal · tiempo" a la
+    // izquierda (junto, no alineado a la derecha: pegado al canal se lee bien y
+    // no queda bajo los botones).
     auto *textBox = new QVBoxLayout;
-    textBox->setSpacing(1);
+    textBox->setSpacing(2);
     m_miniTitle = new QLabel(QStringLiteral("Nada en reproducción"), m_miniBar);
     m_miniTitle->setObjectName(QStringLiteral("miniTitle"));
     m_miniTitle->setTextInteractionFlags(Qt::NoTextInteraction);
@@ -970,34 +1059,51 @@ void MainWindow::setupMiniBar()
     m_miniPlayBtn = new QPushButton(m_miniBar);
     m_miniPlayBtn->setObjectName(QStringLiteral("iconBtn"));
     m_miniPlayBtn->setCursor(Qt::PointingHandCursor);
-    m_miniPlayBtn->setIcon(nt::icon(nt::Icon::Play, nt::kText, 17));
+    m_miniPlayBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Play, nt::kText, 16));
     m_miniPlayBtn->setToolTip(QStringLiteral("Reproducir / Pausar (K)"));
     row->addWidget(m_miniPlayBtn);
+
+    m_miniNextBtn = new QPushButton(m_miniBar);
+    m_miniNextBtn->setObjectName(QStringLiteral("iconBtn"));
+    m_miniNextBtn->setCursor(Qt::PointingHandCursor);
+    m_miniNextBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Next, nt::kText, 16));
+    m_miniNextBtn->setToolTip(QStringLiteral("Siguiente"));
+    row->addWidget(m_miniNextBtn);
 
     m_miniMuteBtn = new QPushButton(m_miniBar);
     m_miniMuteBtn->setObjectName(QStringLiteral("iconBtn"));
     m_miniMuteBtn->setCursor(Qt::PointingHandCursor);
-    m_miniMuteBtn->setIcon(nt::icon(nt::Icon::Mute, nt::kMuted, 17));
+    m_miniMuteBtn->setIcon(
+        nt::playerIcon(nt::PlayerIcon::Volume, nt::kMuted, 16));
     m_miniMuteBtn->setToolTip(QStringLiteral("Silenciar (M)"));
     row->addWidget(m_miniMuteBtn);
 
     m_miniCloseBtn = new QPushButton(m_miniBar);
     m_miniCloseBtn->setObjectName(QStringLiteral("iconBtn"));
     m_miniCloseBtn->setCursor(Qt::PointingHandCursor);
-    m_miniCloseBtn->setIcon(nt::icon(nt::Icon::Clear, nt::kMuted, 17));
+    m_miniCloseBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Close, nt::kMuted, 16));
     m_miniCloseBtn->setToolTip(QStringLiteral("Cerrar y detener"));
     row->addWidget(m_miniCloseBtn);
 
     lay->addLayout(row);
 
+    // Progreso a todo el ancho y pegado al borde inferior: va FUERA del layout
+    // (que tiene márgenes laterales) y MiniPlayerBar::resizeEvent lo recoloca.
     m_miniProgress = new QProgressBar(m_miniBar);
+    m_miniProgress->setObjectName(QStringLiteral("miniProgress"));
     m_miniProgress->setTextVisible(false);
     m_miniProgress->setFixedHeight(4);
-    lay->addWidget(m_miniProgress);
+    // Los clics del progreso no deben robar el "expandir" de la barra.
+    m_miniProgress->setAttribute(Qt::WA_TransparentForMouseEvents);
+    bar->progress = m_miniProgress;
 
     connect(m_miniPlayBtn, &QPushButton::clicked, this, [this]() {
         m_player.playPause();
         updateMiniIcons();
+    });
+    connect(m_miniNextBtn, &QPushButton::clicked, this, [this]() {
+        if (m_player.hasNext())
+            m_player.next();
     });
     connect(m_miniMuteBtn, &QPushButton::clicked, this, [this]() {
         m_player.toggleMute();
@@ -1104,7 +1210,8 @@ void MainWindow::updateMiniBar()
         m_miniTitleFull = QStringLiteral("Nada en reproducción");
         updateMiniTitleElide();
         m_miniThumb->setText(QString());
-        m_miniProgress->setRange(0, 0);
+        m_miniProgress->setRange(0, 1);
+        m_miniProgress->setValue(0);
         return;
     }
     m_miniChannel = v.channel;
@@ -1163,12 +1270,17 @@ void MainWindow::updateMiniIcons()
 {
     if (!m_miniPlayBtn || !m_miniMuteBtn)
         return;
-    m_miniPlayBtn->setIcon(nt::icon(
-        m_player.isPaused() ? nt::Icon::Play : nt::Icon::Pause,
-        nt::kText, 17));
-    m_miniMuteBtn->setIcon(nt::icon(
-        m_player.muted() ? nt::Icon::Unmute : nt::Icon::Mute,
-        nt::kMuted, 17));
+    m_miniPlayBtn->setIcon(nt::playerIcon(
+        m_player.isPaused() ? nt::PlayerIcon::Play : nt::PlayerIcon::Pause,
+        nt::kText, 16));
+    m_miniMuteBtn->setIcon(nt::playerIcon(
+        m_player.muted() ? nt::PlayerIcon::Muted : nt::PlayerIcon::Volume,
+        nt::kMuted, 16));
+    if (m_miniNextBtn) {
+        m_miniNextBtn->setEnabled(m_player.hasNext());
+        m_miniNextBtn->setIcon(
+            nt::playerIcon(nt::PlayerIcon::Next, nt::kText, 16));
+    }
 }
 
 // El título del mini cabe una sola línea: se recorta con elipsis al ancho real
@@ -1187,7 +1299,11 @@ void MainWindow::updateMiniTimeText()
 {
     if (!m_miniTime)
         return;
-    QString t = QStringLiteral("%1 / %2").arg(fmtTime(m_miniPos)).arg(fmtTime(m_miniDur));
+    // Segunda línea del mini: "Canal · m:ss / m:ss", todo a la izquierda (junto
+    // al canal). Alinearlo a la derecha lo dejaba pegado a los botones y lejos
+    // del canal.
+    QString t = QStringLiteral("%1 / %2")
+                    .arg(fmtTime(m_miniPos), fmtTime(m_miniDur));
     if (!m_miniChannel.isEmpty())
         t = m_miniChannel + QStringLiteral(" · ") + t;
     m_miniTime->setText(t);

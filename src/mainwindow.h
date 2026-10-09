@@ -175,6 +175,7 @@ private:
     double m_miniDur = 0.0;
     QProgressBar *m_miniProgress = nullptr;
     QPushButton *m_miniPlayBtn = nullptr;
+    QPushButton *m_miniNextBtn = nullptr;
     QPushButton *m_miniMuteBtn = nullptr;
     QPushButton *m_miniCloseBtn = nullptr;
 
