@@ -323,12 +323,12 @@ Lo que gobierna la página:
   cualquier avatar no cuadrado. Esta función sustituye a las dos copias idénticas
   que tenía `channel_row.cpp` y `watch_page.cpp` (la del Player además estiraba
   el pixmap).
-- **La descripción se recorta por LÍNEAS, no por píxeles**: 3 (`kDescLines`),
-  igual que el Player. El tope anterior eran 165 px, que dependen del
-  interlineado de la fuente. El botón "…más"/"…menos" es `#descToggle` (enlace
-  discreto, no cápsula) y el degradado `#descFade` (26 px arriba del borde
-  inferior de la caja, `positionDescFade`, el mismo floats-out-of-layout que en
-  el Player).
+- **La descripción se recorta por LÍNEAS, no por píxeles**: 3 (`kDescLines`).
+  El tope anterior eran 165 px, que dependen del interlineado de la fuente. El
+  botón "…más"/"…menos" es `#descToggle` (enlace discreto, no cápsula) y el
+  degradado `#descFade` (26 px arriba del borde inferior de la caja,
+  `positionDescFade`). OJO: el **Player ya NO colapsa** (muestra la descripción
+  completa); este recorte + `#descToggle`/`#descFade` son solo de la página Canal.
 - **Las pestañas ya no son un `QTabWidget`**: eran lo ÚNICO de la app sin estilo
   (no hay regla `QTabWidget`/`QTabBar` en el QSS) y el "pane" pintaba una
   columna casi negra `#020303` bajo la lista, más oscura que el fondo de la
@@ -421,6 +421,95 @@ que empuje la imagen para abajo.
   artefactos al scrollear y que el "salto al volver" del vídeo al volver
   arriba tras estar fuera del viewport sea aceptable (mpv acumula frames
   mientras no pinta).
+
+### Fila de controles del Player e iconos (Material Symbols vectorial)
+
+La barra de controles es **UNA sola fila** (estilo YouTube): transporte a la
+izquierda, tiempo transcurrido + slider de progreso + duración en el centro, y
+volumen/acciones a la derecha, todo dentro de `m_ctrlBar` (`#playerOverlay`):
+
+```
+[shuffle][prev][play][next][repeat]  0:00 ──●──  3:21 │ [mute] ──●── │ [CC][playlist][gear][fs]
+```
+
+- **Los iconos son vectoriales, no PNG.** `src/ui/player_glyphs.{h,cpp}` define
+  `nt::PlayerIcon` + `nt::playerIcon(kind, color, size=20)`: la geometría es de
+  **Material Symbols** (`google/material-design-icons`, Apache-2.0; ficheros
+  `symbols/web/<nombre>/materialsymbolsoutlined/`), pero se pinta con
+  `QPainter` (un parser del subconjunto `M m L l H h V v Q q T t Z` construye el
+  `QPainterPath`), igual que `nt::icon()`. Es nítida a cualquier tamaño, se
+  recolorea en caliente con el acento (caché por icono/tamaño/color hex, sin el
+  retint que rompía la nav) y **no** mete PNGs en el `.qrc` ni enlaza
+  `Qt5::Svg` (que añadiría `Qt5Svg.dll` a los DOS empaquetados de Windows). El
+  transporte (`Play`/`Pause`/`Prev`/`Next`) usa la variante **rellena** de
+  Material como YouTube; el resto, la de contorno. Tamaños: play 22, resto 20
+  (mini 16). Los modos activos (barajar, repetir, subtítulos) van en el
+  color de acento.
+- **Sin marcos ni cajas**: todos los controles son `QPushButton#iconBtn`
+  (transparentes, solo relleno al hover). El play NO es un círculo.
+- **Responsive** en `OverlayHost::onWidth` (`gl->onWidth`, en watch_page.cpp):
+  `w < kCtrlWithVolMinW` (760) oculta el slider de volumen (el mute se queda) y
+  `w < kCtrlWithTimeMinW` (640) oculta además las etiquetas de tiempo. El slider
+  de progreso es el único flexible. Los umbrales y su suma están comentados en
+  las constantes (los `setFixedWidth` del slider de volumen no ceden y el
+  recorte caería en iconos y reloj).
+- **Barajar (shuffle) y repetir (repeat) son REALES**, en `PlayerController`
+  (`setShuffle`/`shuffle`, `setRepeat`/`repeat`; de sesión, no se persisten).
+  Barajar reordena al azar SOLO la cola por delante del vídeo actual (el actual
+  no se mueve, como YouTube) con Fisher-Yates y descarta las posiciones de
+  reanudación de los índices movidos (menos la del actual). Repetir vuelve al
+  primer vídeo al terminar el último (`next()` y la rama "ended" de
+  `onPlayerState` con wrap a `playIndex(0)`); con cola de uno es "repetir uno".
+  `updateOverlayIcons()` pinta su estado en acento.
+- **La descripción del Player se muestra COMPLETA**: se quitó el colapso a 3
+  líneas y el control "…más"/"…menos" (lo pidió el usuario). La página Canal SÍ
+  conserva el suyo (`#descToggle`/`#descFade` siguen en el QSS para ella).
+- **El menú de calidad** (`#qualityMenu`) usa el MISMO borde que `#playerOverlay`
+  (fondo de overlay, borde `@BORDER@`, canto superior `@OVERLAY_EDGE@`, radio 12)
+  — antes era `#1F1F1F` con borde `@SELECTION@` y radio 6. Sus entradas llevan
+  HD/4K vía `qualityLabel()`: "720p HD", "1080p HD", "1440p HD", "2160p 4K" (el
+  resto, solo "NNNp").
+- **El chip de calidad desapareció**: el antiguo `QPushButton#chip` ("720p") es
+  ahora el engranaje `PlayerIcon::Settings` (`#iconBtn`). La resolución activa
+  vive en el **tooltip** (`setQualityIndex`/`onVideoSizeChanged`); el menú sigue
+  anclado a él (`toggleQualityMenu`). Por eso se borró la regla `QPushButton#chip`
+  del QSS Y su entrada en la lista de botones borderless de `--selftest-theme`.
+- **El reloj va partido**: `m_ovPos` (transcurrido, izquierda del slider) y
+  `m_ovDur` (duración, derecha), no un solo "0:00 / 0:00". QSS `#ovPos`/`#ovDur`
+  (`@TEXTSOFT@` 12 px) y separadores `QFrame#ovSep` (1×20, `@OVERLAY_EDGE@`).
+- **Mini player**: mismos iconos (`nt::playerIcon`, 16 px) para play/pausa,
+  siguiente, volumen/silencio y cerrar (4 botones); fila más densa (spacing
+  6, `QWidget#miniBar QPushButton#iconBtn { padding: 4px; }`). El fondo es el
+  MISMO tono que la barra inferior (`#101010`, kTop), no el `kElevated` de
+  antes: las dos barras se leen como una sola pieza. Detalles que costaron una
+  vuelta y no hay que revertir sin querer:
+  - **Miniatura con esquinas redondeadas DE VERDAD** (`RoundedThumb`, subclase
+    de `QLabel` en mainwindow.cpp): el `border-radius` del QSS solo redondea el
+    FONDO del QLabel, no el `QPixmap` que se pinta encima, así que se veían
+    esquinas cuadradas. `RoundedThumb::paintEvent` recorta el pixmap a un rect
+    redondeado (centrado y sin reescalar: el pixmap ya viene "cover" y el clip
+    recorta el sobrante). Sin pixmap delega en `QLabel` (estado "sin
+    miniatura").
+  - **Barra de progreso pegada al borde inferior y a todo el ancho** (como
+    YouTube): `m_miniProgress` va FUERA del layout (que tiene márgenes
+    laterales) y `MiniPlayerBar::resizeEvent` la recoloca en
+    `(0, height-4, width, 4)`. Además `WA_TransparentForMouseEvents` para que
+    su clic no robe el "expandir" de la barra. Con `dur<=0` el rango es (0,1)
+    y valor 0, NUNCA (0,0): un rango 0,0 dibuja el chunk animado (modo "busy").
+  - **El progreso va en el ACENTO y mide 4 px** (más grueso que los 2 px
+    originales): el relleno es `@ACCENT@` (sigue el color que se elija en
+    Ajustes, porque el QSS se regenera al cambiarlo) y la pista `@HANDLE@`. La
+    altura se fija con `setFixedHeight(4)` en `setupMiniBar`.
+  - **Hover de toda la barra**: `MiniPlayerBar::enterEvent/leaveEvent` ponen la
+    propiedad dinámica `hover` (con `style()->unpolish/polish`, obligatorio) y
+    el QSS `QWidget#miniBar[hover="true"]` aclara el fondo a `#181818`. El
+    `leaveEvent` NO apaga el hover si el cursor sigue dentro de `rect()`
+    (pasar de la barra a un botón hijo manda `Leave` al padre y parpadearía).
+  - **La línea de metadatos va a la izquierda, junto al canal**: "Canal ·
+    m:ss / m:ss" en un solo `QLabel#miniTime`. Se probó a separarlos (canal izq,
+    tiempo der) y el tiempo quedaba pegado a los botones y lejos del canal (mala
+    posición, corregido). El mini NO se toca en su orden de botones sin querer:
+    play · siguiente · silencio · cerrar.
 
 ## Pruebas de regresión
 
@@ -1049,17 +1138,15 @@ Los dos últimos datos los escribe el reproductor, no la red:
   `WatchPage::m_overlay`/`PlayerContainer` (src/ui/pages/watch_page.cpp).
   Cualquier cambio ahí que afecte el área de video requiere el selftest.
 - **Los botones multimedia NO llevan marco** (regla del usuario). Ni en reposo
-  ni **al pulsarlos**. El chip de calidad (`QPushButton#chip`, el que al pulsarlo
-  abre el menú de resoluciones) lo tenía y se veía como una caja más **dentro**
-  de la caja de controles. Su borde ahora es `1px solid transparent` y no
-  `none`: no se ve ninguno, pero se conservan los 2 px para que el contenido no
-  se desplace. **El `:focus` hay que anularlo a mano** (`border-color:
-  transparent`): la regla global `QPushButton:focus { border-color: @ACCENT@; }`
-  se le aplica igual y encendía un marco en el acento en cuanto se pulsaba el
-  botón — que es justo cuando se abre el menú. El foco se marca SOLO con el
-  relleno (`@HANDLE_HOVER@`), que es lo único que se puede tocar sin dibujar un
-  borde. Lo que marca el chip como control es el **relleno**, no el marco (el
-  resto de la barra, `#iconBtn`, nunca lo tuvo).
+  ni **al pulsarlos**. Todos son `#iconBtn` (transparentes, sin borde en ningún
+  estado). El botón de calidad ANTES era el chip de texto `QPushButton#chip`
+  ("720p"), que llevaba `1px solid transparent` (conserva los 2 px para que el
+  foco no desplace el contenido, pero no se ve el marco); hoy es el engranaje
+  `PlayerIcon::Settings`, un `#iconBtn` más (sin texto ni borde propio), y la
+  regla `#chip` se borró del QSS. **El `:focus` se anula a mano**
+  (`border-color: transparent`): la regla global `QPushButton:focus { border-color:
+  @ACCENT@; }` se aplicaba igual y encendía un marco en el acento en cuanto se
+  pulsaba. El foco se marca SOLO con el relleno (`@HANDLE_HOVER@`).
 - **Los botones de acción de la página Player** (`#actionChip`: Compartir, Me
   gusta (favoritos/estrella), Ver más tarde y Añadir a playlist) siguen la misma
   regla que **Me gusta / No me gusta** (`#actionSegL`/`#actionSegR`, que ya
@@ -1068,7 +1155,7 @@ Los dos últimos datos los escribe el reproductor, no la red:
   `QPushButton:focus` lo encendía en el acento al pulsarlo (un aro rojo). Ahora
   declara `1px solid transparent` y su `:focus` se queda transparente; el estado
   sigue marcándose por el relleno (`active` y `:hover`) y por el color del icono.
-  Lo vigila `--selftest-theme`: `#chip`, `#iconBtn`, `#actionChip` y los items de
+  Lo vigila `--selftest-theme`: `#iconBtn`, `#actionChip` y los items de
   `#qualityMenu` no pueden declarar un borde visible **en ningún estado**
   (recursea por `:hover`/`:pressed`/`:focus`; comprobado que FALLA tanto si se
   devuelve el marco en la base como si se devuelve solo en `:focus`).
