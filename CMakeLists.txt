@@ -92,6 +92,8 @@ add_executable(nevertube_qt2
   src/ui/format.h
   src/ui/icons.cpp
   src/ui/icons.h
+  src/ui/player_glyphs.cpp
+  src/ui/player_glyphs.h
   src/ui/thumbnail_cache.cpp
   src/ui/thumbnail_cache.h
   src/ui/channel_row.cpp
