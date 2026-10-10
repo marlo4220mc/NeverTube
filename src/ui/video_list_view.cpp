@@ -161,7 +161,7 @@ public:
 
         p->setFont(shrunkFont(p->font(), 2));
         const QFontMetricsF fm(p->font());
-        const QString text = QStringLiteral("Reproduciendo");
+        const QString text = nt::tr("queue.playing");
         const QRectF bg(r.right() - fm.horizontalAdvance(text) - 6,
                         r.bottom() - fm.height() - 7,
                         fm.horizontalAdvance(text) + 6,

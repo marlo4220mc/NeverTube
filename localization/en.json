@@ -137,6 +137,7 @@
     "watch.addToPlaylist": "Add to playlist",
     "watch.upNext": "Up next",
     "watch.playing": "Playing…",
+    "queue.playing": "Now playing",
     "watch.loadingDetails": "Loading details…",
     "watch.likes": "%1 likes",
     "watch.noPlaylists": "No playlists yet",
