@@ -4066,8 +4066,8 @@ bool innertubeSelfTest()
                              return;
                          }
                          std::fprintf(stderr,
-                                      "SELFTEST OK (visitorData→player→hls+alturas) "
-                                      "id=%s hls=%s alturas=%d → next\n",
+                                      "SELFTEST OK (visitorData->player->hls+alturas) "
+                                      "id=%s hls=%s alturas=%d -> next\n",
                                       vid.toUtf8().constData(),
                                       hlsUrl.toUtf8().constData(),
                                       heights.size());
@@ -4088,7 +4088,7 @@ bool innertubeSelfTest()
                          success = true;
                          std::fprintf(stderr,
                                       "SELFTEST OK next relacionados=%d "
-                                      "(1º: %s) → radio\n",
+                                      "(1º: %s) -> radio\n",
                                       videos.size(),
                                       videos.first().title.toUtf8().constData());
                          tube.fetchRadio(videoId);
@@ -4323,7 +4323,7 @@ bool homeFeedLiveCheck()
                          if (ok && tube.hasHomeContinuation() && !requestedMore) {
                              requestedMore = true;
                              std::fprintf(stderr,
-                                          "HOME-FEED continuación detectada → "
+                                          "HOME-FEED continuación detectada -> "
                                           "fetchHomeMore\n");
                              tube.fetchHomeMore();
                              return;

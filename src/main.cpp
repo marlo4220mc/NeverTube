@@ -514,7 +514,7 @@ int main(int argc, char *argv[])
         const QString path =
             dir + QStringLiteral("/discover.db");
         const bool ok = discoverSelfTest(path);
-        std::fprintf(stderr, "SELFTEST discover → %s\n",
+        std::fprintf(stderr, "SELFTEST discover -> %s\n",
                      ok ? "OK" : "FAIL");
         return ok ? 0 : 1;
     }
@@ -627,7 +627,7 @@ int main(int argc, char *argv[])
     if (args.contains(QLatin1String("--selftest-feeds"))) {
         const bool proto = feedsProtocolSelfTest();
         const bool chain = feedsChainSelfTest();
-        std::fprintf(stderr, "SELFTEST feeds proto=%s cadena=%s → %s\n",
+        std::fprintf(stderr, "SELFTEST feeds proto=%s cadena=%s -> %s\n",
                      proto ? "OK" : "FAIL", chain ? "OK" : "FAIL",
                      (proto && chain) ? "SELFTEST OK" : "SELFTEST FAIL");
         return (proto && chain) ? 0 : 1;
