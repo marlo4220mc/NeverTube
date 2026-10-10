@@ -53,6 +53,15 @@ extern "C" {
 #include <libavutil/rational.h>
 }
 
+// FFmpeg 5.1 (libavutil 57.28) replaced the old channel_layout/channels pair
+// with AVChannelLayout and swr_alloc_set_opts with swr_alloc_set_opts2. Keep
+// both paths so the backend also compiles against the older FFmpeg shipped by
+// distro LTS releases (Ubuntu 22.04 has 4.4 / libavutil 56). The vendored
+// Windows i686 package and every modern distro take the new path unchanged.
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 28, 100)
+#define NT_FFMPEG_NEW_CHLAYOUT 1
+#endif
+
 #if !defined(Q_OS_WIN) && defined(NEVERTUBE_HAS_PULSE)
 #include <pulse/error.h>
 #include <pulse/simple.h>
@@ -772,7 +781,11 @@ static void runLoop(FfmpegBackend::Impl *m)
     }
     if (ac)
         NT_DEBUG("E2E ffmpeg audio %dHz ch=%d src=%s\n", ac->sample_rate,
+#ifdef NT_FFMPEG_NEW_CHLAYOUT
                  ac->ch_layout.nb_channels,
+#else
+                 ac->channels,
+#endif
                  extAudio ? "externa" : "muxed");
 
     // Resampler to stereo S16 48 kHz.
@@ -780,14 +793,25 @@ static void runLoop(FfmpegBackend::Impl *m)
     uint8_t *abuf = nullptr;
     int abufCap = 0;
     if (ac) {
+        int rc = 0;
+#ifdef NT_FFMPEG_NEW_CHLAYOUT
         AVChannelLayout outLayout{};
         av_channel_layout_default(&outLayout, 2);
-        const int rc = swr_alloc_set_opts2(
+        rc = swr_alloc_set_opts2(
             &swr, &outLayout, AV_SAMPLE_FMT_S16, 48000, &ac->ch_layout,
             ac->sample_fmt, ac->sample_rate, 0, nullptr);
         av_channel_layout_uninit(&outLayout);
+#else
+        const int64_t inLayout =
+            ac->channel_layout ? ac->channel_layout
+                               : av_get_default_channel_layout(ac->channels);
+        swr = swr_alloc_set_opts(
+            nullptr, AV_CH_LAYOUT_STEREO, AV_SAMPLE_FMT_S16, 48000, inLayout,
+            ac->sample_fmt, ac->sample_rate, 0, nullptr);
+        rc = swr ? 0 : -1;
+#endif
         if (rc < 0 || !swr) {
-            NT_DEBUG("E2E ffmpeg: swr_alloc_set_opts2 falló; sin audio\n");
+            NT_DEBUG("E2E ffmpeg: init del resampler falló; sin audio\n");
             ac = nullptr;
         }
     }
