@@ -12,15 +12,21 @@ on:
     paths:
       - '.github/workflows/linux.yml'
 
-# Three distro families, one job each. The app is a native Qt5/CMake binary
-# that links the distro's own sonames (Qt5, mpv, FFmpeg, pulse, GL), so each
-# package has to be compiled in its distro: there is no portable Ubuntu binary
-# that can go into an .rpm or a pacman package. The packaging recipes live in
-# the repo under packaging/linux/<distro>/ and are the same ones you can run by
-# hand.
+# Four package builds, one job each: two Ubuntu bases (22.04 and 24.04, because
+# the t64 package rename and FFmpeg 6.1 of Noble are a real second combination)
+# plus Fedora and Arch. The app is a native Qt5/CMake binary that links the
+# distro's own sonames (Qt5, mpv, FFmpeg, pulse, GL), so each package has to be
+# compiled in its distro: there is no portable Ubuntu binary that can go into an
+# .rpm or a pacman package. The packaging recipes live in the repo under
+# packaging/linux/<distro>/ and are the same ones you can run by hand.
+#
+# EVERY selftest run in these jobs is offline and deterministic. The ones that
+# need the network (a real TLS handshake, Innertube search/browse/feeds) are NOT
+# here: they live in linux-online.yml, manual-only and informational, so a
+# rate-limited or empty YouTube response can never turn a push red.
 jobs:
   build-deb:
-    name: Debian/Ubuntu (.deb)
+    name: Ubuntu 22.04 (.deb)
     runs-on: ubuntu-22.04
     env:
       NEVERTUBE_DEBUG: 1
@@ -31,31 +37,37 @@ jobs:
       - name: Build, selftests and package (.deb)
         run: bash packaging/linux/deb/build.sh
 
-      # Network and GPU dependent: informative, not a gate. A runner may be
-      # rate-limited/blocked by YouTube or lack a real GPU.
-      - name: Network / GPU selftests (informational)
-        continue-on-error: true
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          bin=./build-deb/nevertube_qt2
-          for t in --selftest-tls --selftest-innertube --selftest-search \
-                   --selftest-browse --selftest-feeds --selftest-ffmpeg \
-                   --selftest-player --selftest-hwprobe; do
-            echo "::group::selftest $t (informational)"
-            if timeout 180 "$bin" "$t"; then echo "OK $t"; else echo "::warning::informational selftest failed: $t"; fi
-            echo "::endgroup::"
-          done
-
       # NOTE: there is no separate "smoke the installed .deb" step because
       # packaging/linux/deb/build.sh already does it as part of the gate:
       # desktop-file-validate, apt-get install of the .deb (pulling the declared
       # Depends), an ldd check with no "not found" and the offline selftests run
-      # from /usr/bin. The three jobs are the same on that point.
+      # from /usr/bin. The four jobs are the same on that point.
 
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-deb
+          name: linux-deb-2204
+          path: dist/*.deb
+          retention-days: 21
+
+  # Second Ubuntu base on purpose: Noble renamed the Qt5 runtime packages to the
+  # t64 ones (libqt5core5t64, ...) and ships FFmpeg 6.1 (libavcodec60). The
+  # Depends are derived with dpkg-shlibdeps, so this job is the safety net that
+  # proves the derivation follows the rename instead of pinning a hand-kept list.
+  build-deb-2404:
+    name: Ubuntu 24.04 (.deb)
+    runs-on: ubuntu-24.04
+    env:
+      NEVERTUBE_DEBUG: 1
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build, selftests and package (.deb)
+        run: bash packaging/linux/deb/build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb-2404
           path: dist/*.deb
           retention-days: 21
 

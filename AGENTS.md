@@ -599,12 +599,50 @@ the player.
 
 | workflow | triggers |
 |---|---|
+| `linux.yml` (2x `.deb` + `.rpm` + pacman) | **manual**, or a push that touches **the workflow file itself** (filter `paths:`). It does NOT run on every push to `main`. |
+| `linux-online.yml` (report only) | **ONLY manual**. It has deliberately NO `push` trigger. |
 | `windows.yml` (x86 / Win7) | **manual** (`gh workflow run windows.yml --ref main`) or if the push touches **the workflow file itself** (filter `paths:`). It does NOT run on every push to `main`. |
 | `windows_x64.yml` (Win10+) | only if the push touches **the workflow file itself** (filter `paths:`), or manually with `gh workflow run windows_x64.yml --ref main` |
 
-That is, a push to `main` normally starts **no** Windows job; both are opt-in. The
+That is, a push to `main` normally starts **no** CI job; all of them are opt-in. The
 x86 one is the heavy Win7 gate (Qt + FFmpeg + Inno + full smoke) and running it
 per commit only burned CI time.
+
+**NO workflow runs a selftest that needs the network as a GATE.** Two families, and
+the distinction is a hard rule:
+
+- **Offline (gate)**: `--selftest-db`, `--selftest-discover`, `--selftest-ssl`
+  (only checks that Qt's TLS backend LOADS), `--selftest-grid`,
+  `--selftest-theme`, `--selftest-glyphs`, `--selftest-i18n`,
+  `--selftest-dates`, `--selftest-suggest-parse/panel/gestures` and
+  `--selftest-av1hls`. They run in every build (the three `packaging/linux/*`
+  recipes and both Windows smokes) and can fail the job.
+- **Online (report, NEVER a gate)**: `--selftest-tls` (a REAL handshake),
+  `--selftest-innertube`, `--selftest-search`, `--selftest-browse`,
+  `--selftest-feeds`, `--selftest-home`, plus the GPU ones (`--selftest-hwprobe`,
+  `--selftest-ffmpeg`, `--selftest-player`) that need the real machine. YouTube
+  can rate-limit a runner or answer a video without a channel
+  (`--selftest-search canalVacio=1` turned an x86 run red once) and no runner has
+  a GPU, so they moved out: on Linux to `linux-online.yml` (manual only,
+  `continue-on-error` + `::warning::`) and on Windows behind the
+  `online_selftests` input of `workflow_dispatch` (UNTICKED by default) with
+  `::warning::` instead of `exit`. In the Windows smokes the offline list uses
+  `--selftest-ssl` where the old one went straight to `--selftest-tls`.
+
+**Linux packaging** (`packaging/linux/{deb,rpm,arch}`): the recipes are
+self-contained and the workflow only invokes them. Each one builds natively in its
+distro (no portable Ubuntu binary can go into an `.rpm` or a pacman package),
+declares its own dependencies and ends with an INSTALL SMOKE: install the package,
+`ldd` with no "not found" and the offline selftests run from `/usr/bin`. The `.deb`
+derives its `Depends` with `dpkg-shlibdeps` (+ `libqt5sql5-sqlite`, which Qt
+`dlopen()`s and which therefore does not show up as a linked library), so the two
+Ubuntu bases (22.04 and 24.04, with the `t64` rename and FFmpeg 6.1) do not need a
+hand-kept list; the `.rpm` relies on rpm's automatic soname requires (FFmpeg
+included: dnf resolves them to `ffmpeg-free` in Fedora base, or to RPM Fusion's
+`ffmpeg` if the user already has it -- no repo is forced on anyone); the
+`PKGBUILD` lists them by name. The binary is STRIPPED in the deb and rpm
+(`cmake --install --strip`; `makepkg` already strips in Arch): the symbol table
+alone was 18 % of the binary.
 
 Also mind the toolset: x86 uses **v142** (VS2019) because of the Win7 target and
 x64 the one of `windows-latest` (newer). They do not compile the same: a literal

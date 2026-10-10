@@ -1,0 +1,68 @@
+name: Linux online selftests (manual, informational)
+
+# MANUAL ONLY (Actions -> Run workflow -> this workflow): there is deliberately
+# NO push trigger. The selftests it runs need the network -- a real TLS
+# handshake against public hosts plus Innertube search/browse/feeds -- and
+# YouTube can rate-limit a runner or answer without a channel
+# ("--selftest-search canalVacio=1" was seen on the x86 job), which used to turn
+# a build red for something the app had not done.
+#
+# It builds with the SAME recipe as the .deb job (packaging/linux/deb/build.sh:
+# dependency install + configure + build + the OFFLINE gate + apt install) and
+# then runs the online ones from the INSTALLED path. Every step is
+# continue-on-error and every selftest prints a warning instead of failing: this
+# workflow is a report, never a gate.
+on:
+  workflow_dispatch:
+
+jobs:
+  online:
+    name: online selftests (report only)
+    runs-on: ubuntu-22.04
+    env:
+      NEVERTUBE_DEBUG: 1
+      DEBIAN_FRONTEND: noninteractive
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      # Also runs the offline gate, so a broken binary is caught here too, but
+      # with continue-on-error so a failure is reported instead of blocking.
+      - name: build + install (same recipe as the .deb job)
+        run: bash packaging/linux/deb/build.sh
+        continue-on-error: true
+
+      # --selftest-tls really handshakes (a backend that loads but aborts was a
+      # real bug on 32-bit Windows); the rest hit Innertube. Informational.
+      - name: network selftests (informational)
+        continue-on-error: true
+        run: |
+          bin=/usr/bin/nevertube_qt2
+          if [ ! -x "$bin" ]; then echo "::warning::$bin no está (el build falló)"; exit 0; fi
+          for t in --selftest-tls --selftest-innertube --selftest-search \
+                   --selftest-browse --selftest-feeds --selftest-home; do
+            echo "::group::selftest $t"
+            if timeout 240 "$bin" "$t"; then
+              echo "OK $t"
+            else
+              echo "::warning::online selftest $t failed (informational, not a gate)"
+            fi
+            echo "::endgroup::"
+          done
+
+      # No GPU on a GitHub runner: these are the ones that are validated on the
+      # real test machines, and here they only report.
+      - name: GPU selftests (informational)
+        continue-on-error: true
+        run: |
+          bin=/usr/bin/nevertube_qt2
+          if [ ! -x "$bin" ]; then echo "::warning::$bin no está (el build falló)"; exit 0; fi
+          for t in --selftest-hwprobe --selftest-ffmpeg --selftest-player; do
+            echo "::group::selftest $t"
+            if timeout 300 "$bin" "$t"; then
+              echo "OK $t"
+            else
+              echo "::warning::GPU selftest $t failed (informational, not a gate)"
+            fi
+            echo "::endgroup::"
+          done

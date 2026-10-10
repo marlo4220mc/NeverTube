@@ -9,6 +9,15 @@ name: Windows x64 (mpv moderno — Win10+)
 
 on:
   workflow_dispatch:
+    inputs:
+      # The online selftests (real TLS handshake + YouTube search/browse/feeds)
+      # are informational and run ONLY when this box is ticked: they are never
+      # part of the gate, so a rate-limited or empty YouTube response cannot turn
+      # a build red. Leave it off for a normal validation.
+      online_selftests:
+        description: 'Run the online selftests (TLS handshake + YouTube search/browse/feeds). Informational.'
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -254,12 +263,14 @@ jobs:
           if ($missing) { Write-Host "el setup NO lleva: $missing"; exit 1 }
           Write-Host "gate del setup x64 OK: el instalador lleva los $($need.Count) ficheros clave"
 
-      # Smoke test from dist\ (with all its DLL rigging): real TLS (that
-      # OpenSSL x64 loads and does a handshake), db, Innertube search, channel
-      # /detail/playlist navigation and feed chain. WITHOUT --selftest-hwprobe: the
-      # GitHub VM has no GPU, so the hardware probe is validated on
-      # the x64 test machine, not here (on the runner it would only give a software verdict).
-      - name: smoke test (offscreen) desde dist
+      # Smoke test from dist\ (with all its DLL rigging). EVERYTHING in this step
+      # is OFFLINE: the network selftests (--selftest-tls + search/browse/feeds)
+      # are separated at the end and only run on a manual dispatch with the
+      # online_selftests input ticked, because YouTube can rate-limit a runner or
+      # answer without a channel and that must never fail a build.
+      # WITHOUT --selftest-hwprobe / --selftest-ffmpeg / --selftest-player: the
+      # GitHub VM has no GPU, so those are validated on the x64 test machine.
+      - name: smoke test (offscreen, offline) desde dist
         shell: pwsh
         run: |
           $qtsrc = Split-Path (Split-Path $env:Qt5_DIR)
@@ -270,21 +281,34 @@ jobs:
             Write-Host "smoke $flag exit=$($p.ExitCode)"
             return $p.ExitCode
           }
-          # --selftest-suggest-parse, --selftest-suggest-panel and
-          # --selftest-suggest-gestures are offline and deterministic (autocomplete
-          # parser, construction of the search dropdown and its
-          # gestures with real event delivery), so they do go in the smoke.
-          # --selftest-dates is also pure (relative dates parser).
-          foreach ($t in @('--selftest-tls', '--selftest-db', '--selftest-grid',
+          # OFFLINE, and the gate: --selftest-ssl checks that Qt's TLS backend
+          # (the OpenSSL DLLs next to the exe) LOADS; db/grid/theme/glyphs/i18n
+          # are local; --selftest-suggest-* and --selftest-dates are pure
+          # parsers, deterministic.
+          foreach ($t in @('--selftest-ssl', '--selftest-db', '--selftest-grid',
                            '--selftest-theme', '--selftest-glyphs',
                            '--selftest-i18n',
                            '--selftest-suggest-parse', '--selftest-suggest-panel',
-                           '--selftest-suggest-gestures', '--selftest-dates',
-                           '--selftest-search', '--selftest-browse', '--selftest-feeds')) {
+                           '--selftest-suggest-gestures', '--selftest-dates')) {
             $rc = Invoke-Selftest $t
             if ($rc -ne 0) {
               Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
               exit $rc }
+          }
+          # ONLINE (network), informational, manual dispatch only. --selftest-tls
+          # goes one step further than --selftest-ssl: it does a REAL handshake.
+          # It is kept because a backend that loads but aborts was a real bug on
+          # 32-bit Windows ("assertion failed: lock != NULL"), but it is NOT a
+          # gate any more: it prints a warning and the step continues.
+          $online = ('${{ inputs.online_selftests }}' -eq 'true')
+          if ($online) {
+            foreach ($t in @('--selftest-tls', '--selftest-search',
+                             '--selftest-browse', '--selftest-feeds')) {
+              $rc = Invoke-Selftest $t
+              if ($rc -ne 0) { Write-Host "::warning::online $t failed (informational, not a gate)" }
+            }
+          } else {
+            Write-Host 'online selftests (tls/search/browse/feeds) SKIPPED: only on manual dispatch with online_selftests=true'
           }
           Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
 
