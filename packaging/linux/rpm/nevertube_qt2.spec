@@ -9,8 +9,19 @@ Packager: marlo4220mc
 Group: Applications/Multimedia
 # The binary is built inside Fedora (see packaging/linux/rpm/build.sh), so the
 # sonames it links (Qt5, mpv, pulse, GL, openssl) are the ones in these runtime
-# packages. FFmpeg is NOT a Requires on Fedora: it lives in RPM Fusion and is
-# not needed to play (mpv is the playback core; the FfmpegBackend is optional).
+# packages.
+#
+# FFmpeg is a REAL runtime dependency, not an optional one: the FfmpegBackend is
+# compiled into the binary (mpv-devel pulls Fedora's ffmpeg-free dev packages),
+# so libavcodec/libavformat/libavutil/libswresample/libswscale must be present or
+# the exe does not even start.
+#
+# It is NOT listed by hand: rpm's automatic generator adds the requires from the
+# exe's NEEDED entries ("libavcodec.so.62()(64bit)" and friends). That is
+# provider-agnostic on purpose: on Fedora base dnf resolves them to ffmpeg-free;
+# if the user already has RPM Fusion's ffmpeg (same sonames) they are satisfied by
+# it and nothing gets installed; and it does not force RPM Fusion on anyone. The
+# explicit list below is only for the packages we want by name.
 Requires: mpv-libs, qt5-qtbase, pulseaudio-libs, mesa-libGL, openssl-libs
 Requires: hicolor-icon-theme
 # Wayland session (Fedora Workstation's default): without this plugin Qt falls

@@ -7,9 +7,12 @@
 # compiled with Fedora's own Qt5/mpv sonames: a package cross-built on Ubuntu
 # would link libavcodec.so.58 and friends and would not run here.
 #
-# FFmpeg is intentionally NOT installed: it is not in Fedora's base repos (it
-# lives in RPM Fusion) and it is not needed to play, because mpv is the
-# playback core. The FfmpegBackend is optional and CMake simply skips it.
+# FFmpeg IS part of the build: Fedora base ships ffmpeg-free (libav*-free) since
+# F36 and mpv-devel pulls its dev packages, so the FfmpegBackend compiles in and
+# the exe gets NEEDED entries on libavcodec/libavformat/libavutil/libswresample/
+# libswscale. rpm therefore auto-generates those runtime requires and dnf
+# satisfies them with ffmpeg-free -- or with RPM Fusion's ffmpeg, same sonames,
+# if the user already has it. Nobody is forced to enable RPM Fusion.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
