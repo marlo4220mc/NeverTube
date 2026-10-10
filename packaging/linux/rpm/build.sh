@@ -51,7 +51,9 @@ mkdir -p "$rpmtop"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 
 # The install tree ends up in BUILD/nevertube_qt2/ (usr/bin, usr/share); the
 # spec only copies it into %{buildroot}, it does not compile.
-DESTDIR="$rpmtop/BUILD/nevertube_qt2" cmake --install build-rpm --prefix /usr
+# --strip: strips the symbol table of the Release binary (same as the .deb and
+# the pacman package, where makepkg strips by itself).
+DESTDIR="$rpmtop/BUILD/nevertube_qt2" cmake --install build-rpm --prefix /usr --strip
 sed "s|__VERSION__|$ver|g" packaging/linux/rpm/nevertube_qt2.spec > "$rpmtop/SPECS/nevertube_qt2.spec"
 rpmbuild --define "_topdir $rpmtop" \
          --define "stage $rpmtop/BUILD/nevertube_qt2" \

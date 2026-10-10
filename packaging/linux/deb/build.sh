@@ -60,7 +60,11 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 root="$tmp/root"
-DESTDIR="$root" cmake --install build-deb --prefix /usr
+# --strip: a Release build keeps its symbol table (541 KB in the current
+# binary). Stripping is what a distro package does and saves ~18% of the binary;
+# it does not touch the dynamic section, so dpkg-shlibdeps below still reads the
+# NEEDED libraries from the exe.
+DESTDIR="$root" cmake --install build-deb --prefix /usr --strip
 test -x "$root/usr/bin/nevertube_qt2"
 test -f "$root/usr/share/applications/nevertube_qt2.desktop"
 test -f "$root/usr/share/icons/hicolor/256x256/apps/nevertube_qt2.png"
