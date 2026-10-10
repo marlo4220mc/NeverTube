@@ -1,15 +1,15 @@
 #!/bin/sh
-# Genera los micro-clips de sondeo de hardware (resources/clips/).
+# Generates the hardware-probe micro-clips (resources/clips/).
 #
-# Objetivo: que mpv active el decodificador de hardware real de cada códec
-# (si existe) para poder leer hwdec-current. Receta obligatoria:
-#   - 8-bit 4:2:0 (yuv420p): VDPAU solo 8-bit 4:2:0; VA-API AV1 solo 8/10-bit.
-#   - Perfiles universales: H.264 Main, VP9 Profile 0, AV1 Main.
-#   - 512x288 (16:9, múltiplo de 16 en ambos ejes): por encima del mínimo real
-#     de cualquier decoder (176x144) y en rejilla segura de macrobloques.
-#   - Sin B-frames / refs=1 / keyframe al inicio: el decoder arranca al frame 0.
-#   - Sin audio: el sondeo solo mide vídeo.
-# Uso: tools/gen_probe_clips.sh   (requiere ffmpeg con libx264, libvpx-vp9,
+# Goal: let mpv activate each codec's real hardware decoder
+# (if it exists) so hwdec-current can be read. Mandatory recipe:
+#   - 8-bit 4:2:0 (yuv420p): VDPAU only 8-bit 4:2:0; VA-API AV1 only 8/10-bit.
+#   - Universal profiles: H.264 Main, VP9 Profile 0, AV1 Main.
+#   - 512x288 (16:9, multiple of 16 on both axes): above the real minimum
+#     of any decoder (176x144) and in a safe macroblock grid.
+#   - No B-frames / refs=1 / keyframe at the start: the decoder starts at frame 0.
+#   - No audio: the probe only measures video.
+# Usage: tools/gen_probe_clips.sh   (requires ffmpeg with libx264, libvpx-vp9,
 #                                  libsvtav1)
 set -eu
 dir="$(cd "$(dirname "$0")/.." && pwd)/resources/clips"

@@ -38,23 +38,23 @@ enum class Icon {
 
 QIcon icon(Icon kind, const QColor &color, int size = 20);
 
-// Logo de la app (el icono del .qrc) escalado con suavizado, para superficies
-// de marca (estados vacíos, Home). Devuelve un pixmap nulo si el recurso no
-// está, para que el llamante pueda omitirlo.
+// App logo (the icon from the .qrc) scaled with smoothing, for brand surfaces
+// (empty states, Home). Returns a null pixmap if the resource is missing, so
+// the caller can skip it.
 QPixmap appLogo(int size);
 
-// Texto enriquecido para las cajas de estado vacío: el logo de la app encima
-// del texto. QLabel detecta el HTML y pinta la imagen del .qrc; el color y la
-// alineación los sigue poniendo el QSS del widget.
+// Rich text for the empty-state boxes: the app logo above the text. QLabel
+// detects the HTML and paints the .qrc image; the color and alignment are
+// still set by the widget's QSS.
 QString emptyStateHtml(const QString &text);
 
-// Avatar circular: escala la imagen al lado pedido, recorta el centro y la
-// enmascara con un círculo. La puerta de canal (ficha de Canal y tarjeta de
-// Biblioteca/Search) es un QLabel con un `border-radius` en el QSS, y eso solo
-// redondea el FONDO: el pixmap se pintaba cuadrado y además estirado con
-// setScaledContents. Con esto el círculo es real y no deforma el avatar.
-// Devuelve un pixmap nulo si la entrada no sirve, para poder pintar el icono
-// de usuario en su lugar.
+// Circular avatar: scales the image to the requested size, crops the center
+// and masks it with a circle. The channel gate (Channel page card and
+// Library/Search card) is a QLabel with a `border-radius` in the QSS, and that
+// only rounds the BACKGROUND: the pixmap was painted square and additionally
+// stretched with setScaledContents. With this the circle is real and does not
+// distort the avatar. Returns a null pixmap if the input is unusable, so the
+// user icon can be painted instead.
 QPixmap circularAvatar(const QPixmap &src, int size);
 
 } // namespace nt

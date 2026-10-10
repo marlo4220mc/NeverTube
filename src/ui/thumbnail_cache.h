@@ -34,8 +34,8 @@ private slots:
 
 private:
     QString filePath(const QString &key) const;
-    // Inserta/actualiza en memoria respetando el presupuesto LRU. Const porque
-    // solo toca miembros mutables: se usa también desde pixmap() (paint).
+    // Inserts/updates in memory respecting the LRU budget. Const because it
+    // only touches mutable members: it is also used from pixmap() (paint).
     void touch(const QString &key) const;
     void insertLocked(const QString &key, const QPixmap &pm) const;
 public:

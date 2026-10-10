@@ -27,8 +27,8 @@ public:
 signals:
     void backRequested();
     void openRequested(const QVector<VideoInfo> &videos, int startIndex);
-    // Click en el "⋯" de una fila de la playlist: MainWindow muestra el menú
-    // compartido.
+    // Click on a row's "⋯" in the playlist: MainWindow shows the shared
+    // menu.
     void rowMenuRequested(const VideoInfo &video, const QPoint &globalPos);
 
 private:
@@ -42,8 +42,8 @@ private:
     ThumbnailCache *m_thumbs;
     QString m_playlistId;
     QFrame *m_card = nullptr;
-    // Contenedor con stretch que comparten la lista y la caja de estado vacío
-    // (ver el comentario del constructor).
+    // Stretch container shared by the list and the empty-state box
+    // (see the constructor's comment).
     QWidget *m_area = nullptr;
     QLabel *m_title = nullptr;
     QLabel *m_meta = nullptr;

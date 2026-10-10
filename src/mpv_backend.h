@@ -7,13 +7,13 @@
 #include <mpv/client.h>
 #include <mpv/render.h>
 
-// Backend mpv: la única implementación de PlaybackBackend en esta fase (en
-// x64; la x86 con FFmpeg llega en fases posteriores). Contiene TODO el código
-// de integración mpv que antes vivía en PlayerWidget, movido SIN cambios de
-// comportamiento: opciones de arranque (vo=libmpv, hwdec=auto, …), observe de
-// propiedades, callbacks wakeup/update, handleEvent (traducido a señales
-// neutras), loadfile con la opción per-file "audio-files", render directo al
-// FBO y consultas (track-list, audio-params, cache, …).
+// mpv backend: the only PlaybackBackend implementation at this stage (on
+// x64; the x86 with FFmpeg arrives in later stages). Contains ALL the mpv
+// integration code that used to live in PlayerWidget, moved WITHOUT behavior
+// changes: startup options (vo=libmpv, hwdec=auto, …), property observation,
+// wakeup/update callbacks, handleEvent (translated to neutral signals),
+// loadfile with the per-file "audio-files" option, direct render to the FBO
+// and queries (track-list, audio-params, cache, …).
 class MpvBackend : public PlaybackBackend
 {
     Q_OBJECT
@@ -22,7 +22,7 @@ public:
     explicit MpvBackend(QObject *parent = nullptr);
     ~MpvBackend() override;
 
-    // --- ciclo de vida / render ---
+    // --- lifecycle / render ---
     bool initGL() override;
     void destroyRenderContext() override;
     void shutdown() override;
@@ -31,7 +31,7 @@ public:
     void *renderContextHandle() const override { return m_rctx; }
     void renderGL(int fbo, int width, int height) override;
 
-    // --- comandos ---
+    // --- commands ---
     bool playUrl(const QString &url, double startAt,
                  const QString &audioUrl) override;
     void setYtdlFormat(const QString &format) override;
@@ -45,7 +45,7 @@ public:
     int attachAudio(const QString &url) override;
     void dropExternalAudio() override;
 
-    // --- consultas ---
+    // --- queries ---
     double speed() const override;
     QString configuredHwdec() const override { return m_hwdec; }
     QString hwdecCurrent() const override;
@@ -55,13 +55,13 @@ public:
     double cacheDuration() const override;
     bool cacheIdle() const override;
 
-    // Drena la cola de eventos mpv y emite las señales correspondientes.
+    // Drains the mpv event queue and emits the corresponding signals.
     void pollEvents() override;
 
 private slots:
-    // Invocado de forma diferida por el callback de wakeup de mpv.
+    // Deferred invocation from mpv's wakeup callback.
     void drainEvents();
-    // Invocado de forma diferida por el callback de update de mpv (frame nuevo).
+    // Deferred invocation from mpv's update callback (new frame).
     void deliverFrameReady();
 
 private:
@@ -71,14 +71,14 @@ private:
 
     mpv_handle *m_mpv = nullptr;
     mpv_render_context *m_rctx = nullptr;
-    // Contador de frames logueados del render (cada 90, como antes).
+    // Counter of logged render frames (every 90, as before).
     int m_logFrames = 0;
-    // Decodificación por hardware configurada ("auto"), leída al arrancar.
+    // Hardware decoding configured ("auto"), read at startup.
     QString m_hwdec;
-    // Idioma de audio configurado ("alang"): se re-aplica antes de cada
-    // playUrl para que mpv elija el doblaje correcto en cada carga.
+    // Configured audio language ("alang"): re-applied before each
+    // playUrl so mpv picks the right dub on every load.
     QString m_audioLang;
-    // true si se adjuntó una pista externa con attachAudio (para el
-    // audio-file-remove de dropExternalAudio).
+    // true if an external track was attached with attachAudio (for the
+    // audio-file-remove of dropExternalAudio).
     bool m_audioAdded = false;
 };

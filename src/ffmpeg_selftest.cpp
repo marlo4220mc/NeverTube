@@ -1,22 +1,22 @@
 #include "ffmpeg_selftest.h"
 
-// <cstdio> es necesario en AMBAS ramas del guard: el cuerpo del selftest usa
-// std::snprintf/std::fprintf y la rama de skip (#else) usa std::fprintf. Estaba
-// dentro del #ifdef y MSVC (a diferencia de libstdc++) no lo incluye de forma
-// transitiva -> C2039 en builds sin FFmpeg (p.ej. Windows x64).
+// <cstdio> is needed in BOTH branches of the guard: the selftest body uses
+// std::snprintf/std::fprintf and the skip branch (#else) uses std::fprintf. It
+// was inside the #ifdef and MSVC (unlike libstdc++) does not include it
+// transitively -> C2039 in builds without FFmpeg (e.g. Windows x64).
 #include <cstdio>
 
 #ifdef NEVERTUBE_HAS_FFMPEG_BACKEND
 
-// Selftest offline del FfmpegBackend (Fases 2-4): decodifica en modo banco los
-// clips embebidos (av1.mkv / vp9.webm / h264.mp4, los mismos que usa hwprobe)
-// y verifica la cadena demux -> decode -> swscale:
-//   - caso base por clip: EOF natural, frames>0, códec correcto, tamaño
-//     (si hay VAAPI/DXVA2, el h264 sale por HW copy-back; se imprime el device
-//     en el reporte, no es un assert: depende de la GPU);
-//   - sync fino (Fase 3): SEEK en caliente (flush de decodificadores +
-//     re-base del reloj maestro: la posición final debe superar el destino)
-//     y PAUSA/reanuda (el reloj no revierte: sigue hasta EOF natural).
+// Offline self-test of the FfmpegBackend (Phases 2-4): decodes in bench mode the
+// embedded clips (av1.mkv / vp9.webm / h264.mp4, the same ones hwprobe uses)
+// and checks the demux -> decode -> swscale chain:
+//   - base case per clip: natural EOF, frames>0, correct codec, size
+//     (with VAAPI/DXVA2, h264 comes out through HW copy-back; the device is
+//     printed in the report, it is not an assert: it depends on the GPU);
+//   - fine sync (Phase 3): hot SEEK (decoder flush + master clock
+//     re-base: the final position must go past the target)
+//     and PAUSE/resume (the clock does not rewind: it goes on to a natural EOF).
 
 #include <QEventLoop>
 #include <QFile>
@@ -34,15 +34,15 @@ extern "C" {
 
 namespace {
 
-// ¿Este build puede decodificar AV1 en SOFTWARE? El decoder NATIVO `av1` de
-// FFmpeg 9 NO decodifica por software: sin un hwaccel av1 activo aborta el
-// clip entero con ENOSYS ("Your platform doesn't support hardware accelerated
-// AV1 decoding", av1dec.c). El paquete i686 vendorizado no trae libdav1d ni
-// libaom (sw) ni hwaccel av1 -> AV1 es imposible en x86, y la app x86 nunca lo
-// pide (perfil h264-hw): el clip se salta en vez de fallar. Donde SÍ hay
-// decoder sw de AV1 (Linux/x64 con libdav1d/libaom) se verifica igual que el
-// resto. (Un build sin sw pero con hwaccel av1 usable quedaría fuera de esta
-// heurística; los paquetes de distro traen libdav1d de todos modos.)
+// Can this build decode AV1 in SOFTWARE? FFmpeg 9's NATIVE `av1` decoder does
+// NOT decode in software: with no active av1 hwaccel it aborts the whole clip
+// with ENOSYS ("Your platform doesn't support hardware accelerated
+// AV1 decoding", av1dec.c). The vendored i686 package brings neither libdav1d
+// nor libaom (sw) nor an av1 hwaccel -> AV1 is impossible on x86, and the x86
+// app never asks for it (h264-hw profile): the clip is skipped instead of
+// failing. Where there IS a sw AV1 decoder (Linux/x64 with libdav1d/libaom) it
+// is checked like the rest. (A build without sw but with a usable av1 hwaccel
+// would fall outside this heuristic; distro packages ship libdav1d anyway.)
 bool av1SoftwareDecodable()
 {
     return avcodec_find_decoder_by_name("libdav1d") != nullptr ||
@@ -52,7 +52,7 @@ bool av1SoftwareDecodable()
 struct Clip {
     const char *resource;
     const char *file;
-    const char *codec; // códec esperado (avcodec_get_name)
+    const char *codec; // expected codec (avcodec_get_name)
 };
 
 const Clip kClips[] = {
@@ -61,7 +61,7 @@ const Clip kClips[] = {
     { ":/clips/h264.mp4", "h264.mp4", "h264" },
 };
 
-// Extrae un clip embebido a un archivo temporal. Vacío si falla.
+// Extracts an embedded clip to a temporary file. Empty on failure.
 QString extractClip(const QTemporaryDir &tmp, const char *resource,
                     const char *file)
 {
@@ -84,7 +84,7 @@ struct EofInfo {
     double lastPos = 0.0;
 };
 
-// Conecta las señales de interés del backend (una vez por escenario).
+// Connects the backend's signals of interest (once per scenario).
 void watch(FfmpegBackend &be, QEventLoop &loop, EofInfo &info)
 {
     QObject::connect(
@@ -101,7 +101,7 @@ void watch(FfmpegBackend &be, QEventLoop &loop, EofInfo &info)
         [&](double p) { info.lastPos = p; });
 }
 
-// Deja correr el bucle de eventos `ms` milisegundos (o hasta un endFile).
+// Runs the event loop for `ms` milliseconds (or until an endFile).
 void waitMs(QEventLoop &loop, int ms)
 {
     QTimer t;
@@ -112,7 +112,7 @@ void waitMs(QEventLoop &loop, int ms)
     loop.exec();
 }
 
-// Espera el EOF definitivo (o timeout): el final quita el bucle.
+// Waits for the final EOF (or timeout): the end quits the loop.
 void waitEofPhase(QEventLoop &loop, EofInfo &info, int timeoutMs)
 {
     QTimer to;
@@ -145,10 +145,10 @@ bool ffmpegSelfTest()
 
     int failures = 0;
 
-    // --- caso base por clip (cadena demux->decode->swscale) ---
+    // --- base case per clip (demux->decode->swscale chain) ---
     for (const Clip &clip : kClips) {
-        // AV1 en builds sin decoder de software (paquete i686): imposible de
-        // decodificar (ver av1SoftwareDecodable). En x86 la app no lo usa.
+        // AV1 in builds without a software decoder (i686 package): impossible
+        // to decode (see av1SoftwareDecodable). On x86 the app does not use it.
         if (std::strcmp(clip.codec, "av1") == 0 && !av1SoftwareDecodable()) {
             std::fprintf(stderr,
                          "SELFTEST ffmpeg %-22s -> skip (sin decoder AV1 de "
@@ -165,7 +165,7 @@ bool ffmpegSelfTest()
         }
 
         FfmpegBackend be;
-        be.setBenchMode(true); // sin sink de audio, sin render, solo contar
+        be.setBenchMode(true); // no audio sink, no render, just count
         QEventLoop loop;
         EofInfo info;
         watch(be, loop, info);
@@ -189,15 +189,15 @@ bool ffmpegSelfTest()
         be.shutdown();
     }
 
-    // --- sync fino (Fase 3) sobre h264.mp4 ---
+    // --- fine sync (Phase 3) on h264.mp4 ---
     const QString h264 = extractClip(tmp, kClips[2].resource, kClips[2].file);
     if (h264.isEmpty()) {
         std::fprintf(stderr, "SELFTEST ffmpeg -> falta %s\n",
                      kClips[2].resource);
         ++failures;
     } else {
-        // SEEK en caliente: buscar al 50% y verificar que se termina con EOF
-        // natural habiendo avanzado más allá del destino.
+        // Hot SEEK: seek to 50% and check that it ends with a natural EOF
+        // having advanced past the target.
         {
             FfmpegBackend be;
             be.setBenchMode(true);
@@ -205,7 +205,7 @@ bool ffmpegSelfTest()
             EofInfo info;
             watch(be, loop, info);
             be.playUrl(h264, 0.0, QString());
-            waitMs(loop, 400); // deja que llegue la duración del clip
+            waitMs(loop, 400); // let the clip duration arrive
             const double target =
                 info.duration > 0 ? info.duration / 2 : 0.4;
             be.seek(target);
@@ -224,8 +224,8 @@ bool ffmpegSelfTest()
                 ++failures;
         }
 
-        // PAUSA/reanuda: congelar ~350 ms a mitad y verificar que la
-        // reproducción termina con EOF natural (el reloj no revierte).
+        // PAUSE/resume: freeze ~350 ms halfway and check that playback ends
+        // with a natural EOF (the clock does not rewind).
         {
             FfmpegBackend be;
             be.setBenchMode(true);
@@ -265,7 +265,7 @@ bool ffmpegSelfTest()
 
 #else // !NEVERTUBE_HAS_FFMPEG_BACKEND
 
-// Build sin FFmpeg (p. ej. x64 Linux sin libav): skip, no fallo.
+// Build without FFmpeg (e.g. x64 Linux without libav): skip, not a failure.
 bool ffmpegSelfTest()
 {
     std::fprintf(stderr,

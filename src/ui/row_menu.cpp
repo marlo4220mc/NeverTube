@@ -13,10 +13,10 @@
 
 namespace {
 
-// Añade la acción y la ejecuta en el bucle de eventos siguiente, no dentro del
-// triggered(): así el menú ya está cerrado cuando la acción escribe en la BD o
-// recarga la sección, que es lo que evita que el popup se quede colgando al
-// vaciarse la lista de la que nació.
+// Adds the action and runs it on the next event loop iteration, not inside
+// triggered(): that way the menu is already closed when the action writes to
+// the DB or reloads the section, which is what keeps the popup from hanging
+// around as the list it came from is emptied.
 QAction *addAction(QMenu *menu, const QString &text,
                    std::function<void()> fn)
 {
@@ -52,8 +52,8 @@ void nt::addRowMenuActions(QMenu *menu, const VideoInfo &video,
         plMenu->setTitle(QStringLiteral("Añadir a playlist"));
         for (const PlaylistItem &p : playlists->all()) {
             const bool contains = playlists->contains(p.id, video.id);
-            // Sin glifo de check delante: "✔" (U+2714) no está en la fuente por
-            // defecto y salía como un punto. El "(ya está)" ya lo dice.
+            // No check glyph in front: "✔" (U+2714) is not in the default
+            // font and showed up as a dot. The "(ya está)" already says it.
             QAction *a = plMenu->addAction(
                 contains ? QStringLiteral("%1 (ya está)").arg(p.title) : p.title);
             a->setEnabled(!contains);
@@ -81,9 +81,9 @@ void nt::addRowMenuActions(QMenu *menu, const VideoInfo &video,
         const QString url =
             QStringLiteral("https://www.youtube.com/watch?v=%1").arg(id);
         QGuiApplication::clipboard()->setText(url);
-        // Sin widget padre: la acción corre cuando el menú ya está cerrado, y
-        // el QMenu de la superficie es un objeto local que se destruye; el
-        // tooltip se cuelga del widget con el foco.
+        // No parent widget: the action runs when the menu is already closed,
+        // and the surface's QMenu is a local object that is destroyed; the
+        // tooltip hangs off the focused widget.
         QToolTip::showText(QCursor::pos(), QStringLiteral("Enlace copiado"));
     });
 

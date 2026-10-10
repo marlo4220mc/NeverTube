@@ -24,38 +24,41 @@ namespace {
 const int kGridW = 320;
 const int kGridH = 258;
 
-// Altura que reserva el mini player (miniatura 63 + márgenes/progreso). Es el
-// espacio inferior adicional que se añade al contenido desplazable cuando el
-// mini player está visible, para que la última sección quede por encima de él.
+// Height reserved for the mini player (63 px thumbnail + margins/progress).
+// It is the extra bottom space added to the scrollable content while the mini
+// player is visible, so the last section stays above it.
 const int kMiniBarReservedPx = 96;
 
-// Recolección del feed de suscripciones por canal: máximo de canales
-// consultados por actualización y …nº de vídeos por canal (5) a partir del
-// cual se deja de pedir en uno concreto. Cada canal aporta hasta 5 recientes.
+// Subscriptions feed harvest per channel: maximum number of channels queried
+// per refresh and the number of videos per channel (5) after which a given
+// channel stops being requested. Each channel contributes up to 5 recents.
 const int kFeedMaxChannels = 6;
 const int kFeedPerChannel = 5;
 const int kFeedTargetVideos = kFeedMaxChannels * kFeedPerChannel;
 
-// TTLs de caché por sección (ms). TTL != polling: al entrar Home se muestra lo
-// cached al momento y si caducó se refresca UNA vez en segundo plano.
+// Cache TTLs per section (ms). TTL != polling: on entering Home the cached
+// content is shown immediately and, if expired, refreshed ONCE in the
+// background.
 const qint64 kFeedTtlMs = 30 * 60 * 1000;
 const qint64 kHomeTtlMs = 60 * 60 * 1000;
 const qint64 kTrendTtlMs = 2 * 60 * 60 * 1000;
 const qint64 kDiscoverTtlMs = 60 * 60 * 1000;
-// Cada cuánto se re-comprueba con el /next si un directo de "Continuar viendo"
-// sigue en emisión (barato y sin tocar la fase player). Igual que en Biblioteca.
+// How often the /next re-checks whether a "Continue watching" live stream is
+// still on air (cheap and without touching the player phase). Same as in
+// Library.
 const qint64 kLiveRecheckMs = 10 * 60 * 1000;
-// Backoff de la generación de inicialización de Descubre (cuando no hay radios
-// guardadas): tras un intento sin resultados se espera antes de reintentar,
-// para no martillear la red al abrir Home repetidamente sin conexión.
+// Backoff for Discover's initialization generation (when no radios are
+// saved): after a fruitless attempt it waits before retrying, so repeatedly
+// opening Home offline doesn't hammer the network.
 const qint64 kDiscoverRetryMs = 10 * 60 * 1000;
-// Radios de semilla distintas que se intentan guardar en la generación de
-// inicialización (excepción: solo ocurre si no hay ninguna radio útil).
+// Distinct seed radios that are attempted to be saved during the
+// initialization generation (exception: only happens when there is no usable
+// radio).
 const int kDiscoverMinRadios = 3;
 
-// Claves de las secciones de RED en el home_cache (HomeCacheRepo). Continuar
-// viendo y Descubre NO se guardan ahí: derivan de historial/radios, que ya son
-// persistentes, y Descubre re-selecciona siempre al arrancar.
+// Keys of the NETWORK sections in home_cache (HomeCacheRepo). Continue
+// watching and Discover are NOT stored there: they derive from history/radios,
+// which are already persistent, and Discover always re-selects at startup.
 const char kCacheSecHome[] = "recommended";
 const char kCacheSecFeed[] = "feed";
 const char kCacheSecTrend[] = "trending";
@@ -65,8 +68,8 @@ qint64 nowMs()
     return QDateTime::currentMSecsSinceEpoch();
 }
 
-// Entradas válidas: con id y título (más robusto ante respuestas degradadas
-// de Innertube: vídeos sin id, playlists rotas que se cuelan).
+// Valid entries: with id and title (more robust against degraded Innertube
+// responses: videos without id, broken playlists sneaking in).
 QVector<VideoInfo> sanitizeVideos(const QVector<VideoInfo> &in)
 {
     QVector<VideoInfo> out;
@@ -127,7 +130,7 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     m_busy->setContentsMargins(0, 20, 0, 20);
     bodyLayout->addWidget(m_busy);
 
-    // ▶ Continuar viendo
+    // ▶ Continue watching
     m_contTitle = new QLabel(QStringLiteral("Continuar viendo"), this);
     m_contTitle->setObjectName(QStringLiteral("sectionTitle"));
     m_contGrid = new VideoListView(m_thumbs, this);
@@ -136,7 +139,7 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     bodyLayout->addWidget(m_contTitle);
     bodyLayout->addWidget(m_contGrid);
 
-    // 🎲 Descubre
+    // 🎲 Discover
     auto *discRow = new QHBoxLayout;
     discRow->setSpacing(4);
     m_discTitle = new QLabel(QStringLiteral("Descubre"), this);
@@ -152,7 +155,7 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     m_discGrid->setFixedHeight(0);
     bodyLayout->addWidget(m_discGrid);
 
-    // 🔔 Nuevos de tus suscripciones
+    // 🔔 New from your subscriptions
     m_feedTitle = new QLabel(
         QStringLiteral("Nuevos de tus suscripciones"), this);
     m_feedTitle->setObjectName(QStringLiteral("sectionTitle"));
@@ -162,7 +165,7 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     bodyLayout->addWidget(m_feedTitle);
     bodyLayout->addWidget(m_feedGrid);
 
-    // ✨ Recomendado por YouTube
+    // ✨ Recommended by YouTube
     m_homeTitle = new QLabel(
         QStringLiteral("Recomendado por YouTube"), this);
     m_homeTitle->setObjectName(QStringLiteral("sectionTitle"));
@@ -172,7 +175,7 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     bodyLayout->addWidget(m_homeTitle);
     bodyLayout->addWidget(m_homeGrid);
 
-    // 🔥 Tendencias
+    // 🔥 Trending
     m_trendTitle = new QLabel(QStringLiteral("Tendencias"), this);
     m_trendTitle->setObjectName(QStringLiteral("sectionTitle"));
     m_trendGrid = new VideoListView(m_thumbs, this);
@@ -183,18 +186,17 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
 
     outer->addWidget(m_scroll);
 
-    // Las secciones del Home llenan todo el ancho disponible (celdas que se
-    // estiran) con los vídeos por fila que marque el ajuste "Tamaño de las
-    // miniaturas" (4/5/6, por defecto 5); su altura se deriva del ancho real
-    // de cada rejilla.
+    // Home sections fill the whole available width (stretchy cells) with the
+    // videos per row set by the "Thumbnail size" setting (4/5/6, default 5);
+    // their height derives from each grid's real width.
     for (VideoListView *g : {m_contGrid, m_feedGrid, m_homeGrid,
                              m_discGrid, m_trendGrid}) {
         g->setGridFillWidth(kGridW);
         g->setGridColumns(m_cellColumns);
     }
 
-    // Timer para recalcular alturas de grids después del layout inicial
-    // y cuando se llenan videos asíncronamente
+    // Timer to recalculate grid heights after the initial layout and when
+    // videos are filled in asynchronously
     m_layoutTimer = new QTimer(this);
     m_layoutTimer->setSingleShot(true);
     m_layoutTimer->setInterval(50);
@@ -208,16 +210,18 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     connect(m_yt, &Yt::channelVideosFinished, this, &HomePage::onChannelVideos);
     connect(m_yt, &Yt::homeReady, this, &HomePage::onHomeReady);
     connect(m_yt, &Yt::radioReady, this, &HomePage::onRadioReady);
-    // Cada reproducción escribe el historial (PlayerController::playIndex →
-    // HistoryRepo::add). Sin esta conexión, volver al Home tras reproducir un
-    // vídeo no refresca "Continuar viendo" ni oculta el empty-state.
+    // Every playback writes to the history (PlayerController::playIndex →
+    // HistoryRepo::add). Without this connection, going back to Home after
+    // playing a video doesn't refresh "Continue watching" nor hide the
+    // empty-state.
     connect(m_history, &HistoryRepo::changed, this,
             &HomePage::refreshContinueWatching);
     connect(m_history, &HistoryRepo::changed, this, &HomePage::refreshBusy);
 
-    // Re-comprobación de directos de "Continuar viendo": el /next distingue
-    // "sigue en directo" de "terminó" (viewCountText "viéndolo ahora" frente a
-    // "visualizaciones"). Al terminar, la fila pasa a duración + barra.
+    // Live re-check for "Continue watching": the /next distinguishes "still
+    // live" from "ended" (viewCountText "viéndolo ahora" vs
+    // "visualizaciones"). Once it ends, the row becomes duration + progress
+    // bar.
     connect(m_yt, &Yt::detailReady, this,
             [this](const VideoInfo &video, const QString &, qint64,
                    const QVector<FormatInfo> &) { onLiveDetailReady(video); });
@@ -275,25 +279,26 @@ bool HomePage::cachedFresh(qint64 at, qint64 ttlMs) const
     return at > 0 && (nowMs() - at) < ttlMs;
 }
 
-// Panel "vacío": se muestra cuando NO hay contenido del usuario
-// (sin historial, sin suscripciones, sin radios Descubre). En ese caso la
-// app arranca sin poder ofrecer Continuar viendo / Descubre / Nuevos de tus
-// suscripciones, y el panel guía al usuario en lugar de dejarlo mirando un
-// Home con solo "Recomendado" y "Tendencias". Se oculta en cuanto aparece
-// cualquiera de esas secciones (lo controla refreshBusy).
+// "Empty" panel: shown when there is NO user content (no history, no
+// subscriptions, no Discover radios). In that case the app starts unable to
+// offer Continue watching / Discover / New from your subscriptions, and the
+// panel guides the user instead of leaving them staring at a Home with only
+// "Recommended" and "Trending". It hides as soon as any of those sections
+// appears (refreshBusy controls it).
 void HomePage::buildEmptyState()
 {
     auto *emptyBox = new QFrame(m_body);
-    // Estilo por QSS global (QFrame#popupDialog), igual que los otros cuatro
-    // popups de la app. Antes llevaba ademas un inline que lo bajaba a kPanel
-    // (#181818) sobre el kPopover (#202020) de la regla: era el unico popup
-    // con ese fondo, se veia como deriva y no comodecision.
+    // Styled by the global QSS (QFrame#popupDialog), like the app's other
+    // four popups. It used to also carry an inline rule that lowered it to
+    // kPanel (#181818) on top of the rule's kPopover (#202020): it was the
+    // only popup with that background, it looked like drift and not a
+    // decision.
     emptyBox->setObjectName(QStringLiteral("popupDialog"));
     auto *emptyLay = new QVBoxLayout(emptyBox);
     emptyLay->setContentsMargins(28, 24, 28, 24);
     emptyLay->setSpacing(8);
-    // Logo de la app (marca) encima del título: da identidad al estado vacío en
-    // vez de una caja muda. Si el recurso no estuviera, se omite sin más.
+    // App logo (brand) above the title: gives the empty state an identity
+    // instead of a mute box. If the resource is missing, it's simply skipped.
     if (const QPixmap logo = nt::appLogo(72); !logo.isNull()) {
         auto *logoLabel = new QLabel(emptyBox);
         logoLabel->setObjectName(QStringLiteral("emptyStateLogo"));
@@ -327,9 +332,9 @@ void HomePage::buildEmptyState()
     emptyRow->addWidget(goSearch);
     emptyRow->addStretch(1);
     emptyLay->addLayout(emptyRow);
-    // Se inserta en el bodyLayout JUSTO ANTES de "Continuar viendo". Si esa
-    // sección está oculta, el panel ocupa su lugar y al cerrarse las
-    // secciones se reagrupan naturalmente con el spacing del layout.
+    // It is inserted into bodyLayout JUST BEFORE "Continue watching". If that
+    // section is hidden, the panel takes its place and, when it closes, the
+    // sections regroup naturally with the layout's spacing.
     if (!m_bodyLayout)
         return;
     int idx = m_bodyLayout->indexOf(m_contTitle);
@@ -340,10 +345,11 @@ void HomePage::buildEmptyState()
 }
 
 
-// Al arrancar se recupera el Home persistido para mostrarlo al instante:
-// Recomendado/Feed/Tendencias vienen del home_cache (metadatos resueltos con el
-// caché "videos"); su fetched_at cargado decide después, en loadSections(), si
-// la sección necesita refresco (solo la que caducó se vuelve a pedir).
+// At startup the persisted Home is loaded to show it instantly:
+// Recommended/Feed/Trending come from home_cache (metadata resolved through
+// the "videos" cache); its loaded fetched_at later decides, in
+// loadSections(), whether the section needs a refresh (only an expired one is
+// re-requested).
 void HomePage::loadPersistedSections()
 {
     if (!m_homeCache)
@@ -394,9 +400,9 @@ void HomePage::saveSection(const QString &section,
 {
     if (!m_homeCache || videos.isEmpty())
         return;
-    // Los metadatos completos van a "videos" (VideoCacheRepo): home_cache solo
-    // guarda ids + timestamp, así al reabrir la app getMany(ids) reconstruye la
-    // sección aunque sea una instalación nueva y nunca se haya reproducido nada.
+    // Full metadata goes to "videos" (VideoCacheRepo): home_cache only stores
+    // ids + timestamp, so on reopening the app getMany(ids) rebuilds the
+    // section even on a fresh install where nothing has ever been played.
     for (const VideoInfo &v : videos)
         m_videoCache->upsert(v);
     QStringList ids;
@@ -419,11 +425,11 @@ void HomePage::reload()
 
 void HomePage::refreshContinueWatching()
 {
-    // El historial se escribe cada kPositionFlushMs (20 s) mientras se
-    // reproduce, y este slot está conectado a su changed(). Reconstruir la
-    // rejilla con la página OCULTA (se reproduce en el mini player, que es el
-    // caso normal) es trabajo tirado: al entrar al Home, onNavButton llama a
-    // refreshDynamic() y entonces sí se reconstruye con los datos frescos.
+    // The history is written every kPositionFlushMs (20 s) while playing, and
+    // this slot is connected to its changed(). Rebuilding the grid with the
+    // page HIDDEN (playback goes to the mini player, the normal case) is
+    // wasted work: on entering Home, onNavButton calls refreshDynamic() and
+    // only then is it rebuilt with fresh data.
     if (!isVisible())
         return;
     loadContinueWatching();
@@ -436,11 +442,11 @@ void HomePage::refreshDynamic()
     buildDiscoverSelection();
 }
 
-// Re-aplica el acento de la pagina. El boton del estado vacio ya no lleva
-// stylesheet propio: es QPushButton#accentChip, y nt::styleSheet() se regenera
-// entero en cada cambio de acento, asi que el boton se repinta solo y aqui no
-// queda nada que hacer. Se mantiene el metodo porque MainWindow lo llama en las
-// cuatro paginas por igual.
+// Re-applies the page accent. The empty-state button no longer carries its
+// own stylesheet: it is QPushButton#accentChip, and nt::styleSheet() is fully
+// regenerated on every accent change, so the button repaints itself and there
+// is nothing left to do here. The method is kept because MainWindow calls it
+// on all four pages alike.
 void HomePage::applyAccent()
 {
 }
@@ -469,8 +475,8 @@ void HomePage::maybeInvalidateFeed()
         loadFeed();
 }
 
-// 1) ▶ Continuar viendo: historial local, sin red. Progreso entre 0 y 100%,
-//    con duración conocida, ordenados por última reproducción (máx 4).
+// 1) ▶ Continue watching: local history, no network. Progress between 0 and
+//    100%, with known duration, ordered by last played (max 4).
 void HomePage::loadContinueWatching()
 {
     m_continueVideos.clear();
@@ -488,10 +494,11 @@ void HomePage::loadContinueWatching()
         if (!m_videoCache->get(id, v))
             continue;
         const double frac = HistoryRepo::progressFraction(v, pos);
-        // Un directo entra aunque no tenga fracción (duración 0 o posición
-        // pegada al borde): se muestra con la marca "En directo" en vez de la
-        // barra. Su estado se re-comprueba al re-entrar (maybeRefreshLiveStatus)
-        // y, si ya terminó, vuelve a ser un vídeo normal con barra.
+        // A live stream is included even without a fraction (zero duration or
+        // position stuck at the edge): it shows the "En directo" badge instead
+        // of the bar. Its status is re-checked on re-entry
+        // (maybeRefreshLiveStatus) and, once it ended, it becomes a normal
+        // video with a bar again.
         if (frac <= 0.0 && !v.isLive)
             continue;
         out.append(v);
@@ -510,14 +517,14 @@ void HomePage::loadContinueWatching()
     m_contGrid->setVisible(!out.isEmpty());
 }
 
-// Un directo cacheado puede terminar entre visitas. El re-análisis de los
-// renderers lo aclararía solo al volver a pedir esa superficie; aquí, al
-// re-entrar en Home, se re-comprueba con el /next (getDetail: NO toca la fase
-// player) la marca de cada directo de "Continuar viendo". El /next distingue
-// "sigue en directo" ("N usuarios viéndolo ahora") de "terminó" ("N
-// visualizaciones"); la DURACIÓN total de un directo terminado solo la da el
-// player response al reproducir, así que al terminar se conserva la última
-// duración conocida.
+// A cached live stream may end between visits. Re-parsing the renderers would
+// only clarify it when that surface is requested again; here, on re-entering
+// Home, the /next (getDetail: does NOT touch the player phase) re-checks the
+// flag of each live stream in "Continue watching". The /next distinguishes
+// "still live" ("N usuarios viéndolo ahora") from "ended" ("N
+// visualizaciones"); the TOTAL duration of an ended live stream is only given
+// by the player response on playback, so on ending the last known duration
+// is kept.
 void HomePage::maybeRefreshLiveStatus(const VideoInfo &v)
 {
     if (!v.isLive || m_liveRefreshPending.contains(v.id))
@@ -535,34 +542,34 @@ void HomePage::onLiveDetailReady(const VideoInfo &video)
         return;
     m_liveRefreshedAt.insert(video.id, QDateTime::currentMSecsSinceEpoch());
     if (video.isLive)
-        return; // sigue en emisión: se re-comprueba dentro de 10 min
-    // Terminó: se apaga la marca y "Continuar viendo" la re-pinta como un vídeo
-    // normal (duración + barra de la posición del usuario).
+        return; // still on air: re-checked in 10 minutes
+    // It ended: the flag is turned off and "Continue watching" repaints it
+    // as a normal video (duration + the user's position bar).
     if (m_videoCache->updateLiveStatus(video.id, false))
         loadContinueWatching();
 }
 
-// Carga/refresca todas las secciones de red. Cada una: si la caché es fresca
-// no pide nada; si caducó, pide UNA vez (single-flight por m_*Busy) en segundo
-// plano mientras muestra lo cached.
+// Loads/refreshes all network sections. Each one: if the cache is fresh it
+// requests nothing; if expired, it requests ONCE (single-flight via m_*Busy)
+// in the background while the cached content is shown.
 void HomePage::loadSections()
 {
-    // 2) 🔔 suscripciones
+    // 2) 🔔 subscriptions
     maybeInvalidateFeed();
     if (!cachedFresh(m_feedFetchedAt, kFeedTtlMs) && !m_feedBusy)
         loadFeed();
 
-    // 3) ✨ Recomendado por YouTube
+    // 3) ✨ Recommended by YouTube
     if (!cachedFresh(m_homeFetchedAt, kHomeTtlMs) && !m_homeBusy) {
         m_homeBusy = true;
         NT_DEBUG("E2E home fetchHome\n");
         m_yt->home();
     }
 
-    // 🎲 Descubre (solo cuando hay semilla válida)
+    // 🎲 Discover (only when there is a valid seed)
     ensureDiscover();
 
-    // 5) 🔥 Tendencias
+    // 5) 🔥 Trending
     if (!cachedFresh(m_trendFetchedAt, kTrendTtlMs) && !m_trendBusy) {
         m_trendBusy = true;
         m_yt->trending(8);
@@ -576,8 +583,9 @@ void HomePage::loadFeed()
     const auto channels = m_subs->all();
     m_feedSubsSig = currentSubsSignature();
     m_pendingChannels.clear();
-    // Se conserva la sección mostrada: si la actualización acaba vacía/falla,
-    // onFeedDone la restaura en vez de ocultarla o reemplazarla por vacío.
+    // The section currently shown is kept: if the refresh ends up
+    // empty/failed, onFeedDone restores it instead of hiding it or replacing
+    // it with an empty one.
     m_prevFeed = m_feed;
     m_feed.clear();
     m_feedBusy = true;
@@ -618,8 +626,8 @@ void HomePage::requestNextChannel()
 void HomePage::onChannelVideos(const QVector<VideoInfo> &videos)
 {
     QVector<VideoInfo> patched = videos;
-    // Los items del tab "Vídeos" del canal no llevan nombre de canal: se
-    // rellena con la suscripción pedida (Innertube).
+    // The channel's "Videos" tab items carry no channel name: it is filled
+    // in from the requested subscription (Innertube).
     const QString cid = m_pendingIdx < m_pendingChannels.size()
                             ? m_pendingChannels.at(m_pendingIdx)
                             : QString();
@@ -631,7 +639,7 @@ void HomePage::onChannelVideos(const QVector<VideoInfo> &videos)
         if (v.channelId.isEmpty())
             v.channelId = cid;
     }
-    // Hasta 5 recientes por canal, ordenando ese canal por fecha.
+    // Up to 5 recents per channel, sorting that channel by date.
     std::stable_sort(patched.begin(), patched.end(), [](const VideoInfo &a,
                                                         const VideoInfo &b) {
         const QDateTime ad = QDateTime::fromString(a.publishedAt, Qt::ISODate);
@@ -654,8 +662,8 @@ void HomePage::onFeedDone()
     m_feedBusy = false;
     QVector<VideoInfo> fresh = sanitizeVideos(m_feed);
     if (fresh.isEmpty()) {
-        // Actualización vacía/fallida: se conserva la sección cacheada anterior
-        // (memoria y UI), no se reemplaza por vacío ni se refresca fetched_at.
+        // Empty/failed refresh: the previously cached section is kept (memory
+        // and UI), not replaced by an empty one nor fetched_at refreshed.
         m_feed = m_prevFeed;
         m_prevFeed.clear();
         NT_DEBUG("E2E feed vacío: se conserva la sección anterior n=%d\n",
@@ -688,7 +696,7 @@ void HomePage::onFeedDone()
     m_feedTitle->setVisible(vis);
     m_feedGrid->setVisible(vis);
     NT_DEBUG("E2E feed setVisible=%d height=%d visible=%d\n", vis, m_feedGrid->height(), m_feedGrid->isVisible());
-    // Recalcular alturas después de que el layout se estabilice
+    // Recalculate heights after the layout settles
     m_layoutTimer->start();
     refreshBusy();
     ensureDiscover();
@@ -709,11 +717,12 @@ void HomePage::onHomeReady(const QVector<VideoInfo> &videos)
         m_homeTitle->setVisible(vis);
         m_homeGrid->setVisible(vis);
         NT_DEBUG("E2E home setVisible=%d height=%d visible=%d\n", vis, m_homeGrid->height(), m_homeGrid->isVisible());
-        // Recalcular alturas después de que el layout se estabilice
+        // Recalculate heights after the layout settles
         m_layoutTimer->start();
     } else {
-        // Actualización fallida/vacía: se conserva la sección cacheada anterior
-        // (memoria y UI), sin reemplazarla por vacío ni tocar fetched_at.
+        // Failed/empty refresh: the previously cached section is kept (memory
+        // and UI), without replacing it with an empty one nor touching
+        // fetched_at.
         NT_DEBUG("E2E home vacío: se conserva la sección anterior n=%d\n",
                  (int)m_home.size());
     }
@@ -746,8 +755,9 @@ void HomePage::onTrending(const QVector<VideoInfo> &videos)
         NT_DEBUG("E2E trending setVisible=%d height=%d visible=%d\n", vis, m_trendGrid->height(), m_trendGrid->isVisible());
         m_layoutTimer->start();
     } else {
-        // Actualización fallida/vacía: se conserva la sección cacheada anterior
-        // (memoria y UI), sin reemplazarla por vacío ni tocar fetched_at.
+        // Failed/empty refresh: the previously cached section is kept (memory
+        // and UI), without replacing it with an empty one nor touching
+        // fetched_at.
         NT_DEBUG("E2E trending vacío: se conserva la sección anterior n=%d\n",
                  (int)m_trending.size());
     }
@@ -755,13 +765,13 @@ void HomePage::onTrending(const QVector<VideoInfo> &videos)
     ensureDiscover();
 }
 
-// 4) 🎲 Descubre: fuente PERSISTENTE (SQLite). Abrir Home NUNCA genera radios
-// por sí solo: si la caché en memoria caducó, se re-seleccionan hasta 5 vídeos
-// de las radios YA GUARDADAS (pickDiscoverVideos, sin red). Las radios se
-// guardan al reproducir vídeos (MainWindow.onRadioReadyDiscover) y, como
-// EXCEPCIÓN de inicialización, cuando no existe ninguna radio útil la propia
-// sección las genera con semillas disponibles (historial/recomendado/
-// suscripciones/tendencias) y las guarda antes de consumirlas.
+// 4) 🎲 Discover: PERSISTENT source (SQLite). Opening Home NEVER generates
+// radios by itself: if the in-memory cache expired, up to 5 videos are
+// re-selected from the ALREADY SAVED radios (pickDiscoverVideos, no network).
+// Radios are saved when videos are played (MainWindow.onRadioReadyDiscover)
+// and, as an initialization EXCEPTION, when no usable radio exists the
+// section itself generates them from available seeds (history/recommended/
+// subscriptions/trending) and saves them before consuming them.
 void HomePage::ensureDiscover()
 {
     if (m_discoverBusy)
@@ -774,10 +784,10 @@ void HomePage::ensureDiscover()
     buildDiscoverSelection();
 }
 
-// Selección de Descubre consumiendo SOLO las radios guardadas. Las radios sin
-// vídeo útil se descartan en el propio pick. Si no queda ninguna, se dispara la
-// generación de inicialización (con backoff), única vía en la que Home toca
-// radioVideos() y solo la primera vez que la app se siembra (ver
+// Discover selection consuming ONLY the saved radios. Radios without usable
+// videos are discarded by the pick itself. If none remain, the initialization
+// generation is triggered (with backoff), the only path where Home touches
+// radioVideos() and only the first time the app is seeded (see
 // discoverSeeded).
 void HomePage::buildDiscoverSelection()
 {
@@ -808,10 +818,10 @@ void HomePage::markDiscoverSeeded()
                         QStringLiteral("1"));
 }
 
-// Semillas para la generación de radios de la excepción de inicialización,
-// variadas y barajadas: historial reciente (reusa el caché de metadatos local),
-// recomendado, suscripciones y tendencias. Se excluyen el vídeo en reproducción
-// y los duplicados.
+// Seeds for the radio generation of the initialization exception, varied and
+// shuffled: recent history (reuses the local metadata cache), recommended,
+// subscriptions and trending. The video being played and duplicates are
+// excluded.
 void HomePage::buildDiscoverSeeds()
 {
     m_discoverSeeds.clear();
@@ -861,9 +871,10 @@ void HomePage::startDiscoverSeedGen()
     fetchNextDiscoverSeed();
 }
 
-// Pide la radio de la siguiente semilla. UNA a UNA: Innertube.fetchRadio() es
-// single-flight. Las semillas que ya tienen radio guardada se saltan (no se
-// regenera). Se detiene al reunir kDiscoverMinRadios.
+// Requests the radio of the next seed. ONE at a time:
+// Innertube.fetchRadio() is single-flight. Seeds that already have a saved
+// radio are skipped (not regenerated). Stops once kDiscoverMinRadios are
+// gathered.
 void HomePage::fetchNextDiscoverSeed()
 {
     if (m_discover->count() >= kDiscoverMinRadios) {
@@ -886,10 +897,11 @@ void HomePage::fetchNextDiscoverSeed()
     finishDiscoverSeedGen();
 }
 
-// En el radioReady solo interesan las radios pedidas por el propio Descubre
-// (m_discoverSeedId). Las radios del reproductor ("A continuación") llegan con
-// otra semilla y se ignoran (MainWindow las guarda aparte). La radio se guarda
-// y se sigue con la siguiente semilla hasta reunir kDiscoverMinRadios.
+// In radioReady only the radios requested by Discover itself
+// (m_discoverSeedId) matter. The player's radios ("A continuación") arrive
+// with a different seed and are ignored (MainWindow saves those separately).
+// The radio is saved and the next seed is tried until kDiscoverMinRadios are
+// gathered.
 void HomePage::onRadioReady(const QString &videoId,
                             const QVector<VideoInfo> &videos)
 {
@@ -916,16 +928,16 @@ void HomePage::finishDiscoverSeedGen()
     m_discoverSeeds.clear();
     m_discoverBusy = false;
     if (m_discover->count() == 0)
-        m_discoverEmptyAt = nowMs(); // sin resultados: reintentar con backoff
+        m_discoverEmptyAt = nowMs(); // no results: retry with backoff
     else
-        markDiscoverSeeded(); // ya hubo siembra: no volver a auto-rellenar
+        markDiscoverSeeded(); // seeding already happened: don't auto-fill again
     refreshBusy();
     buildDiscoverSelection();
 }
 
-// "↻ Otro": re-selecciona usando las radios YA GUARDADAS (no regenera, no pide
-// nada por red). Solo si no queda ninguna radio útil cae en la excepción de
-// inicialización.
+// "↻ Another": re-selects using the ALREADY SAVED radios (no regeneration,
+// no network requests). Only if no usable radio remains does it fall into the
+// initialization exception.
 void HomePage::onDiscoveryAgain()
 {
     interruptDiscover();
@@ -979,11 +991,11 @@ void HomePage::setMiniPlayerVisible(bool visible)
 
 void HomePage::refreshBusy()
 {
-    // Contenido PERSONALIZADO: el historial cuenta aunque el vídeo no figure
-    // en "Continuar viendo" (p. ej. reproducción completa o dejada al inicio,
-    // que m_continueVideos no incluye). Un refreshBusy es barato; recientIds(1)
-    // es una consulta local, por eso se pregunta directamente a la BD y no se
-    // depende de listas ya renderizadas.
+    // PERSONALIZED content: history counts even if the video is not in
+    // "Continue watching" (e.g. fully watched or left at the start, which
+    // m_continueVideos excludes). refreshBusy is cheap; recentIds(1) is a
+    // local query, so the DB is asked directly instead of relying on
+    // already-rendered lists.
     const bool hasHistory = m_history && !m_history->recentIds(1).isEmpty();
     const bool anyUserContent = hasHistory || !m_feed.isEmpty()
         || !m_discoverVideos.isEmpty();
@@ -992,11 +1004,11 @@ void HomePage::refreshBusy()
     const bool loading = m_feedBusy || m_homeBusy || m_trendBusy
         || m_discoverBusy;
     m_busy->setVisible(loading && !anyContent);
-    // Empty-state: se muestra cuando NO hay contenido personalizado del
-    // usuario (historial, suscripciones, radios Descubre) — el home solo
-    // tiene Recomendado y/o Tendencias, que son de red. Cubre el hueco
-    // visual que dejaban "Continuar viendo", "Descubre" y "Nuevos de tus
-    // suscripciones" ocultos, y guía al usuario.
+    // Empty-state: shown when there is NO personalized user content (history,
+    // subscriptions, Discover radios) — the home only has Recommended and/or
+    // Trending, which come from the network. It covers the visual gap left by
+    // the hidden "Continue watching", "Discover" and "New from your
+    // subscriptions", and guides the user.
     if (m_emptyState)
         m_emptyState->setVisible(!anyUserContent);
     NT_DEBUG("E2E refreshBusy: history=%d feed=%d disc=%d cont=%d empty=%d\n",
@@ -1009,43 +1021,43 @@ void HomePage::adjustGridHeight(VideoListView *grid)
 {
     const int count = grid->videos().size();
     if (count == 0) {
-        // 0 vídeos: el grid se va a ocultar, lo dejamos con altura 0 para
-        // que no consuma el hueco enorme en el scroll (sino, queda un
-        // vacío visual antes de la siguiente sección).
+        // 0 videos: the grid is about to be hidden; we leave it at height 0
+        // so it doesn't consume the huge gap in the scroll (otherwise a
+        // visual void remains before the next section).
         grid->setFixedHeight(0);
         return;
     }
     const int w = grid->width();
     const int cols = qMax(1, grid->gridColumns());
     const int rows = (count + cols - 1) / cols;
-    // Altura de una celda efectiva: si el grid llena el ancho, la celda escaló
-    // (16:9 según el ancho real); si no, la base.
+    // Effective cell height: if the grid fills the width, the cell scaled
+    // (16:9 from the real width); otherwise the base one.
     const int cellH = grid->gridSize().height() > 0
                           ? grid->gridSize().height()
                           : kGridH;
-    // En IconMode las filas van exactamente una detrás de otra, sin separaciones
-    // (medido: celda 177x195 -> rect 177x195 y paso 195), así que el alto del
-    // contenido es rows*cellH clavado. Lo que importa es que ese cellH sea el
-    // tamaño REAL de la celda: ver VideoListView::applyGridGeometry.
+    // In IconMode rows go exactly one after another, with no gaps (measured:
+    // cell 177x195 -> rect 177x195 and step 195), so the content height is
+    // exactly rows*cellH. What matters is that cellH is the REAL cell size:
+    // see VideoListView::applyGridGeometry.
     const int newH = rows * cellH;
     NT_DEBUG("E2E adjustGridHeight count=%d width=%d cols=%d rows=%d cellH=%d height=%d\n",
              count, w, cols, rows, cellH, newH);
     grid->setFixedHeight(newH);
 }
 
-// Columnas efectivas: las que pidió el usuario, recortadas si la ventana es
-// demasiado estrecha para que la celda conserve el bloque de texto completo.
-// Sin tope, "Pequeñas" (6) en una ventana de 700 px daría celdas de 113 px con
-// el título y el canal recortados. La regla vive en
-// VideoListView::clampGridColumns (función pura, testeada en --selftest-grid).
+// Effective columns: the ones the user asked for, clipped when the window is
+// too narrow for the cell to keep the full text block. Without the clamp,
+// "Small" (6) in a 700 px window would give 113 px cells with the title and
+// channel clipped. The rule lives in VideoListView::clampGridColumns (pure
+// function, tested in --selftest-grid).
 //
-// El ancho NO se toma del grid de una sección: los grids se ocultan cuando su
-// sección está vacía y un widget oculto tiene su viewport estrechado (98 px en
-// vez de 760 con la ventana a 1280). Con la base vacía eso forzaba siempre el
-// mínimo de 3 columnas y el ajuste "Tamaño de las miniaturas" se ignoraba. Se
-// mide el scroll, que está siempre visible y comparte ancho con todos los grids;
-// si aún no está visible (arranque), se recurre al ancho de la página menos los
-// márgenes de m_bodyLayout.
+// The width is NOT taken from a section's grid: grids are hidden when their
+// section is empty and a hidden widget has its viewport narrowed (98 px
+// instead of 760 with the window at 1280). With an empty base that always
+// forced the 3-column minimum and the "Thumbnail size" setting was ignored.
+// The scroll is measured instead: it is always visible and shares its width
+// with every grid; if it is not visible yet (startup), the page width minus
+// m_bodyLayout's margins is used as a fallback.
 int HomePage::effectiveCellColumns() const
 {
     int vw = 0;
@@ -1067,9 +1079,10 @@ void HomePage::setCellColumns(int columns)
 void HomePage::applyGridSizes()
 {
     NT_DEBUG("E2E applyGridSizes called\n");
-    // Primero las columnas efectivas (con el tope por ancho) y el tamaño de
-    // celda que de ahí se deriva; después las alturas de cada sección, que usan
-    // ese tamaño. Aplicarlo al revés dejaría las alturas de un paso atrás.
+    // First the effective columns (with the width clamp) and the cell size
+    // derived from them; then each section's heights, which use that size.
+    // Applying it the other way around would leave the heights one step
+    // behind.
     const int cols = effectiveCellColumns();
     for (VideoListView *g : {m_contGrid, m_feedGrid, m_homeGrid,
                              m_discGrid, m_trendGrid})

@@ -3,177 +3,176 @@
 #include <QObject>
 #include <QString>
 
-// Compartida por MpvBackend y FfmpegBackend: ¿es la URL del servidor HLS
-// local de la propia app (http://127.0.0.1:<port>/... o http://localhost)?
-// Los dos motores la tratan distinto de una URL de red remota (el HLS local
-// no soporta Range requests: sin http_multiple, con timings de localhost).
-// Comparar SOLO por prefijo: un "contains" casaría URLs remotas que lleven
-// "localhost"/"127.0.0.1" en mitad de la ruta.
+// Shared by MpvBackend and FfmpegBackend: is the URL the local HLS server
+// of the app itself (http://127.0.0.1:<port>/... or http://localhost)?
+// Both engines treat it differently from a remote network URL (the local HLS
+// does not support Range requests: no http_multiple, localhost timings).
+// Compare by PREFIX ONLY: a "contains" would match remote URLs that carry
+// "localhost"/"127.0.0.1" somewhere in the path.
 inline bool isLocalStreamUrl(const QString &url)
 {
     return url.startsWith(QLatin1String("http://127.0.0.1"))
         || url.startsWith(QLatin1String("http://localhost"));
 }
 
-// Interfaz neutra del motor de reproducción. PlayerWidget (política: estado,
-// watchdog, escalera de códec, espera de buffer) y sus clientes
-// (PlayerController, MainWindow, WatchPage) dependen de esta interfaz, NO del
-// motor concreto. Cada implementación traduce este API agnóstico a su motor
-// nativo:
-//   - MpvBackend  (x64, pieza protegida): todo el código mpv que antes vivía
-//     en PlayerWidget, movido sin cambios de comportamiento.
-//   - FfmpegBackend (x86, Win7, fases posteriores): FFmpeg/libav
-//     (schannel + DXVA2 h264) sin libmpv.
+// Engine-neutral playback interface. PlayerWidget (policy: state,
+// watchdog, codec ladder, buffer wait) and its clients
+// (PlayerController, MainWindow, WatchPage) depend on this interface, NOT on the
+// concrete engine. Each implementation translates this engine-agnostic API to its
+// native engine:
+//   - MpvBackend  (x64, protected piece): all the mpv code that used to live
+//     in PlayerWidget, moved with no behavior change.
+//   - FfmpegBackend (x86, Win7, later phases): FFmpeg/libav
+//     (schannel + DXVA2 h264) without libmpv.
 //
-// Las señales se emiten revisando el hilo del widget (GUI). El widget las
-// conecta con conexión directa (mismo hilo) para conservar el orden de
-// procesamiento de eventos del motor.
+// The signals are emitted from the widget thread (GUI). The widget connects
+// to them with a direct connection (same thread) to preserve the engine's
+// event processing order.
 
 class PlaybackBackend : public QObject
 {
     Q_OBJECT
 
 public:
-    // Razón del fin de archivo, traducida de lo que el motor reporte.
+    // End-of-file reason, translated from whatever the engine reports.
     enum class EndReason {
-        Quit,  // el motor se cerró
-        Stop,  // parada intencional (stop() / reemplazo de archivo)
-        Error, // error de reproducción (el mensaje viaja en endFile)
-        Eof,   // el archivo terminó (final natural o EOF prematuro)
+        Quit,  // the engine shut down
+        Stop,  // intentional stop (stop() / file replacement)
+        Error, // playback error (the message travels in endFile)
+        Eof,   // the file ended (natural end or premature EOF)
     };
 
     explicit PlaybackBackend(QObject *parent = nullptr) : QObject(parent) {}
     ~PlaybackBackend() override = default;
 
-    // --- ciclo de vida ---
+    // --- lifecycle ---
 
-    // Crea el contexto de render del motor. Debe llamarse con el contexto GL
-    // actual (desde PlayerWidget::initializeGL). Devuelve true si quedó listo.
+    // Creates the engine's render context. Must be called with the current GL
+    // context (from PlayerWidget::initializeGL). Returns true if it ended up ready.
     virtual bool initGL() = 0;
-    // Libera el contexto de render (contexto GL actual). Se llama ANTES de
-    // shutdown() en el destructor del widget (el widget hace makeCurrent()).
+    // Releases the render context (current GL context). Called BEFORE
+    // shutdown() in the widget's destructor (the widget does makeCurrent()).
     virtual void destroyRenderContext() = 0;
-    // Destruye el motor (libera su handle). Se llama DESPUÉS de
-    // destroyRenderContext(). No-op si ya se destruyó.
+    // Destroys the engine (releases its handle). Called AFTER
+    // destroyRenderContext(). No-op if already destroyed.
     virtual void shutdown() = 0;
-    // true si el motor se creó y acepta comandos (NO confundir con render
-    // listo: antes de initializeGL no hay contexto de render).
+    // true if the engine was created and accepts commands (do NOT confuse with render
+    // ready: before initializeGL there is no render context).
     virtual bool isValid() const = 0;
-    // true si el contexto de render está creado (listo para renderGL()).
+    // true if the render context exists (ready for renderGL()).
     virtual bool hasRenderContext() const = 0;
-    // Puntero del contexto de render del motor, SOLO para logs de depuración.
+    // Engine render context pointer, FOR debug logging ONLY.
     virtual void *renderContextHandle() const = 0;
 
     // --- render ---
 
-    // Renderiza el frame actual al FBO indicado. Se llama desde paintGL con el
-    // contexto GL actual; width/height en píxeles físicos (ya con dpr).
+    // Renders the current frame into the given FBO. Called from paintGL with the
+    // current GL context; width/height in physical pixels (already dpr-scaled).
     virtual void renderGL(int fbo, int width, int height) = 0;
 
-    // --- comandos ---
+    // --- commands ---
 
-    // Carga y reproduce `url` (con reanudación opcional en startAt). Si
-    // audioUrl no es vacío, intenta abrir vídeo+audio externo juntos en la
-    // misma carga (equivalente a la opción per-file "audio-files"); devuelve
-    // true si el audio se adjuntó en la carga (el llamador puede descartar
-    // audioUrl) y false si se cargó sin él (el llamador conserva audioUrl para
-    // adjuntarlo tras el archivo cargado, como respaldo).
+    // Loads and plays `url` (with optional resume at startAt). If
+    // audioUrl is not empty, tries to open external video+audio together in the
+    // same load (equivalent to the per-file "audio-files" option); returns
+    // true if the audio was attached during the load (the caller may discard
+    // audioUrl) and false if it was loaded without it (the caller keeps audioUrl to
+    // attach it after the file is loaded, as a fallback).
     virtual bool playUrl(const QString &url, double startAt,
                          const QString &audioUrl) = 0;
-    // Modo ytdl (nada que hacer en motores que resuelven las URLs ellas
-    // mismas): el llamador sigue usando playUrl() después.
+    // ytdl mode (nothing to do in engines that resolve the URLs
+    // themselves): the caller keeps using playUrl() afterwards.
     virtual void setYtdlFormat(const QString &format) = 0;
     virtual void stop() = 0;
     virtual void setPaused(bool paused) = 0;
     virtual void seek(double seconds) = 0;
     virtual void setVolume(double volume) = 0;
-    // Tope máximo del volumen del motor (mpv "volume-max"). Default 100; el
-    // ajuste "Volumen máximo" puede subirlo a 150/175/200 para dar headroom.
+    // Engine volume ceiling (mpv "volume-max"). Default 100; the
+    // "Maximum volume" setting can raise it to 150/175/200 for headroom.
     virtual void setVolumeMax(double maxPercent) = 0;
     virtual void setSubVisibility(bool visible) = 0;
-    // Preferencia de idioma de audio ("alang"): se re-aplica antes de cada
-    // playUrl para que el motor elija el doblaje correcto en cada carga.
+    // Audio language preference ("alang"): re-applied before every
+    // playUrl so the engine picks the right dub in each load.
     virtual void setAudioLanguage(const QString &lang) = 0;
-    // Adjunta una pista de audio externa al archivo YA cargado (fallback
-    // cuando playUrl no consumió el audio). Devuelve el código del motor
-    // (>= 0 correcto, como el 0 de mpv).
+    // Attaches an external audio track to the ALREADY loaded file (fallback
+    // when playUrl did not consume the audio). Returns the engine code
+    // (>= 0 on success, like mpv's 0).
     virtual int attachAudio(const QString &url) = 0;
-    // Quita la pista de audio externa adjuntada manualmente.
+    // Drops the manually attached external audio track.
     virtual void dropExternalAudio() = 0;
 
-    // --- consultas ---
+    // --- queries ---
 
     virtual double speed() const = 0;
-    // Decodificación por hardware configurada en el motor (mpv "hwdec",
-    // p.ej. "auto"). El selftest del player la verifica.
+    // Hardware decoding configured in the engine (mpv "hwdec",
+    // e.g. "auto"). The player selftest verifies it.
     virtual QString configuredHwdec() const = 0;
-    // Backend de decodificación por hardware que el motor usa DE VERDAD para
-    // el stream actual, o "no"/vacío si decodifica en software.
+    // Hardware decoding backend the engine ACTUALLY uses for the current
+    // stream, or "no"/empty if it decodes in software.
     virtual QString hwdecCurrent() const = 0;
-    // Códec que el motor decodifica de verdad para el stream actual
-    // ("h264", "vp9", "av1", …).
+    // Codec the engine is really decoding for the current stream
+    // ("h264", "vp9", "av1", ...).
     virtual QString videoCodec() const = 0;
-    // Altura máxima entre las pistas de vídeo del archivo cargado, o 0 si aún
-    // no cargó o no se puede saber (WatchPage filtra el menú de resoluciones).
+    // Tallest height among the video tracks of the loaded file, or 0 if not
+    // loaded yet or unknown (WatchPage filters the resolution menu with it).
     virtual int probeMaxVideoHeight() const = 0;
-    // true si hay una pista de audio activa en el stream actual (watchdog de
-    // sesión gateada: sin ella el vídeo avanza mudo).
+    // true if there is an active audio track in the current stream (gated-session
+    // watchdog: without it the video advances muted).
     virtual bool hasActiveAudio() const = 0;
-    // Segundos de contenido cacheados por el demuxer (espera inicial de
-    // buffer en alta resolución).
+    // Seconds of content cached by the demuxer (high-resolution initial
+    // buffer wait).
     virtual double cacheDuration() const = 0;
-    // true si la descarga terminó (todo lo descargable ya está en caché).
+    // true if the download finished (everything downloadable is cached).
     virtual bool cacheIdle() const = 0;
 
-    // Drena la cola de eventos del motor y emite las señales correspondientes.
-    // Se llama en el hilo del widget (desde frameReady y desde el wakeup
-    // diferido del motor).
+    // Drains the engine's event queue and emits the matching signals.
+    // Called on the widget thread (from frameReady and from the engine's deferred
+    // wakeup).
     virtual void pollEvents() = 0;
 
-    // --- cobertura por ventanas (solo el backend x86) ---
-    // true si el motor puede pausar su trabajo mientras otra ventana cubre por
-    // completo el área de vídeo. FfmpegBackend SÍ: parar copy-back+swscale y
-    // render bajo una ventana flotante es seguro (frame-driven, sin ráfaga al
-    // destapar) y ahorra CPU/GPU real en Win7, donde DWM no avisa de oclusión
-    // y la app seguiría pintando frames que nadie ve (síntoma: drops de FPS
-    // con CPU/RAM de la app bajos en la GMA 950). MpvBackend NO (parar el
-    // render acumula frames y produce el "salto al volver" — ver AGENTS.md
-    // "Mini player con vídeo en vivo"): el default es false.
+    // --- window occlusion (x86 backend only) ---
+    // true if the engine can pause its work while another window fully covers the
+    // video area. FfmpegBackend YES: stopping copy-back+swscale and
+    // render under a floating window is safe (frame-driven, no burst on
+    // uncover) and saves real CPU/GPU on Win7, where DWM gives no occlusion
+    // notice and the app would keep painting frames nobody sees (symptom: FPS drops
+    // with low app CPU/RAM on the GMA 950). MpvBackend NO (stopping the
+    // render accumulates frames and produces the "jump on return" — see AGENTS.md
+    // "Mini player con vídeo en vivo"): the default is false.
     virtual bool occlusionSkipSupported() const { return false; }
-    // true mientras otra ventana cubre el vídeo (lo detecta el widget con un
-    // timer lento de 250 ms). No-op si occlusionSkipSupported() es false.
+    // true while another window covers the video (detected by the widget with a
+    // slow 250 ms timer). No-op if occlusionSkipSupported() is false.
     virtual void setVideoOccluded(bool occluded) { Q_UNUSED(occluded); }
 
 signals:
-    // El archivo principal terminó de cargar: momento de consultar la altura
-    // máxima (probeMaxVideoHeight) y de adjuntar el audio de respaldo.
+    // The main file finished loading: time to query the maximum height
+    // (probeMaxVideoHeight) and to attach the fallback audio.
     void fileLoaded();
-    // Empieza un stream nuevo (START_FILE / re-arranque de reproducción): el
-    // códec vuelve a dar oportunidad de reportar HW/SW (red de seguridad del
-    // perfil de códec).
+    // A new stream starts (START_FILE / playback restart): the
+    // codec gets a chance to report HW/SW again (codec-profile safety net).
     void streamStart();
-    // Fin de archivo con su razón. Para Error, errorText trae el mensaje.
+    // End of file with its reason. For Error, errorText carries the message.
     void endFile(PlaybackBackend::EndReason reason, const QString &errorText);
-    // Posición de reproducción (segundos).
+    // Playback position (seconds).
     void positionUpdated(double seconds);
-    // Duración total del stream (segundos).
+    // Total stream duration (seconds).
     void durationUpdated(double seconds);
     void videoWidthUpdated(qint64 width);
     void videoHeightUpdated(qint64 height);
-    // Estado de pausa (cambió por comando, por el usuario o por el motor).
+    // Pause state (changed by command, by the user or by the engine).
     void pauseUpdated(bool paused);
-    // Segundos cacheados por el demuxer (salud de la descarga de vídeo).
+    // Seconds cached by the demuxer (video download health).
     void cacheTimeUpdated(double seconds);
-    // Línea de log del motor (veredicto "software/hardware decoding",
-    // errores de red, …). El prefijo y el texto son los del motor.
+    // Engine log line ("software/hardware decoding"
+    // verdict, network errors, ...). Prefix and text are the engine's.
     void logMessage(const QString &prefix, const QString &text);
-    // Lo pide el motor cuando hay un frame nuevo que pintar (vídeo o cambio
-    // de estado): el widget hace pollEvents() + update().
+    // Emitted by the engine when there is a new frame to paint (video or state
+    // change): the widget does pollEvents() + update().
     void frameReady();
 };
 
-// Crea el motor por defecto para la plataforma actual: mpv en x64 (pieza
-// protegida) y, cuando el build lo encienda (NEVERTUBE_HAS_FFMPEG_BACKEND),
-// el FfmpegBackend en la x86 de Windows (Win7). Para desarrollo y
-// verificación se puede forzar con NEVERTUBE_BACKEND=mpv|ffmpeg.
+// Creates the default engine for the current platform: mpv on x64 (protected
+// piece) and, when the build enables it (NEVERTUBE_HAS_FFMPEG_BACKEND),
+// FfmpegBackend on Windows x86 (Win7). For development and
+// verification it can be forced with NEVERTUBE_BACKEND=mpv|ffmpeg.
 PlaybackBackend *createPlaybackBackend(QObject *parent);

@@ -10,17 +10,17 @@ QString compactCount(qint64 count);
 QString publishedLabel(const QString &publishedAt);
 QString viewsLabel(qint64 count);
 
-// Línea de meta de un vídeo: "canal  •  N vistas  •  hace N d", con lo que
-// haya (los tres campos no siempre están: un vídeo de la caché puede no
-// tener fecha, una búsqueda puede no traer visitas). Es la MISMA en todas las
-// filas de la app (rejilla del Home, listas de Búsqueda/Canal/Playlist/
-// Historial/"A continuación" y las secciones de Biblioteca), así que el estilo
-// no depende de la página: una sola función, no una copia por superficie.
+// Meta line of a video: "canal  •  N vistas  •  hace N d", with whatever is
+// available (the three fields are not always there: a cached video may have no
+// date, a search may bring no views). It is the SAME in every row of the app
+// (Home grid, Search/Channel/Playlist/History/"A continuación" lists and the
+// Library sections), so the style does not depend on the page: one function,
+// not a copy per surface.
 QString metaLine(const VideoInfo &v);
 
-// Descripción como HTML para un QLabel en RichText: escapa el texto, convierte
-// los saltos en <br> y envuelve cada URL en un enlace <a> del color del acento
-// (sin subrayado). Es el MISMO HTML en la descripción del Player y en la tarjeta
-// del Canal — una sola función, no una copia por superficie, para que el color
-// y el formato de los enlaces no se separen.
+// Description as HTML for a RichText QLabel: escapes the text, turns line
+// breaks into <br> and wraps each URL in an <a> link in the accent color (no
+// underline). It is the SAME HTML in the Player description and in the Channel
+// card — one function, not a copy per surface, so the link color and format
+// never diverge.
 QString descriptionHtml(const QString &plain);

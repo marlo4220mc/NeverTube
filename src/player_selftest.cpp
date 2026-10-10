@@ -26,12 +26,12 @@ bool playerSelfTest()
 
     auto check = [&]() {
 #ifdef NEVERTUBE_NO_MPV
-        // Build x86 sin mpv (Fase 5): el núcleo protegido (hwdec=auto de mpv)
-        // no vive aquí — el motor es el FfmpegBackend y su gate real es
-        // --selftest-ffmpeg. Se verifica lo que sí aplica: que la superficie
-        // GL del widget quedó lista (initializeGL) y el backend vivo. El
-        // redibujado es por eventos (frameReady por frame del motor), sin
-        // timer de poll.
+        // x86 build without mpv (Phase 5): the protected core (mpv's hwdec=auto)
+        // does not live here — the engine is FfmpegBackend and its real gate is
+        // --selftest-ffmpeg. What does apply is verified: that the widget's
+        // GL surface is ready (initializeGL) and the backend is alive. The
+        // redraw is event-driven (frameReady per engine frame), with no
+        // poll timer.
         if (!player->renderContextReady()) {
             std::fprintf(stderr,
                          "SELFTEST FAIL: contexto de render no creado\n");
@@ -46,10 +46,10 @@ bool playerSelfTest()
                          player->hwdec().toUtf8().constData());
             return false;
         }
-        // initializeGL crea el render context Y instala el update callback
-        // (mpv_render_context_create + set_update_callback van juntos en
-        // MpvBackend::initGL): renderContextReady() true tras mostrar la
-        // ventana prueba que la ruta de redibujado por eventos está activa.
+        // initializeGL creates the render context AND installs the update callback
+        // (mpv_render_context_create + set_update_callback go together in
+        // MpvBackend::initGL): renderContextReady() true after showing the
+        // window proves the event-driven redraw path is active.
         if (!player->renderContextReady()) {
             std::fprintf(stderr,
                          "SELFTEST FAIL: contexto de render no creado\n");

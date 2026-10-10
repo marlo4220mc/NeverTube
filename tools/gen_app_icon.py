@@ -31,8 +31,8 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIR = os.path.join(RAIZ, "resources", "icon")
 MAESTRO = os.path.join(DIR, "nt_icon.png")
 
-# Las alturas que Windows pide de verdad. 16 es la barra de tareas al 100 % y
-# la mas exigente: ahi el monitor tiene que seguir leyendose.
+# The heights Windows actually asks for. 16 is the taskbar at 100 % and
+# the most demanding: there the monitor must still be readable.
 TAMANOS = [16, 24, 32, 48, 64, 128, 256]
 LADO_MAESTRO = 1024
 
@@ -83,7 +83,7 @@ def main():
         print("maestro cuadrado y reescrito: %dx%d" % im.size)
     comprobar_alfa(im, "maestro")
 
-    # Marco util: la baldosa no llega al borde, asi que se mide sobre el alfa.
+    # Useful frame: the tile does not reach the edge, so it is measured over the alpha.
     caja = im.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
     util = 100.0 * (caja[2] - caja[0]) / im.width
     print("maestro %dx%d, la baldosa ocupa el %.1f%% del ancho"
@@ -98,7 +98,7 @@ def main():
     im.save(ico, sizes=[(t, t) for t in TAMANOS])
     print("  nt.ico      %5.1f KB" % (os.path.getsize(ico) / 1024))
 
-    # Comprobacion: el .ico tiene que devolver una entrada por cada tamano.
+    # Check: the .ico must return one entry per size.
     with Image.open(ico) as vi:
         dentro = sorted(vi.info.get("sizes", []))
     fuera = sorted(set(TAMANOS) - {t for t, _ in dentro})

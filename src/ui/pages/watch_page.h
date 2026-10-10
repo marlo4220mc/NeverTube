@@ -47,15 +47,15 @@ public:
                        QWidget *parent = nullptr);
 
     void setWatchData(const QVector<VideoInfo> &queue, int startIndex);
-    // Genera la cola del mix RDAMVM para el vídeo dado (click explícito desde
-    // fuera de "A continuación": search, home, channel). No se auto-genera.
+    // Generates the RDAMVM mix queue for the given video (explicit click from
+    // outside "A continuación": search, home, channel). Not auto-generated.
     void triggerRadio(const QString &videoId);
 
-    // Mini player con vídeo en vivo: mueve el PlayerWidget (y su overlay) al
-    // widget `host` del mini bar manteniéndolo visible/renderizando, para que
-    // mpv no acumule frames ni se reconfigure el decodificador. attachPlayer()
-    // lo devuelve al área de vídeo de la página. Reparentar dentro de la misma
-    // ventana conserva el contexto GL y el mpv_render_context.
+    // Mini player with live video: moves the PlayerWidget (and its overlay) to the
+    // mini bar's `host` widget while keeping it visible/rendering, so that
+    // mpv does not accumulate frames nor the decoder reconfigure. attachPlayer()
+    // puts it back into the page's video area. Reparenting within the same
+    // window preserves the GL context and the mpv_render_context.
     void detachPlayerTo(QWidget *host);
     void attachPlayer();
     bool playerDetached() const { return m_playerDetached; }
@@ -70,8 +70,8 @@ private slots:
     void onQueueChanged();
     void onPhaseChanged(const QString &phase);
     void onPositionChanged(double position, double duration);
-    // El volumen/silencio cambió por cualquier vía (teclado, slider, botón de
-    // silencio, ajuste): sincroniza el slider del overlay en caliente.
+    // Volume/mute changed through any path (keyboard, slider, mute
+    // button, setting): syncs the overlay slider live.
     void onVolumeChanged();
     void onDetailReady(const VideoInfo &video, const QString &desc,
                        qint64 likes, const QVector<FormatInfo> &formats);
@@ -87,20 +87,20 @@ private slots:
     void onRadioReady(const QString &videoId, const QVector<VideoInfo> &videos);
     void onCurrentDetailReady(const QString &videoId, const QString &title,
                               const QString &description);
-    // El backend informó de la duración real del medio: se guarda en la caché
-    // de vídeos (la que lee "Continuar viendo"), rellenando el hueco de los
-    // vídeos que llegaron sin duración desde search/home/canal.
+    // The backend reported the media's real duration: it is saved into the video
+    // cache (the one "Continuar viendo" reads), filling the gap for
+    // videos that arrived from search/home/channel without a duration.
     void onDurationKnown(double seconds);
 
 public slots:
     void toggleFullscreen();
-    // Reaplica el rango/valor del slider del overlay desde el controlador
-    // (p.ej. al cambiar el ajuste "Volumen máximo" en Ajustes).
+    // Re-applies the overlay slider's range/value from the controller
+    // (e.g. when the "Maximum volume" setting changes in Settings).
     void refreshVolumeSlider();
-    // Re-aplica los estilos/los iconos que dependen del color de acento
-    // (botón Suscribirse, acciones activas, enlaces de la descripción, icono
-    // de subs del overlay). Se llama desde MainWindow cuando cambia el acento
-    // en Ajustes, para que todo siga el color sin reconstruir la página.
+    // Re-applies styles/icons that depend on the accent color (Subscribe
+    // button, active actions, description links, overlay subs icon). Called
+    // from MainWindow when the accent changes in Settings, so everything follows
+    // the color without rebuilding the page.
     void applyAccent();
 
 private:
@@ -116,30 +116,30 @@ private:
     int idxToQuality(int idx) const;
     void setQualityIndex(int index);
     void toggleQualityMenu();
-    // Conectada a PlayerWidget::qualityLimitsChanged: oculta los items del
-    // menú de resoluciones por encima del techo real del archivo. Ignora
-    // valores <= 0 (carga incompleta) para no romper el menú.
+    // Connected to PlayerWidget::qualityLimitsChanged: hides the resolution
+    // menu items above the file's real ceiling. Ignores
+    // values <= 0 (incomplete load) so as not to break the menu.
     void applyQualityLimits(int maxVideoHeight);
-    // Conectada a Yt::streamHeightsReady: guarda la altura máxima que ofrece
-    // el vídeo (adaptiveFormats) para que Auto no oculte calidades reales que
-    // el stream cargado no trae (p.ej. Auto pide 360 de un vídeo 1080).
+    // Connected to Yt::streamHeightsReady: stores the maximum height the video
+    // offers (adaptiveFormats) so Auto does not hide real qualities the
+    // loaded stream lacks (e.g. Auto asks 360 for a 1080 video).
     void onStreamHeights(const QString &videoId, const QVector<int> &heights);
-    // Pinta la descripción del vídeo como HTML enriquecido (enlaces + saltos
-    // de línea) y guarda el texto plano. Vacía = oculta la descripción. Se
-    // muestra SIEMPRE completa (sin colapso ni "…más").
+    // Paints the video description as rich HTML (links + line
+    // breaks) and stores the plain text. Empty = hides the description. It is
+    // ALWAYS shown complete (no collapse, no "…más").
     void applyDescription(const QString &description);
-    // True si el vídeo dado es el que está en reproducción (ignora respuestas
-    // que llegan tarde, de un vídeo ya reemplazado).
+    // True if the given video is the one being played (ignores responses
+    // arriving late, for a video already replaced).
     bool isCurrentVideo(const QString &videoId) const;
     void showPlaylistMenu();
-    // Menú de opciones ("⋯") de una fila de "A continuación": "Quitar de la
-    // cola" (no offered para el vídeo en reproducción) más las acciones
-    // estándar compartidas con el resto de superficies con fila.
+    // Options menu ("⋯") of an "A continuación" row: "Quitar de la
+    // cola" (Remove from queue; not offered for the video being played) plus the
+    // standard actions shared with the other row-bearing surfaces.
     void showQueueRowMenu(int index, const VideoInfo &video,
                           const QPoint &globalPos);
-    // "Nueva playlist": nt::inputText (el diálogo de la app, el mismo que
-    // Biblioteca, Historial y Playlist). Si se pasa un vídeo, se añade a la
-    // playlist nueva.
+    // "Nueva playlist": nt::inputText (the app's dialog, the same as
+    // Library, History and Playlist). If a video is passed, it is added to the
+    // new playlist.
     void promptNewPlaylist(const QString &videoId);
     void showOverlayControls();
     void hideOverlayControls();
@@ -167,19 +167,19 @@ private:
     bool m_isStarred = false;
     bool m_watchLaterMarked = false;
 
-    // "Volver" del Player: enlace flotante SOBRE el vídeo que solo aparece con
-    // el ratón. Vive en la página del overlay (gl) y comparte el ciclo de 2,5 s
-    // de los controles; se oculta en fullscreen, donde solo debe quedar el vídeo.
+    // Player's "Volver" (Back): floating link OVER the video that only appears with
+    // the mouse. Lives on the overlay page (gl) and shares the 2.5 s cycle of
+    // the controls; hidden in fullscreen, where only the video should remain.
     QPushButton *m_back;
     QStackedWidget *m_overlay;
     QLabel *m_errorLabel;
-    // Scroll ÚNICO de toda la página: vídeo arriba + fila con descripción y
-    // "A continuación" (derecha, sin límite vertical), movidos por el mismo
-    // scroll (estilo YouTube).
+    // Single SCROLL for the whole page: video on top + row with description and
+    // "A continuación" (right, no vertical limit), moved by the same
+    // scroll (YouTube style).
     QScrollArea *m_topScroll = nullptr;
     QWidget *m_bottomWidget = nullptr;
-    // Bloque de descripción (título/meta/canal/acciones/descripción) dentro
-    // del scroll. Se oculta en fullscreen para dejar solo el vídeo.
+    // Description block (title/meta/channel/actions/description) inside
+    // the scroll. Hidden in fullscreen to leave only the video.
     QWidget *m_watchBody = nullptr;
     bool m_inFullscreen = false;
     QLabel *m_title;
@@ -204,31 +204,31 @@ private:
     QPushButton *m_quality;
     QFrame *m_qualityMenu;
     QWidget *m_qualityMenuAnchor;
-    // Items del menú de resoluciones, alineados con kQualities[]/{360,480,
-    // 720,1080,1440,2160}. Se ocultan individualmente (no se quitan) cuando
-    // el archivo cargado no tiene esa pista: ver applyQualityLimits.
+    // Resolution menu items, aligned with kQualities[]/{360,480,
+    // 720,1080,1440,2160}. Individually hidden (not removed) when the
+    // loaded file lacks that track: see applyQualityLimits.
     QVector<QPushButton *> m_qualityItems;
-    // Altura REAL del vídeo en reproducción (mpv video-params/h). Permite
-    // mostrar honestamente la altura en el botón para clips sub-360p (donde
-    // kQualities[] no tiene entrada), sin engañar con la 360p más cercana.
+    // REAL height of the video being played (mpv video-params/h). Lets the
+    // button honestly show the height for sub-360p clips (where
+    // kQualities[] has no entry), without lying with the closest 360p.
     int m_videoHeight = 0;
     int m_qualityIndex = 2;
     bool m_qualityMenuActive = false;
     bool m_autoQuality = false;
     int m_autoHeight = 360;
-    // Altura máxima que ofrece el vídeo según Innertube (Yt::streamHeightsReady).
-    // El menú ofrece todas las calidades reales aunque Auto haya pedido una
-    // baja. 0 = indeterminado (cae al techo del stream cargado).
+    // Maximum height the video offers according to Innertube (Yt::streamHeightsReady).
+    // The menu offers all real qualities even if Auto asked for a
+    // low one. 0 = unknown (falls back to the loaded stream's ceiling).
     int m_availableMaxH = 0;
     QLabel *m_descLabel;
-    // Tarjeta que agrupa la descripción. El texto se muestra SIEMPRE completo:
-    // se quitó el colapso a 3 líneas y el control "…más"/"…menos".
+    // Card grouping the description. The text is ALWAYS shown complete:
+    // the 3-line collapse and the "…más"/"…menos" control were removed.
     QFrame *m_descCard = nullptr;
     VideoListView *m_nextUpList;
-    // Contador de la cola, alineado a la derecha del título "A continuación".
+    // Queue counter, right-aligned next to the "A continuación" title.
     QLabel *m_queueCount = nullptr;
 
-    // Controles flotantes sobre el video (overlay): fila única.
+    // Floating controls over the video (overlay): single row.
     QWidget *m_ctrlBar = nullptr;
     QPushButton *m_ovShuffleBtn = nullptr;
     QPushButton *m_ovPlayBtn = nullptr;
@@ -236,17 +236,17 @@ private:
     QPushButton *m_ovPrevBtn = nullptr;
     QPushButton *m_ovRepeatBtn = nullptr;
     SeekSlider *m_ovSeek = nullptr;
-    // El reloj va partido: transcurrido a la izquierda del slider, duración a
-    // la derecha (como el mockup). Antes era un solo "0:00 / 0:00".
+    // The clock is split: elapsed to the left of the slider, duration to
+    // the right (as in the mockup). It used to be a single "0:00 / 0:00".
     QLabel *m_ovPos = nullptr;
     QLabel *m_ovDur = nullptr;
-    // Estado visible del modo directo (barra al final, "EN VIVO", reloj
-    // negativo). La DETECCIÓN vive en nt::LiveDetector (evidencia de duración
-    // inestable + desbloqueo); se reinicia al cambiar de vídeo.
+    // Visible state of live mode (bar at the end, "EN VIVO", negative
+    // clock). The DETECTION lives in nt::LiveDetector (unstable-duration
+    // evidence + unlock); it is reset when the video changes.
     bool m_liveMedia = false;
     nt::LiveDetector m_liveDet;
-    // Pico de duración visto en modo directo: el reloj negativo es monótono
-    // aunque la duración reportada oscile (ventana DVR).
+    // Peak duration seen in live mode: the negative clock is monotonic
+    // even if the reported duration fluctuates (DVR window).
     double m_liveDurPeak = 0.0;
     QPushButton *m_ovMuteBtn = nullptr;
     QSlider *m_ovVolume = nullptr;
@@ -259,8 +259,8 @@ private:
     bool m_subsVisible = false;
     qint64 m_lastVideoPressMs = -100000;
     QPoint m_lastVideoPressPos = QPoint(-100000, -100000);
-    // Hay un control de la caja pulsado: el temporizador de auto-ocultado no
-    // debe hacer desaparecer la barra a mitad de gesto.
+    // A control in the box is pressed: the auto-hide timer must not
+    // make the bar disappear mid-gesture.
     bool m_ctrlPressed = false;
 
     QVector<VideoInfo> m_queue;
@@ -269,8 +269,8 @@ private:
     QString m_description;
     qint64 m_likeCount = 0;
     bool m_fetchingDetail = false;
-    // Siembra de "A continuación": id del vídeo cuyo /next ya se pidió (un
-    // solo pedido por vídeo; los nuevos vídeos que llegan de los relacionados
-    // disparan su propio /next cuando la cola vuelve a acercarse al final).
+    // "A continuación" seeding: id of the video whose /next was already
+    // requested (one request per video; new videos arriving from related
+    // triggers fire their own /next when the queue nears the end again).
     QString m_relatedVideoId;
 };

@@ -16,24 +16,24 @@ class SettingsPage : public QWidget
 public:
     explicit SettingsPage(SettingsRepo *settings, QWidget *parent = nullptr);
 
-    // Refresca la fila "Aceleración de vídeo" con el perfil vigente.
+    // Refreshes the "Aceleración de vídeo" row with the current profile.
     void updateCodecProfile(const QString &profile);
-    // Re-aplica el botón "Restablecer aplicación" con el acento vigente
-    // (MainWindow lo llama al cambiar el color de acento en Ajustes).
+    // Re-applies the "Restablecer aplicación" button with the current accent
+    // (MainWindow calls it when the accent color changes in Settings).
     void applyAccent();
 
-    // "Tamaño de las miniaturas" (Ajustes → Interfaz): valor persistido
-    // ("small" | "normal" | "large"), ya migrado desde el antiguo ajuste
-    // "Densidad de cuadrícula". MainWindow lo lee al arrancar para pintar con
-    // el tamaño correcto desde el primer frame, sin esperar a un cambio.
+    // "Tamaño de las miniaturas" (Settings → Interface): persisted value
+    // ("small" | "normal" | "large"), already migrated from the old setting
+    // "Densidad de cuadrícula". MainWindow reads it at startup to draw with
+    // the right size from the first frame, without waiting for a change.
     QString thumbSize() const { return m_thumbSize; }
-    // El valor se traduce a DOS efectos, porque las rejillas y las listas no
-    // se dimensionan igual (ver AGENTS.md):
-    //  - las VISTAS DE LISTA (búsqueda, canal, historial, playlists, cola
-    //    "A continuación") escalan su fila y su miniatura con un factor;
-    //  - las REJILLAS del Inicio son dimensionadas por el ancho con un número
-    //    de columnas FIJO, así que un factor no hace nada visible: la palanca
-    //    es el número de columnas.
+    // The value maps to TWO effects, because grids and lists are not
+    // sized the same (see AGENTS.md):
+    //  - the LIST VIEWS (search, channel, history, playlists, the "A
+    //    continuación" queue) scale their row and thumbnail by a factor;
+    //  - Home's GRIDS are sized by width with a FIXED number
+    //    of columns, so a factor does nothing visible: the lever
+    //    is the number of columns.
     static double thumbListScale(const QString &value);
     static int thumbGridColumns(const QString &value);
 
@@ -51,35 +51,35 @@ signals:
 
 private:
     void buildUI();
-    // Fila "etiqueta + botón de valor": el botón abre un QMenu con las
-    // alternativas (mismo patrón que los tres puntos de Biblioteca). Al
-    // elegir una opción llama a onPick(displayText).
-    // Botón de acción simple: usado p. ej. por "Volver a detectar".
+    // "Label + value button" row: the button opens a QMenu with the
+    // alternatives (same pattern as the three dots in Library). Choosing
+    // an option calls onPick(displayText).
+    // Simple action button: used e.g. by "Volver a detectar".
     QPushButton *makeActionButton(const QString &text);
-    // Botón de VALOR: abre un QMenu con las alternativas. Va con el mismo
-    // aspecto que el de acción y SIN triángulo final (decisión del usuario:
-    // el "▼" sobraba; ver el comentario en la definición).
+    // VALUE button: opens a QMenu with the alternatives. It looks the same
+    // as the action one and has NO trailing triangle (user's decision:
+    // the "▼" was redundant; see the comment in the definition).
     QPushButton *makeValueButton(const QString &text);
     void setupValueMenu(QPushButton *btn, const QStringList &options,
                         const QString &current,
                         const std::function<void(const QString &)> &onPick);
-    // Variante con confirmación asíncrona (modal). `confirm(opt, applyVisual)`
-    // decide por opción: aplica directo o muestra modal; al Aceptar llama
-    // applyVisual (que registra la opción y actualiza botón + checks), al
-    // Cancelar NO lo llama. `current` es el texto exacto de una QAction.
+    // Variant with asynchronous (modal) confirmation. `confirm(opt, applyVisual)`
+    // decides per option: applies directly or shows the modal; on Accept it calls
+    // applyVisual (which records the option and updates button + checks), on
+    // Cancel it does NOT call it. `current` is the exact text of a QAction.
     void setupValueMenuWithConfirm(
         QPushButton *btn, const QStringList &options, const QString &current,
         const std::function<void(const QString &,
                                   const std::function<void(const QString &)> &)>
             &confirm);
-    // Confirmaciones: nt::confirm, el MISMO overlay modal de la app que usan
-    // Biblioteca, Historial, Playlist y Búsqueda. Antes esta página tenía su
-    // propio popup (380 px en vez de los 400 de nt::confirm, sin velo, sin
-    // modal y con su propia pieza de recentrado), o sea un cuarto sitio donde
-    // "confirmar antes de borrar" se veía y se comportaba de otra manera.
+    // Confirmations: nt::confirm, the SAME modal overlay of the app that
+    // Library, History, Playlist and Search use. Before, this page had its
+    // own popup (380 px instead of nt::confirm's 400, no veil, no
+    // modal and with its own re-centering piece), that is, a fourth place where
+    // "confirm before deleting" looked and behaved differently.
 
     SettingsRepo *m_settings;
     QLabel *m_codecProfileLabel = nullptr;
-    // Valor persistido de "Tamaño de las miniaturas" (ver thumbSize()).
+    // Persisted value of "Tamaño de las miniaturas" (see thumbSize()).
     QString m_thumbSize;
 };

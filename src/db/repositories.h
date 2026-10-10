@@ -33,8 +33,8 @@ public:
     bool upsert(const VideoInfo &v);
     bool get(const QString &id, VideoInfo &out) const;
     QVector<VideoInfo> getMany(const QStringList &ids) const;
-    // Cambia solo la marca de directo (refresco por /next, que no trae
-    // duración); el resto de campos queda intacto.
+    // Changes only the live flag (refresh via /next, which does not bring the
+    // duration); the rest of the fields stay intact.
     bool updateLiveStatus(const QString &id, bool isLive);
 
 private:
@@ -56,26 +56,26 @@ public:
     QStringList recentIds(int limit = 50) const;
     qlonglong positionOf(const QString &videoId) const;
 
-    // Un vídeo se considera COMPLETO si su posición guardada indica ≥95% visto
-    // o le quedan ≤15 s (final/créditos). En ese caso no debe ofrecerse en
-    // "Continuar viendo" y, si se reproduce desde el historial, arranca desde
-    // el principio.
+    // A video counts as COMPLETED if its stored position means ≥95% watched
+    // or ≤15 s left (ending/credits). In that case it must not be offered in
+    // "Continuar viendo" and, if played from the history, it starts from the
+    // beginning.
     static bool isCompleted(const VideoInfo &v, qlonglong positionMs);
-    // Posición inicial de reanudación para un vídeo del historial: 0 si está
-    // completo (o no tiene progreso), su posición de otro modo.
+    // Initial resume position for a history video: 0 if it is complete (or has
+    // no progress), its position otherwise.
     static qlonglong resumeStartMs(const VideoInfo &v, qlonglong positionMs);
-    // Fracción de reproducción de un vídeo del historial (0..1) para la barra
-    // de progreso que dibuja el delegado: 0 si no se puede reanudar (sin
-    // posición, sin duración conocida, ya completo, o al final). Es LA MISMA
-    // regla en los tres sitios donde se ve un vídeo con progreso —el "Continuar
-    // viendo" del Home, la página de Historial y su sección en Biblioteca— para
-    // que un vídeo se lea igual en todos.
+    // Playback fraction of a history video (0..1) for the progress bar the
+    // delegate draws: 0 if it cannot be resumed (no position, no known
+    // duration, already completed, or at the end). It is THE SAME rule in the
+    // three places where a video with progress is shown — Home's "Continuar
+    // viendo", the History page and its Library section — so a video reads the
+    // same everywhere.
     static double progressFraction(const VideoInfo &v, qlonglong positionMs);
 
 signals:
-    // Cambió el historial (nuevo vídeo reproducido, posición actualizada,
-    // borrado manual). HomePage lo conecta para refrescar "Continuar viendo"
-    // y reevaluar el empty-state en cuanto hay datos del usuario.
+    // The history changed (new video played, position updated, manual
+    // delete). HomePage connects to it to refresh "Continuar viendo" and
+    // re-evaluate the empty-state as soon as there is user data.
     void changed();
 
 private:
@@ -96,8 +96,8 @@ private:
     AppDatabase &m_db;
 };
 
-// Me gusta (pulgar) y Favoritos (estrella) son repos separados a propósito.
-// Esta es la estrella manual, distinta del toggle de "Me gusta".
+// Like (thumb) and Favorites (star) are separate repos on purpose. This is the
+// manual star, distinct from the "Me gusta" toggle.
 class StarredRepo
 {
 public:
@@ -140,9 +140,9 @@ public:
     bool isSubscribed(const QString &channelId) const;
     QVector<SubscriptionInfo> all() const;
 
-    // Cambió el conjunto de suscripciones (alta/baja): quien muestre feeds
-    // derivados (p.ej. "Nuevos de tus suscripciones" en Home) debe refrescar.
-    // No se emite en setAvatar: el avatar no altera la lista de canales.
+    // The set of subscriptions changed (add/remove): anyone showing derived
+    // feeds (e.g. "Nuevos de tus suscripciones" on Home) must refresh. Not
+    // emitted in setAvatar: the avatar does not alter the channel list.
 
 signals:
     void changed();
@@ -183,20 +183,20 @@ private:
     AppDatabase &m_db;
 };
 
-// Caché persistente del Home por sección de red (Recomendado/Feed/Tendencias).
-// Guarda solo ids ordenados + fetched_at; los metadatos viven en "videos"
-// (VideoCacheRepo). saveSection REEMPLAZA la sección completa: cada respuesta
-// de red es la lista vigente de esa sección, nunca se agrega contenido a una
-// lista vieja (evita duplicados y contenido obsoleto). Una lista vacía se
-// RECHAZA (una actualización fallida/vacía no debe pisotear la caché previa
-// ni marcar un fetched_at nuevo).
+// Persistent Home cache per network section (Recomendado/Feed/Tendencias).
+// Stores only ordered ids + fetched_at; the metadata lives in "videos"
+// (VideoCacheRepo). saveSection REPLACES the whole section: each network
+// response is the current list of that section, content is never appended to
+// an old list (avoids duplicates and stale content). An empty list is REJECTED
+// (a failed/empty update must not trample the previous cache nor stamp a new
+// fetched_at).
 class HomeCacheRepo
 {
 public:
     explicit HomeCacheRepo(AppDatabase &db);
 
-    // Guarda/reemplaza la sección. Devuelve false (y no escribe nada) si
-    // videoIds está vacío o no es una sección válida.
+    // Saves/replaces the section. Returns false (and writes nothing) if
+    // videoIds is empty or it is not a valid section.
     bool saveSection(const QString &section, const QStringList &videoIds,
                      qint64 fetchedAt);
     QStringList sectionVideoIds(const QString &section) const;
@@ -215,47 +215,48 @@ struct DiscoverRadio
     qlonglong lastUsedAt = 0;
 };
 
-// Radios guardadas de Descubre (fuente persistente: no se generan al abrir
-// Home, se construyen al reproducir vídeos y aquí se almacenan). Los
-// metadatos de los vídeos reutilizan la tabla "videos" (VideoCacheRepo).
+// Radios saved from Descubre (a persistent source: they are not generated when
+// opening Home, they are built while playing videos and stored here). The
+// video metadata reuses the "videos" table (VideoCacheRepo).
 class DiscoverRepo
 {
 public:
     explicit DiscoverRepo(AppDatabase &db);
 
-    // Guarda (o reemplaza) la radio de una semilla: una radio por semilla, no
-    // se duplica si ya existe. Devuelve true si quedó guardada con contenido.
+    // Saves (or replaces) the radio of a seed: one radio per seed, it is not
+    // duplicated if it already exists. Returns true if it ended up saved with
+    // content.
     bool saveRadio(const QString &seedVideoId, const QVector<VideoInfo> &videos);
     bool hasRadio(const QString &seedVideoId) const;
-    // Radios ordenadas por last_used_at ASC (menos usadas primero, variedad).
+    // Radios ordered by last_used_at ASC (least used first, for variety).
     QVector<DiscoverRadio> radios() const;
-    // Ids de vídeo de una radio en orden de posición. Los metadatos se resuelven
-    // con VideoCacheRepo::getMany sobre el caché "videos".
+    // Video ids of a radio in position order. The metadata is resolved with
+    // VideoCacheRepo::getMany over the "videos" cache.
     QStringList radioVideoIds(qlonglong radioId) const;
-    // Ids de vídeo de la radio guardada para una semilla (orden de posición),
-    // para reusarla en "A continuación" sin volver a pedirla a YouTube.
+    // Video ids of the radio saved for a seed (position order), to reuse it in
+    // "A continuación" without asking YouTube for it again.
     QStringList radioVideoIdsForSeed(const QString &seedVideoId) const;
     void markUsed(qlonglong radioId);
     bool deleteRadio(qlonglong radioId);
     int count() const;
     AppDatabase &db() const { return m_db; }
 
-    // Limpieza transaccional con HistoryRepo: al borrar un vídeo del
-    // historial, elimina la radio cuyo seed sea ese vídeo.
+    // Transactional cleanup with HistoryRepo: when deleting a video from the
+    // history, it deletes the radio whose seed is that video.
     void clearForSeed(const QString &seedVideoId);
-    // Al borrar todo el historial, elimina todas las radios.
+    // When clearing the whole history, it deletes every radio.
     void clearAll();
 
 private:
     AppDatabase &m_db;
 };
 
-// Selección de vídeos para Descubre usando SOLO las radios almacenadas (sin
-// red). Coge hasta maxVideos de entre las radios guardadas menos usadas
-// (barajadas): hasta perRadio vídeos de cada una, sin repetir ids y excluyendo
-// excludeId. Las radios sin vídeo útil (borradas de "videos" o vacías) se
-// eliminan. Devuelve lo conseguido: puede ser < maxVideos si no hay contenido
-// válido, lista vacía si no hay radios.
+// Video selection for Descubre using ONLY the stored radios (no network). It
+// takes up to maxVideos from the least-used saved radios (shuffled): up to
+// perRadio videos from each, without repeating ids and excluding excludeId.
+// Radios without a useful video (deleted from "videos" or empty) are removed.
+// Returns what it got: it may be < maxVideos if there is no valid content, an
+// empty list if there are no radios.
 QVector<VideoInfo> pickDiscoverVideos(DiscoverRepo &discover,
                                       VideoCacheRepo &cache,
                                       const QString &excludeId,

@@ -45,18 +45,18 @@
 #include "../thumbnail_cache.h"
 #include "../video_list_view.h"
 
-// Resoluciones del menú del reproductor, de menor a mayor. Fuente ÚNICA de
-// verdad: los índices del menú (m_qualityItems), idxToQuality,
-// qualityIndexForHeight y la altura pedida a Yt salen de aquí. Debe coincidir
-// con las opciones de calidad de Ajustes (settings_page.cpp).
+// Player menu resolutions, from lowest to highest. SINGLE source of
+// truth: the menu indices (m_qualityItems), idxToQuality,
+// qualityIndexForHeight and the height requested from Yt come from here. It
+// must match the quality options of Settings (settings_page.cpp).
 namespace {
 const int kQualityHeights[] = {144, 240, 360, 480, 720, 1080, 1440, 2160};
 constexpr int kQualityCount =
     static_cast<int>(sizeof(kQualityHeights) / sizeof(kQualityHeights[0]));
 
-// Etiqueta de una resolución para el menú del engranaje: añade "HD" a 720p y
-// 1080p (y superiores) y "4K" a 2160p, como YouTube. Fuente única: la usan el
-// menú de resoluciones.
+// Label for a resolution in the gear menu: appends "HD" to 720p and
+// 1080p (and above) and "4K" to 2160p, like YouTube. Single source: used by the
+// resolution menu.
 QString qualityLabel(int height)
 {
     if (height >= 2160)
@@ -65,37 +65,37 @@ QString qualityLabel(int height)
         return QStringLiteral("%1p HD").arg(height);
     return QStringLiteral("%1p").arg(height);
 }
-// Altura máxima del área de vídeo (PlayerContainer). En la página con scroll
-// único, un vídeo sin tope ocuparía width/aspect (768+ px en ventanas grandes
-// y maximizadas) y descripción + "A continuación" quedarían empujadas fuera de
-// la vista. El tope muerde cuando el cap por aspecto supera los 560 px: en
-// ventanas pequeñas manda width/aspect y no cambia nada. Layout puro: no toca
-// render ni el redibujado.
+// Maximum height of the video area (PlayerContainer). On the page with a
+// single scroll, an uncapped video would take width/aspect (768+ px in large
+// and maximized windows) and description + "A continuación" would be pushed out
+// of view. The cap bites when the aspect cap exceeds 560 px: in small
+// windows width/aspect rules and this changes nothing. Pure layout: it does not
+// touch render or repaint.
 constexpr int kMaxPlayerHeight = 560;
 
-// Anchos de vídeo por debajo de los cuales la fila de controles recorta
-// elementos, de menos prioritario a más (como YouTube: primero el slider de
-// volumen, luego las etiquetas de tiempo). La suma sale del código, no a ojo
-// (los botones iconBtn miden icono + 12 de padding del QSS; los relojes ~30 px
-// a 12 px; los separadores 1+12 px):
-//   transporte (5 botones: shuffle/prev/play/next/repeat)   162
-//   relojes transcurrido+duración                            ~60  (< kCtrlWithTimeMinW)
-//   separadores (2)                                          ~26
-//   volumen (mute 30 + slider fijo 80)                       110  (< kCtrlWithVolMinW)
-//   acciones (4 botones: captions/playlist/gear/fs)          120
-//   márgenes laterales de barLay                              24
-//   gaps (huecos x 6)                                        30-84
-// El slider de progreso es el único flexible (stretch) y se lleva el resto; los
-// umbrales dejan holgura para no recortar botones (los setFixedWidth del slider
-// de volumen no ceden y el recorte caería en los iconos y el reloj).
+// Video widths below which the control row trims
+// elements, from least to most priority (like YouTube: first the volume
+// slider, then the time labels). The sums come from the code, not by eye
+// (the iconBtn buttons measure icon + 12 QSS padding; the clocks ~30 px
+// at 12 px; the separators 1+12 px):
+//   transport (5 buttons: shuffle/prev/play/next/repeat)     162
+//   elapsed+duration clocks                                  ~60  (< kCtrlWithTimeMinW)
+//   separators (2)                                           ~26
+//   volume (mute 30 + fixed slider 80)                       110  (< kCtrlWithVolMinW)
+//   actions (4 buttons: captions/playlist/gear/fs)           120
+//   side margins of barLay                                   24
+//   gaps (6 of them)                                         30-84
+// The progress slider is the only flexible one (stretch) and takes the rest; the
+// thresholds leave slack so as not to trim buttons (the setFixedWidth of the
+// volume slider do not yield and the trim would fall on the icons and the clock).
 constexpr int kCtrlWithVolMinW = 760;
 constexpr int kCtrlWithTimeMinW = 640;
 
-// Área de vídeo dentro del overlay. gl1 (el layout que lleva la caja) iba con
-// contentsMargins 0, así que la caja ocupaba el ancho entero sin separador. Esta
-// clase no pinta nada: solo avisa de ese ancho, que es lo que decide si la fila
-// cabe. Sin Q_OBJECT a propósito para no meter una clase con señales en el
-// namespace anónimo: un std::function que se asigna al vuelo.
+// Video area inside the overlay. gl1 (the layout that carries the box) used
+// contentsMargins 0, so the box took the whole width with no separator. This
+// class paints nothing: it only reports that width, which is what decides whether
+// the row fits. No Q_OBJECT on purpose so as not to put a class with signals in
+// the anonymous namespace: a std::function assigned on the fly.
 class OverlayHost : public QWidget
 {
 public:
@@ -120,9 +120,9 @@ public:
         , m_overlay(overlay)
         , m_player(player)
     {
-        // El fondo va por QSS global (QWidget#playerArea): negro puro, no kBg,
-        // porque es el fondo de las bandas letterbox y tiene que ser negro de
-        // verdad para que no se note el marco. Antes era un setStyleSheet inline.
+        // The background comes from the global QSS (QWidget#playerArea): pure
+        // black, not kBg, because it is the letterbox bands' background and it
+        // must be truly black so the frame is not noticeable. It used to be an inline setStyleSheet.
         player->setParent(this);
         overlay->setParent(player);
         overlay->setGeometry(player->rect());
@@ -139,9 +139,9 @@ public:
         updateMaxHeight();
     }
 
-    // Devuelve el PlayerWidget a esta área tras el mini player (lo reparenta y
-    // lo reintegra en el layout; el contexto GL se conserva por ser la misma
-    // ventana). El overlay permanece hijo del player.
+    // Returns the PlayerWidget to this area after the mini player (it reparents
+    // it and puts it back in the layout; the GL context is preserved because it
+    // is the same window). The overlay stays a child of the player.
     void givePlayerBack()
     {
         m_player->setParent(this);
@@ -168,9 +168,9 @@ public:
         updateMaxHeight();
     }
 
-    // Pantalla completa de solo-vídeo: el tope absoluto de altura NO aplica (o
-    // el vídeo se quedaría en 560 px con la pantalla llena de negro); manda solo
-    // el cap por aspecto, que era el comportamiento original.
+    // Video-only fullscreen: the absolute height cap does NOT apply (or
+    // the video would stay at 560 px with the screen full of black); only the
+    // aspect cap rules, which was the original behavior.
     void setFullscreen(bool fullscreen)
     {
         if (m_fullscreen == fullscreen)
@@ -194,22 +194,22 @@ private:
     {
         if (m_aspect <= 0.0)
             return;
-        // El vídeo mantiene su proporción y además nunca excede el tope
-        // absoluto: en pantallas grandes/maximizadas el stretch (3:1) haría
-        // crecer el área 3/4 de la ventana y descripción + "A continuación"
-        // se quedarían sin espacio. En ventanas pequeñas el cap por aspecto
-        // (width/aspect) es el que manda y este tope no cambia nada.
-        // En PANTALLA COMPLETA no aplica el tope: el vídeo debe llenar la
-        // pantalla (solo lo limita su aspecto).
+        // The video keeps its ratio and also never exceeds the absolute
+        // cap: on large/maximized screens the stretch (3:1) would make the
+        // area grow to 3/4 of the window and description + "A continuación"
+        // would be left with no space. In small windows the aspect cap
+        // (width/aspect) is what rules and this cap changes nothing.
+        // In FULLSCREEN the cap does not apply: the video must fill the
+        // screen (only its aspect limits it).
         const int h = qRound(width() / m_aspect);
         const int capped = m_fullscreen ? h : qMin(h, kMaxPlayerHeight);
         NT_DEBUG("E2E pc aspect=%.3f width=%d maxH=%d curMin=%d curMax=%d\n",
                  m_aspect, width(), capped, minimumHeight(), maximumHeight());
         if (capped == minimumHeight() && capped == maximumHeight())
             return;
-        // min = max = cap: dentro del scroll único de la página el layout debe
-        // darle al vídeo EXACTAMENTE su altura (aspecto o 560 px), ni estirado
-        // por políticas Expanding ni encogido por el contenido scrolleable.
+        // min = max = cap: inside the page's single scroll the layout must
+        // give the video EXACTLY its height (aspect or 560 px), neither stretched
+        // by Expanding policies nor shrunk by the scrollable content.
         setMinimumHeight(capped);
         setMaximumHeight(capped);
     }
@@ -218,22 +218,22 @@ private:
     PlayerWidget *m_player;
     QVBoxLayout *m_lay = nullptr;
     double m_aspect = 0.0;
-    // Pantalla completa (solo vídeo): desactiva el tope kMaxPlayerHeight.
+    // Fullscreen (video only): disables the kMaxPlayerHeight cap.
     bool m_fullscreen = false;
 };
 
-// --- Deslizadores del overlay (seek y volumen), pintados a mano -------------
-// El QSlider con QSS de Qt 5.15 NO coloca bien el handle: su centro queda ~media
-// anchura a la IZQUIERDA del punto real y el sub-página (el relleno) se ancla al
-// borde del WIDGET, no al de la pista. Resultado en valor mínimo: el círculo se
-// sale por la izquierda de la pista y asoma un residuo rojo a su lado (el "algo
-// de rojo" en 0:00). Los márgenes no lo arreglan (el offset del handle y el
-// anclaje del relleno van acoplados); por eso se pinta aquí, con la MISMA
-// estética del QSS anterior: pista #2F2F2F con borde translúcido de 1 px,
-// relleno de acento y círculo blanco de 12 px. Claves del pintado: el centro del
-// círculo mapea entre radio y ancho-radio (SIEMPRE queda entero dentro del
-// widget) y el relleno termina en el borde IZQUIERDO del círculo, así que en
-// 0:00 mide cero y no deja rojo a la vista.
+// --- Overlay sliders (seek and volume), hand-painted -------------
+// QSlider with Qt 5.15 QSS does NOT place the handle well: its center sits ~half
+// a width to the LEFT of the real point and the sub-page (the fill) anchors to
+// the WIDGET edge, not the track edge. Result at minimum value: the circle
+// goes out past the left of the track and a red residue peeks out beside it (the "bit
+// of red" at 0:00). Margins do not fix it (the handle offset and the
+// fill anchor are coupled); that is why it is painted here, with the SAME
+// look as the previous QSS: track #2F2F2F with a 1 px translucent border,
+// accent fill and a 12 px white circle. Keys to the painting: the circle's
+// center maps between radius and width-radius (it ALWAYS stays fully inside the
+// widget) and the fill ends at the LEFT edge of the circle, so at
+// 0:00 it measures zero and leaves no red in sight.
 class OverlaySlider : public QSlider
 {
 public:
@@ -245,12 +245,12 @@ public:
     }
 
 protected:
-    static constexpr qreal kRadius = 6.0; // círculo de 12 px
-    static constexpr qreal kTrackH = 6.0; // relleno de la pista
+    static constexpr qreal kRadius = 6.0; // 12 px circle
+    static constexpr qreal kTrackH = 6.0; // track fill
 
-    // Centro X del círculo para un valor: entre [radio, ancho - radio]. Función
-    // pura (solo depende del ancho y el rango), compartida por el pintado y el
-    // hover.
+    // X center of the circle for a value: between [radius, width - radius]. Pure
+    // function (only depends on the width and the range), shared by the painting and
+    // the hover.
     static qreal handleCenterX(int widgetWidth, int value, int vmin, int vmax)
     {
         const int span = vmax - vmin;
@@ -268,8 +268,8 @@ protected:
         const qreal w = qreal(width());
         const qreal cy = qreal(height()) / 2.0;
 
-        // Pista: caja de 8 px (6 de relleno + 1 de borde por lado), radio 3,
-        // como el QSS #ovSeek/#ovVolume anterior.
+        // Track: box of 8 px (6 fill + 1 border per side), radius 3,
+        // like the previous #ovSeek/#ovVolume QSS.
         const qreal boxW = qMax(1.0, w - 1.0);
         p.setBrush(QColor(255, 255, 255, 71)); // @OVERLAY_EDGE@
         p.drawRoundedRect(QRectF(0.5, cy - 4.0, boxW, 8.0), 3.0, 3.0);
@@ -277,8 +277,8 @@ protected:
         p.setBrush(nt::kHandle);
         p.drawRoundedRect(track, 2.0, 2.0);
 
-        // Relleno: del arranque de la pista al borde IZQUIERDO del círculo (en
-        // 0:00, ancho cero). Discreto cuando el slider está deshabilitado.
+        // Fill: from the start of the track to the LEFT edge of the circle (at
+        // 0:00, width zero). Discreet when the slider is disabled.
         const qreal cx = handleCenterX(width(), value(), minimum(), maximum());
         const qreal fillEnd = cx - kRadius;
         if (fillEnd > track.left() + 0.5) {
@@ -288,7 +288,7 @@ protected:
                               2.0, 2.0);
         }
 
-        // Círculo: blanco; en acento con el cursor encima o mientras se arrastra.
+        // Circle: white; accent with the cursor over it or while dragging.
         p.setBrush(!isEnabled() ? nt::kDisabled
                   : (m_handleHot || isSliderDown()) ? nt::kAccent
                                                     : QColor(0xFF, 0xFF, 0xFF));
@@ -317,8 +317,8 @@ protected:
     }
 
 private:
-    // El hover solo se enciende con el cursor SOBRE el círculo (como el
-    // `::handle:hover` del QSS que sustituye), no en cualquier punto del widget.
+    // The hover only turns on with the cursor OVER the circle (like the
+    // `::handle:hover` of the QSS it replaces), not anywhere on the widget.
     void updateHandleHover(const QPoint &pos)
     {
         const qreal cx = handleCenterX(width(), value(), minimum(), maximum());
@@ -334,9 +334,9 @@ private:
     bool m_handleHot = false;
 };
 
-// Deslizador de búsqueda: click en cualquier punto del track busca ahí y el
-// arrastre no pelea con las actualizaciones de posición mientras se mantiene
-// pulsado. Emite el valor buscado (gatillo de seek) por cada cambio.
+// Seek slider: a click anywhere on the track seeks there and
+// dragging does not fight the position updates while it is held
+// down. It emits the sought value (seek trigger) on every change.
 class SeekSlider : public OverlaySlider
 {
 public:
@@ -348,15 +348,15 @@ public:
 
     bool isSeeking() const { return m_dragging; }
 
-    // Directo ("EN VIVO"): la barra es informativa (playhead en el borde, el
-    // "ahora" del live); un clic no debe buscar a un valor sin sentido.
+    // Live ("EN VIVO"): the bar is informative (playhead at the edge, the
+    // live's "now"); a click must not seek to a meaningless value.
     void setLive(bool live) { m_live = live; }
 
 protected:
     static int valueFromPos(const QSlider *slider, int x)
     {
-        // Mismo mapeo que el pintado (centro del círculo entre radio y
-        // ancho-radio) para que el valor caiga justo bajo el cursor.
+        // Same mapping as the painting (circle center between radius and
+        // width-radius) so the value falls right under the cursor.
         const qreal w = qMax(qreal(1.0), qreal(slider->width()));
         const qreal r = qBound(qreal(0.0),
                                (qreal(x) - kRadius) / qMax(qreal(1.0), w - 2.0 * kRadius),
@@ -391,7 +391,7 @@ protected:
             event->accept();
             return;
         }
-        // Cae al base para que el hover del círculo siga funcionando.
+        // Falls through to the base so the circle hover keeps working.
         OverlaySlider::mouseMoveEvent(event);
     }
 
@@ -415,15 +415,15 @@ private:
 
 namespace {
 
-// Avatar recortado en círculo para la fila del canal del reproductor.
-// El recorte circular del avatar es nt::circularAvatar (src/ui/icons.*), el
-// mismo que usan la ficha de Canal y la tarjeta de Biblioteca/Search. Esta copia
-// además estiraba el pixmap al cuadrado (dibujo en un rect size x size de una
-// imagen escalada "KeepAspectRatioByExpanding"), así que un avatar no cuadrado
-// salía deformado; la compartida recorta el centro.
+// Avatar cropped into a circle for the player's channel row.
+// The circular crop of the avatar is nt::circularAvatar (src/ui/icons.*), the
+// same one used by the Channel sheet and the Library/Search card. This copy
+// also stretched the pixmap to a square (drawing a "KeepAspectRatioByExpanding"
+// scaled image into a size x size rect), so a non-square avatar
+// came out deformed; the shared one crops the center.
 
-// Icono del canal con gap px de separación a la derecha del círculo, para
-// que el nombre no quede pegado al avatar.
+// Channel icon with gap px of separation to the right of the circle, so
+// that the name is not glued to the avatar.
 QIcon avatarWithGap(const QPixmap &circular, int size, int gap)
 {
     QPixmap canvas(size + gap, size);
@@ -433,8 +433,8 @@ QIcon avatarWithGap(const QPixmap &circular, int size, int gap)
     return QIcon(canvas);
 }
 
-// Activa tracking del ratón + event filter en un widget y todos sus hijos,
-// para que WatchPage pueda mostrar/ocultar los controles flotantes.
+// Enables mouse tracking + event filter on a widget and all its children,
+// so that WatchPage can show/hide the floating controls.
 void enableOverlayTracking(QObject *filterObj, QWidget *root)
 {
     if (!root)
@@ -469,7 +469,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     , m_thumbs(thumbs)
     , m_playlists(playlists)
 {
-    // Modo Auto: leer preferencia de calidad guardada (default auto a 360p)
+    // Auto mode: read the saved quality preference (default auto at 360p)
     const QString savedQ = m_settings
                                ? m_settings->getString(QStringLiteral("quality"),
                                                        QStringLiteral("auto"))
@@ -484,8 +484,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         int h = savedQ.toInt();
         m_autoHeight = (h > 0) ? h : 360;
     }
-    // El botón/índice del menú arrancan en la calidad realmente pedida (Auto =
-    // última memorizada), no en un 720p por defecto que no refleja nada.
+    // The menu button/index start at the quality actually requested (Auto =
+    // the last memorized one), not at a fixed 720p that deceives.
     m_qualityIndex = qualityIndexForHeight(m_autoHeight);
 
     auto *splitOuter = new QVBoxLayout(this);
@@ -494,22 +494,22 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
 
     m_overlay = new QStackedWidget(this);
     m_overlay->setAttribute(Qt::WA_TranslucentBackground, true);
-    // Los dos "background: transparent" de aqui (el stack y OverlayHost) NO son
-    // inlines de tema pendientes de migrar: son estructurales. El stack tiene que
-    // dejar ver el video que hay detras, y OverlayHost es un QWidget plano que
-    // solo existe para colocar la caja de controles encima del video. Moverlos
-    // al QSS global no cambia ni un pixel (ya son "sin color"), y si el selector
-    // fallara el stack volveria a pintar su fondo de paleta encima del video.
+    // The two "background: transparent" here (the stack and OverlayHost) are NOT
+    // theme inlines pending migration: they are structural. The stack has to
+    // let the video behind it show through, and OverlayHost is a flat QWidget that
+    // only exists to place the control box on top of the video. Moving them
+    // to the global QSS does not change a single pixel (they are already "colorless"), and
+    // if the selector failed the stack would paint its palette background on top of the video again.
     m_overlay->setStyleSheet(QStringLiteral("background: transparent;"));
 
     auto *gl = new OverlayHost;
     gl->setStyleSheet(QStringLiteral("background: transparent;"));
     auto *gl1 = new QVBoxLayout(gl);
-    // Separador de 12 px: antes 0,0,0,0. m_ctrlBar no recibe geometría (solo la
-    // gl1 lo coloca), así que la caja tocaba los tres bordes del vídeo y su
-    // border-radius y su borde no delimitaban nada: parecían adornos de una
-    // banda pegada al canto. Con separador, la caja flota y su forma dice lo que
-    // dice. Arriba 0 a propósito: la caja se apoya en el borde inferior.
+    // 12 px separator: used to be 0,0,0,0. m_ctrlBar receives no geometry (only
+    // gl1 places it), so the box touched the three edges of the video and its
+    // border-radius and border delimited nothing: they looked like ornaments of a
+    // band stuck to the edge. With the separator, the box floats and its shape says
+    // what it says. Top 0 on purpose: the box rests on the bottom edge.
     gl1->setContentsMargins(12, 0, 12, 12);
     gl1->setSpacing(0);
     gl1->addStretch(1);
@@ -517,24 +517,24 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_ctrlBar = new QWidget(gl);
     m_ctrlBar->setObjectName(QStringLiteral("playerOverlay"));
     m_ctrlBar->setAttribute(Qt::WA_StyledBackground, true);
-    // El estilo (fondo translúcido, borde de dos tonos, radio 12) vive en el
-    // QSS global: antes era un setStyleSheet inline con #2A2A2A, que además
-    // contradecía kBorder (#262626), y por eso esta superficie era la única que
-    // no cubría un cambio de acento.
+    // The style (translucent background, two-tone border, radius 12) lives in the
+    // global QSS: it used to be an inline setStyleSheet with #2A2A2A, which also
+    // contradicted kBorder (#262626), and that is why this surface was the only one that
+    // did not cover an accent change.
     auto *barLay = new QVBoxLayout(m_ctrlBar);
-    // Antes (10, 4, 10, 6) con spacing 2: 4 px de aire encima de la pista y 2
-    // entre filas, frente a 10 px a los lados. Al flotar la caja ese desequilibrio
-    // se nota. 8/8/6 es lo que usa el resto de la app. La caja crece ~10 px.
+    // Before (10, 4, 10, 6) with spacing 2: 4 px of air above the track and 2
+    // between rows, versus 10 px on the sides. With the box floating that imbalance
+    // shows. 8/8/6 is what the rest of the app uses. The box grows ~10 px.
     barLay->setContentsMargins(12, 8, 12, 8);
     barLay->setSpacing(6);
 
-    // Fila ÚNICA de controles (estilo YouTube): el TRANSPORTE arranca la fila
-    // con reproducir/pausa (como YouTube), luego anterior y siguiente, y por
-    // último barajar y repetir; tiempo transcurrido + slider de progreso +
-    // duración en el centro, y volumen/acciones a la derecha. Todos los
-    // controles son #iconBtn (transparentes, solo relleno al hover): sin
-    // marcos, sin cajas de botón, sin play circular. Los iconos son los de
-    // nt::playerIcon (Material Symbols dibujado con QPainter, vectorial).
+    // SINGLE row of controls (YouTube style): the TRANSPORT starts the row
+    // with play/pause (like YouTube), then previous and next, and
+    // finally shuffle and repeat; elapsed time + progress slider +
+    // duration in the center, and volume/actions on the right. All the
+    // controls are #iconBtn (transparent, only fill on hover): no
+    // frames, no button boxes, no circular play. The icons are those of
+    // nt::playerIcon (Material Symbols drawn with QPainter, vector).
     auto *btnRow = new QHBoxLayout;
     btnRow->setSpacing(6);
 
@@ -553,8 +553,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
 
     m_ovPrevBtn = makeIconBtn(m_ctrlBar);
     m_ovPrevBtn->setToolTip(QStringLiteral("Anterior\nP"));
-    // El comportamiento de YouTube vive en PlayerController::previous() (y el
-    // habilitado del botón en previousAvailable()): la lógica no es de la UI.
+    // YouTube's behavior lives in PlayerController::previous() (and the
+    // button's enabled state in previousAvailable()): the logic is not the UI's.
     connect(m_ovPrevBtn, &QPushButton::clicked, this, [this]() {
         m_player->previous();
     });
@@ -584,8 +584,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     });
     btnRow->addWidget(m_ovRepeatBtn);
 
-    // Tiempo transcurrido, progreso y duración en el centro: el slider se lleva
-    // todo el hueco flexible (stretch) entre las dos etiquetas.
+    // Elapsed time, progress and duration in the center: the slider takes
+    // all the flexible gap (stretch) between the two labels.
     m_ovPos = new QLabel(QStringLiteral("0:00"), m_ctrlBar);
     m_ovPos->setObjectName(QStringLiteral("ovPos"));
     btnRow->addWidget(m_ovPos);
@@ -602,7 +602,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_ovDur->setObjectName(QStringLiteral("ovDur"));
     btnRow->addWidget(m_ovDur);
 
-    // Separadores verticales sutiles (1 px) entre los subgrupos de la fila.
+    // Subtle vertical separators (1 px) between the subgroups of the row.
     auto makeSep = [this](QWidget *parent) {
         auto *sep = new QFrame(parent);
         sep->setObjectName(QStringLiteral("ovSep"));
@@ -625,9 +625,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_ovVolume->setCursor(Qt::PointingHandCursor);
     connect(m_ovVolume, &QSlider::valueChanged, this, [this](int v) {
         m_player->setVolume(v);
-        // El capado a 100% en persistencia está en MainWindow::persistVolume,
-        // llamado por otros paths. Aquí, si v>100 (boost activo) no se persiste
-        // para evitar que un volumen alto sobreviva al reinicio de la app.
+        // The cap at 100% on persistence is in MainWindow::persistVolume,
+        // called by other paths. Here, if v>100 (boost active) it is not persisted
+        // to prevent a high volume from surviving the app restart.
         if (m_settings && v <= 100)
             m_settings->set(QStringLiteral("volume"), QString::number(v));
     });
@@ -651,9 +651,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             &WatchPage::showPlaylistMenu);
     btnRow->addWidget(m_ovPlaylistBtn);
 
-    // El menú de resoluciones se ancla a este botón, que dejó de ser el chip de
-    // texto "720p" para ser el icono de ajustes de la fila. La resolución activa
-    // vive ahora en el tooltip (ver onVideoSizeChanged/setQualityIndex).
+    // The resolution menu is anchored to this button, which stopped being the text
+    // chip "720p" to be the settings icon of the row. The active resolution
+    // now lives in the tooltip (see onVideoSizeChanged/setQualityIndex).
     m_quality = makeIconBtn(m_ctrlBar);
     m_quality->setToolTip(QStringLiteral("Calidad de vídeo"));
     connect(m_quality, &QPushButton::clicked, this,
@@ -666,8 +666,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             &WatchPage::toggleFullscreen);
     btnRow->addWidget(m_ovFsBtn);
 
-    // Iconos base de la fila (nt::playerIcon). Los que dependen del estado
-    // (play/pausa, barajar, repetir, subtítulos) los refresca
+    // Base icons of the row (nt::playerIcon). The ones that depend on the state
+    // (play/pause, shuffle, repeat, captions) are refreshed by
     // updateOverlayIcons().
     m_ovShuffleBtn->setIcon(
         nt::playerIcon(nt::PlayerIcon::Shuffle, nt::kText, 20));
@@ -689,10 +689,10 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     gl1->addWidget(m_ctrlBar);
     m_ctrlBar->hide();
 
-    // Lógica responsive: si el ancho del vídeo no cabe la fila completa, se
-    // oculta primero el slider de volumen (el mute sigue estando) y después las
-    // etiquetas de tiempo. Se conecta al widget que conoce el ancho real
-    // (OverlayHost), no al parent.
+    // Responsive logic: if the video width does not fit the full row, the
+    // volume slider is hidden first (mute stays) and then the
+    // time labels. It is connected to the widget that knows the real width
+    // (OverlayHost), not the parent.
     gl->onWidth = [this](int w) {
         if (!m_ovVolume)
             return;
@@ -707,10 +707,10 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         }
         const bool showVol = (w >= kCtrlWithVolMinW);
         const bool showTime = (w >= kCtrlWithTimeMinW);
-        // isHidden() y NO isVisible(): la caja vive oculta casi todo el tiempo,
-        // y isVisible() devuelve false en cuanto el padre está oculto, así que
-        // con isVisible() la guarda nunca se cumpliría (nada se escondería
-        // nunca) y además se forzaría un relayout en cada resize.
+        // isHidden() and NOT isVisible(): the box is hidden almost all the time,
+        // and isVisible() returns false as soon as the parent is hidden, so
+        // with isVisible() the guard would never be met (nothing would ever be
+        // hidden) and a relayout would be forced on every resize.
         if (m_ovVolume->isHidden() == showVol)
             m_ovVolume->setVisible(showVol);
         if (m_ovPos->isHidden() == showTime) {
@@ -722,15 +722,15 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_qualityMenu = new QFrame(gl);
     m_qualityMenu->setObjectName(QStringLiteral("qualityMenu"));
     m_qualityMenu->setAttribute(Qt::WA_StyledBackground, true);
-    // El estilo vive en el QSS global (QFrame#qualityMenu): aquí era un
-    // setStyleSheet inline que repetía #1F1F1F y #2D2D2D, que ya son tokens.
+    // The style lives in the global QSS (QFrame#qualityMenu): here it was an
+    // inline setStyleSheet that repeated #1F1F1F and #2D2D2D, which are already tokens.
     auto *menuLay = new QVBoxLayout(m_qualityMenu);
     menuLay->setContentsMargins(4, 4, 4, 4);
     menuLay->setSpacing(1);
-    // En perfil soft-all (decodificación por CPU, sin HW) no tiene sentido
-    // ofrecer 1440p/2160p: el menú los oculta para que el usuario no elija una
-    // resolución que un CPU puro no puede mover. Los índices se mantienen
-    // alineados con idxToQuality(): solo se ocultan, no se quitan.
+    // In the soft-all profile (CPU decoding, no HW) it makes no sense
+    // to offer 1440p/2160p: the menu hides them so the user does not pick a
+    // resolution a pure CPU cannot handle. The indices stay
+    // aligned with idxToQuality(): they are only hidden, not removed.
     const bool softAll = m_settings
         && m_settings->getString(QStringLiteral("codec_profile"),
                                  QStringLiteral("av1-hw"))
@@ -740,9 +740,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         auto *item =
             new QPushButton(qualityLabel(kQualityHeights[i]), m_qualityMenu);
         item->setFixedWidth(90);
-        // soft-all: CPU solo, no se ofrecen 1440p/2160p. Cada item se
-        // guarda en m_qualityItems para ocultarlo en caliente si el mpv
-        // emite un techo real inferior (ver applyQualityLimits).
+        // soft-all: CPU only, 1440p/2160p are not offered. Each item is
+        // stored in m_qualityItems to hide it on the fly if mpv
+        // reports a real lower ceiling (see applyQualityLimits).
         item->setVisible(!(softAll && kQualityHeights[i] >= 1440));
         const int idx = i;
         connect(item, &QPushButton::clicked, this, [this, idx]() {
@@ -772,7 +772,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_overlay->setCurrentIndex(0);
     enableOverlayTracking(this, gl);
 
-    // Ocultar los controles flotantes tras inactividad del ratón.
+    // Hide the floating controls after mouse inactivity.
     m_overlayTimer = new QTimer(this);
     m_overlayTimer->setSingleShot(true);
     m_overlayTimer->setInterval(2500);
@@ -782,27 +782,27 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     auto *pc = new PlayerContainer(playerWidget, m_overlay, this);
     m_playerContainer = pc;
     pc->setObjectName(QStringLiteral("playerArea"));
-    // PlayerContainer es un QWidget plano, no un QFrame: Qt solo pinta el fondo
-    // que le da el QSS si el widget lleva WA_StyledBackground. Con el fondo en
-    // el stylesheet global (en vez de un setStyleSheet propio) hay que decirlo
-    // explícitamente, o las bandas letterbox quedan en kBg (#0F0F0F) en vez de
-    // negro y se nota el marco alrededor del vídeo.
+    // PlayerContainer is a flat QWidget, not a QFrame: Qt only paints the background
+    // the QSS gives it if the widget carries WA_StyledBackground. With the background in
+    // the global stylesheet (instead of its own setStyleSheet) it has to be said
+    // explicitly, or the letterbox bands stay in kBg (#0F0F0F) instead of
+    // black and the frame around the video shows.
     pc->setAttribute(Qt::WA_StyledBackground, true);
     pc->ensurePolished();
     enableOverlayTracking(this, pc);
     connect(playerWidget, &PlayerWidget::videoAspectChanged, pc,
             &PlayerContainer::setVideoAspect);
-    // Sin marco de foco tipo botón al hacer click sobre el vídeo.
+    // No button-like focus frame when clicking the video.
     pc->setFocusPolicy(Qt::NoFocus);
     playerWidget->setFocusPolicy(Qt::NoFocus);
     m_overlay->setFocusPolicy(Qt::NoFocus);
     gl->setFocusPolicy(Qt::NoFocus);
 
-    // Scroll ÚNICO de toda la página: vídeo + descripción + "A continuación"
-    // apilados y afectados por el MISMO scroll (estilo YouTube). Al bajar, el
-    // vídeo se va de la pantalla y descripción/cola ganan espacio. La altura
-    // del vídeo la fija PlayerContainer::updateMaxHeight (cap por aspecto
-    // hasta 560 px) dentro del contenido scrolleable.
+    // SINGLE scroll of the whole page: video + description + "A continuación"
+    // stacked and affected by the SAME scroll (YouTube style). On scrolling down, the
+    // video leaves the screen and description/queue gain space. The height
+    // of the video is set by PlayerContainer::updateMaxHeight (aspect cap
+    // up to 560 px) inside the scrollable content.
     auto *topScroll = new QScrollArea(this);
     topScroll->setWidgetResizable(true);
     topScroll->setFrameShape(QFrame::NoFrame);
@@ -815,13 +815,13 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     topScroll->setWidget(topWidget);
     splitOuter->addWidget(topScroll, 1);
 
-    // El reproductor vive DENTRO del scroll (arriba del contenido): se mueve
-    // con la página.
+    // The player lives INSIDE the scroll (at the top of the content): it moves
+    // with the page.
     top->addWidget(pc);
 
-    // Fila media DENTRO del scroll: descripción a la izquierda y "A
-    // continuación" a la derecha, SIN límite vertical en la cola (crece con
-    // todas sus filas y el scroll general la recorre, sin scroll interno).
+    // Middle row INSIDE the scroll: description on the left and "A
+    // continuación" on the right, with NO vertical limit on the queue (it grows with
+    // all its rows and the general scroll goes through it, with no internal scroll).
     auto *midRow = new QWidget;
     auto *midLay = new QHBoxLayout(midRow);
     midLay->setContentsMargins(0, 0, 0, 0);
@@ -848,8 +848,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_channelBtn->setCursor(Qt::PointingHandCursor);
     m_channelBtn->setIconSize(QSize(43, 40));
     m_channelBtn->setIcon(nt::icon(nt::Icon::User, nt::kMuted, 20));
-    // A proposito NO es #ghost: el boton lleva icono a la izquierda y texto a la
-    // derecha alineado, y necesita padding de 8px en vez de los 6px de #ghost.
+    // On purpose it is NOT #ghost: the button has an icon on the left and text on the
+    // right, aligned, and needs 8px padding instead of the 6px of #ghost.
     m_channelBtn->setObjectName(QStringLiteral("channelBtn"));
     m_channelBtn->setMinimumHeight(56);
     m_channelBtn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
@@ -858,9 +858,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_subscribeBtn->setObjectName(QStringLiteral("subscribe"));
     m_subscribeBtn->setCursor(Qt::PointingHandCursor);
     m_subscribeBtn->setMinimumHeight(36);
-    // Sin stylesheet propio: el estado inicial (no suscrito, con acento) lo da
-    // la regla QPushButton#subscribe, y el hover es la variante clara de
-    // @ACCENT@, asi que sigue al color elegido sin re-aplicar nada.
+    // No stylesheet of its own: the initial state (not subscribed, with accent) is given
+    // by the QPushButton#subscribe rule, and the hover is the light variant of
+    // @ACCENT@, so it follows the chosen color without re-applying anything.
 
     auto *channelRow = new QHBoxLayout;
     channelRow->setSpacing(8);
@@ -869,14 +869,14 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     channelRow->addWidget(m_subscribeBtn, 0, Qt::AlignVCenter);
     infoLay->addLayout(channelRow);
 
-    // Fila de acciones. Altura 44 px (WCAG 2.5.5, objetivo táctil recomendado;
-    // 40 px se quedaba corto) y 10 px de separacion entre objetivos contiguos.
-    // El segmentado crece a la misma altura para que la fila no quede escalonada.
+    // Action row. Height 44 px (WCAG 2.5.5, recommended touch target;
+    // 40 px fell short) and 10 px of separation between contiguous targets.
+    // The segmented group grows to the same height so the row is not stepped.
     auto *actionsRow = new FlowLayout(0, 10, 10);
 
-    // Grupo segmentado Me gusta / No me gusta. Ambos son de icono solo: el texto
-    // de los 6 chips liberaba media fila y el FlowLayout saltaba de línea. El
-    // tooltip y el nombre accesible conservan la etiqueta.
+    // Segmented Like / Dislike group. Both are icon-only: the text
+    // of the 6 chips freed half a row and the FlowLayout wrapped. The
+    // tooltip and the accessible name keep the label.
     auto *seg = new QWidget(this);
     seg->setObjectName(QStringLiteral("actionSeg"));
     seg->setFixedHeight(44);
@@ -904,9 +904,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     segLay->addWidget(m_dislikeBtn);
     actionsRow->addWidget(seg);
 
-    // Resto de acciones: pastilla circular de icono solo, con tooltip. Se
-    // añaden EXPLÍCITAMENTE a actionsRow: crear el botón no basta, sin
-    // addWidget queda fuera del layout y no se ve.
+    // Rest of the actions: circular icon-only pill, with tooltip. They are
+    // added EXPLICITLY to actionsRow: creating the button is not enough, without
+    // addWidget it stays out of the layout and is not visible.
     auto makeAction = [this, actionsRow](nt::Icon icon, const QString &tip,
                              QPushButton **out, nt::Icon *iconOut) {
         auto *b = new QPushButton(this);
@@ -940,9 +940,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
                                          | Qt::TextSelectableByMouse);
     m_descLabel->setOpenExternalLinks(true);
     m_descLabel->setObjectName(QStringLiteral("watchDesc"));
-    // Tarjeta de la descripción: fondo #181818 con el texto COMPLETO. Ya no hay
-    // colapso a 3 líneas ni control "…más"/"…menos": la descripción se muestra
-    // entera (lo pidió el usuario).
+    // Description card: #181818 background with the COMPLETE text. There is no longer
+    // a collapse to 3 lines or a "…más"/"…menos" control: the description shows
+    // in full (the user asked for it).
     m_descCard = new QFrame(this);
     m_descCard->setObjectName(QStringLiteral("watchDescCard"));
     auto *descLay = new QVBoxLayout(m_descCard);
@@ -975,47 +975,47 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     bot->addLayout(quRow);
     bot->addWidget(m_nextUpList);
 
-    // "A continuación" a la derecha de la descripción, dentro del scroll
-    // general (sin límite vertical: la altura la fija updateQueue al
-    // contenido real).
+    // "A continuación" to the right of the description, inside the general
+    // scroll (with no vertical limit: updateQueue sets the height to the
+    // real content).
     midLay->addWidget(bottomWidget, 3);
-    // Ambos bloques conservan su alto NATURAL y quedan alineados arriba: la
-    // fila crece con la cola (sin límite), pero la descripción no se estira a
-    // esa altura — debajo de cada bloque solo queda espacio vacío scrollable.
+    // Both blocks keep their NATURAL height and stay top-aligned: the
+    // row grows with the queue (no limit), but the description does not stretch to
+    // that height — below each block there is only scrollable empty space.
     midLay->setAlignment(infoWidget, Qt::AlignTop);
     midLay->setAlignment(bottomWidget, Qt::AlignTop);
     top->addWidget(midRow);
-    // El stretch absorbe el sobrante cuando el contenido no llena la ventana:
-    // los bloques quedan pegados arriba, con hueco al final (como YouTube).
+    // The stretch absorbs the surplus when the content does not fill the window:
+    // the blocks stay glued to the top, with a gap at the end (like YouTube).
     top->addStretch(1);
 
-    // "Volver" del Player: un enlace flotante sobre el vídeo que SOLO aparece
-    // con el ratón. Vive dentro de la página del overlay (gl, OverlayHost
-    // transparente), así que comparte el mismo ciclo de 2,5 s que los controles
-    // (showOverlayControls/hideOverlayControls), sigue al reparent del mini
-    // player sin nada que hacer a mano (el overlay es hijo del player), y no
-    // necesita geometría propia al redimensionar: en la esquina superior
-    // izquierda la posición no cambia.
+    // Player "Back": a floating link over the video that ONLY appears
+    // with the mouse. It lives inside the overlay page (gl, transparent
+    // OverlayHost), so it shares the same 2.5 s cycle as the controls
+    // (showOverlayControls/hideOverlayControls), follows the mini player
+    // reparent with nothing to do by hand (the overlay is a child of the player), and
+    // does not need its own geometry on resize: in the top
+    // left corner the position does not change.
     //
-    // Antes ocupaba una barra fija de 38 px a todo el ancho ENCIMA del scroll
-    // (m_backBar con splitOuter->insertWidget(0, ...)): un enlace de 63 px en
-    // una banda llena de hueco, que además empujaba el vídeo 38 px para abajo.
-    // El usuario la pidió fuera. La barra entera desaparece, con ella los 38 px
-    // y el hueco que dejaba.
+    // It used to take a fixed 38 px bar across the whole width ABOVE the scroll
+    // (m_backBar with splitOuter->insertWidget(0, ...)): a 63 px link in
+    // a band full of gap, which also pushed the video 38 px down.
+    // The user asked for it outside. The whole bar disappears, and with it the 38 px
+    // and the gap it left.
     //
-    // El token es #backLink, el mismo enlace discreto que Canal, Historial y
-    // Playlist; dentro del overlay su parte superior queda pegada al borde del
-    // vídeo (gl1 no gestiona este hijo, solo a m_ctrlBar y al stretch).
+    // The token is #backLink, the same discreet link as Channel, History and
+    // Playlist; inside the overlay its top edge sits against the edge of the
+    // video (gl1 does not manage this child, only m_ctrlBar and the stretch).
     m_back = new QPushButton(QStringLiteral("Volver"), gl);
     m_back->setObjectName(QStringLiteral("backLink"));
-    // El icono Back (abajo) ya es la flecha: el "◀" del texto era un glifo
-    // que no existe en la fuente por defecto y salia como un punto, ademas
-    // duplicaba la misma affordance.
+    // The Back icon (below) is already the arrow: the "◀" in the text was a glyph
+    // that does not exist in the default font and came out as a dot, and it also
+    // duplicated the same affordance.
     m_back->setIcon(nt::icon(nt::Icon::Back, nt::kMuted, 13));
     m_back->setCursor(Qt::PointingHandCursor);
     m_back->move(12, 8);
     m_back->raise();
-    m_back->hide(); // aparece con los controles, no antes
+    m_back->hide(); // appears with the controls, not before
 
     connect(m_back, &QPushButton::clicked, this,
             &WatchPage::backRequested);
@@ -1091,14 +1091,14 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             &WatchPage::onVolumeChanged);
     connect(playerWidget, &PlayerWidget::videoSizeChanged, this,
             &WatchPage::onVideoSizeChanged);
-    // Cuando mpv carga el archivo emite la altura máxima real de sus
-    // pistas; si limita a 720p, ocultamos 1080p/1440p/2160p del menú de
-    // resoluciones (mpv no podría seleccionar esas pistas y quedaba como
-    // "click inerte" para el usuario).
+    // When mpv loads the file it emits the real maximum height of its
+    // tracks; if it caps at 720p, we hide 1080p/1440p/2160p from the
+    // resolution menu (mpv could not select those tracks and it felt like a
+    // "dead click" for the user).
     connect(playerWidget, &PlayerWidget::qualityLimitsChanged, this,
             &WatchPage::applyQualityLimits);
-    // Alturas reales del vídeo (Innertube): si Auto pidió 360 de un vídeo 1080,
-    // el menú debe seguir ofreciendo 1080 aunque el stream cargado sea 360.
+    // Real video heights (Innertube): if Auto asked for 360 of a 1080 video,
+    // the menu must still offer 1080 even if the loaded stream is 360.
     connect(m_yt, &Yt::streamHeightsReady, this, &WatchPage::onStreamHeights);
     connect(m_player, &PlayerController::durationChanged, this,
             &WatchPage::onDurationKnown);
@@ -1114,10 +1114,10 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             &WatchPage::onAvatarReady);
     connect(m_nextUpList, &VideoListView::videoActivated, this,
             &WatchPage::onNextUpActivated);
-    // Botón de opciones por fila, como en el resto de superficies con fila. Aquí
-    // la página SÍ tiene los repos (ver más tarde, playlists) y el controlador
-    // de la cola, así que añade su acción propia ("Quitar de la cola") delante
-    // del menú compartido.
+    // Per-row options button, as in the rest of the surfaces with rows. Here
+    // the page DOES have the repos (watch later, playlists) and the queue
+    // controller, so it adds its own action ("Quitar de la cola") in front
+    // of the shared menu.
     m_nextUpList->setRowMoreVisible(true);
     connect(m_nextUpList, &VideoListView::moreRequested, this,
             &WatchPage::showQueueRowMenu);
@@ -1154,8 +1154,8 @@ void WatchPage::detachPlayerTo(QWidget *host)
 {
     if (!m_playerWidget || !host || m_playerDetached)
         return;
-    // El overlay (controles) es hijo del player: se oculta, no se mueve. El
-    // player se reparenta visible para que mpv siga renderizando en el mini.
+    // The overlay (controls) is a child of the player: it is hidden, not moved. The
+    // player is reparented visible so mpv keeps rendering in the mini.
     m_overlay->hide();
     m_playerWidget->setParent(host);
     m_playerWidget->setGeometry(host->rect());
@@ -1177,8 +1177,8 @@ void WatchPage::attachPlayer()
 
 void WatchPage::onCurrentChanged()
 {
-    // Nuevo vídeo: la detección de directo se reinicia (la duración se recibe
-    // desde cero; no se arrastra el estado del vídeo anterior).
+    // New video: live detection restarts (the duration is received
+    // from scratch; the previous video's state is not carried over).
     m_liveDet.reset();
     m_liveDurPeak = 0.0;
     if (m_liveMedia) {
@@ -1193,13 +1193,13 @@ void WatchPage::onCurrentChanged()
         m_title->setText(QStringLiteral("Reproduciendo…"));
         return;
     }
-    // Página en un único scroll (estilo YouTube): al cambiar de vídeo se
-    // vuelve arriba para que el nuevo parta desde el vídeo. No en fullscreen
-    // (ahí el scroll está oculto y el vídeo llena la página).
+    // Page with a single scroll (YouTube style): on changing video it
+    // returns to the top so the new one starts from the video. Not in fullscreen
+    // (there the scroll is hidden and the video fills the page).
     if (m_topScroll && !m_inFullscreen)
         m_topScroll->verticalScrollBar()->setValue(0);
-    // Nuevo vídeo: el techo de calidades disponibles se recalcula con su
-    // streamHeightsReady; hasta entonces no se arrastra el del anterior.
+    // New video: the ceiling of available qualities is recalculated with its
+    // streamHeightsReady; until then the previous one is not carried over.
     m_availableMaxH = 0;
     m_title->setText(m_player->current().title);
     m_liked = m_favs->isFavorite(m_player->current().id);
@@ -1210,12 +1210,12 @@ void WatchPage::onCurrentChanged()
     updateInfo();
     updateQueue();
     m_yt->getDetail(m_player->current().id);
-    // Detalle traducido (/next normal): solo cuando el idioma del ajuste es
-    // explícito (es/en/pt); en "original" el /next no aporta y se ahorra la
-    // petición. Se difiere una iteración del event loop para que el POST
-    // /player (camino crítico de reproducción) pase por delante: Ipv4Https
-    // es FIFO de un solo socket, y si este /next entra antes, el vídeo
-    // espera a que termine la traducción antes de pedir el stream.
+    // Translated detail (normal /next): only when the setting's language is
+    // explicit (es/en/pt); in "original" the /next adds nothing and the request
+    // is saved. It is deferred one event loop iteration so that the POST
+    // /player (critical playback path) goes first: Ipv4Https
+    // is a single-socket FIFO, and if this /next enters first, the video
+    // waits for the translation to finish before requesting the stream.
     if (!m_yt->audioLanguage().isEmpty()) {
         const QString id = m_player->current().id;
         QTimer::singleShot(0, this, [this, id]() {
@@ -1248,9 +1248,9 @@ void WatchPage::updateQueue()
     const int remaining = m_queue.size() - (idx + 1);
     const NextMode mode = nextMode();
 
-    // Siembra: solo Suggestions auto-llena la cola cuando quedan pocos ítems.
-    // Radio se genera por un click explícito desde fuera de "A continuación"
-    // (search, home, channel) y NO auto-recarga al agotar.
+    // Seeding: only Suggestions auto-fills the queue when few items are left.
+    // Radio is generated by an explicit click from outside "A continuación"
+    // (search, home, channel) and does NOT auto-reload when exhausted.
     if (mode == NextMode::Suggestions && remaining <= 5 && !cur.id.isEmpty()
         && cur.id != m_relatedVideoId) {
         m_relatedVideoId = cur.id;
@@ -1259,17 +1259,17 @@ void WatchPage::updateQueue()
         m_yt->relatedVideos(cur.id);
     }
 
-    // Lista completa de la colección: el vídeo en reproducción queda marcado
-    // con recuadro y los saltados/ya vistos siguen visibles y elegibles.
+    // Complete list of the collection: the playing video stays marked
+    // with a box and the skipped/already watched ones stay visible and eligible.
     m_nextUpList->showVideos(m_queue, VideoListView::ListMode);
     m_nextUpList->setCurrentRow(idx);
     if (m_queueCount)
         m_queueCount->setText(m_queue.isEmpty()
             ? QString()
             : QStringLiteral("%1 vídeos").arg(m_queue.size()));
-    // La cola vive DENTRO del scroll de la página: su altura se ajusta al
-    // contenido real (filas × alto de fila) para que el scroll de la página
-    // mueva la cola entera, sin scroll interno duplicado.
+    // The queue lives INSIDE the page scroll: its height is adjusted to the
+    // real content (rows × row height) so that the page scroll
+    // moves the whole queue, with no duplicated internal scroll.
     const int rowH = m_nextUpList->sizeHintForRow(0);
     if (rowH > 0)
         m_nextUpList->setFixedHeight(qMax(1, m_queue.size()) * rowH);
@@ -1305,9 +1305,9 @@ void WatchPage::onRadioReady(const QString &videoId,
         m_player->appendVideos(videos);
         return;
     }
-    // Radio RDAMVM vacía (ni panel ni mezcla en ningún cliente): último
-    // recurso con el /next plano de recomendaciones para no dejar "A
-    // continuación" vacío. La guarda de onRelatedReady valida m_relatedVideoId.
+    // Empty RDAMVM radio (neither panel nor mix in any client): last
+    // resort with the flat /next of recommendations so as not to leave "A
+    // continuación" empty. The onRelatedReady guard validates m_relatedVideoId.
     NT_DEBUG("E2E nextUp radio vacia -> fallback /next id=%s\n",
              videoId.toUtf8().constData());
     m_yt->relatedVideos(videoId);
@@ -1347,7 +1347,7 @@ void WatchPage::updateChannelRow()
             m_channelBtn->setIcon(avatarWithGap(nt::circularAvatar(pm, 40), 40, 3));
         } else {
             m_channelBtn->setIcon(placeholder);
-            // Pide datos del canal (nombre y avatar) si faltan.
+            // Requests channel data (name and avatar) if missing.
             m_yt->channelInfo(v.channelId);
         }
     } else {
@@ -1361,9 +1361,9 @@ void WatchPage::updateSubscribeButton(bool subscribed)
     m_subscribeBtn->setText(subscribed ? QStringLiteral("Suscrito")
                                        : QStringLiteral("Suscribirse"));
     m_subscribeBtn->setIcon(QIcon());
-    // Misma regla #subscribe que el boton de la ficha de canal: los dos
-    // estados los decide la propiedad `subscribed` y el acento sale de
-    // @ACCENT@. Re-polish obligatorio al cambiar la propiedad.
+    // Same #subscribe rule as the channel sheet button: both
+    // states are decided by the `subscribed` property and the accent comes from
+    // @ACCENT@. Re-polish required when changing the property.
     m_subscribeBtn->setProperty("subscribed", subscribed);
     m_subscribeBtn->style()->unpolish(m_subscribeBtn);
     m_subscribeBtn->style()->polish(m_subscribeBtn);
@@ -1386,14 +1386,14 @@ void WatchPage::updateActionButtons()
         b->setIcon(nt::icon(icon, active ? QColor(nt::accentHex())
                                          : nt::kMuted, 20));
         b->setIconSize(QSize(20, 20));
-        // Los dos estados viven en el QSS global (#actionChip) y los distingue
-        // la propiedad booleana `active`, igual que el boton Suscribirse. El
-        // acento sale de @ACCENT@, asi que un cambio de color lo repinta solo
-        // y ya no hace falta rehacer el stylesheet aqui.
+        // Both states live in the global QSS (#actionChip) and are told apart by
+        // the boolean property `active`, just like the Subscribe button. The
+        // accent comes from @ACCENT@, so a color change repaints it on its own
+        // and there is no longer a need to redo the stylesheet here.
         b->setProperty("active", active);
-        // La propiedad cambia el selector, asi que hay que re-polish: sin esto
-        // Qt no vuelve a resolver las reglas y el boton conserva el estado
-        // anterior (por ejemplo, "Me gusta" pulsado que no se ve marcado).
+        // The property changes the selector, so it must be re-polished: without this
+        // Qt does not resolve the rules again and the button keeps the previous
+        // state (for example, "Me gusta" pressed that is not shown as marked).
         b->style()->unpolish(b);
         b->style()->polish(b);
         b->update();
@@ -1413,14 +1413,14 @@ void WatchPage::showQueueRowMenu(int index, const VideoInfo &video,
         return;
     QMenu menu(this);
 
-    // Acción propia de la cola. El vídeo en reproducción no se quita de la
-    // cola (ver PlayerController::removeFromQueue), así que en su fila la
-    // acción no aparece en vez de aparecer sin hacer nada.
+    // Own action of the queue. The playing video is not removed from the
+    // queue (see PlayerController::removeFromQueue), so in its row the
+    // action does not appear instead of appearing without doing anything.
     if (index != m_player->index()) {
         QAction *rem = menu.addAction(QStringLiteral("Quitar de la cola"));
         connect(rem, &QAction::triggered, this, [this, index]() {
-            // En el bucle siguiente, con el menú cerrado: quitarlo borra la fila
-            // de la lista de la que nació el popup.
+            // On the next loop iteration, with the menu closed: removing it deletes the row
+            // from the list the popup was born from.
             QTimer::singleShot(0, this, [this, index]() {
                 m_player->removeFromQueue(index);
             });
@@ -1454,8 +1454,8 @@ void WatchPage::showPlaylistMenu()
         const bool contains = m_playlists->contains(p.id, v.id);
         if (contains)
             anyAdded = true;
-        // Sin glifo de check: "✔" (U+2714) no esta en la fuente por defecto y
-        // salia como un punto. El "(ya esta)" ya dice lo mismo.
+        // No check glyph: "✔" (U+2714) is not in the default font and
+        // came out as a dot. The "(ya está)" already says the same.
         const QString label = contains
             ? QStringLiteral("%1 (ya está)").arg(p.title)
             : p.title;
@@ -1476,12 +1476,12 @@ void WatchPage::showPlaylistMenu()
                   : QCursor::pos());
 }
 
-// "Nueva playlist" del Player: nt::inputText, el MISMO diálogo que usan
-// Biblioteca, Historial y Playlist. Antes el Player tenía aquí su propio
-// QFrame#popupDialog con el campo (hijo de la página, sin velo y sin modal, y
-// sin cerrar con Escape), de modo que la misma acción se veía y se comportaba
-// de tres maneras según de dónde se pidiera. La playlist se crea DESPUÉS de
-// cerrar el diálogo, no antes: el texto solo llega si el usuario acepta.
+// Player "New playlist": nt::inputText, the SAME dialog used by
+// Library, History and Playlist. Before, the Player had its own
+// QFrame#popupDialog with the field here (child of the page, with no veil and no modal, and
+// not closing with Escape), so the same action looked and behaved
+// in three ways depending on where it was requested from. The playlist is created AFTER
+// closing the dialog, not before: the text only arrives if the user accepts.
 void WatchPage::promptNewPlaylist(const QString &videoId)
 {
     QString name;
@@ -1525,12 +1525,12 @@ void WatchPage::onAvatarReady(const QString &key)
         m_channelBtn->setIcon(avatarWithGap(nt::circularAvatar(pm, 40), 40, 3));
 }
 
-// El backend ya conoce la duración real del medio (la de mpv o el reloj de
-// audio del FfmpegBackend). Los vídeos abiertos desde search/home/canal llegan
-// con durationSeconds=0, y "Continuar viendo" descarta todo lo que no tenga
-// duración en la caché: por eso un vídeo visto varios minutos nunca aparecía
-// allí. Se rellena SOLO la duración y se respeta lo ya cacheado (el upsert es
-// un INSERT OR REPLACE, meter un ítem de cola con campos vacíos los borraría).
+// The backend already knows the real duration of the media (mpv's or the
+// FfmpegBackend audio clock). Videos opened from search/home/channel arrive
+// with durationSeconds=0, and "Continuar viendo" discards everything without
+// duration in the cache: that is why a video watched for several minutes never appeared
+// there. ONLY the duration is filled in and what is already cached is respected (the upsert is
+// an INSERT OR REPLACE, putting a queue item with empty fields would erase them).
 void WatchPage::onDurationKnown(double seconds)
 {
     const int dur = qRound(seconds);
@@ -1541,19 +1541,19 @@ void WatchPage::onDurationKnown(double seconds)
         return;
     VideoInfo cached;
     const bool known = m_cache->get(cur.id, cached);
-    // El player response es la fuente AUTORITATIVA de si el medio es un directo
-    // (videoDetails.isLive, ya cableado hasta currentIsLive()): se escribe la
-    // marca junto a la duración para que Home/Biblioteca la pinten sin esperar
-    // a re-analizar un renderer. Un directo en emisión aporta una duración que
-    // crece con el tiempo (la "hasta ahora"), así que el guard de igualdad no lo
-    // corta; se compara también isLive por el caso raro de duración repetida con
-    // el estado cambiado.
+    // The player response is the AUTHORITATIVE source of whether the media is a live
+    // (videoDetails.isLive, already wired up to currentIsLive()): the
+    // mark is written next to the duration so Home/Library paint it without waiting
+    // to re-analyze a renderer. A live broadcast provides a duration that
+    // grows with time (the "so far"), so the equality guard does not
+    // cut it; isLive is also compared for the rare case of a repeated duration with
+    // the state changed.
     const bool live = m_player->currentIsLive();
     if (known && cached.durationSeconds == dur && cached.isLive == live)
-        return; // ya está al día: no escribir por gusto
+        return; // already up to date: do not write for no reason
     if (known) {
-        // Rellenar solo lo que falte: el upsert es INSERT OR REPLACE, así que
-        // meter el ítem de cola tal cual borraría lo ya cacheado.
+        // Fill in only what is missing: the upsert is INSERT OR REPLACE, so
+        // putting the queue item as is would erase what is already cached.
         if (cached.title.isEmpty())
             cached.title = cur.title;
         if (cached.channel.isEmpty())
@@ -1580,8 +1580,8 @@ void WatchPage::onDetailFailed(const QString &videoId)
 {
     if (!isCurrentVideo(videoId))
         return;
-    // Ningún cliente devolvió metadatos; no dejar "Cargando detalles…"
-    // clavado. Se muestra lo que ya se conoce del elemento de la cola.
+    // No client returned metadata; do not leave "Cargando detalles…"
+    // stuck. It shows what is already known from the queue element.
     m_fetchingDetail = false;
     m_description.clear();
     m_descLabel->hide();
@@ -1610,14 +1610,14 @@ void WatchPage::onDetailReady(const VideoInfo &video, const QString &desc,
     }
     meta << QStringLiteral("%1 me gusta").arg(likes);
     m_meta->setText(meta.join(QStringLiteral("  •  ")));
-    // El detalle acaba de rellenar lo que faltaba en el ítem de la cola (canal,
-    // id, visitas, fecha) vía applyCurrentDetail: se repinta la lista para que
-    // la fila del vídeo en reproducción muestre ya los tres campos.
+    // The detail just filled in what was missing in the queue item (channel,
+    // id, views, date) via applyCurrentDetail: the list is repainted so that
+    // the playing video's row already shows the three fields.
     updateQueue();
-    // El videoMetadataRenderer del /next NO trae duración. Como el upsert es
-    // INSERT OR REPLACE, guardarlo tal cual pondría duration=0 y borraría la
-    // duración real que ya cacheó onDurationKnown(). "Continuar viendo" filtra
-    // por duración > 0, así que perderla sacaba el vídeo de la lista.
+    // The /next videoMetadataRenderer does NOT bring duration. Since the upsert is
+    // INSERT OR REPLACE, storing it as is would set duration=0 and erase the
+    // real duration already cached by onDurationKnown(). "Continuar viendo" filters
+    // by duration > 0, so losing it would drop the video from the list.
     VideoInfo toCache = video;
     if (toCache.durationSeconds <= 0) {
         VideoInfo known;
@@ -1627,10 +1627,10 @@ void WatchPage::onDetailReady(const VideoInfo &video, const QString &desc,
     m_cache->upsert(toCache);
 }
 
-// Detalle traducido del vídeo actual (/next): título y descripción en el
-// idioma "hl" solicitado. Se aplica si coincide el vídeo y el idioma no es
-// "original" (cuando es original, el detail de Innertube ya muestra lo que
-// YouTube entrega por defecto y no queremos sobrescribir).
+// Translated detail of the current video (/next): title and description in the
+// requested "hl" language. It is applied if the video matches and the language is not
+// "original" (when it is original, the Innertube detail already shows what
+// YouTube delivers by default and we do not want to overwrite it).
 void WatchPage::onCurrentDetailReady(const QString &videoId,
                                      const QString &title,
                                      const QString &description)
@@ -1640,9 +1640,9 @@ void WatchPage::onCurrentDetailReady(const QString &videoId,
     if (!isCurrentVideo(videoId))
         return;
     const QString audioLang = m_yt->audioLanguage();
-    // Si el usuario pidió "original", no sobrescribir la descripción
-    // (youtube entrega en idioma del canal; el fix hl=es ya preserva
-    // hispanohablantes). Solo aplicar para idiomas explícitos.
+    // If the user asked for "original", do not overwrite the description
+    // (youtube delivers in the channel's language; the hl=es fix already preserves
+    // Spanish speakers). Only apply for explicit languages.
     if (audioLang.isEmpty())
         return;
     if (!title.isEmpty()) {
@@ -1653,16 +1653,16 @@ void WatchPage::onCurrentDetailReady(const QString &videoId,
         applyDescription(description);
 }
 
-// True si el vídeo dado es el que está en reproducción.
+// True if the given video is the one playing.
 bool WatchPage::isCurrentVideo(const QString &videoId) const
 {
     return m_player->isActive() && videoId == m_player->current().id;
 }
 
-// Pinta la descripción del vídeo como el HTML del helper compartido
-// (format::descriptionHtml: enlaces del acento + saltos de línea) y guarda el
-// texto plano. Crece a altura completa (sin tope ni "Ver más"). Vacía = oculta
-// la descripción.
+// Paints the video description as the HTML of the shared helper
+// (format::descriptionHtml: accent links + line breaks) and saves the
+// plain text. It grows to full height (no cap or "Ver más"). Empty = hides
+// the description.
 void WatchPage::applyDescription(const QString &description)
 {
     m_description = description;
@@ -1674,7 +1674,7 @@ void WatchPage::applyDescription(const QString &description)
     }
     QString rich = descriptionHtml(description);
     m_descLabel->setText(rich);
-    // Sin tope de altura: la descripción se muestra entera.
+    // No height cap: the description shows in full.
     m_descLabel->setMaximumHeight(QWIDGETSIZE_MAX);
     m_descLabel->show();
     if (m_descCard)
@@ -1700,9 +1700,9 @@ void WatchPage::onPhaseChanged(const QString &phase)
         showOverlayControls();
     else
         hideOverlayControls();
-    // Auto: la memoria (quality_auto) solo cambia con una elección explícita
-    // del menú (ver onQualityChanged); al terminar un vídeo no se toca el
-    // reproductor ni se sube resolución en caliente.
+    // Auto: the memory (quality_auto) only changes with an explicit
+    // menu choice (see onQualityChanged); when a video ends the
+    // player is not touched nor is the resolution raised on the fly.
     NT_DEBUG("E2E overlay visible=%d idx=%d\n", m_overlay->isVisible(),
              m_overlay->currentIndex());
     const QPoint qp = m_quality->mapToGlobal(QPoint(0, 0));
@@ -1718,21 +1718,21 @@ void WatchPage::onPhaseChanged(const QString &phase)
 
 void WatchPage::onPositionChanged(double position, double duration)
 {
-    // Un directo no tiene "duración final": mpv reporta 0 (HLS live puro) o la
-    // duración "hasta ahora", que crece/u oscila con cada segmento. Con la
-    // barra pos/dur el porcentaje salta hacia atrás cuando la duración cambia.
-    // Se trata como YouTube: playhead en el borde derecho (el "ahora" del
-    // directo), marca "EN VIVO" y el tiempo desde la emisión en negativo.
-    // La DETECCIÓN usa evidencia sostenida (nt::LiveDetector): un VOD materializa
-    // su duración una vez y la mantiene estable, un directo la cambia con cada
-    // segmento; y si la duración se estabiliza, se desbloquea (falso positivo
-    // → barra normal y seek recuperado). Un vídeo normal nunca se marca.
+    // A live has no "final duration": mpv reports 0 (pure HLS live) or the
+    // "so far" duration, which grows/or oscillates with each segment. With the
+    // pos/dur bar the percentage jumps backwards when the duration changes.
+    // It is treated like YouTube: playhead at the right edge (the live's
+    // "now"), "EN VIVO" mark and the time since the broadcast in negative.
+    // The DETECTION uses sustained evidence (nt::LiveDetector): a VOD materializes
+    // its duration once and keeps it stable, a live changes it with each
+    // segment; and if the duration stabilizes, it unlocks (false positive
+    // → normal bar and seek recovered). A normal video is never marked.
     NT_DEBUG("E2E tick pos=%.1f dur=%.1f\n", position, duration);
-    // HLS sintético de AV1 (construido por la app desde un fMP4 finito):
-    // por construcción NO puede ser un directo, y mpv reporta ahí duraciones
-    // inestables (crecen/resetean mientras se cargan los rangos BYTERANGE),
-    // que en un directo real son la señal. Este stream queda EXCLUIDO de la
-    // detección: nunca "EN VIVO", barra normal y seek operativo siempre.
+    // Synthetic AV1 HLS (built by the app from a finite fMP4):
+    // by construction it CANNOT be a live, and mpv reports unstable durations
+    // there (they grow/reset while the BYTERANGE ranges are loaded),
+    // which in a real live are the signal. This stream is EXCLUDED from
+    // detection: never "EN VIVO", normal bar and seek always operational.
     const bool appStream = !m_player->currentCanBeLive();
     if (appStream && m_liveMedia) {
         m_liveMedia = false;
@@ -1745,12 +1745,12 @@ void WatchPage::onPositionChanged(double position, double duration)
         NT_DEBUG("E2E live released (app stream) pos=%.1f dur=%.1f\n",
                  position, duration);
     }
-    // Señal AUTORITATIVA (videoDetails.isLive del player response): YouTube
-    // declara el medio como directo actual -> entrar en modo EN VIVO al
-    // INSTANTE, sin esperar los 2 ascensos de duración (y cubre los directos
-    // puros con dur=0, que nunca producen ascensos). El detector sigue
-    // gobernando la salida: si la duración se estabiliza (directo terminado),
-    // se desbloquea solo a los ~15 s como siempre.
+    // AUTHORITATIVE signal (player response videoDetails.isLive): YouTube
+    // declares the media as a current live -> enter EN VIVO mode
+    // INSTANTLY, without waiting for the 2 duration rises (and it covers pure
+    // lives with dur=0, which never produce rises). The detector still
+    // governs the exit: if the duration stabilizes (finished live),
+    // it unlocks on its own after ~15 s as always.
     if (!appStream && m_player->currentIsLive())
         m_liveDet.forceLive();
     const bool live = !appStream && m_liveDet.feed(duration);
@@ -1759,10 +1759,10 @@ void WatchPage::onPositionChanged(double position, double duration)
         m_ovSeek->setLive(live);
         NT_DEBUG("E2E live %s pos=%.1f dur=%.1f\n",
                  live ? "detect" : "released", position, duration);
-        // Reloj negativo desde cero en cada (re)entrada.
+        // Negative clock from zero on each (re)entry.
         m_liveDurPeak = 0.0;
-        // La marca "EN VIVO" se pinta en el acento con una regla QSS por
-        // propiedad dinámica (re-polish obligatorio al cambiarla).
+        // The "EN VIVO" mark is painted in the accent with a QSS rule by
+        // dynamic property (re-polish required when changing it).
         m_ovPos->setProperty("live", live);
         m_ovPos->style()->unpolish(m_ovPos);
         m_ovPos->style()->polish(m_ovPos);
@@ -1770,10 +1770,10 @@ void WatchPage::onPositionChanged(double position, double duration)
     }
     QSignalBlocker blockOv(m_ovSeek);
     if (m_liveMedia) {
-        // Barra al final: el playhead pegado al borde derecho y la historia
-        // del directo rellena hacia atrás. El reloj negativo usa el PICO de
-        // duración visto (monótono, sin el vaivén de la ventana DVR); sin
-        // duración conocida queda solo la marca.
+        // Bar at the end: the playhead glued to the right edge and the live's
+        // history fills backwards. The negative clock uses the PEAK
+        // duration seen (monotonic, without the back-and-forth of the DVR window); without
+        // known duration only the mark remains.
         m_ovSeek->setRange(0, 1);
         m_ovSeek->setValue(1);
         m_ovPos->setText(QStringLiteral("EN VIVO"));
@@ -1785,13 +1785,13 @@ void WatchPage::onPositionChanged(double position, double duration)
         m_ovSeek->setRange(0, duration > 0 ? qRound(duration) : 0);
         if (!m_ovSeek->isSeeking())
             m_ovSeek->setValue(qRound(position));
-        // El reloj va partido: transcurrido a la izquierda del slider y
-        // duración a la derecha, como el mockup.
+        // The clock is split: elapsed to the left of the slider and
+        // duration to the right, like the mockup.
         m_ovPos->setText(fmtTime(position));
         m_ovDur->setText(fmtTime(duration));
     }
-    // "Anterior" se habilita al cruzar el umbral de reinicio (avanzado); el
-    // cambio solo se aplica cuando difiere, así no se repinta cada segundo.
+    // "Anterior" is enabled on crossing the restart threshold (advanced); the
+    // change is only applied when it differs, so it is not repainted every second.
     if (m_ovPrevBtn) {
         const bool available = m_player->previousAvailable();
         if (m_ovPrevBtn->isEnabled() != available)
@@ -1806,30 +1806,30 @@ void WatchPage::onQualityChanged(int index)
              m_autoQuality ? 1 : 0);
     m_player->setMaxHeight(height);
     if (m_autoQuality) {
-        // En Auto el menú no sale de modo: la elección pasa a ser la ÚLTIMA
-        // resolución memorizada (quality_auto) y el siguiente vídeo la reusa.
+        // In Auto the menu does not leave the mode: the choice becomes the LAST
+        // memorized resolution (quality_auto) and the next video reuses it.
         m_autoHeight = height;
         if (m_settings)
             m_settings->set(QStringLiteral("quality_auto"),
                             QString::number(height));
     } else if (m_settings) {
-        // Calidad fija: se persiste como valor explícito (sale de Auto).
+        // Fixed quality: it is persisted as an explicit value (leaves Auto).
         m_settings->set(QStringLiteral("quality"), QString::number(height));
     }
     if (m_player->isActive())
         m_player->reloadCurrent();
 }
 
-// Alturas reales del vídeo (adaptiveFormats de Innertube) para el vídeo en
-// reproducción. Con Auto el stream va capado a la calidad memorizada (p.ej.
-// 360) y el archivo cargado no trae las pistas superiores, así que el techo del
-// stream no sirve para el menú; este dato sí refleja lo que el vídeo ofrece.
+// Real video heights (Innertube adaptiveFormats) for the video being
+// played. With Auto the stream is capped to the memorized quality (e.g.
+// 360) and the loaded file does not bring the higher tracks, so the stream
+// ceiling is useless for the menu; this data does reflect what the video offers.
 void WatchPage::onStreamHeights(const QString &videoId,
                                 const QVector<int> &heights)
 {
     if (heights.isEmpty() || !m_player->isActive())
         return;
-    // Solo del vídeo en reproducción: descartar resoluciones atrasadas.
+    // Only for the video being played: discard delayed resolutions.
     if (!isCurrentVideo(videoId))
         return;
     int maxH = 0;
@@ -1842,16 +1842,16 @@ void WatchPage::onStreamHeights(const QString &videoId,
     m_availableMaxH = maxH;
     NT_DEBUG("E2E streamHeights video=%s max=%d n=%d\n",
              videoId.toUtf8().constData(), maxH, int(heights.size()));
-    // Reaplicar con el techo real del vídeo (no el del stream filtrado).
+    // Reapply with the real video ceiling (not the filtered stream's).
     applyQualityLimits(m_availableMaxH);
 }
 
-// Oculta los ítems del menú de resoluciones por encima del techo real: el del
-// vídeo (m_availableMaxH de Innertube) si se conoce; si no, el del archivo
-// cargado. Los ítems se ocultan (no se quitan) para preservar los índices de
-// idxToQuality(); un valor <= 0 (consulta fallida o FILE_LOADED sin pistas) no
-// toca el menú. Para clips sub-360p quedan todos ocultos y el botón muestra la
-// altura real (ver onVideoSizeChanged).
+// Hides the resolution menu items above the real ceiling: the video's
+// (Innertube m_availableMaxH) if known; if not, the loaded file's
+// one. The items are hidden (not removed) to preserve the indices of
+// idxToQuality(); a value <= 0 (failed query or FILE_LOADED with no tracks) does not
+// touch the menu. For sub-360p clips all stay hidden and the button shows the
+// real height (see onVideoSizeChanged).
 void WatchPage::applyQualityLimits(int maxVideoHeight)
 {
     if (m_availableMaxH > 0)
@@ -1886,16 +1886,16 @@ void WatchPage::onVideoSizeChanged(int width, int height)
     if (height <= 0 || !m_player->isActive())
         return;
     m_videoHeight = height;
-    // Calidad pedida (la última guardada por el usuario o al clickear el menú):
-    // el botón debe mostrar esa calidad mientras el archivo la tenga.
+    // Requested quality (the last one saved by the user or when clicking the menu):
+    // the button must show that quality while the file has it.
     const int requested = idxToQuality(m_qualityIndex);
     const int visible = (requested <= height) ? requested : height;
-    // El botón de calidad es el icono de ajustes: la resolución activa vive en
-    // el tooltip (el chip de texto se fue con la fila nueva).
+    // The quality button is the settings icon: the active resolution lives in
+    // the tooltip (the text chip left with the new row).
     m_quality->setToolTip(
         QStringLiteral("Calidad de vídeo: %1p").arg(visible));
-    // El menú se ancla con m_quality->mapTo(anchor, ...) al abrirse
-    // (toggleQualityMenu), así que sigue al botón sin reajustar nada aquí.
+    // The menu is anchored with m_quality->mapTo(anchor, ...) when it opens
+    // (toggleQualityMenu), so it follows the button without readjusting anything here.
     NT_DEBUG("E2E combo sync %dx%d requested=%d button=%d\n",
              width, height, requested, visible);
 }
@@ -1947,8 +1947,8 @@ void WatchPage::onPlayPause()
 void WatchPage::onToggleMute()
 {
     m_player->toggleMute();
-    // Persistir silencio actual (y volumen por si el overlay lo cambió
-    // sin pasar por el slider de la mini bar).
+    // Persist current mute (and volume in case the overlay changed it
+    // without going through the mini bar slider).
     if (m_settings) {
         m_settings->set(QStringLiteral("volume"),
                         QString::number(int(m_player->volume())));
@@ -1964,9 +1964,9 @@ void WatchPage::onNextUpActivated(int index, const VideoInfo &)
     m_player->playIndex(index);
 }
 
-// Fullscreen de SOLO el área de vídeo (+ barra de controles), no de la app
-// completa: se ocultan los bloques de información/cola para que el área del
-// reproductor llene toda la página; MainWindow se encarga de la ventana.
+// Fullscreen of ONLY the video area (+ control bar), not the whole
+// app: the info/queue blocks are hidden so the player area
+// fills the whole page; MainWindow takes care of the window.
 void WatchPage::toggleFullscreen()
 {
     if (m_inFullscreen)
@@ -1982,13 +1982,13 @@ void WatchPage::enterFullscreen()
     m_inFullscreen = true;
     if (m_playerContainer)
         m_playerContainer->setFullscreen(true);
-    // Fullscreen de SOLO vídeo: se ocultan botón Volver + descripción + cola.
-    // Con todo en el scroll único, ocultarlos deja el contenido = solo vídeo y
-    // widgetResizable lo estira a toda la página (sin reparent del player).
-    // Se oculta el enlace "Volver" en fullscreen, donde solo debe quedar el
-    // vídeo. Ya no hay barra fija que dejar una franja: el enlace vive dentro
-    // del overlay y showOverlayControls no vuelve a mostrarlo aquí porque el
-    // guard de arriba (m_inFullscreen) lo tiene en cuenta.
+    // Video-ONLY fullscreen: the Back button + description + queue are hidden.
+    // With everything in the single scroll, hiding them leaves the content = only video and
+    // widgetResizable stretches it to the whole page (without reparenting the player).
+    // The "Volver" link is hidden in fullscreen, where only
+    // the video should remain. There is no longer a fixed bar leaving a strip: the link lives inside
+    // the overlay and showOverlayControls does not show it again here because the
+    // guard above (m_inFullscreen) takes it into account.
     if (m_back)
         m_back->hide();
     if (m_watchBody)
@@ -2010,9 +2010,9 @@ void WatchPage::leaveFullscreen()
     m_inFullscreen = false;
     if (m_playerContainer)
         m_playerContainer->setFullscreen(false);
-    // Al salir no se fuerza el enlace: si los controles están visibles (suelen
-    // moverse justo antes de salir) vuelve con ellos, y si no, aparecerá en el
-    // próximo movimiento de ratón sobre el vídeo, que es la regla nueva.
+    // On exit the link is not forced: if the controls are visible (they usually
+    // move right before leaving) it comes back with them, and if not, it will appear on the
+    // next mouse movement over the video, which is the new rule.
     if (m_back && m_ctrlBar && m_ctrlBar->isVisible())
         m_back->show();
     if (m_watchBody)
@@ -2023,15 +2023,15 @@ void WatchPage::leaveFullscreen()
     NT_DEBUG("E2E fullscreen exit\n");
 }
 
-// Bucle de eventos para el overlay: cualquier movimiento del ratón (o click o
-// scroll) sobre el área de vídeo muestra los controles y reinicia el temporizador.
+// Event loop for the overlay: any mouse movement (or click or
+// scroll) over the video area shows the controls and restarts the timer.
 bool WatchPage::eventFilter(QObject *watched, QEvent *event)
 {
-    // En el mini player el PlayerWidget está reparentado al hueco del mini bar
-    // (el filtro sigue instalado en él). Los eventos sobre el vídeo del mini no
-    // deben alternar play/pausa ni mostrar el overlay: el mini bar gestiona el
-    // click (expandir al Player completo). Sin esta guarda, en modo "Ver vídeo"
-    // (miniatura oculta) el click en el vídeo pausaba al expandir.
+    // In the mini player the PlayerWidget is reparented to the mini bar slot
+    // (the filter is still installed on it). Events on the mini video must not
+    // toggle play/pause or show the overlay: the mini bar handles the
+    // click (expand to the full Player). Without this guard, in "Ver vídeo" mode
+    // (thumbnail hidden) the click on the video paused when expanding.
     if (m_playerDetached)
         return QWidget::eventFilter(watched, event);
     if (event->type() == QEvent::KeyPress) {
@@ -2046,8 +2046,8 @@ bool WatchPage::eventFilter(QObject *watched, QEvent *event)
         showOverlayControls();
         break;
     case QEvent::MouseButtonRelease:
-        // Suelta lo que hubiera pulsado en la barra: al soltar, el temporizador de
-        // 2,5 s puede volver a ocultar. Sin esto, un clic lento se comía.
+        // Releases whatever was pressed on the bar: on release, the 2.5 s
+        // timer can hide it again. Without this, a slow click ate it.
         if (m_ctrlPressed && isControlClick(watched)) {
             m_ctrlPressed = false;
             showOverlayControls();
@@ -2056,24 +2056,24 @@ bool WatchPage::eventFilter(QObject *watched, QEvent *event)
     case QEvent::MouseMove:
     case QEvent::MouseButtonPress:
     case QEvent::MouseButtonDblClick: {
-        // Ignorar los MouseMove sintéticos que genera el slider de búsqueda al
-        // desplazarse bajo un cursor estacionario; solo contar movimiento real.
+        // Ignore the synthetic MouseMove that the seek slider generates when
+        // moving under a stationary cursor; only count real movement.
         const QPoint gp =
             static_cast<const QMouseEvent *>(event)->globalPos();
         if (gp == m_lastMousePos && event->type() == QEvent::MouseMove)
             break;
         m_lastMousePos = gp;
         showOverlayControls();
-        // Marca que hay un control pulsado para que hideOverlayControls() no
-        // desaparezca la caja a mitad de gesto (el temporador de 2,5 s se agota
-        // igual si el usuario mantiene pulsado sin mover: pulsas el volumen, te
-        // quedas quieto y la caja se va con el dedo encima).
+        // Marks that a control is pressed so that hideOverlayControls() does not
+        // make the box disappear mid-gesture (the 2.5 s timer still runs out
+        // if the user holds without moving: you press the volume, you
+        // stay still and the box goes away with your finger on it).
         if (event->type() == QEvent::MouseButtonPress && isControlClick(watched))
             m_ctrlPressed = true;
-        // Un solo click sobre el vídeo alterna play/pausa de forma inmediata.
-        // Ojo: un mismo click engancha eventos en dos widgets (PlayerWidget y
-        // el QWidget del overlay), así que deduplicamos el mismo click físico
-        // por posición en una ventana de 50 ms: si no, saldría pause+play.
+        // A single click on the video toggles play/pause immediately.
+        // Note: the same click hooks events on two widgets (PlayerWidget and
+        // the overlay QWidget), so we deduplicate the same physical click
+        // by position within a 50 ms window: otherwise it would come out pause+play.
         if (event->type() == QEvent::MouseButtonPress
             && isVideoClick(watched)) {
             const qint64 nowMs =
@@ -2092,12 +2092,12 @@ bool WatchPage::eventFilter(QObject *watched, QEvent *event)
     default:
         break;
     }
-    // Deja pasar el evento: el overlay no consume clics del vídeo.
+    // Let the event through: the overlay does not consume video clicks.
     return QWidget::eventFilter(watched, event);
 }
 
-// Considera "click sobre el vídeo" cualquier click que no apunte a la barra de
-// controles flotante ni al menú de calidad, con el overlay en la vista normal.
+// Considers "click on the video" any click that does not point to the floating
+// control bar or the quality menu, with the overlay in the normal view.
 bool WatchPage::isVideoClick(const QObject *watched) const
 {
     if (!m_overlay || m_overlay->currentIndex() != 0)
@@ -2112,10 +2112,10 @@ bool WatchPage::isVideoClick(const QObject *watched) const
     return true;
 }
 
-// Considera "click sobre un control" cualquier click que apunte a la barra de
-// controles flotante (o al menú de calidad), con el overlay en la vista normal.
-// Es la contraparte de isVideoClick(): sirve para no ocultar la caja mientras el
-// usuario tiene un control pulsado.
+// Considers "click on a control" any click that points to the floating
+// control bar (or the quality menu), with the overlay in the normal view.
+// It is the counterpart of isVideoClick(): it serves to not hide the box while the
+// user holds a control pressed.
 bool WatchPage::isControlClick(const QObject *watched) const
 {
     if (!m_overlay || m_overlay->currentIndex() != 0)
@@ -2140,9 +2140,9 @@ void WatchPage::showOverlayControls()
              m_overlay->currentIndex(), m_ctrlBar->isVisible());
     m_ctrlBar->show();
     m_ctrlBar->raise();
-    // "Volver" sale con los controles, pero NO en fullscreen: allí solo debe
-    // quedar el vídeo y este bloque también corre en fullscreen (es el mismo
-    // ciclo de 2,5 s), así que el estado se decide aquí y no en cada rama.
+    // "Volver" comes out with the controls, but NOT in fullscreen: there only
+    // the video should remain and this block also runs in fullscreen (it is the same
+    // 2.5 s cycle), so the state is decided here and not in each branch.
     if (m_back)
         m_back->setVisible(!m_inFullscreen);
     if (m_qualityMenuActive && m_qualityMenu->isVisible())
@@ -2156,10 +2156,10 @@ void WatchPage::hideOverlayControls()
 {
     if (!m_ctrlBar)
         return;
-    // Si hay un control pulsado, no ocultamos: postponemos. Sin esto, mantener
-    // pulsado sin mover (p. ej. sambilando el volumen) agota el temporizador de
-    // 2,5 s y la caja desaparece con el dedo encima, Qt suelta el grab y el
-    // gesto se pierde a mitad.
+    // If a control is pressed, we do not hide: we postpone. Without this, holding
+    // it without moving (e.g. dragging the volume) runs out the 2.5 s
+    // timer and the box disappears with the finger on it, Qt releases the grab and the
+    // gesture is lost midway.
     if (m_ctrlPressed) {
         if (m_overlayTimer)
             m_overlayTimer->start();
@@ -2168,13 +2168,13 @@ void WatchPage::hideOverlayControls()
     NT_DEBUG("E2E overlayHide idx=%d barVisible=%d\n",
              m_overlay->currentIndex(), m_ctrlBar->isVisible());
     m_ctrlBar->hide();
-    // El enlace "Volver" comparte el ciclo con la caja de controles.
+    // The "Volver" link shares the cycle with the control box.
     if (m_back)
         m_back->hide();
-    // reaches a la guarda de m_ctrlPressed, así que aquí el estado ya no puede
-    // estar atascado. Se pone a cero igualmente: si un release se perdiera
-    // (el filtro está en el reproductor y sus hijos, pero por si acaso), la
-    // caja dejaría de auto-ocultarse para siempre.
+    // reaches the m_ctrlPressed guard, so here the state can no longer
+    // be stuck. It is reset anyway: if a release were lost
+    // (the filter is on the player and its children, but just in case), the
+    // box would stop auto-hiding forever.
     m_ctrlPressed = false;
     if (m_qualityMenuActive) {
         m_qualityMenu->hide();
@@ -2187,16 +2187,16 @@ void WatchPage::updateOverlayIcons()
     if (!m_ovPlayBtn)
         return;
     const QColor accent(nt::accentHex());
-    // Iconos del arte del reproductor (nt::playerIcon). Los modos activos
-    // (barajar, repetir, subtítulos) van en el color de acento.
+    // Player art icons (nt::playerIcon). The active modes
+    // (shuffle, repeat, captions) go in the accent color.
     m_ovPlayBtn->setIcon(nt::playerIcon(
         m_player->isPaused() ? nt::PlayerIcon::Play : nt::PlayerIcon::Pause,
         nt::kText, 22));
     m_ovNextBtn->setEnabled(m_player->hasNext());
     m_ovNextBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Next, nt::kText, 20));
     if (m_ovPrevBtn) {
-        // Habilitado si hay previo O si el actual ya está avanzado (reinicio):
-        // previousAvailable() es la misma condición que decide previous().
+        // Enabled if there is a previous one OR if the current one is already advanced (restart):
+        // previousAvailable() is the same condition that decides previous().
         m_ovPrevBtn->setEnabled(m_player->previousAvailable());
         m_ovPrevBtn->setIcon(
             nt::playerIcon(nt::PlayerIcon::Prev, nt::kText, 20));
@@ -2219,9 +2219,9 @@ void WatchPage::refreshVolumeSlider()
     if (!m_ovVolume)
         return;
     QSignalBlocker block(m_ovVolume);
-    // Aplica el rango nuevo (puede haber cambiado por el ajuste de Ajustes).
+    // Applies the new range (it may have changed with the Settings setting).
     m_ovVolume->setRange(0, m_player->volumeMax());
-    // El volumen actual puede haber quedado capeado por el nuevo tope.
+    // The current volume may have been capped by the new limit.
     m_ovVolume->setValue(qRound(m_player->volume()));
 }
 
@@ -2229,10 +2229,10 @@ void WatchPage::onVolumeChanged()
 {
     if (!m_ovVolume)
         return;
-    // Sincronización en caliente del slider tras cualquier cambio de volumen
-    // (teclado de MainWindow, botón de silencio, slider, ajuste de volumen
-    // máximo). QSignalBlocker: el setValue programático NO debe re-disparar
-    // el valueChanged (que persistiría y re-aplicaría el volumen).
+    // On-the-fly slider synchronization after any volume change
+    // (MainWindow keyboard, mute button, slider, maximum volume
+    // setting). QSignalBlocker: the programmatic setValue must NOT re-fire
+    // valueChanged (which would persist and re-apply the volume).
     QSignalBlocker block(m_ovVolume);
     m_ovVolume->setValue(qRound(m_player->volume()));
     m_ovMuteBtn->setIcon(nt::playerIcon(
@@ -2242,18 +2242,18 @@ void WatchPage::onVolumeChanged()
 
 void WatchPage::applyAccent()
 {
-    // Botón Suscribirse: repinta con el estado (suscrito / acento vivo) y el
-    // color de acento vigente.
+    // Subscribe button: repaints with the state (subscribed / live accent) and the
+    // current accent color.
     if (m_subscribeBtn)
         updateSubscribeButton(
             m_subscribeBtn->property("subscribed").toBool());
-    // Acciones (like/dislike/estrella/ver después): el icono y el texto del
-    // estado activo usan el acento.
+    // Actions (like/dislike/star/watch later): the icon and the text of the
+    // active state use the accent.
     updateActionButtons();
-    // Descripción: los enlaces se pintaron con el color de acento anterior;
-    // se regenera el texto enriquecido (siempre a altura completa).
+    // Description: the links were painted with the previous accent color;
+    // the rich text is regenerated (always at full height).
     if (!m_description.isEmpty())
         applyDescription(m_description);
-    // Overlay: el icono de subtítulos activo usa el acento.
+    // Overlay: the active captions icon uses the accent.
     updateOverlayIcons();
 }

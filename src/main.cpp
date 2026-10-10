@@ -24,28 +24,28 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 namespace {
-// La app está marcada WIN32_EXECUTABLE_TARGET (sin consola propia). Para que
-// los selftests impriman y el CI/la máquina de pruebas vean los logs, nos pegamos a la
-// consola del proceso padre (shell del CI) o, en doble clic con
-// NEVERTUBE_DEBUG=1 (depuración explícita), creamos una consola propia. En un
-// lanzamiento normal con doble clic NO se abre ninguna ventana de terminal.
-// Núcleo del reproductor no se toca: es arranque de la app.
+// The app is marked WIN32_EXECUTABLE_TARGET (no console of its own). So that
+// the selftests print and the CI/test machine see the logs, we attach to the
+// parent process's console (CI shell) or, on a double click with
+// NEVERTUBE_DEBUG=1 (explicit debugging), we create a console of our own. On a
+// normal double-click launch NO terminal window is opened.
+// Player core is not touched: this is app startup.
 void ensureConsoleAttached()
 {
-    // SI CI/redirección ya nos dio un stdout válido (pipe heredada del runner vía
-    // Start-Process -RedirectStandardOutput), NO tocamos nada: el runner captura
-    // esa pipe. Adjuntar/AllocConsole + freopen(CONOUT$) robaría el output.
+    // IF CI/redirection already gave us a valid stdout (pipe inherited from the runner via
+    // Start-Process -RedirectStandardOutput), we do NOT touch anything: the runner captures
+    // that pipe. Attach/AllocConsole + freopen(CONOUT$) would steal the output.
     const HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
     if (out && out != INVALID_HANDLE_VALUE)
         return;
     if (GetConsoleWindow())
-        return; // ya tenemos (o hay) consola
+        return; // we already have (or there is) a console
     bool ok = false;
-    if (AttachConsole(ATTACH_PARENT_PROCESS)) { // shell/CI: hereda la consola del padre
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) { // shell/CI: inherit the parent's console
         ok = true;
     } else if (qEnvironmentVariableIsSet("NEVERTUBE_DEBUG")) {
-        // Doble clic SIN consola madre: la app normal no abre terminal. Solo una
-        // sesión de depuración explícita (NEVERTUBE_DEBUG=1) abre consola propia.
+        // Double click WITHOUT a parent console: the normal app does not open a terminal. Only an
+        // explicit debugging session (NEVERTUBE_DEBUG=1) opens a console of its own.
         ok = (AllocConsole() != FALSE);
     }
     if (ok) {
@@ -58,14 +58,14 @@ void ensureConsoleAttached()
 } // namespace
 #endif // Q_OS_WIN
 
-// SELFTEST TLS con handshake REAL. El viejo --selftest-ssl solo cargaba las
-// DLLs de OpenSSL (supportsSsl): un backend que carga pero aborta en el
-// primer uso real (p. ej. "OpenSSL internal error, assertion failed:
-// lock != NULL", conocido en Windows con Qt 5.15.2 + OpenSSL 1.1.1 en una
-// máquina x86 de 32 bits) pasaba desapercibido en CI. Este selftest abre una
-// conexión TLS real contra hosts públicos y comprueba que el engine completa
-// el handshake; si OpenSSL aborta internamente, el proceso muere con abort()
-// y el CI lo marca rojo con el mensaje del assert en el log.
+// TLS SELFTEST with a REAL handshake. The old --selftest-ssl only loaded the
+// OpenSSL DLLs (supportsSsl): a backend that loads but aborts on the
+// first real use (e.g. "OpenSSL internal error, assertion failed:
+// lock != NULL", known on Windows with Qt 5.15.2 + OpenSSL 1.1.1 on a
+// 32-bit x86 machine) went unnoticed in CI. This selftest opens a
+// real TLS connection to public hosts and checks that the engine completes
+// the handshake; if OpenSSL aborts internally, the process dies with abort()
+// and the CI marks it red with the assert message in the log.
 static bool tlsHandshakeSelfTest(QString *outDetail)
 {
     const bool supported = QSslSocket::supportsSsl();
@@ -87,7 +87,7 @@ static bool tlsHandshakeSelfTest(QString *outDetail)
     for (const char *hostC : hosts) {
         const QString host = QString::fromUtf8(hostC);
         QSslSocket socket;
-        socket.setPeerVerifyMode(QSslSocket::VerifyNone); // testea el engine, no certs
+        socket.setPeerVerifyMode(QSslSocket::VerifyNone); // tests the engine, not certs
         socket.ignoreSslErrors();
         QEventLoop loop;
         QTimer timer;
@@ -128,10 +128,10 @@ static bool tlsHandshakeSelfTest(QString *outDetail)
     return false;
 }
 
-// Tabla de decisión del perfil HW probada offline (independiente de la GPU de
-// este equipo): reemplaza medidas los casos reales observados en máquinas que
-// no tenemos aquí (i5-4590/HD4600 con fallo av1_qsv -> SW; GMA 950 -> SW;
-// GPUs con HW real -> HW). Regresión determinista para CI.
+// HW profile decision table tested offline (independent of this machine's
+// GPU): it re-measures the real cases observed on machines we do not
+// have here (i5-4590/HD4600 with av1_qsv failure -> SW; GMA 950 -> SW;
+// GPUs with real HW -> HW). Deterministic regression for CI.
 static bool hwprobeVerdictSelfTests()
 {
     struct Case
@@ -143,25 +143,25 @@ static bool hwprobeVerdictSelfTests()
         const char *want;
     };
     const Case cases[] = {
-        // GPU real: AV1 por Vulkan (p. ej. este equipo Linux).
+        // Real GPU: AV1 via Vulkan (e.g. this Linux machine).
         { true, false, false, "vulkan-copy", "HW" },
-        // GPU real: D3D11.
+        // Real GPU: D3D11.
         { true, false, false, "d3d11va-copy", "HW" },
-        // Respaldo: backend activo sin señales en contra (tras la gracia).
+        // Fallback: backend active with no signals against it (after the grace).
         { false, false, false, "dxva2-copy", "HW" },
-        // GMA 950: mpv confirmó software aunque haya un dispositivo WARP.
+        // GMA 950: mpv confirmed software even though there is a WARP device.
         { false, true, false, "warp", "SW" },
-        // i5-4590/HD4600: el intento av1_qsv falló (unsupported) -> SW, aunque
-        // hwdec-current reporte qsv-copy (el falso positivo original).
+        // i5-4590/HD4600: the av1_qsv attempt failed (unsupported) -> SW, even though
+        // hwdec-current reports qsv-copy (the original false positive).
         { false, false, true, "qsv-copy", "SW" },
-        // i5: tras el fallo QSV hwdec-current termina en "no" -> SW.
+        // i5: after the QSV failure hwdec-current ends as "no" -> SW.
         { false, false, true, "no", "SW" },
-        // Log de software domina aunque antes hubiera una línea HW (cambio de
-        // decoder durante la gracia) -> SW.
+        // Software log dominates even if there was an HW line before (decoder
+        // change during the grace) -> SW.
         { true, true, false, "vulkan-copy", "SW" },
-        // hwdec-current == "no" es decisivo aunque hubiera línea HW -> SW.
+        // hwdec-current == "no" is decisive even if there was an HW line -> SW.
         { true, false, false, "no", "SW" },
-        // Sin ninguna señal: indeterminado -> continuar la escalera.
+        // No signal at all: indeterminate -> continue the ladder.
         { false, false, false, "", "" },
     };
     for (const Case &c : cases) {
@@ -179,7 +179,7 @@ static bool hwprobeVerdictSelfTests()
     }
     std::fprintf(stderr, "SELFTEST hwprobe verify -> ok (9 casos)\n");
 
-    // Escalera de descenso de perfil (hwprobe::lowerProfile), regresión pura.
+    // Profile descent ladder (hwprobe::lowerProfile), pure regression.
     struct LadderCase
     {
         const char *in;
@@ -189,9 +189,9 @@ static bool hwprobeVerdictSelfTests()
         { "av1-hw", "vp9-hw" },
         { "vp9-hw", "h264-hw" },
         { "h264-hw", "soft-all" },
-        { "soft-all", "" },    // suelo: no procede
-        { "", "" },            // sin perfil: no procede
-        { "desconocido", "" }, // perfil raro: no se toca
+        { "soft-all", "" },    // floor: not applicable
+        { "", "" },            // no profile: not applicable
+        { "desconocido", "" }, // weird profile: left untouched
     };
     for (const LadderCase &c : ladder) {
         const QString got = hwprobe::lowerProfile(QString::fromUtf8(c.in));
@@ -206,11 +206,11 @@ static bool hwprobeVerdictSelfTests()
     return true;
 }
 
-// Tope de columnas de las rejillas del Home (VideoListView::clampGridColumns).
-// El ajuste "Tamaño de las miniaturas" pide 4/5/6 columnas fijas y la rejilla es
-// dimensionada por el ancho, así que en ventanas estrechas hay que recortar: con
-// 6 columnas a 700 px la celda mide 113 px y el título de 2 líneas + el canal se
-// recortan. Es una función pura, sin widget ni red: se testea aquí.
+// Column cap of Home's grids (VideoListView::clampGridColumns).
+// The "Tamaño de las miniaturas" setting asks for 4/5/6 fixed columns and the grid is
+// sized by width, so on narrow windows it has to be trimmed: with
+// 6 columns at 700 px the cell measures 113 px and the 2-line title + the channel
+// get cut off. It is a pure function, no widget or network: it is tested here.
 static bool gridGeometrySelfTest()
 {
     struct Case
@@ -221,24 +221,24 @@ static bool gridGeometrySelfTest()
         const char *why;
     };
     const Case cases[] = {
-        // Ancho de la máquina de pruebas (portátil 1024x600): 6 columnas
-        // caben (celda de 147 px), que es justo lo que busca "Pequeñas".
+        // Width of the test machine (1024x600 laptop): 6 columns
+        // fit (cell of 147 px), which is exactly what "Pequeñas" looks for.
         { 6, 903, 6, "6 pedidas caben a 903 px (celda 147)" },
         { 5, 903, 5, "5 pedidas a 903 px" },
         { 4, 903, 4, "4 pedidas a 903 px (celda 222)" },
-        // Ventana estrecha: 6 columnas darían 113 px -> se baja a 5 (136 px).
+        // Narrow window: 6 columns would give 113 px -> it drops to 5 (136 px).
         { 6, 700, 5, "6 recortadas a 5 a 700 px (celda 136)" },
         { 6, 600, 4, "6 recortadas a 4 a 600 px (celda 147)" },
-        // Muy estrecha: nunca menos de 3 columnas.
+        // Very narrow: never fewer than 3 columns.
         { 6, 380, 3, "suelo de 3 columnas a 380 px" },
         { 4, 380, 3, "4 recortadas al suelo de 3" },
-        // "Grandes" nunca sube de 4 aunque la ventana sea enorme.
+        // "Grandes" never goes above 4 even if the window is huge.
         { 4, 1850, 4, "4 pedidas a 1850 px (no se estira a 8)" },
-        // Ancho aún desconocido (layout inicial): no se recorta; el
-        // resizeEvent del Home lo ajustará cuando lo haya.
+        // Width still unknown (initial layout): nothing is trimmed; the
+        // Home resizeEvent will adjust it once it exists.
         { 6, 0, 6, "sin ancho no se recorta" },
         { 6, -1, 6, "ancho negativo no se recorta" },
-        // Entradas degeneradas: nunca 0 columnas.
+        // Degenerate inputs: never 0 columns.
         { 0, 903, 1, "0 pedidas -> 1" },
         { -3, 903, 1, "negativo pedido -> 1" },
     };
@@ -251,20 +251,20 @@ static bool gridGeometrySelfTest()
             return false;
         }
     }
-    // El ancho mínimo por defecto (kMinCellW) es la razón del tope: por debajo
-    // la celda no cabe el bloque de texto completo.
+    // The default minimum width (kMinCellW) is the reason for the cap: below it
+    // the cell does not fit the full text block.
     if (VideoListView::kMinCellW < 100) {
         std::fprintf(stderr, "SELFTEST grid FAIL kMinCellW=%d (<100)\n",
                      VideoListView::kMinCellW);
         return false;
     }
 
-    // Texto de la celda derivado del ancho. Antes eran 13 px y 34 px FIJOS con la
-    // miniatura creciendo al estirar la ventana, que es lo que dejado el bloque
-    // descoyente en pantalla grande. Se comprueba la tabla de tamaños, que el
-    // interlineado quepa la fuente, que el bloque guardado sea el que ocupa, que
-    // a celda de 140 px siga midiendo lo que medía antes (68 px: nada cambia en
-    // ventana estrecha) y que la curva sea monótona.
+    // Cell text derived from the width. It used to be 13 px and 34 px FIXED with the
+    // thumbnail growing as the window stretched, which is what left the block
+    // disjointed on a large screen. The size table is checked, that the
+    // line spacing fits the font, that the reserved block is the one it occupies, that
+    // at a cell of 140 px it still measures what it did before (68 px: nothing changes on
+    // a narrow window) and that the curve is monotonic.
     struct TxtCase
     {
         int cellW;
@@ -308,11 +308,11 @@ static bool gridGeometrySelfTest()
             return false;
         }
     }
-    // El bloque reservado tiene que ser exactamente el que ocupa la pintura:
-    // kGridTitleLines líneas de título + 14 px de hueco + 20 px de pie. A celda
-    // de 140 px son 2*15+34 = 64 px (con 3 líneas a 14 px eran 3*18+34 = 88 y el
-    // usuario lo veía demasiado grande). Si esta suma no cuadra, la celda solapa
-    // con la línea de canal o deja hueco.
+    // The reserved block has to be exactly the one the painting occupies:
+    // kGridTitleLines title lines + 14 px gap + 20 px footer. At a cell
+    // of 140 px it is 2*15+34 = 64 px (with 3 lines at 14 px it was 3*18+34 = 88 and the
+    // user saw it as too big). If this sum does not add up, the cell overlaps
+    // with the channel line or leaves a gap.
     if (VideoListView::gridTextBlockH(140)
         != VideoListView::kGridTitleLines * VideoListView::gridTitleLineH(140) + 34) {
         std::fprintf(stderr,
@@ -322,7 +322,7 @@ static bool gridGeometrySelfTest()
                          * VideoListView::gridTitleLineH(140) + 34);
         return false;
     }
-    // Monótona creciente y con suelo en todo el rango real de celdas.
+    // Monotonically increasing and with a floor across the real cell range.
     int prevPx = 0;
     int prevBh = 0;
     for (int cw = 100; cw <= 900; cw += 10) {
@@ -339,16 +339,16 @@ static bool gridGeometrySelfTest()
         prevBh = bh;
     }
 
-    // La celda de la rejilla tiene que medir LO MISMO en los tres sitios que la
-    // usan: el sizeHint que lleva cada item del modelo, gridSize() (del que la
-    // página saca la altura de la sección) y el rect que acaba pintando
-    // QListView. En IconMode manda el sizeHint del MODELO, así que cuando
-    // divergían las filas ocupaban una cosa y la sección se dimensionaba con
-    // otra: con 19 vídeos (4 filas) la última quedaba entera fuera de la vista,
-    // y con ella la línea de canal del vídeo. Aquí se monta un VideoListView de
-    // verdad y se comprueba que no se solapa y que la altura de sección alcanza
-    // para todas las filas. Sin red: el ThumbnailCache no pide nada hasta que
-    // se le pinta una miniatura.
+    // The grid cell must measure THE SAME in the three places that
+    // use it: the sizeHint each model item carries, gridSize() (from which the
+    // page derives the section height) and the rect QListView ultimately
+    // paints. In IconMode the MODEL's sizeHint rules, so when they
+    // diverged the rows occupied one thing and the section was sized with
+    // another: with 19 videos (4 rows) the last one ended up entirely outside the view,
+    // and with it the video's channel line. Here a real VideoListView is
+    // mounted and it is checked that it does not overlap and that the section height is enough
+    // for all rows. No network: ThumbnailCache requests nothing until
+    // a thumbnail is painted on it.
     {
         ThumbnailCache thumbs(QStringLiteral("selftest_grid"), 8 * 1024 * 1024);
         VideoListView v(&thumbs);
@@ -370,8 +370,8 @@ static bool gridGeometrySelfTest()
                          cell.width(), cell.height());
             return false;
         }
-        // El sizeHint que ve la vista (SizeHintRole), que en IconMode es el que
-        // manda por encima de gridSize().
+        // The sizeHint the view sees (SizeHintRole), which in IconMode is the one that
+        // rules above gridSize().
         const QSize hint = v.model()->index(0, 0).data(Qt::SizeHintRole).toSize();
         if (hint != cell) {
             std::fprintf(stderr,
@@ -380,8 +380,8 @@ static bool gridGeometrySelfTest()
                          hint.width(), hint.height(), cell.width(), cell.height());
             return false;
         }
-        // Y el rect real de la primera celda, que es lo que tiene que coincidir
-        // con gridSize() ahora que los tres van al mismo cálculo.
+        // And the real rect of the first cell, which is what has to match
+        // gridSize() now that the three go to the same calculation.
         if (v.gridItemRect(0).size() != cell) {
             std::fprintf(stderr,
                          "SELFTEST grid FAIL rect real de la celda %dx%d != "
@@ -390,8 +390,8 @@ static bool gridGeometrySelfTest()
                          cell.width(), cell.height());
             return false;
         }
-        // La altura que el Home le da a la sección tiene que alcanzar para las
-        // 4 filas: si no, la última no se ve.
+        // The height Home gives the section has to reach for the
+        // 4 rows: if not, the last one is not visible.
         const int cols = v.gridColumns();
         const int rows = (int(vids.size()) + cols - 1) / cols;
         const int sectionH = rows * cell.height();
@@ -405,8 +405,8 @@ static bool gridGeometrySelfTest()
                          rows);
             return false;
         }
-        // Y las filas contiguas no pueden pisarse (el título de una celda no
-        // puede caer encima de la línea de canal de la de encima).
+        // And adjacent rows cannot step on each other (a cell's title cannot
+        // fall over the channel line of the one above).
         const QRect prevRect = v.gridItemRect(cols - 1);
         if (lastRect.top() < prevRect.bottom()) {
             std::fprintf(stderr,
@@ -437,20 +437,20 @@ int main(int argc, char *argv[])
 #endif
 #ifdef Q_OS_WIN
 #ifndef NEVERTUBE_NO_MPV
-    // Experimento ANGLE (Windows x64, OPT-IN con NEVERTUBE_ANGLE=1): forzar
-    // el contexto GL del widget a ANGLE (OpenGL ES sobre D3D11) para que mpv
-    // pueda decodificar con zero-copy. Con GL de escritorio (el default en la máquina de
-    // pruebas — mpv loguea "Detected desktop OpenGL") mpv NO puede importar texturas D3D11
-    // y se ve forzado a d3d11va-copy: el copy-back VRAM->RAM->textura GL es el
-    // coste del CPU al 100% en la máquina de pruebas. Con contexto ANGLE, mpv (hwdec=auto,
-    // invariante protegida intacta) elige solo el hwdec d3d11-egl: decodifica
-    // en D3D11 y el frame viaja por EGLStream a la textura del widget sin
-    // copiar a CPU. mpv carga LIBEGL.DLL con la búsqueda de LoadLibrary, así
-    // que usa el MISMO ANGLE que carga Qt (mismo directorio) y toma el display
-    // con eglGetCurrentDisplay() en paintGL: no hay que pasarle handles.
-    // Solo Windows y solo donde hay mpv (el build x86/FfmpegBackend sale por
-    // NEVERTUBE_NO_MPV; su render GLES no está preparado para ANGLE). Respetar
-    // un QT_OPENGL que el usuario ya haya fijado.
+    // ANGLE experiment (Windows x64, OPT-IN with NEVERTUBE_ANGLE=1): force
+    // the widget's GL context to ANGLE (OpenGL ES over D3D11) so mpv
+    // can decode with zero-copy. With desktop GL (the default on the test
+    // machine — mpv logs "Detected desktop OpenGL") mpv CANNOT import D3D11 textures
+    // and is forced to d3d11va-copy: the VRAM->RAM->GL texture copy-back is the
+    // cost of the 100% CPU on the test machine. With an ANGLE context, mpv (hwdec=auto,
+    // protected invariant intact) picks only the d3d11-egl hwdec: it decodes
+    // in D3D11 and the frame travels via EGLStream to the widget's texture without
+    // copying to CPU. mpv loads LIBEGL.DLL with the LoadLibrary search, so
+    // it uses the SAME ANGLE that Qt loads (same directory) and takes the display
+    // with eglGetCurrentDisplay() in paintGL: no handles need to be passed.
+    // Windows only, and only where mpv exists (the x86/FfmpegBackend build exits via
+    // NEVERTUBE_NO_MPV; its GLES render is not prepared for ANGLE). Respect
+    // a QT_OPENGL the user has already set.
     if (qEnvironmentVariableIsSet("NEVERTUBE_ANGLE")
         && !qEnvironmentVariableIsSet("QT_OPENGL")) {
         qputenv("QT_OPENGL", QByteArrayLiteral("angle"));
@@ -467,21 +467,21 @@ int main(int argc, char *argv[])
     app.setOrganizationName(QStringLiteral("nevertube"));
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
 
-    // Icono de la ventana. Van TODAS las alturas porque QIcon no escala: elige
-    // la entrada que más se parezca a lo que pide cada superficie (la barra del
-    // SO pide 16 o 24, el gestor de ventanas 32 o 48, el alt-tab 256). Con una
-    // sola entrada, la barra la muestra borrosa aunque el PNG sea de 1024.
-    // El .exe de Windows lo lleva embebido aparte (resources/nt.rc).
+    // Window icon. ALL sizes are included because QIcon does not scale: it picks
+    // the entry that best matches what each surface asks for (the OS bar asks
+    // for 16 or 24, the window manager 32 or 48, alt-tab 256). With a
+    // single entry, the bar shows it blurry even if the PNG is 1024.
+    // The Windows .exe carries it embedded separately (resources/nt.rc).
     QIcon iconoApp;
     for (int lado : {16, 24, 32, 48, 64, 128, 256})
         iconoApp.addFile(QStringLiteral(":/icon/nt_%1.png").arg(lado));
     app.setWindowIcon(iconoApp);
 
-    // Selección de TEXTO en el gris de la app. Va aquí y no en el QSS porque hay
-    // texto seleccionable que el QSS no alcanza: la descripción del Player es un
-    // QLabel con Qt::TextSelectableByMouse y la pinta con QPalette::Highlight,
-    // que sin esto salía con el azul del tema del escritorio. Se aplica sobre la
-    // paleta de la QApplication para que la hereden todas las páginas.
+    // TEXT selection in the app's gray. It is here and not in the QSS because there is
+    // selectable text the QSS does not reach: the Player description is a
+    // QLabel with Qt::TextSelectableByMouse and it paints it with QPalette::Highlight,
+    // which without this came out with the desktop theme's blue. It is applied on the
+    // QApplication palette so all pages inherit it.
     QPalette pal = app.palette();
     nt::applyTextSelectionPalette(pal);
     app.setPalette(pal);
@@ -522,21 +522,21 @@ int main(int argc, char *argv[])
     }
 
     if (args.contains(QLatin1String("--selftest-ffmpeg"))) {
-        // Fase 2: FfmpegBackend offline (clips embebidos, modo banco). Sin
-        // FFmpeg en el build es un skip, no un fallo.
+        // Phase 2: FfmpegBackend offline (embedded clips, bench mode). Without
+        // FFmpeg in the build is a skip, not a failure.
         return ffmpegSelfTest() ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-hwprobe"))) {
-        // Offline: la tabla de decisión con los casos REALES observados
-        // (i5/HD4600 con fallo av1_qsv, GMA 950 software, GPU con HW) no
-        // depende de la GPU de este equipo; es una regresión CI determinista.
+        // Offline: the decision table with the REAL cases observed
+        // (i5/HD4600 with av1_qsv failure, GMA 950 software, GPU with HW) does
+        // not depend on this machine's GPU; it is a deterministic CI regression.
         if (!hwprobeVerdictSelfTests())
             return 1;
 #ifndef NEVERTUBE_NO_MPV
-        // Diagnóstico dependiente de la GPU: imprime el perfil detectado
-        // (av1-hw/vp9-hw/h264-hw/soft-all) o INDETERMINADO. No es un assert
-        // fijo, sino una comprobación de que el sondeo concluye.
+        // GPU-dependent diagnostic: it prints the detected profile
+        // (av1-hw/vp9-hw/h264-hw/soft-all) or INDETERMINATE. It is not a fixed
+        // assert, but a check that the probe concludes.
         HwProbe probe;
         bool decided = false;
         int rc = 1;
@@ -560,10 +560,10 @@ int main(int argc, char *argv[])
         app.exec();
         return rc;
 #else
-        // Build x86 sin mpv (Fase 5): el sondeo vivo usa mpv y no existe en
-        // este build. La tabla de decisión ya corrió arriba; el gate de HW
-        // real del x86 es --selftest-ffmpeg (y la escalera reactiva cubre a
-        // las máquinas sin HW sin necesidad de HwProbe).
+        // x86 build without mpv (Phase 5): the live probe uses mpv and does not exist in
+        // this build. The decision table already ran above; the real HW gate
+        // of x86 is --selftest-ffmpeg (and the reactive ladder covers
+        // machines without HW without needing HwProbe).
         std::fprintf(stderr,
                      "SELFTEST hwprobe -> (sin mpv en este build: tabla de "
                      "decisión OK, sondeo vivo no disponible)\n");
@@ -575,29 +575,29 @@ int main(int argc, char *argv[])
         return homeBrowseSelfTest() ? 0 : 1;
     }
 
-    // Tope de columnas de las rejillas (función pura, sin red ni GPU): vale en
-    // el CI, donde no se puede comprobar el hardware ni reproducir.
+    // Column cap of the grids (pure function, no network or GPU): it works in
+    // the CI, where the hardware cannot be checked nor playback tested.
     if (args.contains(QLatin1String("--selftest-grid"))) {
         return gridGeometrySelfTest() ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-theme"))) {
-        // QSS puro: ningun selector declarado dos veces. Un duplicado no avisa y
-        // el ultimo gana, que es como se colo un #sectionTitle de 22px por
-        // detras del de 16px y crecieron los titulos de seccion de todas las
-        // paginas. Offline y determinista: vale en el CI.
+        // Pure QSS: no selector declared twice. A duplicate does not warn and
+        // the last one wins, which is how a #sectionTitle of 22px slipped in
+        // behind the 16px one and the section titles grew on all the
+        // pages. Offline and deterministic: it works in the CI.
         const bool ok = nt::themeSelfTest();
         std::fprintf(stderr, "SELFTEST theme -> %s\n", ok ? "OK" : "FAIL");
         return ok ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-glyphs"))) {
-        // Glifos de la UI contra la fuente real de la app. La fuente por
-        // defecto del sistema no cubre todos los caracteres no ASCII: el que
-        // falta lo sustituye Qt por el marcador de glifo ausente, que medido
-        // en pantalla son 2x5 px (un boton invisible). Recorre los literales
-        // del arbol de fuentes, asi que un glifo nuevo que no exista lo ve el
-        // CI. Offline y determinista: vale en el CI.
+        // UI glyphs against the app's real font. The default font of
+        // the system does not cover all non-ASCII characters: the missing
+        // one is replaced by Qt with the missing-glyph marker, which measured
+        // on screen is 2x5 px (an almost invisible button). It walks the literals
+        // of the source tree, so a new glyph that does not exist is caught by the
+        // CI. Offline and deterministic: it works in the CI.
         const bool ok = nt::glyphSelfTest();
         std::fprintf(stderr, "SELFTEST glyphs -> %s\n", ok ? "OK" : "FAIL");
         return ok ? 0 : 1;
@@ -625,41 +625,41 @@ int main(int argc, char *argv[])
     }
 
     if (args.contains(QLatin1String("--selftest-suggest-parse"))) {
-        // Solo el parser del desplegable: sin red y sin GPU, asi que este si
-        // puede ir en el smoke del CI (a diferencia del selftest completo).
+        // Only the parser of the dropdown: no network or GPU, so this one
+        // can go in the CI smoke (unlike the full selftest).
         const bool ok = suggestParseSelfTest();
         std::fprintf(stderr, "SELFTEST suggest-parse -> %s\n", ok ? "OK" : "FAIL");
         return ok ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-dates"))) {
-        // Parser de fechas relativas (relativeToIso): funcion pura, sin red ni
-        // GPU. Fija la regresion de "hace N semanas" -> segundos -> "hoy".
+        // Relative-date parser (relativeToIso): pure function, no network or
+        // GPU. It pins the regression of "hace N semanas" -> seconds -> "hoy".
         const bool ok = relativeDateSelfTest();
         std::fprintf(stderr, "SELFTEST dates -> %s\n", ok ? "OK" : "FAIL");
         return ok ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-suggest-panel"))) {
-        // El desplegable en si (offline): construye una SearchPage y comprueba
-        // los dos grupos, el filtrado del historial y el descarte de respuestas
-        // tardias, sin pedir nada a la red.
+        // The dropdown itself (offline): it builds a SearchPage and checks
+        // the two groups, the history filtering and the discarding of late
+        // responses, without asking the network for anything.
         const bool ok = searchSuggestPanelSelfTestRun();
         std::fprintf(stderr, "SELFTEST suggest-panel -> %s\n", ok ? "OK" : "FAIL");
         return ok ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-suggest-gestures"))) {
-        // Gestos del desplegable en la jerarquia real (offline): la pagina
-        // dentro de un QStackedWidget, con QSS puesto, y cada gesto entregado
-        // por la ruta que usa la plataforma.
+        // Dropdown gestures in the real hierarchy (offline): the page
+        // inside a QStackedWidget, with QSS set, and each gesture delivered
+        // by the route the platform uses.
         const bool ok = searchSuggestGesturesSelfTestRun();
         std::fprintf(stderr, "SELFTEST suggest-gestures -> %s\n", ok ? "OK" : "FAIL");
         return ok ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-suggest"))) {
-        // Parser offline + sonda con red del endpoint que usa el type-ahead.
+        // Offline parser + network probe of the endpoint the type-ahead uses.
         return suggestSelfTest() ? 0 : 1;
     }
 
@@ -672,9 +672,9 @@ int main(int argc, char *argv[])
     }
 
     if (args.contains(QLatin1String("--selftest-ssl"))) {
-        // Backend TLS (Windows: OpenSSL 1.1 en DLLs al lado del exe). Si las
-        // DLLs de OpenSSL faltan o no cargan, supportsSsl() es false y todas
-        // las llamadas HTTPS fallan con "TLS initialization failed".
+        // TLS backend (Windows: OpenSSL 1.1 in DLLs next to the exe). If the
+        // OpenSSL DLLs are missing or do not load, supportsSsl() is false and all
+        // HTTPS calls fail with "TLS initialization failed".
         const bool ok = QSslSocket::supportsSsl();
         std::fprintf(stderr, "SELFTEST ssl -> %s\n", ok ? "OK" : "FAIL");
         return ok ? 0 : 1;

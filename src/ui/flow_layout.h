@@ -1,9 +1,9 @@
 #ifndef NT_FLOW_LAYOUT_H
 #define NT_FLOW_LAYOUT_H
 
-// Layout fluido: coloca los items en filas que se envuelven cuando el ancho es
-// insuficiente (estilo flexbox). Reutilizable para filas de botones que no
-// deben desbordar ni generar scroll horizontal en columnas estrechas.
+// Flow layout: places the items in rows that wrap when the width is
+// insufficient (flexbox style). Reusable for button rows that must not
+// overflow nor produce horizontal scroll in narrow columns.
 
 #include <QLayout>
 #include <QStyle>

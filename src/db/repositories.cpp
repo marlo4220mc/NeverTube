@@ -115,8 +115,8 @@ bool databaseSelfTest(const QString &dbPath)
                   && many[1].id == QLatin1String("vidB"),
               "cache getMany order");
 
-    // Marca de directo: sobrevive al upsert/lectura y updateLiveStatus la apaga
-    // sin tocar el resto de campos.
+    // Live flag: survives upsert/read and updateLiveStatus clears it without
+    // touching the rest of the fields.
     VideoInfo live;
     live.id = QStringLiteral("vidLive");
     live.title = QStringLiteral("Directo");
@@ -260,7 +260,7 @@ bool databaseSelfTest(const QString &dbPath)
               "home cache ids order");
     ok &= yes(homeCache.sectionFetchedAt(QStringLiteral("recommended")) == 1111,
               "home cache fetchedAt");
-    // Refresco inteligente: reemplaza la sección completa, nunca agrega.
+    // Smart refresh: replaces the whole section, never appends.
     const QStringList secIds2{QLatin1String("vidB")};
     ok &= yes(homeCache.saveSection(QStringLiteral("recommended"), secIds2, 2222),
               "home cache replace section");
@@ -269,7 +269,7 @@ bool databaseSelfTest(const QString &dbPath)
               "home cache replaced (no merge, no leak to other sections)");
     ok &= yes(homeCache.sectionFetchedAt(QStringLiteral("recommended")) == 2222,
               "home cache replaced fetchedAt");
-    // Secciones independientes entre sí.
+    // Sections are independent of one another.
     ok &= yes(homeCache.saveSection(QStringLiteral("trending"),
                                     QStringList{QLatin1String("vidX")}, 3333),
               "home cache second section");
@@ -280,9 +280,9 @@ bool databaseSelfTest(const QString &dbPath)
                   && homeCache.sectionVideoIds(QStringLiteral("trending")).isEmpty(),
               "home cache clear section");
 
-    // Reconstrucción del Home tras reiniciar (instalación nueva incluida):
-    // HomePage.saveSection persiste los metadatos en "videos" y solo los ids en
-    // home_cache; getMany(ids) debe materializar la sección completa de nuevo.
+    // Home reconstruction after a restart (fresh install included):
+    // HomePage.saveSection persists the metadata in "videos" and only the ids
+    // in home_cache; getMany(ids) must materialize the whole section again.
     VideoInfo h1;
     h1.id = QStringLiteral("homeVid1");
     h1.title = QStringLiteral("Home 1");
@@ -317,8 +317,8 @@ bool databaseSelfTest(const QString &dbPath)
                   && reconstructed[1].viewCount == 222,
               "home cache reconstruction (ids + metadata)");
 
-    // Actualización fallida/vacía: guardar vacío se RECHAZA y no pisa la
-    // sección guardada ni su fetched_at.
+    // Failed/empty update: saving empty is REJECTED and does not overwrite the
+    // saved section nor its fetched_at.
     const qint64 savedAt = homeCache.sectionFetchedAt(QStringLiteral("recommended"));
     ok &= yes(!homeCache.saveSection(QStringLiteral("recommended"),
                                      QStringList(), 9999),
@@ -426,9 +426,9 @@ VideoInfo VideoCacheRepo::fromRow(const QSqlQuery &q) const
     return v;
 }
 
-// Re-comprobación de directos al re-entrar en una página: apaga (o deja
-// encendida) la marca de directo cacheada sin tocar el resto de campos, que
-// es lo que necesita el refresco por /next (que no trae duración).
+// Live re-check when re-entering a page: clears (or leaves set) the cached
+// live flag without touching the rest of the fields, which is what the /next
+// refresh needs (it does not bring a duration).
 bool VideoCacheRepo::updateLiveStatus(const QString &id, bool isLive)
 {
     QSqlQuery q(m_db.db());
@@ -454,9 +454,9 @@ bool HistoryRepo::add(const QString &videoId, qlonglong positionMs)
     q.addBindValue(nowMs());
     q.addBindValue(positionMs);
     const bool ok = q.exec();
-    // Avisar a las vistas (p.ej. "Continuar viendo" del Home y su empty-state)
-    // aunque la inserción sea un UPDATE de posición: el orden de watched_at
-    // cambió y la lista pudo reordenarse.
+    // Notify the views (e.g. Home "Continuar viendo" and its empty state) even
+    // if the insert is a position UPDATE: the watched_at order changed and the
+    // list may have been reordered.
     emit changed();
     return ok;
 }
@@ -469,8 +469,8 @@ bool HistoryRepo::remove(const QString &videoId)
     if (!q.exec())
         return false;
 
-    // Si se elimina el vídeo del historial, también se elimina su radio de
-    // Descubre (solo si el seed es ese vídeo, no si aparece como contenido).
+    // If the video is removed from the history, its Descubre radio is removed
+    // too (only if the seed is that video, not if it appears as content).
     if (m_discover)
         m_discover->clearForSeed(videoId);
 
@@ -483,7 +483,7 @@ bool HistoryRepo::clear()
     if (!exec(m_db.db(), QStringLiteral("DELETE FROM history")))
         return false;
 
-    // Al limpiar todo el historial, se eliminan todas las radios de Descubre.
+    // When clearing the whole history, all Descubre radios are removed.
     if (m_discover)
         m_discover->clearAll();
 
@@ -516,9 +516,9 @@ qlonglong HistoryRepo::positionOf(const QString &videoId) const
     return q.value(0).toLongLong();
 }
 
-// Se considera un vídeo COMPLETADO si se vio ≥95% de su duración, o si le
-// quedan 15 segundos o menos (final/créditos). Regla relativa en vez de un
-// umbral fijo: escala con la duración.
+// A video is considered COMPLETED if ≥95% of its duration was watched, or if
+// 15 seconds or less remain (end/credits). Relative rule instead of a fixed
+// threshold: it scales with the duration.
 constexpr double kCompletedFraction = 0.95;
 constexpr qlonglong kCompletedRemainMs = 15000;
 
@@ -928,8 +928,8 @@ HomeCacheRepo::HomeCacheRepo(AppDatabase &db)
 bool HomeCacheRepo::saveSection(const QString &section,
                                 const QStringList &videoIds, qint64 fetchedAt)
 {
-    // Vacío = actualización fallida/vacía: no debe reemplazar la caché previa
-    // ni marcar un fetched_at nuevo (es un fallo, no un estado nuevo).
+    // Empty = failed/empty update: it must not replace the previous cache nor
+    // set a new fetched_at (it is a failure, not a new state).
     if (section.isEmpty() || videoIds.isEmpty())
         return false;
     QSqlQuery q(m_db.db());
@@ -1009,7 +1009,7 @@ bool DiscoverRepo::saveRadio(const QString &seedVideoId,
             return false;
         radioId = q.lastInsertId().toLongLong();
     } else {
-        // La radio ya existe: blindaje para no sobrescribir ni duplicar.
+        // The radio already exists: guard so as not to overwrite or duplicate.
         return false;
     }
     if (radioId <= 0)
@@ -1158,7 +1158,7 @@ QVector<VideoInfo> pickDiscoverVideos(DiscoverRepo &discover,
     if (radios.isEmpty())
         return picked;
 
-    // Excluir radios cuyo seed ya no esté en el historial (seguridad extra).
+    // Exclude radios whose seed is no longer in the history (extra safety).
     QSet<QString> seedEnHistorial;
     {
         QStringList ids;
@@ -1180,8 +1180,8 @@ QVector<VideoInfo> pickDiscoverVideos(DiscoverRepo &discover,
                 seedEnHistorial << q.value(0).toString();
     }
 
-    // Variedad: de las radios menos usadas (últimas ventanas) se baraja una
-    // muestra al azar. Así no se repiten siempre las mismas ni se regenera.
+    // Variety: from the least-used radios (the most recent windows) a random
+    // sample is shuffled. Thus the same ones are not always repeated nor regenerated.
     const int n = qMin(radios.size(), 8);
     QVector<DiscoverRadio> candidates;
     for (int i = 0; i < n; ++i)
@@ -1194,7 +1194,7 @@ QVector<VideoInfo> pickDiscoverVideos(DiscoverRepo &discover,
     for (const DiscoverRadio &r : candidates) {
         if (picked.size() >= maxVideos)
             break;
-        // Saltar si el seed ya no está en el historial (medida de seguridad).
+        // Skip if the seed is no longer in the history (safety measure).
         if (!seedEnHistorial.contains(r.seedVideoId)) {
             discover.deleteRadio(r.id);
             continue;
@@ -1209,7 +1209,7 @@ QVector<VideoInfo> pickDiscoverVideos(DiscoverRepo &discover,
             discover.deleteRadio(r.id);
             continue;
         }
-        // Excluir radios cuyo seed ya no esté en el historial (seguridad extra).
+        // Exclude radios whose seed is no longer in the history (extra safety).
         QSqlQuery q(discover.db().db());
         q.prepare(QStringLiteral("SELECT 1 FROM history WHERE video_id=?"));
         q.addBindValue(r.seedVideoId);
@@ -1276,7 +1276,7 @@ bool discoverSelfTest(const QString &dbPath)
     VideoCacheRepo cache(db);
     HistoryRepo history(db, &discover);
 
-    // Metadatos en la caché para que las radios sean resolubles.
+    // Metadata in the cache so the radios are resolvable.
     for (int i = 0; i < 12; ++i)
         cache.upsert(mkVideo(i, QStringLiteral("Título %1").arg(i)));
 
@@ -1290,8 +1290,8 @@ bool discoverSelfTest(const QString &dbPath)
     ok &= yes(discover.hasRadio(QStringLiteral("seedAAAAAAA")),
               "discover hasRadio");
     ok &= yes(discover.count() == 1, "discover count");
-    // El seed debe estar en el historial: el filtro de pickDiscoverVideos
-    // solo usa radios cuyo vídeo semilla siga en el historial.
+    // The seed must be in the history: the pickDiscoverVideos filter only uses
+    // radios whose seed video is still in the history.
     history.add(QStringLiteral("seedAAAAAAA"));
 
     const auto radiosA = discover.radios();
@@ -1325,7 +1325,7 @@ bool discoverSelfTest(const QString &dbPath)
     if (!radiosMark.isEmpty()) {
         const DiscoverRadio r0 = radiosMark.first();
         ok &= yes(r0.lastUsedAt == 0, "discover last_used_at inicial 0");
-        QThread::msleep(2); // evita colisión de milisegundo con created_at
+        QThread::msleep(2); // avoids a millisecond collision with created_at
         discover.markUsed(r0.id);
         const DiscoverRadio r0b = discover.radios().first();
         ok &= yes(r0b.lastUsedAt > r0.createdAt, "discover markUsed");
@@ -1335,11 +1335,11 @@ bool discoverSelfTest(const QString &dbPath)
         pickDiscoverVideos(discover, cache, QString());
     ok &= yes(sola.size() == 2, "discover 1 radio -> hasta 2 vídeos");
 
-    // Generación de excepción y selección repetida no deben añadir radios.
+    // Raising an exception and repeated selection must not add radios.
     ok &= yes(pickDiscoverVideos(discover, cache, QString()).size() == 2,
               "discover re-selección reutiliza radios");
 
-    // Semillas B y C: radios con contenido parcial distinto.
+    // Seeds B and C: radios with partially different content.
     QVector<VideoInfo> radioB;
     radioB.append(mkVideo(2, QStringLiteral("Título 2")));
     radioB.append(mkVideo(3, QStringLiteral("Título 3")));
@@ -1369,7 +1369,7 @@ bool discoverSelfTest(const QString &dbPath)
                 dupes = true;
             roundSeen.insert(v.id);
             if (v.id == QLatin1String("video000000"))
-                dupes = true; // el excluido no debe aparecer
+                dupes = true; // the excluded one must not appear
         }
         seenPicks.unite(roundSeen);
         ok &= yes(discover.count() == count3,
@@ -1377,10 +1377,10 @@ bool discoverSelfTest(const QString &dbPath)
     }
     ok &= yes(!dupes, "discover sin duplicados ni excluido");
 
-    // Regla de 1-2 por radio: con 3 radios y perRadio=2 debe haber 4-5.
+    // 1-2 per radio rule: with 3 radios and perRadio=2 there must be 4-5.
     ok &= yes(picks.size() >= 4, "discover 3 radios -> 4-5 vídeos");
 
-    // Persistencia: cerrar y reabrir la base.
+    // Persistence: close and reopen the database.
     db.close();
     AppDatabase db2(dbPath);
     if (!db2.open())
@@ -1391,13 +1391,13 @@ bool discoverSelfTest(const QString &dbPath)
     ok &= yes(discover2.hasRadio(QStringLiteral("seedAAAAAAA")),
               "discover radio persistida");
 
-    // ── Integración Historial ↔ Descubre ────────────────────────────────
+    // ── History ↔ Descubre integration ──────────────────────────────────
     DiscoverRepo purger(db2);
     VideoCacheRepo cache2(db2);
     HistoryRepo history2(db2, &purger);
 
-    // 1) Borrar un vídeo que aparece DENTRO de otras radios no las elimina.
-    //    "video000003" está en A y en B; la radio (semilla) es lo que cuenta.
+    // 1) Deleting a video that appears INSIDE other radios does not remove
+    //    them. "video000003" is in A and in B; the radio (seed) is what counts.
     ok &= yes(history2.remove(QStringLiteral("video000003")),
               "history intern remove");
     ok &= yes(purger.count() == count3,
@@ -1406,7 +1406,7 @@ bool discoverSelfTest(const QString &dbPath)
                   && purger.hasRadio(QStringLiteral("seedCCCCCCC")),
               "radios internas siguen tras borrar vídeo interno");
 
-    // 2) Borrar el vídeo SEMILLA elimina únicamente su propia radio.
+    // 2) Deleting the SEED video removes only its own radio.
     ok &= yes(history2.remove(QStringLiteral("seedAAAAAAA")),
               "history seed remove");
     ok &= yes(!purger.hasRadio(QStringLiteral("seedAAAAAAA")),
@@ -1416,7 +1416,7 @@ bool discoverSelfTest(const QString &dbPath)
     ok &= yes(purger.hasRadio(QStringLiteral("seedBBBBBBB"))
                   && purger.hasRadio(QStringLiteral("seedCCCCCCC")),
               "otras radios intactas");
-    // Sin registros huérfanos tras borrar la radio del seed.
+    // No orphan records after deleting the seed radio.
     QSqlQuery orphanSeed(db2.db());
     ok &= yes(orphanSeed.exec(QStringLiteral(
                   "SELECT COUNT(*) FROM discover_radio_videos "
@@ -1425,7 +1425,7 @@ bool discoverSelfTest(const QString &dbPath)
                   && orphanSeed.value(0).toInt() == 0,
               "limpieza sin huérfanos");
 
-    // 3) Descubre no vuelve a usar radios eliminadas (selección tras borrado).
+    // 3) Descubre does not use deleted radios again (selection after deletion).
     QVector<VideoInfo> picksPostA;
     for (int round = 0; round < 2; ++round) {
         picksPostA = pickDiscoverVideos(purger, cache2, QString());
@@ -1434,7 +1434,7 @@ bool discoverSelfTest(const QString &dbPath)
     }
     ok &= yes(picksPostA.size() >= 2, "descubre aún selecciona de B/C");
 
-    // 4) Borrar TODO el historial deja Descubre vacío y sin registros.
+    // 4) Deleting ALL the history leaves Descubre empty and with no records.
     ok &= yes(history2.clear(), "history clear");
     ok &= yes(purger.count() == 0, "descubre vacío tras borrar historial");
     QSqlQuery orphanCheck(db2.db());
@@ -1447,13 +1447,13 @@ bool discoverSelfTest(const QString &dbPath)
               "descubre no usa radios eliminadas");
     ok &= yes(purger.count() == 0, "borrado no genera radios");
 
-    // Radio rota (vídeos sin metadatos en la caché) se elimina al seleccionar.
+    // A broken radio (videos with no metadata in the cache) is removed on selection.
     QVector<VideoInfo> radioRota;
     radioRota.append(mkVideo(9, QStringLiteral("Título 9")));
     ok &= yes(purger.saveRadio(QStringLiteral("seedDDDDDDD"), radioRota),
               "discover save radio D");
-    history2.add(QStringLiteral("seedDDDDDDD")); // seed válido: solo falta metadato
-    // Se vacía la caché de metadatos de la radio D para simular inválida.
+    history2.add(QStringLiteral("seedDDDDDDD")); // valid seed: only the metadata is missing
+    // The metadata cache of radio D is emptied to simulate an invalid one.
     QSqlQuery del(db2.db());
     del.exec(QStringLiteral("DELETE FROM videos WHERE id='video000009'"));
     const int beforeInvalid = purger.count();

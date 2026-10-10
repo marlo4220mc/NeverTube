@@ -21,105 +21,105 @@ public:
     void showVideos(const QVector<VideoInfo> &videos, Mode mode);
     void appendVideos(const QVector<VideoInfo> &videos);
     void clearVideos();
-    // Fila del vídeo en reproducción: se dibuja con un recuadro de marca.
-    // -1 (o un índice fuera de rango) oculta la marca.
+    // Row of the video being played: drawn with a highlight frame.
+    // -1 (or an out-of-range index) hides the mark.
     void setCurrentRow(int row);
     int currentRow() const { return m_currentRow; }
-    // Barra de progreso (0..1) sobre la miniatura de un vídeo concreto,
-    // para la fila "Continuar viendo". No afecta al resto de páginas
-    // (solo se dibuja en el modo rejilla y si el valor es > 0).
+    // Progress bar (0..1) over the thumbnail of a specific video,
+    // for the "Continuar viendo" row. It does not affect the rest of the
+    // pages (only drawn in grid mode and when the value is > 0).
     void setProgress(const QString &videoId, double fraction);
     bool isEmpty() const;
     QVector<VideoInfo> videos() const;
     void refreshThumbnails();
-    // Escala de tamaño de las celdas (1.0 = tamaño base).
+    // Cell size scale (1.0 = base size).
     void setScale(qreal scale);
-    // Densidad de cuadrícula aplicada sobre la escala base (1.0 = densidad
-    // normal, <1 compacta, >1 cómoda). No pisa la escala base de la página.
+    // Grid density applied on top of the base scale (1.0 = normal density,
+    // <1 compact, >1 roomy). It does not override the page's base scale.
     void setDensity(qreal density);
-    // Muestra un botón "X" a la derecha de cada fila (modo lista) que permite
-    // eliminar el ítem. El click sobre la X emite removeRequested() en lugar
-    // de videoActivated(). Por defecto está desactivado: no afecta a otras
-    // páginas que reutilizan la lista.
+    // Shows an "X" button on the right of each row (list mode) that removes
+    // the item. Clicking the X emits removeRequested() instead of
+    // videoActivated(). It is disabled by default: it does not affect other
+    // pages that reuse the list.
     void setRowRemoveVisible(bool visible);
-    // Similar a setRowRemoveVisible pero con el botón de opciones "⋯" (modo
-    // lista): el click sobre él emite moreRequested() en lugar de
-    // videoActivated(). Puede combinarse con la X; el botón de opciones queda
-    // a la izquierda de la X.
+    // Same as setRowRemoveVisible but with the "⋯" options button (list
+    // mode): clicking it emits moreRequested() instead of
+    // videoActivated(). It can be combined with the X; the options button
+    // stays to the left of the X.
     void setRowMoreVisible(bool visible);
-    // Hace que las celdas del modo rejilla se estiren para llenar todo el ancho
-    // disponible (0 desactiva: se usa el tamaño base fijo). El ancho mínimo de
-    // celda fija cuántas columnas entran; el sobrante se reparte entre ellas.
+    // Makes grid-mode cells stretch to fill the whole available width
+    // (0 disables it: the fixed base size is used). The minimum cell width
+    // fixes how many columns fit; the remainder is shared among them.
     void setGridFillWidth(int minCellWidth);
-    // Fuerza un número fijo de columnas en el modo rejilla (0 = automático por
-    // ancho mínimo). Usado por el Home para mostrar los vídeos por fila que elija
-    // el usuario (4/5/6 según "Tamaño de las miniaturas").
+    // Forces a fixed number of columns in grid mode (0 = automatic by
+    // minimum width). Used by Home to show the videos per row chosen by the
+    // user (4/5/6 according to "Tamaño de las miniaturas").
     void setGridColumns(int columns);
     int gridColumns() const;
 
-    // Ancho de celda por debajo del cual el bloque de texto (miniatura 16:9 +
-    // hueco + título de 2 líneas + línea de canal) se recorta. Es la constante
-    // que justifica el tope de columnas del Home.
+    // Cell width below which the text block (16:9 thumbnail + gap + 2-line
+    // title + channel line) gets clipped. It is the constant that justifies
+    // Home's column cap.
     static constexpr int kMinCellW = 130;
 
-    // Recorta las columnas pedidas para que la celda no baje de minCellW: una
-    // rejilla es dimensionada por el ancho con columnas fijas, así que con 6
-    // columnas en una ventana estrecha (celda de 113 px a 700 px de viewport) el
-    // título y el canal saldrían cortados; es mejor mostrar menos vídeos por
-    // fila que metidos. Función PURA (sin widget) para poder testearla.
-    // viewportW <= 0 = ancho aún no conocido: no se recorta nada.
+    // Trims the requested columns so the cell does not fall below minCellW: a
+    // grid is sized by the width with fixed columns, so with 6 columns in a
+    // narrow window (cell of 113 px at 700 px of viewport) the title and the
+    // channel would be cut off; it is better to show fewer videos per row
+    // than crammed in. PURE function (no widget) so it can be tested.
+    // viewportW <= 0 = width not known yet: nothing is trimmed.
     static int clampGridColumns(int wanted, int viewportW,
                                 int minCellW = kMinCellW);
 
-    // Rect REAL de la celda de la fila `row` tal y como la coloca QListView. En
-    // IconMode manda el sizeHint del MODELO, no gridSize(), así que este rect
-    // puede no coincidir con gridSize() si divergen: eso es justo lo que hay que
-    // mirar, porque la página dimensiona la sección con gridSize() y la última
-    // fila se salía de la vista. Lo usa --selftest-grid.
+    // REAL rect of the cell of row `row` as QListView places it. In
+    // IconMode the MODEL's sizeHint wins, not gridSize(), so this rect
+    // may not match gridSize() if they diverge: that is exactly what to
+    // check, because the page sizes the section with gridSize() and the last
+    // row went off the view. --selftest-grid uses it.
     QRect gridItemRect(int row) const;
 
-    // Separación declarada entre celdas de la rejilla. OJO: en IconMode
-    // QListView NO la suma a la rejilla (medido: con celda 177x195 los items
-    // salen con rect 177x195 y paso 195 entre filas, sin hueco). El hueco que se
-    // ve entre miniaturas es el margen interno de 6 px que pinta el delegate.
+    // Declared spacing between grid cells. NOTE: in IconMode
+    // QListView does NOT add it to the grid (measured: with a 177x195 cell
+    // the items come out with a rect of 177x195 and a step of 195 between
+    // rows, no gap). The gap seen between thumbnails is the internal 6 px margin the delegate paints.
     static constexpr int kGridSpacing = 4;
 
-    // Tamaño del título de la celda de rejilla DERIVADO del ancho de la celda.
-    // Antes eran 13 px fijos con un bloque de texto de 34 px fijos, y como la
-    // rejilla tiene columnas FIJAS la miniatura crece con la ventana mientras el
-    // texto se quedaba. Ahora va de 12 px (celda de 140 px) a 16 px (celda de
-    // 340 px) en lineal, con topes en los dos extremos. Todo el rango bajó 1 px
-    // (y el techo de 18 a 16) porque con 14 px en negrita se veía demasiado
-    // grande. Función PURA (sin widget ni fuentes): la usan tanto la geometría
-    // (applyGridGeometry) como la pintura (paintGrid), de modo que la celda
-    // siempre reserva lo que el título ocupa y no hay solape.
+    // Title size of the grid cell DERIVED from the cell width.
+    // It used to be a fixed 13 px with a fixed 34 px text block, and since
+    // the grid has FIXED columns the thumbnail grows with the window while
+    // the text stayed put. Now it goes from 12 px (cell of 140 px) to 16 px
+    // (cell of 340 px) linearly, with caps at both ends. The whole range
+    // dropped 1 px (and the ceiling from 18 to 16) because at 14 px bold it
+    // looked too big. PURE function (no widget or fonts): it is used both by
+    // the geometry (applyGridGeometry) and the painting (paintGrid), so the
+    // cell always reserves what the title occupies and there is no overlap.
     static int gridTitlePx(int cellW);
 
-    // Líneas de título de la celda de rejilla. Con 3 líneas a 14 px en negrita el
-    // título se leía entero en el 13% de los casos (medido sobre los 90 títulos de
-    // la caché con la caja de 161 px que sale a 5 columnas en una ventana de 941
-    // px) pero la celda quedaba con mucho texto y el usuario lo veía demasiado
-    // grande. Bajaron a 2: se paga legibilidad (3% enteros, 55% del texto visible
-    // de media) a cambio de una celda de 175 px en vez de 195. La negrita se
-    // mantiene, que es lo que el usuario pidió tras verla sin ella. Se comparte
-    // entre geometría y pintura para que no puedan divergir.
+    // Title lines of the grid cell. With 3 lines at 14 px bold the title was
+    // read in full in 13% of cases (measured over the 90 titles in
+    // the cache with the 161 px box that comes out at 5 columns in a 941 px
+    // window) but the cell held too much text and the user found it too big.
+    // Reduced to 2: legibility is paid for (3% whole, 55% of the visible text
+    // on average) in exchange for a cell of 175 px instead of 195. Bold is
+    // kept, which is what the user asked for after seeing it without bold.
+    // It is shared between geometry and painting so they cannot diverge.
     static constexpr int kGridTitleLines = 2;
 
-    // Interlineado de las líneas de título, en px (1,28 del tamaño de fuente).
-    // A 12 px da 15 px, a 13 px daba 17. Función PURA.
+    // Line spacing of the title lines, in px (1.28 of the font size).
+    // At 12 px it gives 15 px; at 13 px it gave 17. PURE function.
     static int gridTitleLineH(int cellW);
-    // Alto del bloque de texto bajo la miniatura: kGridTitleLines líneas de
-    // título + hueco a la línea de canal + pie. Función PURA.
+    // Height of the text block under the thumbnail: kGridTitleLines title
+    // lines + gap to the channel line + footer. PURE function.
     static int gridTextBlockH(int cellW);
 
 signals:
     void videoActivated(int index, const VideoInfo &video);
-    // Click sobre el botón "X" de una fila (solo si setRowRemoveVisible(true)).
+    // Click on the "X" button of a row (only if setRowRemoveVisible(true)).
     void removeRequested(int index, const VideoInfo &video);
-    // Click sobre el botón de opciones "⋯" de una fila
-    // (solo si setRowMoreVisible(true)). La posición global del botón la
-    // acompaña en la señal porque la vista sabe dónde está: la página que
-    // re-emite hacia arriba la pasa tal cual en vez de recalcularla.
+    // Click on the "⋯" options button of a row
+    // (only if setRowMoreVisible(true)). The button's global position
+    // accompanies it in the signal because the view knows where it is: the
+    // page that re-emits it upward passes it as-is instead of recomputing it.
     void moreRequested(int index, const VideoInfo &video,
                        const QPoint &globalPos);
 
@@ -131,13 +131,13 @@ private slots:
     void onThumbReady(const QString &key);
 
 private:
-    // Recalcula el ancho de celda del modo rejilla cuando está activo el
-    // relleno de ancho (setGridFillWidth). No hace nada en modo lista.
+    // Recomputes the grid-mode cell width when width filling is active
+    // (setGridFillWidth). It does nothing in list mode.
     void applyGridGeometry();
-    // Tamaño que deben llevar los items de la rejilla: el que calculó
-    // applyGridGeometry, o la base fija si aún no se ha calculado (aún sin ancho
-    // de viewport). Único lugar donde se decide, para que showVideos y
-    // appendVideos no puedan dejar items con un alto distinto al de la celda.
+    // Size the grid items must use: the one computed by applyGridGeometry, or
+    // the fixed base if it has not been computed yet (still no viewport
+    // width). Single place where it is decided, so showVideos and appendVideos
+    // cannot leave items with a height different from the cell's.
     QSize gridItemSize() const;
 
     ThumbnailCache *m_thumbs;
@@ -152,10 +152,10 @@ private:
     bool m_rowMore = false;
     int m_gridMinCellW = 0;
     int m_gridColumns = 0;
-    // Tamaño de celda que ha calculado applyGridGeometry. Es la única fuente: el
-    // sizeHint del modelo, el gridSize, el delegate y el alto de sección del Home
-    // (HomePage::adjustGridHeight usa gridSize) tienen que salir de aquí, o las
-    // filas miden una cosa y la sección reserva otra.
+    // Cell size computed by applyGridGeometry. It is the single source: the
+    // model's sizeHint, gridSize, the delegate and Home's section height
+    // (HomePage::adjustGridHeight uses gridSize) must all come from here, or
+    // the rows measure one thing and the section reserves another.
     QSize m_gridCell;
     QHash<QString, double> m_progress;
 };

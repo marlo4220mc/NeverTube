@@ -2,31 +2,31 @@
 
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// MSVC 2026 (VS 18, toolset 14.5x, _MSC_VER >= 1950) ELIMINÓ de su STL el
-// símbolo stdext::make_checked_array_iterator. Qt 5.15.2 lo referencia de forma
-// INCONDICIONAL en MSVC desde qlist.h:915 (QList::op_eq_impl) vía la macro
-// QT_MAKE_CHECKED_ARRAY_ITERATOR, así que cualquier TU que instancie el
-// operator== de un QList falla con C2653 ('stdext' no es clase) / C3861
-// ('make_checked_array_iterator' no encontrado). GitHub windows-latest ya corre
-// VS2026 y no queda imagen con VS2022, por lo que no se puede arreglar a nivel
-// de runner: hay que compensarlo a nivel de código.
+// MSVC 2026 (VS 18, toolset 14.5x, _MSC_VER >= 1950) REMOVED the symbol
+// stdext::make_checked_array_iterator from its STL. Qt 5.15.2 references it
+// UNCONDITIONALLY on MSVC from qlist.h:915 (QList::op_eq_impl) via the macro
+// QT_MAKE_CHECKED_ARRAY_ITERATOR, so any TU that instantiates the
+// operator== of a QList fails with C2653 ('stdext' is not a class) / C3861
+// ('make_checked_array_iterator' not found). GitHub windows-latest already runs
+// VS2026 and no VS2022 image remains, so it cannot be fixed at the
+// runner level: it must be compensated at the code level.
 //
-// Este shim provee un reemplazo mínimo que devuelve el puntero crudo (idéntico
-// a la rama no-MSVC de Qt: #define QT_MAKE_CHECKED_ARRAY_ITERATOR(x, size) (x)),
-// ignorando bounds. Por eso va guardado en _MSC_VER >= 1950 (solo cuando el
-// símbolo real ya no existe) y es un no-op en cualquier otro toolchain: en
-// VS2022/GCC/Clang nadie usa esta función, no cambia el binario.
+// This shim provides a minimal replacement that returns the raw pointer (identical
+// to Qt's non-MSVC branch: #define QT_MAKE_CHECKED_ARRAY_ITERATOR(x, size) (x)),
+// ignoring bounds. That is why it is guarded by _MSC_VER >= 1950 (only when the
+// real symbol no longer exists) and is a no-op on any other toolchain: on
+// VS2022/GCC/Clang nobody uses this function, the binary does not change.
 //
-// Se fuerza antes de todo cabecera Qt vía /FI desde CMakeLists.txt (if(MSVC)).
+// It is force-included before every Qt header via /FI from CMakeLists.txt (if(MSVC)).
 #if defined(_MSC_VER) && _MSC_VER >= 1950
 #include <cstddef>
 
 namespace stdext {
 
-// Qt llama make_checked_array_iterator(ptr, size); aquí se devuelve el puntero
-// crudo. El tamaño solo existe en la cabecera original para el rango de
-// iteradores comprobados; al devolver un puntero puro a std::equal (como hace
-// Qt en el resto de plataformas) se obtiene comportamiento idéntico.
+// Qt calls make_checked_array_iterator(ptr, size); here the raw pointer is
+// returned. The size only exists in the original header for the checked
+// iterator range; returning a plain pointer to std::equal (as Qt does on the
+// other platforms) yields identical behavior.
 template <typename T>
 inline T *make_checked_array_iterator(T *pointer, std::size_t /*size*/)
 {

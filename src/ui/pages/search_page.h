@@ -33,34 +33,34 @@ public:
     ~SearchPage() override;
     void startSearch(const QString &query);
 
-    // Medidas del desplegable. El endpoint devuelve hasta 14 sugerencias y el
-    // historial suma mas; sin tope el panel crecia hacia abajo y tapaba los
-    // resultados. La fila y el separador se necesitan ademas para el alto
-    // cuando el layout aun no ha calculado nada (ver showSuggestPanel), y las
-    // usa tambien SuggestRow, que es una clase aparte.
+    // Sizes of the dropdown. The endpoint returns up to 14 suggestions and the
+    // history adds more; without a cap the panel grew downward and covered the
+    // results. The row and the divider are also needed for the height when the
+    // layout has not computed anything yet (see showSuggestPanel), and
+    // SuggestRow uses them too, as it is a separate class.
     static constexpr int kSuggestPanelMaxH = 320;
     static constexpr int kSuggestRowH = 32;
     static constexpr int kSuggestDividerH = 22;
 
-    // Panel de sugerencias, solo lectura. Lo usa el selftest del desplegable
-    // para comprobar que se abre con los dos grupos sin depender de la red.
+    // Suggestions panel, read-only. The dropdown selftest uses it to check that
+    // it opens with both groups without depending on the network.
     QWidget *suggestPanel() const { return m_suggestPanel; }
 
-    // Selftest OFFLINE del desplegable (sin red). Es friend para poder sembrar
-    // el historial y el campo y llamar al slot directamente, sin abrir un
-    // monton de accesores publicos solo para test.
+    // OFFLINE selftest of the dropdown (no network). It is a friend so it can
+    // seed the history and the field and call the slot directly, without opening
+    // a bunch of public accessors just for the test.
     friend bool searchSuggestPanelSelfTest(SearchPage *page);
-    // El banco de gestos tambien siembra el campo y el historial, y necesita el
-    // contenedor para probar el cambio de pestana.
+    // The gesture bench also seeds the field and the history, and needs the
+    // container to test the tab switch.
     friend bool searchSuggestGesturesSelfTest(SearchPage *page, QStackedWidget *stack,
                                               QWidget *otra);
 
 signals:
     void openRequested(const QVector<VideoInfo> &videos, int startIndex);
     void channelRequested(const QString &channelId);
-    // Click en el "⋯" de una fila de resultados: la página no tiene los repos
-    // (ver más tarde, playlists), así que pide el vídeo y MainWindow muestra el
-    // menú compartido.
+    // Click on the "⋯" of a results row: the page has no repos
+    // (watch later, playlists), so it asks for the video and MainWindow shows
+    // the shared menu.
     void rowMenuRequested(const VideoInfo &video, const QPoint &globalPos);
 
 private slots:
@@ -72,7 +72,7 @@ private slots:
     void onHistoryClear();
     void onHistoryQuery(const QString &query);
     void onHistoryRemove(const QString &query);
-    // Del desplegable, desde la navegacion por teclado.
+    // From the dropdown, via keyboard navigation.
     void onRowPicked(SuggestRow *row);
     void onRowStepFocus(SuggestRow *row, int delta);
     void onRowEscape();
@@ -80,49 +80,50 @@ private slots:
     void onRowFocused(SuggestRow *row);
 
 protected:
-    // Cierra el desplegable al pulsar fuera, y resuelve el teclado del campo
-    // (fieldKey). Ver el installEventFilter del constructor: NO se usa
-    // editingFinished por el orden de los eventos, y el teclado NO va en un
-    // keyPressEvent de la pagina porque el QFrame del "card" se come el Tab.
+    // Closes the dropdown when clicking outside, and resolves the field's
+    // keyboard (fieldKey). See the constructor's installEventFilter: NO
+    // editingFinished is used because of the event order, and the keyboard is
+    // NOT in the page's keyPressEvent because the "card" QFrame eats the Tab.
     bool eventFilter(QObject *watched, QEvent *event) override;
-    // Al cambiar el ancho de la pagina el campo se ensancha; el desplegable va
-    // anclado a el, asi que hay que recolocarlo o se queda desalineado.
+    // When the page width changes the field widens; the dropdown is anchored to
+    // it, so it must be repositioned or it stays misaligned.
     void resizeEvent(QResizeEvent *event) override;
-    // Al cambiar de pestana se cierra. Sin esto el panel se queda con su
-    // estado de "mostrado" y reaparece al volver a Buscar con sugerencias
-    // viejas de lo que se escribio la ultima vez.
+    // Closes when switching tabs. Without this the panel keeps its "shown"
+    // state and reappears when coming back to Search with stale suggestions
+    // from whatever was typed last time.
     void hideEvent(QHideEvent *event) override;
 
 private:
-    // Teclado del campo con el desplegable abierto: flechas mueven el
-    // resaltado, Tab entra en el desplegable y Esc lo cierra. Se llama desde
-    // eventFilter (no desde un keyPressEvent) por el motivo del QFrame.
-    // Enter NO se toca a proposito: el campo busca SIEMPRE el texto literal,
-    // resaltado o no (ver el comentario del constructor y acceptSuggestion).
+    // Field keyboard with the dropdown open: arrows move the highlight, Tab
+    // enters the dropdown and Esc closes it. Called from eventFilter (not from
+    // a keyPressEvent) for the QFrame reason.
+    // Enter is deliberately NOT touched: the field ALWAYS searches the literal
+    // text, highlighted or not (see the constructor's comment and
+    // acceptSuggestion).
     bool fieldKey(QKeyEvent *event);
     void showHistory();
     void setResultsMode(bool active);
     void buildChannelButtons();
     QStringList history() const;
     void setHistory(const QStringList &queries);
-    // Desplegable de type-ahead. Se ancla al campo y flota encima de la
-    // pagina; no toca el layout, asi que la pagina se ve igual.
+    // Type-ahead dropdown. It anchors to the field and floats over the
+    // page; it does not touch the layout, so the page looks the same.
     void showSuggestPanel();
     void hideSuggestPanel();
     void populateSuggestPanel();
     void positionSuggestPanel();
-    // Filas del historial que empiezan por el texto escrito (para el segundo
-    // grupo del desplegable), en orden de recurrencia y sin repetir.
+    // History rows starting with the typed text (for the dropdown's second
+    // group), in order of recurrence and without duplicates.
     QStringList matchingHistory(const QString &prefix) const;
-    // Pulsa una fila del desplegable: pone el texto LITERAL en el campo (sin
-    // sustituirlo por la sugerencia) y lanza la busqueda.
+    // Presses a dropdown row: puts the LITERAL text in the field (without
+    // replacing it with the suggestion) and launches the search.
     void acceptSuggestion(const QString &query);
-    // Resaltado por teclado. -1 = ninguno. Solo cambia el fondo de la fila: el
-    // texto del campo nunca se sustituye por la sugerencia resaltada.
+    // Keyboard highlight. -1 = none. Only changes the row background: the
+    // field text is never replaced by the highlighted suggestion.
     void setHighlight(int index);
     void moveHighlight(int delta);
-    // Mueve el foco real a la fila index (o al campo con -1). Es lo que hace
-    // Tab al entrar en el desplegable.
+    // Moves the real focus to row index (or to the field with -1). That is what
+    // Tab does when entering the dropdown.
     void focusRow(int index);
 
     Yt *m_yt;
@@ -147,42 +148,42 @@ private:
     bool m_searching = false;
     QString m_activeQuery;
 
-    // Type-ahead. m_suggestPanel flota sobre la pagina; m_suggestItems son las
-    // consultas de YouTube (con su detalle de entidad) y m_historyRows las del
-    // historial ya filtradas. m_suggestScroll lleva las filas con barra cuando
-    // superan el tope, y m_suggestRowsBox es su contenido (se reconstruye
-    // entero en cada respuesta).
+    // Type-ahead. m_suggestPanel floats over the page; m_suggestItems are the
+    // YouTube queries (with their entity detail) and m_historyRows the already
+    // filtered history ones. m_suggestScroll carries the rows with a scrollbar
+    // when they exceed the cap, and m_suggestRowsBox is its content (rebuilt in
+    // full on every response).
     QFrame *m_suggestPanel = nullptr;
     QScrollArea *m_suggestScroll = nullptr;
     QWidget *m_suggestRowsBox = nullptr;
     QVector<Suggestion> m_suggestItems;
     QStringList m_historyRows;
-    // Las filas como widgets, en el orden en que se pintan, y el indice de la
-    // resaltada (-1 = ninguna). El orden es: grupo de YouTube y luego de
-    // historial, asi que el indice es plano.
+    // The rows as widgets, in the order they are painted, and the index of the
+    // highlighted one (-1 = none). The order is: YouTube group and then
+    // history, so the index is flat.
     QVector<SuggestRow *> m_rows;
     int m_highlight = -1;
-    // Texto para el que se pidio la ultima tanda de sugerencias: permite
-    // ignorar tanto respuestas tardias como la peticion en si misma si el
-    // campo ya no coincide.
+    // Text for which the last batch of suggestions was requested: allows
+    // ignoring both late responses and the request itself if the field no
+    // longer matches.
     QString m_suggestQuery;
-    // Consulta ya BUSCADA (Enter o botón): un suggest que llegue después para
-    // esa misma consulta no debe reabrir el desplegable (pasaba al escribir
-    // rápido y pulsar Enter: el debounce de 300 ms disparaba después y el panel
-    // aparecía sobre los resultados). Se limpia al volver a escribir.
+    // Query already SEARCHED (Enter or button): a suggest arriving later for
+    // that same query must not reopen the dropdown (it happened when typing
+    // fast and pressing Enter: the 300 ms debounce fired afterwards and the
+    // panel appeared over the results). Cleared when typing again.
     QString m_suggestClosedFor;
-    // Aplicacion para el eventFilter del cierre por clic fuera.
+    // Application target for the click-outside close eventFilter.
     QObject *m_app = nullptr;
 };
 
-// Selftest OFFLINE del desplegable de sugerencias (sin red): construye una
-// SearchPage con las piezas minimas y comprueba que el panel se abre con los
-// dos grupos, que el historial se filtra, y que una respuesta tardia se
-// ignora. Se llama desde --selftest-suggest-panel.
+// OFFLINE selftest of the suggestions dropdown (no network): builds a
+// SearchPage with the minimal pieces and checks that the panel opens with the
+// two groups, that the history is filtered, and that a late response is
+// ignored. Called from --selftest-suggest-panel.
 bool searchSuggestPanelSelfTestRun();
 
-// Banco de gestos del desplegable en la jerarquia real (pagina dentro de un
-// QStackedWidget, con barra de navegacion y el QSS de verdad). Comprueba los
-// gestos con entrega real, que es donde fallaban. Se llama desde
+// Gesture bench of the dropdown in the real hierarchy (page inside a
+// QStackedWidget, with a navigation bar and the real QSS). Checks the
+// gestures with real delivery, which is where they failed. Called from
 // --selftest-suggest-gestures.
 bool searchSuggestGesturesSelfTestRun();

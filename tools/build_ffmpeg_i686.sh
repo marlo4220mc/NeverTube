@@ -1,30 +1,30 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# build_ffmpeg_i686.sh — construye el FFmpeg i686 vendorizado del build x86 de Windows
-# (Win7 x86) que vive en third_party/ffmpeg-win32/.
+# build_ffmpeg_i686.sh — builds the vendored i686 FFmpeg for the Windows x86 build
+# (Win7 x86) that lives in third_party/ffmpeg-win32/.
 #
-# Por qué existe: NO hay build público de FFmpeg para Windows de 32 bits.
-# gyan.dev y BtbN/FFmpeg-Builds solo publican win64, y MSYS2 retiró el target
-# i686. La única vía es compilarlo nosotros, y eso es lo que hace este script
-# (cross-compile desde Linux con llvm-mingw, sin instalar nada en el sistema).
+# Why it exists: there is NO public FFmpeg build for 32-bit Windows.
+# gyan.dev and BtbN/FFmpeg-Builds only publish win64, and MSYS2 removed the
+# i686 target. The only way is to build it ourselves, and that is what this script
+# does (cross-compile from Linux with llvm-mingw, without installing anything on the system).
 #
-# Propiedades del binario resultante (todas verificadas):
+# Properties of the resulting binary (all verified):
 #   - i686 (PE32, Windows 7+): _WIN32_WINNT=0x0601.
-#   - LGPL v2.1+ (--disable-gpl --disable-nonfree): redistribuible con la app
-#     enlazándolo dinámicamente.
-#   - TLS por schannel (--enable-schannel): sin DLLs de OpenSSL para FFmpeg.
-#   - DXVA2 para h264 (--enable-dxva2 --enable-hwaccel=h264_dxva2).
-#   - --enable-w32threads: sin dependencia de libwinpthread-1.dll.
-#   - Recortado a lo que usa la app (--disable-everything + listas): ~6 MB de
-#     DLLs en vez de ~15 MB con el set completo de FFmpeg.
-#   - Imports Win7-limpios (sin GetSystemTimePreciseAsFileTime, *ForDpi,
+#   - LGPL v2.1+ (--disable-gpl --disable-nonfree): redistributable with the app
+#     by linking it dynamically.
+#   - TLS via schannel (--enable-schannel): no OpenSSL DLLs for FFmpeg.
+#   - DXVA2 for h264 (--enable-dxva2 --enable-hwaccel=h264_dxva2).
+#   - --enable-w32threads: no dependency on libwinpthread-1.dll.
+#   - Trimmed to what the app uses (--disable-everything + lists): ~6 MB of
+#     DLLs instead of ~15 MB with the full FFmpeg set.
+#   - Win7-clean imports (no GetSystemTimePreciseAsFileTime, *ForDpi,
 #     GetDpiForMonitor, api-ms-win-*, WaitOnAddress, etc.).
 #
-# Uso:
-#   tools/build_ffmpeg_i686.sh [destino]
-#   (destino por defecto: third_party/ffmpeg-win32)
+# Usage:
+#   tools/build_ffmpeg_i686.sh [destination]
+#   (default destination: third_party/ffmpeg-win32)
 #
-# Requisitos de red: descarga llvm-mingw, nasm y el código de FFmpeg.
+# Network requirements: downloads llvm-mingw, nasm and the FFmpeg source.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 

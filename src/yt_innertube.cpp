@@ -40,46 +40,47 @@ const char kBrowseEndpoint[] =
     "/youtubei/v1/browse?prettyPrint=false";
 const char kSearchEndpoint[] =
     "/youtubei/v1/search?prettyPrint=false";
-// Sugerencias de búsqueda (type-ahead del campo).
+// Search suggestions (type-ahead of the field).
 //
-// El endpoint elegido es el del autocompletado REAL de youtube.com:
-// suggestqueries.google.com con client=youtube. Lo decide la medición de
-// /selftest-suggest, no una preferencia (ver suggestSelfTest):
-//   - Innertube music/get_search_suggestions solo coincide con el YT real en
-//     el 14-43% de las sugerencias, da 6 en prefijos cortos y arrastra un
-//     carrusel de musica de 4-52 KB que el type-ahead no usa.
-//   - client=firefox coincide en el 50-71%, pero recorta a 10 items y tira
-//     los metadatos de entidad.
-//   - client=youtube ES el dataset del buscador de youtube.com: 14 items,
-//     0.3-2 KB, ~280 ms, y trae la entidad (descripcion, avatar, wikipedia)
-//     de las filas con panel de conocimiento.
-// No toca la sesion Innertube: es un GET plano a un host de Google, asi que no
-// puede sufrir el gate 403 de sesion documentado en AGENTS.md.
+// The chosen endpoint is the REAL autocomplete of youtube.com:
+// suggestqueries.google.com with client=youtube. This is decided by the
+// measurement in /selftest-suggest, not by preference (see suggestSelfTest):
+//   - Innertube music/get_search_suggestions only matches real YT on
+//     14-43% of suggestions, returns 6 on short prefixes and drags along a
+//     4-52 KB music carousel that the type-ahead never uses.
+//   - client=firefox matches 50-71%, but truncates to 10 items and drops
+//     the entity metadata.
+//   - client=youtube IS the youtube.com search dataset: 14 items,
+//     0.3-2 KB, ~280 ms, and it carries the entity (description, avatar,
+//     wikipedia) for rows with a knowledge panel.
+// It does not touch the Innertube session: it is a plain GET to a Google
+// host, so it cannot suffer the 403 session gate documented in AGENTS.md.
 const char kSuggestUrl[] =
     "https://suggestqueries.google.com/complete/search"
     "?client=youtube&ds=yt&hl=es&gl=US&q=";
-// Envoltura de JS que pone Google alrededor del JSON. NO es JavaScript que
-// ejecutar: es un prefijo y un parentesis que se recortan para dejar el JSON
-// plano, que se parsea con QJsonDocument. No hay motor JS en la app.
+// JS wrapper that Google puts around the JSON. It is NOT JavaScript to
+// execute: it is a prefix and a closing parenthesis that get trimmed off to
+// leave plain JSON, which is parsed with QJsonDocument. There is no JS engine
+// in the app.
 const char kSuggestJsPrefix[] = "window.google.ac.h(";
 
-// UA del fork de youtube_explode_dart usado para /sw.js_data.
+// UA of the youtube_explode_dart fork used for /sw.js_data.
 const char kChromeUA[] =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
 
-// UA de cliente VISIONOS (coincide con el del body player). Valores tomados
-// de las tablas de clientes de referencia (NewPipeExtractor).
+// VISIONOS client UA (matches the one in the player body). Values taken
+// from the reference client tables (NewPipeExtractor).
 const char kVisionOSUA[] =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
 
-// UA del cliente IOS (com.google.ios.youtube).
+// UA of the IOS client (com.google.ios.youtube).
 const char kIOSUA[] =
     "com.google.ios.youtube/21.26.4 "
     "(iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)";
 
-// UA del cliente ANDROID_VR (Oculus/Quest).
+// UA of the ANDROID_VR client (Oculus/Quest).
 const char kAndroidVRUA[] =
     "com.google.android.apps.youtube.vr.oculus/1.65.10 "
     "(Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
@@ -87,30 +88,30 @@ const char kAndroidVRUA[] =
 const char kFallbackVisitorData[] =
     "CgttN24wcmd5UzNSWSi2lvq2BjIKCgJKUBIEGgAgYQ%3D%3D";
 
-// Timeouts por fase del transporte Ipv4Https (ms). La regeneración de
-// visitorData no debe esperar el timeout largo de player.
+// Timeouts per phase of the Ipv4Https transport (ms). Regenerating
+// visitorData must not wait for the long player timeout.
 constexpr int kVisitorTimeoutMs = 10000;
 constexpr int kPlayerTimeoutMs = 12000;
 constexpr int kMasterTimeoutMs = 15000;
 
-// Cascada de clientes para /player, en orden de preferencia. VISIONOS es el
-// primario (único que hoy no requiere poToken y devuelve hlsManifestUrl en
-// VODs); los demás son el fallback estilo NewPipe para vídeos que
-// exigen login (edad/miembros) o que no responden en VISIONOS. Los valores
-// (versión actual de 2026, device/os/UA) vienen de las tablas de clientes de
-// referencia (NewPipeExtractor), no son inventados.
+// Client cascade for /player, in order of preference. VISIONOS is the
+// primary one (the only one that today needs no poToken and returns
+// hlsManifestUrl on VODs); the rest are the NewPipe-style fallback for videos
+// that require login (age/members) or that do not respond on VISIONOS. The
+// values (current 2026 version, device/os/UA) come from the reference client
+// tables (NewPipeExtractor); they are not invented.
 struct PlayerClient
 {
     const char *name;
     const char *version;
-    int clientId; // X-Youtube-Client-Name numérico
+    int clientId; // numeric X-Youtube-Client-Name
     const char *ua;
-    const char *deviceMake; // nullptr si no aplica
+    const char *deviceMake; // nullptr when not applicable
     const char *deviceModel;
     const char *osName;
     const char *osVersion;
-    int androidSdkVersion; // 0 si no aplica
-    bool embed;            // requiere thirdParty.embedUrl + Referer
+    int androidSdkVersion; // 0 when not applicable
+    bool embed;            // requires thirdParty.embedUrl + Referer
     const char *embedUrl;
 };
 
@@ -134,9 +135,9 @@ const PlayerClient kPlayerClients[] = {
 constexpr int kPlayerClientCount =
     static_cast<int>(sizeof(kPlayerClients) / sizeof(kPlayerClients[0]));
 
-// Cliente WEB (solo browse de pestañas Shorts/Directos del canal): VISIONOS no
-// expone esas pestañas (devuelve la Home) y WEB sí, aunque con el layout
-// moderno (*ViewModel). No requiere X-Goog-Api-Key (verificado).
+// WEB client (only for browsing a channel's Shorts/Live tabs): VISIONOS does
+// not expose those tabs (it returns the Home) but WEB does, though with the
+// modern (*ViewModel) layout. It requires no X-Goog-Api-Key (verified).
 constexpr int kWebClientId = 1;
 const char kWebClientVersion[] = "2.20240726.00.00";
 
@@ -145,9 +146,9 @@ const char kFieldMask[] =
     "streamingData.hlsManifestUrl,streamingData.adaptiveFormats,"
     "videoDetails.videoId,videoDetails.lengthSeconds,videoDetails.isLive";
 
-// Alturas de vídeo únicas y ascendentes extraídas de streamingData.
-// Solo se tienen en cuenta entradas de vídeo (con width/height > 0);
-// los itags de solo audio (139/140/249/…) se ignoran.
+// Unique ascending video heights extracted from streamingData.
+// Only video entries (with width/height > 0) are taken into account;
+// audio-only itags (139/140/249/…) are ignored.
 QVector<int> videoHeights(const QJsonObject &streamingData)
 {
     QVector<int> heights;
@@ -164,11 +165,11 @@ QVector<int> videoHeights(const QJsonObject &streamingData)
     return heights;
 }
 
-// Contexto de cliente genérico para la cascada, construido a partir de la
-// tabla kPlayerClients. Cada cliente aporta sus campos device/os/UA propios
-// (valores reales de los clientes). "hl" se fija en el idioma de la app
-// (auto "es" por el fix de títulos originales: sin esto YouTube auto-traduce
-// los títulos al inglés) y todos los clientes llevan visitorData.
+// Generic client context for the cascade, built from the kPlayerClients
+// table. Each client contributes its own device/os/UA fields (real values
+// from those clients). "hl" is set to the app language (auto "es" from the
+// original-titles fix: without it YouTube auto-translates titles to English)
+// and every client carries visitorData.
 QJsonObject clientContext(const PlayerClient &pc, const QString &visitorData,
                           const QString &hl = QStringLiteral("es"))
 {
@@ -194,8 +195,8 @@ QJsonObject clientContext(const PlayerClient &pc, const QString &visitorData,
     return client;
 }
 
-// Contexto del cliente WEB (browse de pestañas shorts/live). Solo nombre,
-// versión, idioma y visitorData: WEB no necesita device/os ni API key.
+// WEB client context (browsing shorts/live tabs). Only name, version,
+// language and visitorData: WEB needs neither device/os nor an API key.
 QJsonObject webClientContext(const QString &visitorData, const QString &hl)
 {
     return QJsonObject{
@@ -208,9 +209,9 @@ QJsonObject webClientContext(const QString &visitorData, const QString &hl)
     };
 }
 
-// Cuerpo de una respuesta de youtubei/v1 → QJsonObject. Quita el prefijo
-// anti-XSSI (")]}'") que YouTube antepone a algunas respuestas y tolera
-// cuerpos no-JSON (errores/HTML). Devuelve false si no hay objeto JSON.
+// Body of a youtubei/v1 response → QJsonObject. Strips the anti-XSSI prefix
+// (")]}'") that YouTube prepends to some responses and tolerates non-JSON
+// bodies (errors/HTML). Returns false when there is no JSON object.
 bool parseJsonObject(const QByteArray &body, QJsonObject *root)
 {
     QByteArray json = body.trimmed();
@@ -254,26 +255,26 @@ QString visitorDataFromSwJsData(const QByteArray &body)
     return level4.at(13).toString();
 }
 
-// Body de /complete/search -> lista de sugerencias.
+// Body of /complete/search -> suggestion list.
 //
-// El cuerpo es JSON envuelto en una llamada JS: window.google.ac.h([...]). No
-// se ejecuta nada: se recorta el prefijo y el parentesis final, y lo que queda
-// es un array JSON normal que se parsea con QJsonDocument. No hay motor JS en
-// la app. Si Google cambiara el envoltorio, el recorte no aplica y el parseo
-// falla -> lista vacia, que es el fallo correcto (el desplegable se oculta) en
-// vez de pintar filas basura.
+// The body is JSON wrapped in a JS call: window.google.ac.h([...]). Nothing
+// is executed: the prefix and the trailing parenthesis are trimmed off and
+// what remains is a plain JSON array parsed with QJsonDocument. There is no
+// JS engine in the app. If Google changed the wrapper, the trim does not
+// apply and parsing fails -> empty list, which is the correct failure (the
+// dropdown hides) instead of painting garbage rows.
 //
-// Cada item es ["texto", flags, [ids...], {metadatos}]. Solo se conserva el
-// texto, y SOLO si es una cadena no vacia: el filtro es explicito porque los
-// items sin texto no son consultas buscables y no deben convertirse en filas
-// en blanco del desplegable (el fallo tipico de este endpoint).
+// Each item is ["text", flags, [ids...], {metadata}]. Only the text is kept,
+// and ONLY if it is a non-empty string: the filter is explicit because items
+// without text are not searchable queries and must not become blank rows in
+// the dropdown (the typical failure of this endpoint).
 QVector<Suggestion> parseSuggestBody(const QByteArray &body)
 {
     QVector<Suggestion> out;
     QString text = QString::fromUtf8(body).trimmed();
     if (text.startsWith(QLatin1String(")]}'"))) {
         text.remove(0, 4);
-        text = text.trimmed(); // el XSSI suele seguir de un \n
+        text = text.trimmed(); // the XSSI prefix is usually followed by a \n
     }
     const QString prefix = QLatin1String(kSuggestJsPrefix);
     if (text.startsWith(prefix)) {
@@ -281,8 +282,8 @@ QVector<Suggestion> parseSuggestBody(const QByteArray &body)
         if (text.endsWith(QLatin1Char(')')))
             text.chop(1);
     } else if (!text.startsWith(QLatin1Char('['))) {
-        // Sin la envoltura esperada no es el formato conocido: no se intenta
-        // adivinar ni a medias.
+        // Without the expected wrapper this is not the known format: no
+        // guessing, not even half of it.
         return out;
     }
 
@@ -291,18 +292,19 @@ QVector<Suggestion> parseSuggestBody(const QByteArray &body)
     if (err.error != QJsonParseError::NoError || !doc.isArray())
         return out;
 
-    // arr[1] es la lista de items; arr[0] es el prefijo ya escrito.
+    // arr[1] is the list of items; arr[0] is the already typed prefix.
     const QJsonArray arr = doc.array();
     if (arr.size() < 2)
         return out;
     const QJsonArray items = arr.at(1).toArray();
     for (const QJsonValue &v : items) {
-        // El endpoint usa DOS formatos segun el client, y hay que leer los dos:
-        //   client=youtube/chrome -> ["texto", flags, [ids...], {meta}]
-        //   client=firefox        -> "texto" (string pelado)
-        // Se cubre el de youtube (el que usa la app) y, si el item llega como
-        // string, tambien se acepta: es el mismo texto y no cuesta nada. Un item
-        // que no sea ninguno de los dos se descarta.
+        // The endpoint uses TWO formats depending on the client, and both
+        // have to be read:
+        //   client=youtube/chrome -> ["text", flags, [ids...], {meta}]
+        //   client=firefox        -> "text" (bare string)
+        // The youtube one (what the app uses) is covered and, if the item
+        // arrives as a string, it is accepted too: it is the same text and it
+        // costs nothing. An item that is neither of the two is discarded.
         QString query;
         QString detail;
         if (v.isString()) {
@@ -312,9 +314,8 @@ QVector<Suggestion> parseSuggestBody(const QByteArray &body)
             if (item.isEmpty())
                 continue;
             query = item.at(0).toString().trimmed();
-            // Metadatos de entidad del panel de conocimiento (solo algunas
-            // filas los traen): "Cantante y compositor peruano", avatar,
-            // wikipedia.
+            // Entity metadata of the knowledge panel (only some rows carry
+            // it): "Cantante y compositor peruano", avatar, wikipedia.
             const QJsonObject meta = item.at(3).toObject();
             detail = meta.value(QStringLiteral("zaf")).toString().trimmed();
             if (detail.isEmpty())
@@ -323,7 +324,7 @@ QVector<Suggestion> parseSuggestBody(const QByteArray &body)
             continue;
         }
         if (query.isEmpty())
-            continue; // sin consulta real: no es una fila valida
+            continue; // no real query: not a valid row
         Suggestion s;
         s.query = query;
         s.detail = detail;
@@ -334,10 +335,10 @@ QVector<Suggestion> parseSuggestBody(const QByteArray &body)
 
 } // namespace
 
-// Cliente HTTP/HTTPS mínimo que fuerza conexión por IPv4 manteniendo SNI y
-// validación de certificado contra www.youtube.com (QSslSocket usa
-// setPeerVerifyName para ambos). YouTube bloquea por IPv6 ciertos videos
-// desde esta red; por IPv4 responden sin gate anti-bot.
+// Minimal HTTP/HTTPS client that forces IPv4 connections while keeping SNI
+// and certificate validation against www.youtube.com (QSslSocket uses
+// setPeerVerifyName for both). YouTube blocks certain videos over IPv6 from
+// this network; over IPv4 they answer without the anti-bot gate.
 class Ipv4Https : public QObject
 {
     Q_OBJECT
@@ -387,22 +388,22 @@ public:
         start(req);
     }
 
-    // GET a una URL HTTPS absoluta (p.ej. el master HLS en
-    // manifest.googlevideo.com). Reutiliza el mismo transporte IPv4.
-    // highPriority=true adelanta la petición al frente de la cola: el master
-    // es imprescindible para arrancar el vídeo y no debe esperar detrás de la
-    // siembra radio/next (que no bloquea la reproducción).
+    // GET of an absolute HTTPS URL (e.g. the HLS master on
+    // manifest.googlevideo.com). Reuses the same IPv4 transport.
+    // highPriority=true moves the request to the front of the queue: the
+    // master is required to start the video and must not wait behind the
+    // radio/next seeding (which does not block playback).
     void getUrl(const QUrl &url, const char *ua, bool highPriority = false)
     {
         HttpRequest req;
         req.verb = QByteArrayLiteral("GET");
         const QString host = url.host();
-        // FullyEncoded (no el path()/query() por defecto, que DEVUELVEN la
-        // forma decodificada): el request-line tiene que llevar al servidor lo
-        // mismo que el caller escribio. Con query() sin FullyEncoded, un "&q="
-        // que el caller percent-encoded a mano vuelve con los espacios en crudo
-        // y el endpoint responde 400. Para el master HLS no se nota (sus URLs
-        // ya vienen consistentes), pero en /complete/search lo rompia.
+        // FullyEncoded (not the default path()/query(), which RETURN the
+        // decoded form): the request-line must send the server exactly what
+        // the caller wrote. With query() but no FullyEncoded, a "&q=" that the
+        // caller percent-encoded by hand comes back with raw spaces and the
+        // endpoint answers 400. For the HLS master it does not show (its URLs
+        // already come consistent), but on /complete/search it broke it.
         QString path = url.path(QUrl::FullyEncoded);
         if (url.hasQuery())
             path += QLatin1Char('?') + url.query(QUrl::FullyEncoded);
@@ -462,8 +463,8 @@ public:
 
     void setTimeoutMs(int ms)
     {
-        // Tiempo de espera de la PRÓXIMA petición que se encuele (cada
-        // petición lleva el suyo: el transporte es FIFO).
+        // Timeout of the NEXT request that gets queued (each request carries
+        // its own: the transport is FIFO).
         m_nextTimeoutMs = ms;
     }
 
@@ -493,9 +494,10 @@ private:
 
     void start(HttpRequest req)
     {
-        // Cada petición captura SUS callbacks y timeout al encolarse: si otra
-        // fase (player/next/radio/master) ya está usando el socket, la nueva
-        // espera en la cola FIFO en vez de abortar la conexión en curso.
+        // Each request captures ITS OWN callbacks and timeout when queued: if
+        // another phase (player/next/radio/master) is already using the
+        // socket, the new one waits in the FIFO queue instead of aborting the
+        // connection in progress.
         req.result = std::move(m_result);
         req.error = std::move(m_error);
         req.timeoutMs = m_nextTimeoutMs;
@@ -548,7 +550,7 @@ private:
                     onDisconnected(current);
                 });
 
-        // Resolver el host de destino a una dirección IPv4.
+        // Resolve the target host to an IPv4 address.
         QHostInfo::lookupHost(QString::fromUtf8(reqHost), this,
                               [this, current, reqHost](const QHostInfo &info) {
                                   if (current != m_socket)
@@ -691,8 +693,8 @@ private:
         return h.contains("transfer-encoding: chunked");
     }
 
-    // Decodifica un cuerpo transfer-encoding: chunked (el que YouTube usa en
-    // sw.js_data y youtubei/v1/player).
+    // Decodes a transfer-encoding: chunked body (the one YouTube uses in
+    // sw.js_data and youtubei/v1/player).
     static QByteArray dechunkBody(const QByteArray &raw)
     {
         QByteArray out;
@@ -702,7 +704,7 @@ private:
             if (eol < 0)
                 break;
             int sizeEnd = eol;
-            const int ext = raw.indexOf(';', pos); // "1a;ext" opcional
+            const int ext = raw.indexOf(';', pos); // "1a;ext" optional
             if (ext > pos && ext < eol)
                 sizeEnd = ext;
             bool ok = false;
@@ -713,7 +715,7 @@ private:
             if (start + size > raw.size())
                 break;
             out += raw.mid(start, size);
-            pos = start + size + 2; // CRLF tras el bloque
+            pos = start + size + 2; // CRLF after the block
         }
         return out;
     }
@@ -796,15 +798,16 @@ void Innertube::setHl(const QString &hl)
 
 void Innertube::rotateSession()
 {
-    // El gate de YouTube es de SESIÓN, no de URL: descartar el visitorData
-    // vigente (aunque no haya caducado) fuerza sw.js_data -> visitorData nuevo.
+    // YouTube's gate is per SESSION, not per URL: dropping the current
+    // visitorData (even if it has not expired) forces sw.js_data -> a new
+    // visitorData.
     m_visitorData.clear();
     m_visitorExpiresAt = 0;
     m_retryingVisitor = false;
-    // URLs firmadas cacheadas de la sesión anterior: todas potencialmente
-    // gateadas. Descartarlas todas (no solo el vídeo en curso, por si el usuario
-    // reproduce otro con esa caché) para que el siguiente fetchHls repita el
-    // POST /player con el visitorData nuevo.
+    // Signed URLs cached from the previous session: all potentially gated.
+    // Drop all of them (not just the video at hand, in case the user plays
+    // another one with that cache) so the next fetchHls repeats the POST
+    // /player with the new visitorData.
     if (!m_hlsCache.isEmpty()) {
         m_hlsCache.clear();
         saveHlsCacheToDisk();
@@ -815,26 +818,27 @@ void Innertube::rotateSession()
 void Innertube::fetchHls(const QString &videoId, int preferredClient,
                          bool forceRefresh)
 {
-    // Frescura forzada: descartar la entrada cacheada (hlsUrl + adaptiveFormats
-    // con sus URLs firmadas) para que el POST /player devuelva URLs nuevas. Si
-    // no, una segunda reproducción reusa la URL de videoplayback ya agotada
-    // (presupuesto por petición) y YouTube responde 403 → vídeo congelado.
+    // Forced freshness: drop the cached entry (hlsUrl + adaptiveFormats with
+    // their signed URLs) so the POST /player returns new URLs. Otherwise a
+    // second playback reuses an already exhausted videoplayback URL (per
+    // request budget) and YouTube answers 403 → frozen video.
     if (forceRefresh && m_hlsCache.remove(videoId) > 0) {
         saveHlsCacheToDisk();
         NT_DEBUG("E2E innertube hls cache invalidada id=%s\n",
                  videoId.toUtf8().constData());
     }
-    // Caché de sesión: si ya hay una hlsManifestUrl firmada y vigente, se
-    // entrega al instante sin repetir el POST player.
+    // Session cache: if there is already a signed, still-valid
+    // hlsManifestUrl, it is served instantly without repeating the player
+    // POST.
     if (serveCachedHls(videoId)) {
         NT_DEBUG("E2E innertube hls caché hit id=%s\n",
                  videoId.toUtf8().constData());
         return;
     }
-    // Single-flight: si ya hay una petición player en curso para este
-    // videoId (p.ej. dos cambios de resolución seguidos), no lanzar otra
-    // HTTP. La petición en curso emitirá hlsReady y los guards de Yt filtran
-    // por gen/propósito y la reciben.
+    // Single-flight: if a player request is already in flight for this
+    // videoId (e.g. two consecutive resolution changes), do not launch
+    // another HTTP request. The request in flight will emit hlsReady and Yt's
+    // guards filter by gen/purpose and pick it up.
     if (m_hlsInFlight && m_flightVideoId == videoId) {
         NT_DEBUG("E2E innertube hls single-flight id=%s\n",
                  videoId.toUtf8().constData());
@@ -863,21 +867,21 @@ void Innertube::fetchHls(const QString &videoId, int preferredClient,
 
 void Innertube::fetchMaster(const QString &videoId, const QString &masterUrl)
 {
-    // Caché de sesión del cuerpo del master (mismo videoId y firma vigente).
+    // Session cache of the master body (same videoId and valid signature).
     if (serveCachedMaster(videoId)) {
         NT_DEBUG("E2E innertube master caché hit id=%s\n",
                  videoId.toUtf8().constData());
         return;
     }
-    // Single-flight: si otra petición del mismo videoId está descargando el
-    // master, esperar su masterReady en vez de lanzar un segundo GET.
+    // Single-flight: if another request for the same videoId is downloading
+    // the master, wait for its masterReady instead of launching a second GET.
     if (mMasterInFlight && m_flightVideoId == videoId) {
         NT_DEBUG("E2E innertube master single-flight id=%s\n",
                  videoId.toUtf8().constData());
         return;
     }
     if (videoId != m_videoId) {
-        // No es el videoId de la petición hls en curso: no se puede servir.
+        // Not the videoId of the hls request in flight: it cannot be served.
         fail(QStringLiteral("fetchMaster para id distinto del actual"));
         return;
     }
@@ -897,15 +901,15 @@ void Innertube::fetchMaster(const QString &videoId, const QString &masterUrl)
     m_http->setError([this](const QString &reason) {
         handleMaster(false, reason, QByteArray());
     });
-    // High priority: el master es imprescindible para arrancar el vídeo; se
-    // adelanta a la siembra radio/next ya encolada (que no bloquea).
+    // High priority: the master is required to start the video; it jumps
+    // ahead of the already queued radio/next seeding (which does not block).
     m_http->getUrl(url, kVisionOSUA, /*highPriority=*/true);
 }
 
 void Innertube::fetchVisitorData()
 {
-    // El flujo documentado (AGENTS.md) es sw.js_data -> visitorData. La
-    // homepage (/) devuelve un body vacío (JS challenge) y no sirve.
+    // The documented flow (AGENTS.md) is sw.js_data -> visitorData. The
+    // homepage (/) returns an empty body (JS challenge) and is useless.
     if (m_visitorInFlight) {
         NT_DEBUG("E2E innertube visitorData single-flight\n");
         return;
@@ -929,8 +933,8 @@ void Innertube::fetchVisitorData()
         NT_DEBUG("E2E innertube visitorData sw.js_data len=%d\n",
                  visitorData.size());
         emit visitorDataReady(m_visitorData, m_visitorExpiresAt);
-        // Despachar TODAS las fases que esperaban visitorData (el player
-        // primero para arrancar el vídeo cuanto antes), no solo una.
+        // Dispatch EVERY phase that was waiting for visitorData (the player
+        // first, to start the video as soon as possible), not just one.
         dispatchPending();
     });
     m_http->setError([this](const QString &reason) {
@@ -947,18 +951,18 @@ void Innertube::useFallbackVisitorData()
 {
     m_visitorData = QString::fromLatin1(kFallbackVisitorData);
     m_visitorExpiresAt = QDateTime::currentSecsSinceEpoch() + 2592000;
-    // Marcar como "fresco en esta sesión" también ante fallback: evita que el
-    // Home reintente sw.js_data en cada recarga cuando el endpoint está caído
-    // (el fallback fijo ya es usable).
+    // Mark as "fresh in this session" on the fallback too: it keeps the Home
+    // from retrying sw.js_data on every reload while the endpoint is down
+    // (the fixed fallback is already usable).
     m_visitorDataFreshRun = true;
     NT_DEBUG("E2E innertube visitorData fixed fallback len=%d\n",
              m_visitorData.size());
     dispatchPending();
 }
 
-// Dispatcher tras refrescar visitorData: lanza las fases player/next/radio
-// que quedaron esperando, con prioridad al player. El transporte FIFO
-// serializa los POSTs sin abortarlos entre sí.
+// Dispatcher after refreshing visitorData: launches the player/next/radio
+// phases that were left waiting, with priority to the player. The FIFO
+// transport serializes the POSTs without aborting each other.
 void Innertube::dispatchPending()
 {
     if (m_playerPending) {
@@ -997,8 +1001,9 @@ void Innertube::dispatchPending()
         m_chInfoPending = false;
         requestChannelInfo();
     }
-    // Pestañas de canal pendientes de visitorData: relanzar las que esperaban
-    // (puede haber varias: la UI pide videos/shorts/live a la vez).
+    // Channel tabs pending on visitorData: relaunch the ones that were
+    // waiting (there can be several: the UI requests videos/shorts/live at
+    // the same time).
     const QList<QString> tabKeys = m_tabStates.keys();
     for (const QString &key : tabKeys) {
         ChannelTabState st = m_tabStates.value(key);
@@ -1074,8 +1079,8 @@ void Innertube::fetchCurrentDetail(const QString &videoId)
     requestCurrentDetail();
 }
 
-// Detalle traducido del vídeo actual con el /next normal. Cliente primario
-// VISIONOS, sin cascada ni siembra: solo se emite currentDetailReady.
+// Translated detail of the current video with a plain /next. Primary client
+// VISIONOS, no cascade and no seeding: only currentDetailReady is emitted.
 void Innertube::requestCurrentDetail()
 {
     const QString videoId = m_currentDetailVideoId;
@@ -1117,12 +1122,12 @@ void Innertube::requestCurrentDetail()
                  nullptr, nullptr, nullptr);
 }
 
-// videoMetadataRenderer del /next: título y descripción en el idioma "hl"
-// solicitado (traducción de YouTube). Se busca tanto en el /next tipo
-// twoColumnWatchNextResults (cliente de escritorio/TV) como en el
-// singleColumnWatchNextResults → watchNextTabbedResultsRenderer que
-// devuelve VISIONOS (vista por pestañas: la pestaña de reproducción trae el
-// videoMetadataRenderer del vídeo actual).
+// videoMetadataRenderer of the /next: title and description in the
+// requested "hl" language (YouTube translation). It is searched both in the
+// twoColumnWatchNextResults /next (desktop/TV client) and in the
+// singleColumnWatchNextResults → watchNextTabbedResultsRenderer that VISIONOS
+// returns (tabbed view: the playback tab carries the current video's
+// videoMetadataRenderer).
 void Innertube::parseCurrentDetail(const QJsonObject &root, QString *title,
                                    QString *description)
 {
@@ -1135,8 +1140,8 @@ void Innertube::parseCurrentDetail(const QJsonObject &root, QString *title,
     if (col.isEmpty())
         return;
 
-    // Vista por pestañas (VISIONOS): recorrer la primera pestaña cuya sección
-    // contenga el renderer del vídeo actual.
+    // Tabbed view (VISIONOS): walk the first tab whose section contains the
+    // current video's renderer.
     const QJsonObject tabbed =
         col.value(QStringLiteral("results"))
             .toObject().value(QStringLiteral("watchNextTabbedResultsRenderer"))
@@ -1189,7 +1194,7 @@ void Innertube::parseCurrentDetail(const QJsonObject &root, QString *title,
         return;
     }
 
-    // Ruta clásica results.results.contents[].itemSectionRenderer.contents[].
+    // Classic route results.results.contents[].itemSectionRenderer.contents[].
     const QJsonObject results = col.value(QStringLiteral("results")).toObject()
                                     .value(QStringLiteral("results")).toObject();
     const QJsonArray items = results.value(QStringLiteral("contents")).toArray();
@@ -1269,8 +1274,8 @@ void Innertube::handleNext(const QString &videoId, bool ok,
                            const QString &error, const QByteArray &body)
 {
     m_nextInFlight = false;
-    // Cascada de clientes estilo NewPipe: probar el siguiente cliente antes
-    // de abandonar con una respuesta vacía.
+    // NewPipe-style client cascade: try the next client before giving up
+    // with an empty response.
     auto tryNextClient = [this, videoId]() {
         if (m_nextClientIndex + 1 < kPlayerClientCount) {
             ++m_nextClientIndex;
@@ -1306,8 +1311,8 @@ void Innertube::handleNext(const QString &videoId, bool ok,
     const QVector<VideoInfo> related = parseRelated(jsonRoot);
     NT_DEBUG("E2E innertube next ok id=%s relacionados=%d\n",
              videoId.toUtf8().constData(), related.size());
-    // Seleccionar la mejor respuesta: quedarse con la lista más larga y seguir
-    // probando clientes mientras no llegue a un "A continuación" razonable.
+    // Pick the best response: keep the longest list and keep trying clients
+    // until a reasonable "Up next" shows up.
     auto emitBest = [this, videoId]() {
         emit relatedReady(videoId, m_bestNext);
     };
@@ -1382,7 +1387,7 @@ void Innertube::requestRadio()
 
     QJsonObject body;
     if (m_radioContinuation.isEmpty()) {
-        // Primer batch: el mix RDAMVM<videoId> (radio) de YouTube.
+        // First batch: YouTube's RDAMVM<videoId> (radio) mix.
         body = {
             {QStringLiteral("context"), context},
             {QStringLiteral("videoId"), videoId},
@@ -1395,7 +1400,7 @@ void Innertube::requestRadio()
             {QStringLiteral("isAudioOnly"), true},
         };
     } else {
-        // Batch siguiente del mismo mix, por token de continuación.
+        // Next batch of the same mix, via continuation token.
         body = {
             {QStringLiteral("context"), context},
             {QStringLiteral("continuation"), m_radioContinuation},
@@ -1410,8 +1415,8 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
                             const QString &error, const QByteArray &body)
 {
     m_radioInFlight = false;
-    // Cascada de clientes solo en el primer batch: el token de continuación
-    // es específico del cliente que lo emitió.
+    // Client cascade only on the first batch: the continuation token is
+    // specific to the client that issued it.
     auto tryNextClient = [this, videoId]() {
         if (m_radioContinuation.isEmpty()
             && m_radioClientIndex + 1 < kPlayerClientCount) {
@@ -1449,19 +1454,19 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
     QString continuation;
     parseWatchQueue(jsonRoot, &videos, &continuation);
     if (videos.isEmpty()) {
-        // El mix RDAMVM solo trae panel (playlistPanelVideoRenderer) para
-        // vídeos con edición de música; para el resto el /next responde la
-        // mezcla como recomendaciones (compactVideoRenderer). Se guarda la
-        // primera mezcla vista y se sigue cascadeando por si otro cliente
-        // trae el panel real; si ninguno lo trae, se emite la mezcla.
+        // The RDAMVM mix only carries a panel (playlistPanelVideoRenderer)
+        // for videos with a music edit; for the rest, /next answers the mix as
+        // recommendations (compactVideoRenderer). The first mix seen is saved
+        // and the cascade keeps going in case another client brings the real
+        // panel; if none does, the mix is emitted.
         const QVector<VideoInfo> fb = parseRelated(jsonRoot);
-        // Cliente principal (VISIONOS): responde la mezcla como
-        // recomendaciones (compactVideoRenderer, SIN fecha y con el texto de
-        // visitas localizado). En vez de emitirla ya, se pide UNA vez el mismo
-        // /next al cliente WEB, que devuelve lockupViewModel con visitas y
-        // fecha; si esa petición falla, se emite la de VISIONOS tal cual. Sigue
-        // siendo una sola petición extra, no las 4 de la cascada completa
-        // (~12-15 s), y el panel real de música lo siguen trayendo IOS/otros.
+        // Primary client (VISIONOS): answers the mix as recommendations
+        // (compactVideoRenderer, WITHOUT date and with the localized views
+        // text). Instead of emitting it right away, the same /next is asked
+        // once to the WEB client, which returns lockupViewModel with views
+        // and date; if that request fails, the VISIONOS one is emitted as is.
+        // It is still a single extra request, not the 4 of the full cascade
+        // (~12-15 s), and IOS/others still bring the real music panel.
         if (m_radioClientIndex == 0 && !fb.isEmpty()) {
             NT_DEBUG("E2E innertube radio vision fallback id=%s n=%d -> web\n",
                      videoId.toUtf8().constData(), fb.size());
@@ -1498,16 +1503,16 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
     emit radioReady(videoId, videos);
 }
 
-// Segunda petición del fallback de radio: el mismo /next con el cliente WEB.
-// Su layout moderno (lockupViewModel) trae las visitas y la fecha que el
-// compactVideoRenderer de VISIONOS no tiene; es lo único que hace que "A
-// continuación" muestre los tres campos como el resto de la app. Sin API key
-// (igual que el browse de pestañas de canal).
+// Second request of the radio fallback: the same /next with the WEB client.
+// Its modern layout (lockupViewModel) carries the views and the date that
+// VISIONOS's compactVideoRenderer lacks; it is the only thing that makes
+// "Up next" show the three fields like the rest of the app. No API key
+// (same as browsing channel tabs).
 void Innertube::requestRadioWeb(const QString &videoId)
 {
-    // La radio sigue "en vuelo" (handleRadio acaba de bajar el flag): sin esto
-    // un fetchRadio concurrente lanzaría otra petición y pisaría estos
-    // callbacks.
+    // The radio is still "in flight" (handleRadio just lowered the flag):
+    // without this a concurrent fetchRadio would launch another request and
+    // overwrite these callbacks.
     m_radioInFlight = true;
     m_http->setResult([this, videoId](int status, const QByteArray &body) {
         NT_DEBUG("E2E innertube radioWeb HTTP status=%d size=%d\n", status,
@@ -1541,8 +1546,8 @@ void Innertube::handleRadioWeb(const QString &videoId, bool ok,
         if (parseJsonObject(body, &root))
             out = parseRelated(root); // lockupViewModel -> visitas + fecha
     }
-    // Si el WEB no dio lista utilizable, se usa la que ya trajo VISIONOS: la
-    // cola se sirve igual, solo que sin fecha.
+    // If WEB did not yield a usable list, use the one VISIONOS already
+    // brought: the queue is served the same way, only without the date.
     if (out.isEmpty())
         out = m_radioVisionFallback;
     m_radioVisionFallback.clear();
@@ -1551,31 +1556,32 @@ void Innertube::handleRadioWeb(const QString &videoId, bool ok,
     emit radioReady(videoId, out);
 }
 
-// Límites del feed del Home (browse FEwhat_to_watch): hasta kHomeShelfCap
-// estantes y kHomeShelfVideos vídeos por estante; si no hay estantes (layout
-// distinto) se recolecta hasta kHomeShelfVideos sueltos.
+// Home feed limits (browse FEwhat_to_watch): up to kHomeShelfCap shelves
+// and kHomeShelfVideos videos per shelf; if there are no shelves (different
+// layout), up to kHomeShelfVideos loose videos are collected.
 constexpr int kHomeShelfCap = 3;
 constexpr int kHomeShelfVideos = 8;
 
-// Params de la pestaña "Vídeos" de los canales (browse). Valor verificado
-// idéntico en los canales reales; sin él el browse devuelve la pestaña por
-// defecto ("Inicio") en lugar del listado de vídeos.
+// Params of the channels' "Videos" tab (browse). A value verified as
+// identical on real channels; without it the browse returns the default tab
+// ("Home") instead of the video listing.
 const char kChannelVideosParams[] = "EgZ2aWRlb3PyBgQKAjoA";
-// Tendencias: browseId real, aunque hoy YouTube responde 400/redirección a la
-// Home para tendencias anónimas (el selftest registra el estado real).
+// Trending: real browseId, although today YouTube answers 400/redirect to
+// the Home for anonymous trending (the selftest records the real status).
 const char kTrendingBrowseId[] = "FEtrending";
-// Cuántos vídeos se recolectan por canal/tendencias (luego la UI decide/dedupe
-// y limita a 8). Suficiente para llenar la sección sin pedir más canales.
+// How many videos are collected per channel/trending (then the UI
+// decides/dedupes and limits to 8). Enough to fill the section without
+// asking for more channels.
 constexpr int kChannelTake = 12;
 constexpr int kTrendingTake = 12;
-// Params de las pestañas Shorts y Directos (browse del canal). VISIONOS los
-// ignora y devuelve la Home; el cliente WEB sí las sirve.
+// Params of the Shorts and Live tabs (channel browse). VISIONOS ignores
+// them and returns the Home; the WEB client does serve them.
 const char kChannelShortsParams[] = "EgZzaG9ydHPyBgUKA5oBAA==";
 const char kChannelLiveParams[] = "EgdzdHJlYW1z8gYECgJ6AA==";
-// Pestaña "Información" del canal (browse): descripción, país, url canónica.
+// Channel "About" tab (browse): description, country, canonical url.
 const char kChannelAboutParams[] = "EgVhYm91dPIGBAoCEgA=";
-// Tamaño de página de las pestañas de canal y de la búsqueda: la UI muestra
-// "Mostrar más" cuando la página llega a este tamaño.
+// Page size of channel tabs and search: the UI shows "Show more" when the
+// page reaches this size.
 constexpr int kChannelTabTake = 25;
 constexpr int kSearchTake = 20;
 
@@ -1589,10 +1595,10 @@ void Innertube::fetchHome()
     m_homeContinuation.clear();
     m_homeVisitorRetried = false;
     NT_DEBUG("E2E innertube fetchHome\n");
-    // El visitorData persistido vigente se usa directamente: ya no se fuerza
-    // el refresh una vez por sesión (gana una RTT en el arranque). Si el
-    // browse responde 500/vacío, handleHome refresca visitorData UNA vez y
-    // reintenta (m_homeVisitorRetried) sin bucle.
+    // The current persisted visitorData is used directly: the refresh is no
+    // longer forced once per session (saves one RTT at startup). If the
+    // browse answers 500/empty, handleHome refreshes visitorData ONCE and
+    // retries (m_homeVisitorRetried), without looping.
     if (!hasFreshVisitor()) {
         m_homePending = true;
         fetchVisitorData();
@@ -1625,9 +1631,9 @@ void Innertube::requestHome(const QString &continuation)
     m_http->setTimeoutMs(kPlayerTimeoutMs);
     m_http->setVisitorId(m_visitorData);
 
-    // VISIONOS: el único cliente probado que devuelve el feed real del Home
-    // (62 compactVideoRenderer en la PRUEBA 1). Sin cascada: si falla/500, se
-    // reintenta una vez con visitorData fresco (no en bucle).
+    // VISIONOS: the only tested client that returns the real Home feed
+    // (62 compactVideoRenderer in PROOF 1). No cascade: on failure/500, retry
+    // once with fresh visitorData (not in a loop).
     const PlayerClient &pc = kPlayerClients[0];
     const QJsonObject client = clientContext(pc, m_visitorData, m_hl);
     QJsonObject context{{QStringLiteral("client"), client}};
@@ -1690,8 +1696,8 @@ void Innertube::handleHome(bool ok, const QString &error,
         emit homeMoreReady(videos);
         return;
     }
-    // Respuesta válida pero sin vídeos (p. ej. 200 con challenge/error):
-    // reintentar una vez con visitorData fresco antes de ocultar la sección.
+    // Valid response but with no videos (e.g. 200 with challenge/error):
+    // retry once with fresh visitorData before hiding the section.
     if (videos.isEmpty()
         && retryBrowseWithFreshVisitor(&m_homeVisitorRetried,
                                        &m_homePending))
@@ -1852,9 +1858,9 @@ void Innertube::handleTrending(bool ok, const QString &error,
 }
 
 // ---------------------------------------------------------------------------
-// Búsqueda y peticiones de browse de la UI (canal, pestañas, detalle,
-// playlist). Mismo patrón que el Home: single-flight, visitorData y un
-// reintento con visitorData fresco si el browse responde vacío/error.
+// UI search and browse requests (channel, tabs, detail, playlist). Same
+// pattern as Home: single-flight, visitorData, and one retry with fresh
+// visitorData if the browse responds empty/error.
 
 void Innertube::fetchSearch(const QString &query, int limit)
 {
@@ -1895,9 +1901,9 @@ void Innertube::fetchSearchMore(int limit)
 
 void Innertube::fetchSuggest(const QString &query)
 {
-    // Sin texto no hay nada que sugerir, y un prefijo de 1 letra solo trae
-    // ruido de entidades; el minimo de 2 evita una peticion por cada tecla al
-    // arrancar la palabra.
+    // With no text there is nothing to suggest, and a 1-letter prefix only
+    // brings entity noise; the minimum of 2 avoids one request per keypress
+    // when starting a word.
     const QString q = query.trimmed();
     if (q.size() < 2) {
         m_suggestInFlight = false;
@@ -1905,13 +1911,13 @@ void Innertube::fetchSuggest(const QString &query)
         return;
     }
     if (m_suggestInFlight && m_suggestQuery == q)
-        return; // mismo prefijo ya pedido
+        return; // same prefix already requested
 
     m_suggestInFlight = true;
     m_suggestQuery = q;
-    // El query viaja en la URL, asi que codificarlo es OBLIGATORIO: con
-    // espacios en crudo el endpoint devuelve 400. QUrl::toPercentEncoding deja
-    // intactos los caracteres seguros y escapa el resto (acentos incluidos).
+    // The query travels in the URL, so encoding it is MANDATORY: with raw
+    // spaces the endpoint returns 400. QUrl::toPercentEncoding leaves safe
+    // characters intact and escapes the rest (accents included).
     const QString url = QLatin1String(kSuggestUrl)
         + QString::fromLatin1(QUrl::toPercentEncoding(q));
 
@@ -1925,9 +1931,9 @@ void Innertube::fetchSuggest(const QString &query)
                  reason.toUtf8().constData());
         handleSuggest(q, false, QByteArray());
     });
-    m_http->setTimeoutMs(8000); // type-ahead: caduca antes que una busqueda
-    // getUrl() valida TLS contra el host de la propia URL, asi que sirve para
-    // suggestqueries.google.com sin tocar el transporte.
+    m_http->setTimeoutMs(8000); // type-ahead: expires sooner than a search
+    // getUrl() validates TLS against the URL's own host, so it works for
+    // suggestqueries.google.com without touching the transport.
     m_http->getUrl(QUrl(url), kChromeUA);
 }
 
@@ -1940,8 +1946,8 @@ void Innertube::handleSuggest(const QString &query, bool ok,
         items = parseSuggestBody(body);
     NT_DEBUG("E2E suggest q=%s items=%d\n", query.toUtf8().constData(),
              items.size());
-    // Se emite siempre, incluso vacio: la UI lo trata como "cierra el
-    // desplegable", no como "no hagas nada".
+    // Always emitted, even when empty: the UI treats it as "close the
+    // dropdown", not as "do nothing".
     emit suggestReady(query, items);
 }
 
@@ -2150,9 +2156,9 @@ void Innertube::requestChannelTab(const QString &channelId, const QString &tab,
     m_http->setTimeoutMs(kPlayerTimeoutMs);
     m_http->setVisitorId(m_visitorData);
 
-    // Cliente WEB para las tres pestañas: VISIONOS solo expone "Vídeos" y su
-    // continuación devuelve páginas vacías; WEB sirve videos/shorts/live con el
-    // layout moderno (lockups) y continuación funcional.
+    // WEB client for all three tabs: VISIONOS only exposes "Videos" and its
+    // continuation returns empty pages; WEB serves videos/shorts/live with the
+    // modern layout (lockups) and working continuation.
     const QJsonObject client = webClientContext(m_visitorData, m_hl);
     QJsonObject body{
         {QStringLiteral("context"),
@@ -2192,8 +2198,8 @@ void Innertube::handleChannelTab(const QString &channelId, const QString &tab,
         QJsonObject jsonRoot;
         const bool jsonOk = parseJsonObject(body, &jsonRoot);
         if (jsonOk) {
-            // Las tres pestañas van por el cliente WEB (lockups modernos); el
-            // parser clásico queda como respaldo por si el layout cambia.
+            // All three tabs go through the WEB client (modern lockups); the
+            // classic parser remains as a fallback in case the layout changes.
             videos = collectWebLockups(jsonRoot, st.limit);
             if (videos.isEmpty())
                 videos = collectVideoRenderers(jsonRoot, st.limit);
@@ -2204,7 +2210,7 @@ void Innertube::handleChannelTab(const QString &channelId, const QString &tab,
     }
     st.continuation = continuation;
     if (!more && videos.isEmpty() && !st.visitorRetried) {
-        // Un solo reintento con visitorData fresco por (canal, pestaña).
+        // Only one retry with fresh visitorData per (channel, tab).
         st.visitorRetried = true;
         st.pending = true;
         m_tabStates.insert(key, st);
@@ -2363,7 +2369,7 @@ void Innertube::handlePlaylist(const QString &playlistId, bool ok,
 
 namespace {
 
-// Texto de un nodo (simpleText o runs).
+// Text of a node (simpleText or runs).
 QString homeTextOf(const QJsonValue &val)
 {
     const QJsonObject o = val.toObject();
@@ -2377,10 +2383,10 @@ QString homeTextOf(const QJsonValue &val)
     return t;
 }
 
-// browseId del canal en un byline compartido (compactVideoRenderer /
+// browseId of the channel in a shared byline (compactVideoRenderer /
 // playlistPanelVideoRenderer): runs[0].navigationEndpoint.browseEndpoint.
-// Sin esto, los vídeos que llegan por la cola se quedaban SIN id de canal y no
-// se podía ni entrar al canal ni suscribirse desde la página Player.
+// Without this, videos arriving via the queue were left WITHOUT a channel id,
+// and one could neither enter the channel nor subscribe from the Player page.
 QString channelIdFromByline(const QJsonObject &text)
 {
     const QJsonArray runs = text.value(QStringLiteral("runs")).toArray();
@@ -2410,9 +2416,9 @@ int homeDurationOf(const QJsonArray &overlays)
     return 0;
 }
 
-// ¿El thumbnailOverlayTimeStatusRenderer declara un directo? En VISIONOS un
-// directo lleva style "LIVE" en ese overlay (texto "En directo ahora" en vez
-// de una duración); un VOD no tiene style de directo.
+// Does the thumbnailOverlayTimeStatusRenderer declare a live stream? In
+// VISIONOS a live stream carries style "LIVE" in that overlay (text "En
+// directo ahora" instead of a duration); a VOD has no live style.
 bool overlayIsLive(const QJsonArray &overlays)
 {
     for (const QJsonValue &val : overlays) {
@@ -2425,9 +2431,9 @@ bool overlayIsLive(const QJsonArray &overlays)
     return false;
 }
 
-// ¿La lista badges del renderer clásico declara un directo? El cliente WEB lo
-// hace con metadataBadgeRenderer.style == "BADGE_STYLE_TYPE_LIVE_NOW" (icono
-// LIVE, label "EN DIRECTO").
+// Does the badges list of the classic renderer declare a live stream? The WEB
+// client does it with metadataBadgeRenderer.style ==
+// "BADGE_STYLE_TYPE_LIVE_NOW" (LIVE icon, label "EN DIRECTO").
 bool badgesIsLive(const QJsonArray &badges)
 {
     for (const QJsonValue &b : badges) {
@@ -2440,18 +2446,18 @@ bool badgesIsLive(const QJsonArray &badges)
     return false;
 }
 
-// Un renderer clásico (videoRenderer/compactVideoRenderer/playlistPanelVideo
-// Renderer) es un directo si lo declara cualquiera de las dos vías.
+// A classic renderer (videoRenderer/compactVideoRenderer/playlistPanelVideo
+// Renderer) is a live stream if either of the two paths declares it.
 bool rendererIsLive(const QJsonObject &r)
 {
     return overlayIsLive(r.value(QStringLiteral("thumbnailOverlays")).toArray())
         || badgesIsLive(r.value(QStringLiteral("badges")).toArray());
 }
 
-// ¿El viewCountText del /next describe un directo EN EMISIÓN ("10.554
-// usuarios viéndolo ahora", "10,554 watching now", "assistindo agora") en vez
-// de "N visualizaciones"? Es el discriminador de "sigue en directo": un
-// directo terminado vuelve al formato de vistas normales.
+// Does the /next viewCountText describe a live stream ON AIR ("10.554
+// usuarios viéndolo ahora", "10,554 watching now", "assistindo agora") instead
+// of "N visualizaciones"? It is the discriminator for "still live": a live
+// stream that ended goes back to the normal view-count format.
 bool viewCountShowsLive(const QString &text)
 {
     const QString t = text.toLower();
@@ -2460,32 +2466,33 @@ bool viewCountShowsLive(const QString &text)
         || t.contains(QStringLiteral("assistindo"));
 }
 
-// --- "Metalenguaje" de las fechas relativas -------------------------------
-// El parser NO se apoya en las palabras del idioma ("hace"/"ago") ni en una
-// cascada de startsWith() en un orden fijado a mano. Ese diseño ya escondio un
-// bug real: "semanas" empieza por 's' igual que "segundos", cayó en la rama de
-// segundos y la fecha de "hace 2 semanas" salia a 2 s de ahora -> la app la
-// pintaba "hoy". Para que no vuelva a pasar con otra unidad o idioma:
-//   1) extraction idioma-agnostica: se busca el primer numero (o el articulo
-//      "uno") cuyo token SIGUIENTE sea una unidad reconocible. Da igual el
-//      conector: "hace 2 semanas", "2 weeks ago", "Emitido hace 6 horas" o el
-//      portugues "ha 2 semanas" funcionan sin tocar nada.
-//   2) la unidad se reconoce con una TABLA declarativa (pista -> factor) por
-//      coincidencia MAS LARGA, no por orden de ifs: "sem" gana a "s" sin tener
-//      que blindar ninguna rama, y anadir una unidad nueva (p. ej. "quincena")
-//      es anadir una fila.
-//   3) lo que no se reconoce devuelve VACIO: la UI no inventa una fecha (antes
-//      una unidad rara podia colarse y salir "hoy").
-// Las pistas se comparan sin acentos (la unidad se normaliza a NFD y se quitan
-// las marcas) para cubrir cualquier idioma.
+// --- "Metalanguage" of relative dates ---------------------------------------
+// The parser does NOT rely on the language's words ("hace"/"ago") nor on a
+// cascade of startsWith() in a hand-fixed order. That design already hid a
+// real bug: "semanas" starts with 's' just like "segundos", it fell into the
+// seconds branch and the date of "hace 2 semanas" came out 2 s from now -> the
+// app painted it "hoy". So it does not happen again with another unit or
+// language:
+//   1) language-agnostic extraction: find the first number (or the article
+//      "uno") whose NEXT token is a recognizable unit. The connector does not
+//      matter: "hace 2 semanas", "2 weeks ago", "Emitido hace 6 horas" or
+//      Portuguese "ha 2 semanas" all work without touching anything.
+//   2) the unit is recognized with a DECLARATIVE table (hint -> factor) by
+//      LONGEST match, not by order of ifs: "sem" beats "s" without having to
+//      armor any branch, and adding a new unit (e.g. "quincena") is adding a
+//      row.
+//   3) what is not recognized returns EMPTY: the UI does not invent a date
+//      (before, a weird unit could slip in and produce "hoy").
+// The hints are compared without accents (the unit is normalized to NFD and
+// the marks are stripped) to cover any language.
 struct RelativeUnitHint
 {
-    const char *hint; // subcadena (o token exacto si mide 1), minusculas, sin acentos
-    qint64 factor;    // segundos por unidad
+    const char *hint; // substring (or exact token if length 1), lowercase, no accents
+    qint64 factor;    // seconds per unit
 };
 
-// El orden no importa: se elige la pista mas larga. "sem" cubre semana(s),
-// "seg"/"segund" cubren segundo(s), "mes"/"mese" cubren mes(es), etc.
+// The order does not matter: the longest hint wins. "sem" covers semana(s),
+// "seg"/"segund" cover segundo(s), "mes"/"mese" cover mes(es), etc.
 const RelativeUnitHint kRelativeUnits[] = {
     {"segund", 1},           {"seg", 1},          {"sec", 1},  {"s", 1},
     {"minut", 60},           {"min", 60},         {"m", 30 * 86400},
@@ -2497,8 +2504,8 @@ const RelativeUnitHint kRelativeUnits[] = {
     {"a", 365 * 86400},      {"y", 365 * 86400},
 };
 
-// Espana/Portugues comen acentos ("día", "mês", "año"): se quitan para que la
-// misma pista ("dia", "mes", "ano") valga en los tres idiomas soportados.
+// Spanish/Portuguese eat accents ("día", "mês", "año"): they are stripped so
+// the same hint ("dia", "mes", "ano") works in all three supported languages.
 QString sinAcentos(const QString &s)
 {
     const QString d = s.normalized(QString::NormalizationForm_D);
@@ -2513,8 +2520,8 @@ QString sinAcentos(const QString &s)
     return out;
 }
 
-// Segundos por unidad (0 si no se reconoce). Pista mas larga gana; si la unidad
-// es de UNA letra, se exige coincidencia EXACTA (no "s" dentro de "semanas").
+// Seconds per unit (0 if not recognized). The longest hint wins; if the unit
+// is ONE letter, an EXACT match is required (not "s" inside "semanas").
 qint64 unidadSegundos(const QString &rawUnit)
 {
     const QString u = sinAcentos(rawUnit.toLower()).trimmed();
@@ -2534,21 +2541,22 @@ qint64 unidadSegundos(const QString &rawUnit)
     return best;
 }
 
-// "hace 3 días" / "hace 8 h" / "2 months ago" / "há 2 semanas" → fecha ISO
-// aproximada (para ordenar feeds sin depender de una marca exacta). Si no
-// reconoce el texto, devuelve vacío (la UI no inventa fecha). Reconoce las
-// unidades abreviadas del lockupViewModel del /next ("hace 8 h", "hace 2 m",
-// "hace 3 d"): sin ellas, la fecha se perdía y "A continuación" salía sin ella.
-// El reconocimiento (número + unidad) es idioma-agnóstico y usa la tabla
-// kRelativeUnits; ver el "metalenguaje" unas líneas más arriba.
+// "hace 3 días" / "hace 8 h" / "2 months ago" / "há 2 semanas" → approximate
+// ISO date (to sort feeds without depending on an exact timestamp). If the
+// text is not recognized, returns empty (the UI does not invent a date).
+// Recognizes the abbreviated units of the /next lockupViewModel ("hace 8 h",
+// "hace 2 m", "hace 3 d"): without them the date was lost and "A continuación"
+// came out without it. Recognition (number + unit) is language-agnostic and
+// uses the kRelativeUnits table; see the "metalanguage" a few lines above.
 QString relativeToIso(const QString &text)
 {
     const QString t = text.trimmed().toLower();
     const QStringList parts = t.split(QLatin1Char(' '), Qt::SkipEmptyParts);
     if (parts.size() < 2)
         return QString();
-    // Extracción idioma-agnóstica: primer número (o artículo "uno") cuyo token
-    // siguiente sea una unidad reconocible. NO se ancla a "hace"/"ago".
+    // Language-agnostic extraction: first number (or article "un/una/um/uma/
+    // an/a") whose next token is a recognizable unit. NOT anchored to
+    // "hace"/"ago".
     double n = 0;
     qint64 factor = 0;
     for (int i = 0; i + 1 < parts.size(); ++i) {
@@ -2579,9 +2587,10 @@ QString relativeToIso(const QString &text)
         .toString(Qt::ISODate);
 }
 
-// Cuenta numérica de un texto localizado ("16,9 M de suscriptores",
-// "47 M de visualizaciones", "1.234 suscriptores"). En "es" la coma es
-// decimal y el punto millar; el sufijo M/K/B multiplica.
+// Numeric count from a localized text ("16,9 M de suscriptores",
+// "47 M de visualizaciones", "1.234 suscriptores"). In "es" the comma is the
+// decimal separator and the dot the thousands separator; the M/K/B suffix
+// multiplies.
 long long countFromText(const QString &raw)
 {
     const QString t = raw.simplified();
@@ -2612,11 +2621,11 @@ long long countFromText(const QString &raw)
     if (lastSep >= 0) {
         const int after = num.size() - lastSep - 1;
         if (mult > 1.0 || after <= 2) {
-            // Multiplicador o separador decimal: coma decimal, punto de millar.
+            // Multiplier or decimal separator: comma decimal, dot thousands.
             num.remove(QLatin1Char('.'));
             num.replace(QLatin1Char(','), QLatin1Char('.'));
         } else {
-            // Sin multiplicador y 3 dígitos tras el separador: millar.
+            // No multiplier and 3 digits after the separator: thousands.
             num.remove(QLatin1Char(','));
             num.remove(QLatin1Char('.'));
         }
@@ -2626,7 +2635,7 @@ long long countFromText(const QString &raw)
     return ok ? qRound64(v * mult) : 0;
 }
 
-// Primer valor con esa clave en el árbol (Undefined si no aparece).
+// First value with that key in the tree (Undefined if it does not appear).
 QJsonValue findFirstValue(const QJsonValue &root, const QString &key)
 {
     if (root.isObject()) {
@@ -2668,8 +2677,9 @@ VideoInfo Innertube::videoFromHomeRenderer(const QJsonObject &item) const
     if (v.id.isEmpty())
         return VideoInfo{};
     v.title = homeTextOf(r->value(QStringLiteral("title")));
-    // El canal va en ownerText (Home/canal) o longBylineText/shortBylineText
-    // (search): el primer run con browseEndpoint.browseId da nombre e id.
+    // The channel lives in ownerText (Home/channel) or longBylineText/
+    // shortBylineText (search): the first run with browseEndpoint.browseId
+    // gives name and id.
     for (const char *key : {"ownerText", "longBylineText", "shortBylineText"}) {
         const QJsonArray runs = r->value(QString::fromLatin1(key)).toObject()
                                     .value(QStringLiteral("runs")).toArray();
@@ -2709,8 +2719,8 @@ VideoInfo Innertube::videoFromHomeRenderer(const QJsonObject &item) const
     return v;
 }
 
-// Recorre el árbol recolectando compactVideoRenderer/videoRenderer sin
-// duplicar ids, respetando el orden de la respuesta y el límite.
+// Walks the tree collecting compactVideoRenderer/videoRenderer without
+// duplicating ids, respecting the response order and the limit.
 QVector<VideoInfo> Innertube::collectVideoRenderers(const QJsonObject &root,
                                                     int maxCount) const
 {
@@ -2747,7 +2757,7 @@ QVector<VideoInfo> Innertube::collectVideoRenderers(const QJsonObject &root,
     return out;
 }
 
-// Feed del Home (FEwhat_to_watch) con el layout verificado en la PRUEBA 1 con
+// Home feed (FEwhat_to_watch) with the layout verified in PROOF 1 with
 // VISIONOS: singleColumnBrowseResultsRenderer → tabs → tabRenderer → content →
 // sectionListRenderer → contents[] → shelfRenderer → content →
 // verticalListRenderer → items[] → compactVideoRenderer / videoRenderer.
@@ -2758,9 +2768,9 @@ QVector<VideoInfo> Innertube::parseHomeBrowse(const QJsonObject &root,
     if (continuation)
         continuation->clear();
 
-    // Primer token de continuación que aparezca (en cualquier parte de la
-    // respuesta; los estantes no lo llevan, va en el propio sectionListRenderer
-    // o en continuations del listado).
+    // First continuation token found anywhere in the response; the shelves do
+    // not carry it, it lives in the sectionListRenderer itself or in the
+    // listing's continuations.
     std::function<void(const QJsonValue &)> grabCont;
     grabCont = [&](const QJsonValue &val) {
         if (continuation && !continuation->isEmpty())
@@ -2795,8 +2805,8 @@ QVector<VideoInfo> Innertube::parseHomeBrowse(const QJsonObject &root,
     for (auto it = root.begin(); it != root.end(); ++it)
         grabCont(it.value());
 
-    // Recolecta renderers de vídeo dentro de una sección (subárbol). Respeta
-    // los límites por estante y total.
+    // Collects video renderers inside a section (subtree). Respects the
+    // per-shelf and total limits.
     int shelves = 0;
     int shelfVideos = 0;
     std::function<void(const QJsonValue &)> collect =
@@ -2852,13 +2862,13 @@ QVector<VideoInfo> Innertube::parseHomeBrowse(const QJsonObject &root,
         }
     }
 
-    // Layout distinto (p. ej. richGrid): recolectar hasta kHomeShelfVideos
-    // directamente desde el árbol raíz como si fuera un único "estante".
+    // Different layout (e.g. richGrid): collect up to kHomeShelfVideos
+    // straight from the root tree as if it were a single "shelf".
     if (out.isEmpty()) {
         shelfVideos = 0;
         collect(QJsonValue(root));
     }
-    // Dedupe por id (un mismo vídeo puede repetirse en estantes).
+    // Dedupe by id (the same video can repeat across shelves).
     QVector<VideoInfo> unique;
     for (const VideoInfo &v : std::as_const(out)) {
         bool seen = false;
@@ -2875,8 +2885,8 @@ QVector<VideoInfo> Innertube::parseHomeBrowse(const QJsonObject &root,
 }
 
 // ---------------------------------------------------------------------------
-// Renderers modernos del cliente WEB (pestañas Shorts/Directos del canal, que
-// VISIONOS no expone): shortsLockupViewModel y lockupViewModel.
+// Modern renderers of the WEB client (channel Shorts/Live tabs, which
+// VISIONOS does not expose): shortsLockupViewModel and lockupViewModel.
 
 namespace {
 
@@ -2892,10 +2902,10 @@ QString webLockupThumb(const QJsonObject &contentImage)
         : sources.last().toObject().value(QStringLiteral("url")).toString();
 }
 
-// Duración y marca de directo del layout moderno WEB (lockupViewModel): el
-// overlay inferior lleva una insignia por miniatura — la duración ("12:34")
-// para los VOD y la de directo ("EN DIRECTO", badgeStyle THUMBNAIL_OVERLAY_
-// BADGE_STYLE_LIVE) para los directos.
+// Duration and live badge of the modern WEB layout (lockupViewModel): the
+// bottom overlay carries one badge per thumbnail — the duration ("12:34") for
+// VODs and the live one ("EN DIRECTO", badgeStyle THUMBNAIL_OVERLAY_
+// BADGE_STYLE_LIVE) for live streams.
 int webLockupMeta(const QJsonObject &contentImage, int *secondsOut,
                   bool *isLiveOut)
 {
@@ -2929,8 +2939,8 @@ int webLockupMeta(const QJsonObject &contentImage, int *secondsOut,
     return seconds;
 }
 
-// shortsLockupViewModel: id en entityId="shorts-shelf-item-<id>", título y
-// vistas en overlayMetadata, miniatura vertical en thumbnailViewModel.
+// shortsLockupViewModel: id in entityId="shorts-shelf-item-<id>", title and
+// views in overlayMetadata, vertical thumbnail in thumbnailViewModel.
 VideoInfo videoFromWebShorts(const QJsonObject &sl)
 {
     VideoInfo v;
@@ -2955,11 +2965,11 @@ VideoInfo videoFromWebShorts(const QJsonObject &sl)
     return v;
 }
 
-// ¿El texto es un recuento tipo "21 K", "5,4 M", "684"? El lockup del /next
-// da las vistas como número + multiplicador, SIN la palabra "vistas" (esa
-// palabra solo aparece en el layout de canal). Se exige que empiece por dígito
-// y que lo que queda sea solo el sufijo del multiplicador, para no confundir el
-// nombre del canal ("3 Doors Down" empieza por dígito pero sigue con letras).
+// Is the text a count like "21 K", "5,4 M", "684"? The /next lockup gives the
+// views as number + multiplier, WITHOUT the word "vistas" (that word only
+// appears in the channel layout). It requires the text to start with a digit
+// and what remains to be only the multiplier suffix, so as not to confuse a
+// channel name ("3 Doors Down" starts with a digit but continues with letters).
 bool looksLikeCountText(const QString &raw)
 {
     const QString t = raw.simplified();
@@ -2977,8 +2987,8 @@ bool looksLikeCountText(const QString &raw)
         || rest == QLatin1String("bn");
 }
 
-// lockupViewModel: id=contentId, título en lockupMetadataViewModel, vistas y
-// fecha en metadataRows, miniatura+duración en contentImage.
+// lockupViewModel: id=contentId, title in lockupMetadataViewModel, views and
+// date in metadataRows, thumbnail+duration in contentImage.
 VideoInfo videoFromWebLockup(const QJsonObject &lv)
 {
     VideoInfo v;
@@ -2998,10 +3008,10 @@ VideoInfo videoFromWebLockup(const QJsonObject &lv)
         for (const QJsonValue &p : parts) {
             const QString t = p.toObject().value(QStringLiteral("text")).toObject()
                                   .value(QStringLiteral("content")).toString();
-            // El parser de fechas es la UNICA autoridad de "esto es una fecha":
-            // no se filtra por "hace"/"ago" aqui (era una segunda copia del
-            // conocimiento del parser y con pt "ha 2 semanas" la fecha no
-            // llegaba a clasificarse, cayendo el texto en el nombre del canal).
+            // The date parser is the ONLY authority on "this is a date": there
+            // is no filter by "hace"/"ago" here (it was a second copy of the
+            // parser's knowledge and with pt "ha 2 semanas" the date was not
+            // classified, the text falling into the channel name).
             const QString iso = relativeToIso(t);
             if (!iso.isEmpty())
                 v.publishedAt = iso;
@@ -3011,11 +3021,11 @@ VideoInfo videoFromWebLockup(const QJsonObject &lv)
             else if (looksLikeCountText(t))
                 v.viewCount = countFromText(t);
             else if (v.channel.isEmpty())
-                v.channel = t; // el primer dato que no es visitas ni fecha
+                v.channel = t; // the first datum that is neither views nor date
         }
     }
-    // Canal: el avatar del lockup lleva el browseEndpoint del canal, así que se
-    // resuelve también el id (lo necesita el menú "Ver canal" de la fila).
+    // Channel: the lockup avatar carries the channel's browseEndpoint, so the
+    // id is resolved too (the row's "Ver canal" menu needs it).
     const QJsonObject channelEndpoint =
         md.value(QStringLiteral("image")).toObject()
             .value(QStringLiteral("decoratedAvatarViewModel")).toObject()
@@ -3037,7 +3047,7 @@ VideoInfo videoFromWebLockup(const QJsonObject &lv)
 
 } // namespace
 
-// Primer token de continuación del árbol, sea cual sea el layout
+// First continuation token of the tree, whatever the layout
 // (continuationCommand / nextContinuationData / reloadContinuationData).
 QString Innertube::firstContinuationToken(const QJsonObject &root)
 {
@@ -3071,7 +3081,7 @@ QString Innertube::firstContinuationToken(const QJsonObject &root)
     return token;
 }
 
-// Página de /search: compactVideoRenderer del sectionListRenderer.
+// /search page: compactVideoRenderer of the sectionListRenderer.
 QVector<VideoInfo> Innertube::parseSearchBrowse(const QJsonObject &root,
                                                 int maxCount,
                                                 QString *continuation) const
@@ -3081,8 +3091,8 @@ QVector<VideoInfo> Innertube::parseSearchBrowse(const QJsonObject &root,
     return collectVideoRenderers(root, maxCount);
 }
 
-// Recorre el árbol recolectando los lockups modernos del cliente WEB sin
-// duplicar ids (pestañas Shorts/Directos del canal).
+// Walks the tree collecting the WEB client's modern lockups without
+// duplicating ids (channel Shorts/Live tabs).
 QVector<VideoInfo> Innertube::collectWebLockups(const QJsonObject &root,
                                                 int maxCount) const
 {
@@ -3120,8 +3130,8 @@ QVector<VideoInfo> Innertube::collectWebLockups(const QJsonObject &root,
     return out;
 }
 
-// Ficha de canal del browse "Información": c4TabbedHeaderRenderer (título,
-// avatar, suscriptores) + channelAboutMetadataRenderer (descripción).
+// Channel card from the "About" browse: c4TabbedHeaderRenderer (title,
+// avatar, subscribers) + channelAboutMetadataRenderer (description).
 void Innertube::parseChannelInfo(const QJsonObject &root, ChannelInfo *info)
 {
     if (!info)
@@ -3155,8 +3165,8 @@ void Innertube::parseChannelInfo(const QJsonObject &root, ChannelInfo *info)
     }
 }
 
-// Detalle de vídeo del /next: videoMetadataRenderer (título, vistas, fecha,
-// canal, descripción) + likeButtonRenderer (me gusta).
+// Video detail from /next: videoMetadataRenderer (title, views, date,
+// channel, description) + likeButtonRenderer (likes).
 void Innertube::parseVideoDetail(const QJsonObject &root, VideoInfo *video,
                                  QString *description, qint64 *likeCount)
 {
@@ -3172,15 +3182,15 @@ void Innertube::parseVideoDetail(const QJsonObject &root, VideoInfo *video,
         const QString viewCountText =
             homeTextOf(vm.value(QStringLiteral("viewCountText")));
         video->viewCount = countFromText(viewCountText);
-        // Un directo en emisión muestra "N usuarios viéndolo ahora" en vez de
-        // "N visualizaciones": es lo que distingue "sigue en directo" de
-        // "terminó" en el refresco por /next (el player response manda cuando
-        // se reproduce, pero el /next no toca la fase player).
+        // A live stream on air shows "N usuarios viéndolo ahora" instead of
+        // "N visualizaciones": that is what distinguishes "still live" from
+        // "ended" in the /next refresh (the player response is authoritative
+        // when playing, but /next does not touch the player phase).
         video->isLive = viewCountShowsLive(viewCountText);
         video->publishedAt = relativeToIso(
             homeTextOf(vm.value(QStringLiteral("dateText"))));
-        // Si dateText no da una fecha relativa, se prueba publishedTimeText
-        // ("Emitió en directo hace 6 horas").
+        // If dateText does not give a relative date, publishedTimeText is
+        // tried ("Emitió en directo hace 6 horas").
         if (video->publishedAt.isEmpty()) {
             video->publishedAt = relativeToIso(homeTextOf(
                 vm.value(QStringLiteral("publishedTimeText"))));
@@ -3193,11 +3203,11 @@ void Innertube::parseVideoDetail(const QJsonObject &root, VideoInfo *video,
                                .toObject().value(QStringLiteral("browseEndpoint"))
                                .toObject().value(QStringLiteral("browseId"))
                                .toString();
-        // Vídeos con varios canales de COLABORACIÓN: el owner no lleva
-        // navigationEndpoint (solo avatarStack + subscribeButton), así que el id
-        // sale del botón de suscripción. Sin esta vía, esos canales no se podían
-        // entrar ni suscribir desde la página Player (medido: channelId vacío
-        // en el detalle y el botón "Canal" sin hacer nada).
+        // Videos with several COLLABORATION channels: the owner carries no
+        // navigationEndpoint (only avatarStack + subscribeButton), so the id
+        // comes from the subscribe button. Without this path, those channels
+        // could not be entered or subscribed from the Player page (measured:
+        // empty channelId in the detail and the "Canal" button doing nothing).
         if (video->channelId.isEmpty()) {
             video->channelId = owner.value(QStringLiteral("subscribeButton"))
                                    .toObject()
@@ -3253,9 +3263,9 @@ void Innertube::parsePlaylistBrowse(const QJsonObject &root, PlaylistInfo *info,
             if (v.channel.isEmpty())
                 v.channel =
                     homeTextOf(pv.value(QStringLiteral("longBylineText")));
-            // Id del canal, igual que en la cola: sin él, un vídeo abierto
-            // desde una playlist no podía entrar al canal ni suscribirse hasta
-            // que llegara el detalle.
+            // Channel id, same as in the queue: without it, a video opened
+            // from a playlist could not enter the channel or subscribe until
+            // the detail arrived.
             v.channelId = channelIdFromByline(
                 pv.value(QStringLiteral("shortBylineText")).toObject());
             if (v.channelId.isEmpty()) {
@@ -3284,11 +3294,11 @@ void Innertube::parsePlaylistBrowse(const QJsonObject &root, PlaylistInfo *info,
     collect(QJsonValue(root));
 }
 
-// Cola "watch playlist" del mix RDAMVM: playlistPanelVideoRenderer de la
-// respuesta /next. Extrae el token de continuación (nextRadioContinuationData
-// / nextContinuationData / continuationItemRenderer) si el mix tiene más
-// batches. Soporta twoColumnWatchNextResults y el renderizado de una sola
-// columna (musicQueueRenderer del cliente de música).
+// "watch playlist" queue of the RDAMVM mix: playlistPanelVideoRenderer from
+// the /next response. Extracts the continuation token (nextRadioContinuationData
+// / nextContinuationData / continuationItemRenderer) if the mix has more
+// batches. Supports twoColumnWatchNextResults and the single-column rendering
+// (musicQueueRenderer of the music client).
 void Innertube::parseWatchQueue(const QJsonObject &root, QVector<VideoInfo> *out,
                                 QString *continuation) const
 {
@@ -3392,8 +3402,8 @@ void Innertube::parseWatchQueue(const QJsonObject &root, QVector<VideoInfo> *out
                                     + parts.at(2).toInt();
             }
             v.isLive = rendererIsLive(pvr);
-            // Mismo parser localizado que el resto ("1,2 M de visitas"): con
-            // toInt() directo un panel con texto daba visitas=0.
+            // Same localized parser as elsewhere ("1,2 M de visitas"): with a
+            // plain toInt() a text panel gave views=0.
             v.viewCount = static_cast<int>(countFromText(
                 homeTextOf(pvr.value(QStringLiteral("viewCountText")))));
             v.publishedAt = relativeToIso(homeTextOf(
@@ -3407,21 +3417,21 @@ void Innertube::parseWatchQueue(const QJsonObject &root, QVector<VideoInfo> *out
         grabContinuation(panel);
     };
 
-    // 1) Layout de dos columnas: la cola del mix vive en playlist.playlist.
+    // 1) Two-column layout: the mix queue lives in playlist.playlist.
     const QJsonObject tw =
         contents.value(QStringLiteral("twoColumnWatchNextResults")).toObject();
     handlePanel(tw.value(QStringLiteral("playlist")).toObject()
                     .value(QStringLiteral("playlist")).toObject());
 
-    // 1b) Layout de una columna de VISIONOS/ANDROID_VR: el mix también está
-    //     en playlist.playlist (contenidos playlistPanelVideoRenderer).
+    // 1b) Single-column layout of VISIONOS/ANDROID_VR: the mix is also in
+    //     playlist.playlist (playlistPanelVideoRenderer contents).
     const QJsonObject scw =
         contents.value(QStringLiteral("singleColumnWatchNextResults")).toObject();
     handlePanel(scw.value(QStringLiteral("playlist")).toObject()
                     .value(QStringLiteral("playlist")).toObject());
 
-    // 2) Cliente de música (singleColumnMusicWatchNextResultsRenderer): la
-    //    cola está en musicQueueRenderer → playlistPanelRenderer.
+    // 2) Music client (singleColumnMusicWatchNextResultsRenderer): the queue
+    //    is in musicQueueRenderer → playlistPanelRenderer.
     const QJsonObject scm =
         contents.value(QStringLiteral("singleColumnMusicWatchNextResultsRenderer"))
             .toObject();
@@ -3452,7 +3462,7 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
 
     QVector<VideoInfo> out;
 
-    // Texto de un nodo de texto (runs o simpleText).
+    // Text of a text node (runs or simpleText).
     auto durationSecondsOf = [](const QJsonArray &overlays) {
         for (const QJsonValue &val : overlays) {
             const QJsonObject o = val.toObject();
@@ -3475,11 +3485,11 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
     };
 
     auto viewCountOf = [](const QString &s) {
-        // Reutiliza el parser de texto localizado: "85.805 visualizaciones",
-        // "1,2 M de vistas", "85 mil visualizaciones". El parser propio que
-        // había aquí quitaba puntos/comas/espacios y hacía toLongLong del
-        // resultado, así que "85.805 visualizaciones" daba 0 y "A continuación"
-        // se quedaba SIN las visitas (medido en el render).
+        // Reuses the localized text parser: "85.805 visualizaciones",
+        // "1,2 M de vistas", "85 mil visualizaciones". The own parser that was
+        // here stripped dots/commas/spaces and did toLongLong on the result,
+        // so "85.805 visualizaciones" gave 0 and "A continuación" was left
+        // WITHOUT the views (measured in the render).
         return static_cast<int>(countFromText(s));
     };
 
@@ -3514,8 +3524,8 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
                               .value(QStringLiteral("browseId"))
                               .toString();
         } else {
-            // Byline compartido (compactVideoRenderer): el nombre va en
-            // longBylineText/shortBylineText y el id del canal en sus runs.
+            // Shared byline (compactVideoRenderer): the name goes in
+            // longBylineText/shortBylineText and the channel id in its runs.
             const QJsonObject longByline =
                 r->value(QStringLiteral("longBylineText")).toObject();
             const QJsonObject shortByline =
@@ -3543,8 +3553,8 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
         out.append(v);
     };
 
-    // Recorre cualquier contenedor de resultados (results y secondaryResults),
-    // bajando por richItemRenderer/itemSectionRenderer.
+    // Walks any results container (results and secondaryResults), descending
+    // through richItemRenderer/itemSectionRenderer.
     std::function<void(const QJsonArray &)> collect =
         [&](const QJsonArray &items) {
             for (const QJsonValue &val : items) {
@@ -3577,8 +3587,8 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
     collect(tw.value(QStringLiteral("secondaryResults"))
                 .toObject().value(QStringLiteral("secondaryResults"))
                 .toObject().value(QStringLiteral("results")).toArray());
-    // Clientes de una sola columna (VISIONOS/ANDROID): la lista completa de
-    // recomendaciones vive en watchNextTabbedResultsRenderer → tabs[]
+    // Single-column clients (VISIONOS/ANDROID): the full recommendation list
+    // lives in watchNextTabbedResultsRenderer → tabs[]
     // → tabRenderer → content → sectionListRenderer → contents[] →
     // itemSectionRenderer → contents → compactVideoRenderer / videoRenderer.
     const QJsonArray scTabs =
@@ -3597,8 +3607,8 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
                         .toObject().value(QStringLiteral("contents")).toArray());
         }
     }
-    // Clientes de una sola columna (VISIONOS): la cola de auto-reproducción
-    // vive en autoplay.autoplay.sets[].autoplayVideoRenderer.compactVideoRenderer.
+    // Single-column clients (VISIONOS): the autoplay queue
+    // lives in autoplay.autoplay.sets[].autoplayVideoRenderer.compactVideoRenderer.
     const QJsonArray sets =
         sc.value(QStringLiteral("autoplay")).toObject()
             .value(QStringLiteral("autoplay")).toObject()
@@ -3613,16 +3623,16 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
             pushRenderer(avr);
     }
 
-    // Cliente WEB: la lista de recomendaciones viene en el layout moderno
-    // (lockupViewModel), no en compactVideoRenderer. Es el layout que SÍ trae
-    // las visitas y la fecha en la metadata del lockup, así que sin esta rama
-    // un /next del cliente WEB salía vacío y "A continuación" se quedaba sin
-    // esos dos campos (que es lo que hace el cliente VISIONOS, cuyo
-    // compactVideoRenderer no tiene fecha).
+    // WEB client: the recommendation list comes in the modern layout
+    // (lockupViewModel), not in compactVideoRenderer. It is the layout that
+    // DOES carry the views and the date in the lockup metadata, so without this
+    // branch a WEB client /next came out empty and "A continuación" was left
+    // without those two fields (which is what the VISIONOS client does, whose
+    // compactVideoRenderer has no date).
     if (out.isEmpty())
         out = collectWebLockups(root, 20);
 
-    // Dedupe por id (un mismo recomendado puede aparecer en ambos contenedores).
+    // Dedupe by id (a same recommendation can appear in both containers).
     QVector<VideoInfo> unique;
     for (const VideoInfo &v : out) {
         bool seen = false;
@@ -3641,7 +3651,7 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
 void Innertube::requestPlayer()
 {
     if (!m_hlsInFlight)
-        m_hlsInFlight = true; // asegurar el single-flight si se entró vía visitor
+        m_hlsInFlight = true; // ensure single-flight if entered via visitor
     m_http->setResult([this](int status, const QByteArray &body) {
         handlePlayer(status == 200, QString(), body);
     });
@@ -3673,8 +3683,8 @@ void Innertube::requestPlayer()
     };
     const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
 
-    // X-Goog-Visitor-Id se añade al request dinámicamente; lo insertamos
-    // directamente en las cabeceras por estado.
+    // X-Goog-Visitor-Id is added to the request dynamically; we insert it
+    // directly into the headers by state.
     m_http->post(kPlayerEndpoint, json, pc.ua, pc.clientId, pc.version,
                  pc.embed ? pc.embedUrl : nullptr);
 }
@@ -3703,8 +3713,8 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
             m_retryingVisitor = true;
             m_visitorData.clear();
             m_visitorExpiresAt = 0;
-            // El visitor Data regenerado invalida las URLs firmadas previas
-            // para este vídeo (podrían quedar ligadas al token anterior).
+            // The regenerated visitor Data invalidates the previous signed URLs
+            // for this video (they could remain tied to the earlier token).
             m_hlsCache.remove(m_videoId);
             NT_DEBUG("E2E innertube regenerating visitorData after "
                      "LOGIN_REQUIRED\n");
@@ -3712,9 +3722,9 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
             fetchVisitorData();
             return;
         }
-        // Cascada de clientes estilo NewPipe: agotado el cliente actual o el
-        // intento con un visitorData fresco, probar el siguiente cliente antes
-        // de abandonar.
+        // NewPipe-style client cascade: once the current client or the fresh
+        // visitorData attempt is exhausted, try the next client before
+        // giving up.
         if (m_clientIndex + 1 < kPlayerClientCount) {
             ++m_clientIndex;
             m_retryingVisitor = false;
@@ -3730,8 +3740,9 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
         return;
     }
 
-    // Respuesta falseada estilo "no disponible en esta app" (la detecta
-    // NewPipe) o rate-limit (Piped): el videoId devuelto no es el pedido.
+    // Faked response of the "not available in this app" kind (detected by
+    // NewPipe) or rate-limit (Piped): the returned videoId is not the requested
+    // one.
     const QString gotVideoId = root.value(QStringLiteral("videoDetails"))
                                    .toObject()
                                    .value(QStringLiteral("videoId"))
@@ -3754,8 +3765,8 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
     const QString hls =
         streamingData.value(QStringLiteral("hlsManifestUrl")).toString();
     if (hls.isEmpty()) {
-        // En VODs solo los clientes Apple devuelven hlsManifestUrl; agotar la
-        // cascada antes de fallar.
+        // For VODs only the Apple clients return hlsManifestUrl; exhaust the
+        // cascade before failing.
         NT_DEBUG("E2E innertube client %s sin hlsManifestUrl\n",
                  kPlayerClients[m_clientIndex].name);
         if (m_clientIndex + 1 < kPlayerClientCount) {
@@ -3774,10 +3785,10 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
                               .toObject()
                               .value(QStringLiteral("lengthSeconds"))
                               .toInt();
-    // Algunos contextos (p.ej. VISIONOS) no incluyen lengthSeconds; la URL
-    // firmada de cada formato trae "dur=<segundos>" con la duración real.
-    // Usarla evita que el master edge declare EXTINF falsos (~1h) que rompen
-    // la barra de progreso y el tiempo final del reproductor.
+    // Some contexts (e.g. VISIONOS) do not include lengthSeconds; the signed
+    // URL of each format carries "dur=<seconds>" with the real duration.
+    // Using it prevents the edge master from declaring false EXTINF (~1h) that
+    // break the progress bar and the player's final time.
     if (durationSeconds <= 0) {
         const QString u =
             !adaptiveFormats.isEmpty()
@@ -3799,8 +3810,8 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
         }
     }
     m_lastWinClient = m_clientIndex;
-    // Señal autoritativa de directo (videoDetails.isLive): YouTube declara si
-    // el medio es un directo actual. Se copia a la caché para reutilizarla.
+    // Authoritative live signal (videoDetails.isLive): YouTube declares whether
+    // the media is a current live stream. It is copied to the cache for reuse.
     m_lastIsLive = root.value(QStringLiteral("videoDetails"))
                        .toObject()
                        .value(QStringLiteral("isLive"))
@@ -3811,9 +3822,9 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
              "(%lldms)\n",
              hls.size(), heights.size(), kPlayerClients[m_clientIndex].name,
              m_lastIsLive ? 1 : 0, static_cast<long long>(elapsed));
-    // Caché de sesión: guarda hlsManifestUrl firmada, su expiración y los
-    // adaptiveFormats (con url directa) + duración, para no repetir el POST
-    // player en cambios de resolución del mismo vídeo.
+    // Session cache: stores the signed hlsManifestUrl, its expiration and the
+    // adaptiveFormats (with direct url) + duration, to avoid repeating the
+    // player POST on resolution changes of the same video.
     const qint64 exp = expireFromUrl(hls);
     m_hlsCache.insert(m_videoId,
                       HlsCacheEntry{hls, QByteArray(), heights, exp,
@@ -3822,9 +3833,9 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
     saveHlsCacheToDisk();
     m_hlsInFlight = false;
     mMasterInFlight = false;
-    // Los adaptiveFormats (con url por formato) primero: Yt construye el
-    // master edge (1 vídeo + 1 audio) sin tocar el master de YouTube. Si el
-    // edge no es posible, el flujo clásico hlsReady → fetchMaster lo cubre.
+    // adaptiveFormats (with a url per format) first: Yt builds the edge master
+    // (1 video + 1 audio) without touching YouTube's master. If the edge is not
+    // possible, the classic hlsReady → fetchMaster flow covers it.
     emit formatsReady(m_videoId, adaptiveFormats, durationSeconds);
     emit hlsReady(m_videoId, hls, heights);
 }
@@ -3846,8 +3857,8 @@ void Innertube::handleMaster(bool ok, const QString &error,
     }
     NT_DEBUG("E2E innertube master ok len=%d (%lldms)\n", body.size(),
              static_cast<long long>(elapsed));
-    // Guarda el cuerpo del master en la caché del videoId para evitar
-    // re-descargarlo en cambios de resolución.
+    // Stores the master body in the videoId cache to avoid re-downloading it on
+    // resolution changes.
     auto it = m_hlsCache.find(m_videoId);
     if (it != m_hlsCache.end())
         it->masterBody = body;
@@ -3873,10 +3884,10 @@ void Innertube::fail(const QString &reason)
 bool Innertube::serveCachedHls(const QString &videoId)
 {
     if (m_hlsInFlight && m_flightVideoId == videoId)
-        return false; // la petición en curso se resolverá sola
+        return false; // the in-flight request will resolve itself
     if (m_http->isBusy())
-        return false; // transporte ocupado (POST de otro vídeo): no emitir
-                      // señales que dispararían un GET real y lo abortaría
+        return false; // transport busy (POST of another video): do not emit
+                      // signals that would trigger a real GET and abort it
     const auto it = m_hlsCache.constFind(videoId);
     if (it == m_hlsCache.constEnd())
         return false;
@@ -3889,9 +3900,9 @@ bool Innertube::serveCachedHls(const QString &videoId)
     m_lastWinClient = it->clientIndex;
     m_lastIsLive = it->isLive;
     m_videoId = videoId;
-    // Emitir primero los adaptiveFormats cacheados: Yt puede reconstruir el
-    // master edge sin repetir el POST player; si no procede, hlsReady cubre
-    // el camino clásico (fetchMaster).
+    // Emit the cached adaptiveFormats first: Yt can rebuild the edge master
+    // without repeating the player POST; if not applicable, hlsReady covers
+    // the classic path (fetchMaster).
     if (!it->adaptiveFormats.isEmpty())
         emit formatsReady(videoId, it->adaptiveFormats, it->durationSeconds);
     emit hlsReady(videoId, it->hlsUrl, it->heights);
@@ -3903,7 +3914,7 @@ bool Innertube::serveCachedMaster(const QString &videoId)
     if (mMasterInFlight && m_flightVideoId == videoId)
         return false;
     if (m_http->isBusy())
-        return false; // ver serveCachedHls
+        return false; // see serveCachedHls
     const auto it = m_hlsCache.constFind(videoId);
     if (it == m_hlsCache.constEnd())
         return false;
@@ -3918,9 +3929,9 @@ bool Innertube::serveCachedMaster(const QString &videoId)
 
 qint64 Innertube::expireFromUrl(const QString &url) const
 {
-    // La URL firmada incluye /expire/<timestamp unix>/. Si no aparece (o no
-    // es numérico) devolvemos 0 → la caché se considera caducada y se
-    // descarta en la siguiente consulta.
+    // The signed URL includes /expire/<unix timestamp>/. If it does not appear
+    // (or is not numeric) we return 0 → the cache is considered stale and is
+    // discarded on the next lookup.
     const QByteArray marker = "/expire/";
     const int pos = url.indexOf(QString::fromLatin1(marker));
     if (pos < 0)
@@ -4113,19 +4124,20 @@ bool innertubeSelfTest()
 }
 
 // ---------------------------------------------------------------------------
-// Sondeo de diagnóstico del Home real (POST /browse, browseId FEwhat_to_watch).
-// Investigación SOLO (no es el Home de la app y no toca HomePage ni player):
-//   - visitorData: el persistido si se pasa en NEVERTUBE_HOME_VISITOR (valor
-//     tal como está guardado en settings), o uno freso vía sw.js_data.
-//   - prueba FEwhat_to_watch con los clientes ya existentes (VISIONOS primero;
-//     IOS/ANDROID_VR/WEB_EMBEDDED como comparación si VISIONOS falla/vacío).
-//   - reporta estado HTTP, tiempo, tamaño, renderers, vídeos, continuations y
-//     posibles desafíos (alertRenderer), sin inventar campos.
-// La lista de titles impresa permite contar manualmente la aparición de un
-// tema (PRUEBA 2: sesión A persistida vs sesión B fresca).
+// Diagnostic probe of the real Home (POST /browse, browseId FEwhat_to_watch).
+// Investigation ONLY (it is not the app's Home and does not touch HomePage or
+// player):
+//   - visitorData: the persisted one if passed in NEVERTUBE_HOME_VISITOR (value
+//     as stored in settings), or a fresh one via sw.js_data.
+//   - tries FEwhat_to_watch with the existing clients (VISIONOS first;
+//     IOS/ANDROID_VR/WEB_EMBEDDED for comparison if VISIONOS fails/empty).
+//   - reports HTTP status, time, size, renderers, videos, continuations and
+//     possible challenges (alertRenderer), without inventing fields.
+// The printed list of titles allows manually counting the appearance of a
+// topic (PROOF 2: persisted session A vs fresh session B).
 //
-// Se lanza con:  ./build/nevertube_qt2 --selftest-home
-// (opcional)          NEVERTUBE_HOME_VISITOR='<visitorData persistido>'
+// Launched with:  ./build/nevertube_qt2 --selftest-home
+// (optional)          NEVERTUBE_HOME_VISITOR='<persisted visitorData>'
 
 namespace {
 
@@ -4140,7 +4152,7 @@ struct HomeVideoRow
 
 struct HomeStats
 {
-    QHash<QString, int> renderers; // renderer/viewmodel -> conteo
+    QHash<QString, int> renderers; // renderer/viewmodel -> count
     QVector<HomeVideoRow> videos;
     QString continuation;
     bool hasAlerts = false;
@@ -4222,17 +4234,17 @@ void walkHomeJson(const QJsonValue &v, HomeStats *st)
 
 } // namespace
 
-// Primera fase del sondeo usada por homeBrowseSelfTest (definida más abajo).
+// First phase of the probe used by homeBrowseSelfTest (defined further below).
 namespace {
 void runHomeProbes(Ipv4Https *http, const QString &visitorData);
 }
 
-// Comprobación del camino de PRODUCCIÓN del Home: Innertube::fetchHome()
-// (sw.js_data → visitorData fresco → POST /browse FEwhat_to_watch VISIONOS →
-// parseHomeBrowse) y, si hay token, fetchHomeMore(). No toca el reproductor.
-// Si el feed llega vacío (500/fallo de red) el selftest NO falla: ese es el
-// comportamiento por diseño (la app oculta la sección). Sí falla si el
-// parser produce duplicados o pierde el id/continuación esperados.
+// Check of the PRODUCTION path of the Home: Innertube::fetchHome()
+// (sw.js_data → fresh visitorData → POST /browse FEwhat_to_watch VISIONOS →
+// parseHomeBrowse) and, if there is a token, fetchHomeMore(). Does not touch
+// the player. If the feed arrives empty (500/network failure) the selftest does
+// NOT fail: that is the behavior by design (the app hides the section). It does
+// fail if the parser produces duplicates or loses the expected id/continuation.
 bool homeFeedLiveCheck()
 {
     std::fprintf(stderr,
@@ -4342,7 +4354,7 @@ bool homeBrowseSelfTest()
     std::fprintf(stderr, "HOME-BROWSE SELFTEST start\n");
     Ipv4Https http;
 
-    // Timeout global: no colgar el selftest si YouTube no responde.
+    // Global timeout: don't hang the selftest if YouTube doesn't respond.
     QTimer watchdog;
     watchdog.setSingleShot(true);
     QObject::connect(&watchdog, &QTimer::timeout, []() {
@@ -4351,7 +4363,7 @@ bool homeBrowseSelfTest()
     });
     watchdog.start(110000);
 
-    // 1) visitorData: el persistido si viene por env, si no uno freso.
+    // 1) visitorData: the persisted one if passed via env, otherwise a fresh one.
     const QByteArray envVisitor = qgetenv("NEVERTUBE_HOME_VISITOR").trimmed();
     QString visitorData;
     bool seeded = false;
@@ -4367,7 +4379,7 @@ bool homeBrowseSelfTest()
         QCoreApplication::exec();
         return homeFeedLiveCheck();
     }
-    // visitorData freso via sw.js_data (flujo normal).
+    // fresh visitorData via sw.js_data (normal flow).
     http.setTimeoutMs(kVisitorTimeoutMs);
     http.setResult([&http](int status, const QByteArray &body) {
         if (status != 200) {
@@ -4396,25 +4408,26 @@ bool homeBrowseSelfTest()
     return homeFeedLiveCheck();
 }
 
-// --- C1: que endpoint de sugerencias usar ----------------------------------
+// --- C1: which suggestions endpoint to use ----------------------------------
 //
-// No es un PASS/FAIL: la pregunta es "que endpoint sirve, con que cliente y a
-// que precio", asi que se miden los dos candidatos y se imprime la tabla para
-// decidir. El numero que mas importa no es cuantas sugerencias salen, sino
-// cuantas son CONSULTAS y cuantas son ATAJOS: las que solo traen
-// serviceEndpoint apuntan a otro sitio (Google, el historial de la cuenta) y en
-// una app que es solo YouTube no tienen destino. Si el parseo las dejara pasar
-// serian filas muertas en el desplegable (el bug de Harmony: nav() a null).
+// It is not a PASS/FAIL: the question is "which endpoint serves, with which
+// client and at what cost", so both candidates are measured and the table is
+// printed to decide. The number that matters most is not how many suggestions
+// come out, but how many are QUERIES and how many are SHORTCUTS: those that
+// only carry serviceEndpoint point somewhere else (Google, the account
+// history) and in an app that is only YouTube they have no destination. If the
+// parser let them through they would be dead entries in the dropdown (the
+// Harmony bug: nav() to null).
 struct SuggestStats
 {
-    int total = 0;        // searchSuggestionRenderer encontrados
+    int total = 0;        // searchSuggestionRenderer found
     int conQuery = 0;     // traen navigationEndpoint.searchEndpoint.query
-    QStringList muestras; // hasta 6, marcando "(sin query)" donde toca
+    QStringList muestras; // up to 6, marking "(sin query)" where applicable
 };
 
-// Recorre el JSON buscando searchSuggestionRenderer en cualquier parte en vez
-// de fiarse de una ruta fija: si YouTube cambia el layout, el conteo sigue
-// siendo valido y el selftest lo delata, en vez de devolver cero en silencio.
+// Walks the JSON looking for searchSuggestionRenderer anywhere instead of
+// trusting a fixed path: if YouTube changes the layout, the count still holds
+// and the selftest reports it, instead of returning zero silently.
 void collectSuggestStats(const QJsonValue &val, SuggestStats *st, int depth)
 {
     if (depth > 24)
@@ -4458,8 +4471,8 @@ bool suggestParseSelfTest()
             ++fail;
     };
 
-    // Cuerpo real (medido con client=youtube): mix de filas con entidad, filas
-    // planas, y el envoltorio JS. Cada item es ["texto", flags, ids, meta].
+    // Real body (measured with client=youtube): a mix of entity rows, flat
+    // rows, and the JS wrapper. Each item is ["text", flags, ids, meta].
     const QByteArray real =
         "window.google.ac.h([\"Will\",["
         "[\"willie col\\u00f3n\",0,[512,433,47],{\"zaf\":\"Cantautor y trombonista estadounidense\",\"zao\":\"Willie Col\\u00f3n\"}],"
@@ -4487,14 +4500,14 @@ bool suggestParseSelfTest()
               "sin zaf se usa zao como detalle");
     }
 
-    // Formato string (client=firefox): items como "texto" a secas.
+    // String format (firefox): items as plain "text".
     const QVector<Suggestion> plain =
         parseSuggestBody("[\"blender\",[\"blender 4.5\",\"blender 5.0\"]]");
     check(plain.size() == 2 && plain.at(0).query == QStringLiteral("blender 4.5")
               && plain.at(0).detail.isEmpty(),
           "items-string (firefox) tambien se parsean");
 
-    // Formatos que NO son el nuestro: lista vacia, sin crashear.
+    // Formats that are NOT ours: empty list, without crashing.
     check(parseSuggestBody("<html>error</html>").isEmpty(),
           "HTML de error -> vacio");
     check(parseSuggestBody("").isEmpty(), "body vacio -> vacio");
@@ -4505,7 +4518,7 @@ bool suggestParseSelfTest()
     check(parseSuggestBody("window.google.ac.h([\"solo\"])").isEmpty(),
           "array sin lista de items -> vacio");
 
-    // Prefijo XSSI, por si algun dia vuelve.
+    // XSSI prefix, in case it ever comes back.
     const QVector<Suggestion> xssi =
         parseSuggestBody(")]}'\n[\"x\",[\"x resultado\"]]");
     check(xssi.size() == 1 && xssi.at(0).query == QStringLiteral("x resultado"),
@@ -4524,9 +4537,10 @@ bool relativeDateSelfTest()
         if (!ok)
             ++fail;
     };
-    // Segundos que relativeToIso ha restado a "ahora". El parser devuelve la
-    // fecha en ISO UTC; se compara contra el reloj actual con tolerancia (el
-    // reloj puede ir por milisegundos y el propio test no es de precision).
+    // Seconds that relativeToIso has subtracted from "now". The parser returns
+    // the date in ISO UTC; it is compared against the current clock with a
+    // tolerance (the clock may run in milliseconds and the test itself is not
+    // about precision).
     const auto deltaSecs = [](const QString &text) -> qint64 {
         const QDateTime d =
             QDateTime::fromString(relativeToIso(text), Qt::ISODate);
@@ -4539,15 +4553,15 @@ bool relativeDateSelfTest()
         return got >= 0 && qAbs(got - want) <= 5;
     };
 
-    // EL BUG (regresion que este test fija): "semanas" NO puede caer en
-    // segundos, o la fecha queda a 2 s de ahora y publishedLabel pinta "hoy".
+    // THE BUG (regression this test pins down): "semanas" must NOT fall into
+    // seconds, or the date ends up 2 s from now and publishedLabel paints "hoy".
     check(near(QStringLiteral("hace 2 semanas"), 2 * 7 * 86400),
           "hace 2 semanas -> 14 dias (no 'hoy')");
     check(near(QStringLiteral("hace 4 semanas"), 4 * 7 * 86400),
           "hace 4 semanas -> 28 dias (no 'hoy')");
     check(near(QStringLiteral("hace 1 semana"), 7 * 86400),
           "hace 1 semana -> 7 dias");
-    // Resto de unidades, sin regresion.
+    // Remaining units, no regression.
     check(near(QStringLiteral("hace 5 segundos"), 5),
           "hace 5 segundos -> 5 s");
     check(near(QStringLiteral("hace 51 minutos"), 51 * 60),
@@ -4560,12 +4574,12 @@ bool relativeDateSelfTest()
           "hace 1 mes -> meses");
     check(near(QStringLiteral("hace 4 años"), 4 * 365 * 86400),
           "hace 4 anos -> anos");
-    // Abreviaturas del lockup moderno ("hace 8 h", "hace 3 d", "hace 2 m").
+    // Abbreviations of the modern lockup ("hace 8 h", "hace 3 d", "hace 2 m").
     check(near(QStringLiteral("hace 8 h"), 8 * 3600), "hace 8 h -> horas");
     check(near(QStringLiteral("hace 3 d"), 3 * 86400), "hace 3 d -> dias");
     check(near(QStringLiteral("hace 2 m"), 2 * 30 * 86400),
           "hace 2 m -> meses");
-    // Prefijo de directos/estrenos y las formas en ingles.
+    // Prefix of live/premieres and the English forms.
     check(near(QStringLiteral("Emitido hace 6 horas"), 6 * 3600),
           "prefijo 'Emitido hace 6 horas'");
     check(near(QStringLiteral("2 weeks ago"), 14 * 86400),
@@ -4574,8 +4588,9 @@ bool relativeDateSelfTest()
           "2 months ago -> meses");
     check(near(QStringLiteral("hace 3 semanas"), 3 * 7 * 86400),
           "hace 3 semanas -> 21 dias (colision ya resuelta)");
-    // El parser ya no depende del idioma: PORTUGUES (idioma soportado por la
-    // app) usa "ha", no "hace", y "mes" lleva acento. Antes no se reconocia.
+    // The parser no longer depends on the language: PORTUGUESE (a language
+    // supported by the app) uses "ha", not "hace", and "mes" carries an accent.
+    // Before it was not recognized.
     check(near(QStringLiteral("há 2 semanas"), 14 * 86400),
           "pt 'há 2 semanas' -> 14 dias");
     check(near(QStringLiteral("há 3 dias"), 3 * 86400),
@@ -4588,7 +4603,7 @@ bool relativeDateSelfTest()
           "pt 'há 5 minutos' -> minutos");
     check(near(QStringLiteral("Transmitido há 2 horas"), 2 * 3600),
           "pt prefijo 'Transmitido há 2 horas'");
-    // Ingles variado y el articulo "a"/"an" (sin numero explicito).
+    // Varied English and the article "a"/"an" (without an explicit number).
     check(near(QStringLiteral("Streamed 3 hours ago"), 3 * 3600),
           "en 'Streamed 3 hours ago'");
     check(near(QStringLiteral("1 year ago"), 365 * 86400),
@@ -4597,15 +4612,15 @@ bool relativeDateSelfTest()
           "en 'a year ago' (articulo)");
     check(near(QStringLiteral("2 seconds ago"), 2),
           "en '2 seconds ago' -> 2 s");
-    // Textos que no son fecha -> vacio (sin reventar).
+    // Texts that are not a date -> empty (without crashing).
     check(relativeToIso(QString()).isEmpty(), "texto vacio -> vacio");
     check(relativeToIso(QStringLiteral("hola mundo")).isEmpty(),
           "texto no-fecha -> vacio");
     check(relativeToIso(QStringLiteral("hace 0 semanas")).isEmpty(),
           "cuenta 0 -> vacio");
-    // Unidad que NO reconocemos -> VACIO (no se inventa fecha ni cae a "hoy",
-    // que era el sintoma del bug). Anadir una unidad futura es una fila mas en
-    // la tabla, no un if.
+    // Unit we do NOT recognize -> EMPTY (no date is invented nor does it fall
+    // back to "hoy", which was the bug's symptom). Adding a future unit is one
+    // more row in the table, not an if.
     check(relativeToIso(QStringLiteral("hace 2 quincenas")).isEmpty(),
           "unidad desconocida (es) -> vacio (no 'hoy')");
     check(relativeToIso(QStringLiteral("2 fortnights ago")).isEmpty(),
@@ -4618,8 +4633,8 @@ bool relativeDateSelfTest()
 bool suggestSelfTest()
 {
     std::fprintf(stderr, "SUGGEST SELFTEST start\n");
-    // Primero el parser, que es offline y determinista: si el parseo esta roto
-    // no tiene sentido ni intentar la red.
+    // Parser first, which is offline and deterministic: if parsing is broken
+    // there is no point even trying the network.
     if (!suggestParseSelfTest()) {
         std::fprintf(stderr, "SELFTEST FAIL: suggest (parseo)\n");
         return false;
@@ -4627,7 +4642,7 @@ bool suggestSelfTest()
     std::fprintf(stderr, "\n");
     Ipv4Https http;
 
-    // Watchdog global: son varias peticiones reales; no colgar el selftest.
+    // Global watchdog: there are several real requests; do not hang the selftest.
     QTimer watchdog;
     watchdog.setSingleShot(true);
     QObject::connect(&watchdog, &QTimer::timeout, []() {
@@ -4639,22 +4654,22 @@ bool suggestSelfTest()
     struct Probe
     {
         const char *label;
-        const char *path;       // Innertube, relativo a www.youtube.com
-        const char *url;        // Google, absoluta; si no es null, gana
-        const char *clientName; // solo Innertube
+        const char *path;       // Innertube, relative to www.youtube.com
+        const char *url;        // Google, absolute; if not null, it wins
+        const char *clientName; // Innertube only
         int clientId;
         const char *clientVersion;
         const char *referer;
     };
-    // A = Innertube music/get_search_suggestions: POST con contexto y
-    // visitorData. B = suggestqueries: GET plano, sin cliente ni visitorData.
-    // Mismo prefijo y misma red para que la comparacion sea justa.
+    // A = Innertube music/get_search_suggestions: POST with context and
+    // visitorData. B = suggestqueries: plain GET, without client or
+    // visitorData. Same prefix and same network so the comparison is fair.
     //
-    // C1 (client=youtube) es el que usa C2: es el autocompletado real de
-    // youtube.com. Se midio su solapamiento con el dataset de A1 y de B1 y
-    // gano por ser el original: 14 items, metadatos de entidad y 0.3-2 KB.
-    // A1 se mantiene en la sonda como referencia de calidad (y es la que peor
-    // coincide: 14-43% con el YT real).
+    // C1 (client=youtube) is the one C2 uses: it is the real autocomplete of
+    // youtube.com. Its overlap with the A1 and B1 datasets was measured and it
+    // won for being the original: 14 items, entity metadata and 0.3-2 KB.
+    // A1 remains in the probe as a quality reference (and it is the one that
+    // matches worst: 14-43% with the real YT).
     const Probe probes[] = {
         {"C1 suggestqueries youtube", nullptr,
          "https://suggestqueries.google.com/complete/search"
@@ -4668,14 +4683,13 @@ bool suggestSelfTest()
          "/youtubei/v1/music/get_search_suggestions?prettyPrint=false", nullptr,
          "WEB_REMIX", 67, "1.20240723.01.00", "https://music.youtube.com/"},
     };
-    // Prefijos de theme claro (tutorial/receta/codigo), de musica, corto, y
-    // "Will" (el caso que pidio medir el usuario: 4 letras, una palabra).
-    // "tutorial blender" y "receta de tarta" llevan espacios A PROPOSITO:
-    // medido con curl, un espacio crudo en la query hace que suggestqueries
-    // conteste HTTP 400. El type-ahead tiene que funcionar con lo que se
-    // escribe de verdad (una frase), no solo con prefijos de una palabra, asi
-    // que estos casos DEBEN quedar verdes: si C2 no codifica bien la query, se
-    // ve aqui.
+    // Light-theme prefixes (tutorial/recipe/code), music, short, and
+    // "Will" (the case the user asked to measure: 4 letters, one word).
+    // "tutorial blender" and "receta de tarta" carry spaces ON PURPOSE:
+    // measured with curl, a raw space in the query makes suggestqueries
+    // answer HTTP 400. Type-ahead has to work with what is actually typed (a
+    // phrase), not only with single-word prefixes, so these cases MUST come out
+    // green: if C2 does not encode the query properly, it shows up here.
     const QStringList queries{QStringLiteral("Will"),
                               QStringLiteral("tutorial blender"),
                               QStringLiteral("receta de tarta"),
@@ -4696,13 +4710,13 @@ bool suggestSelfTest()
     QString visitor;
     int step = 0;
     int okProbes = 0;
-    std::function<void()> run; // se asigna abajo; stepDone lo invoca
+    std::function<void()> run; // assigned below; stepDone invokes it
 
     const auto stepDone = [&]() {
         ++step;
         if (step < total) {
-            // Con un turno de evento entre sondas: encadenar peticiones desde
-            // dentro del readyRead del socket es reentrada.
+            // With an event turn between probes: chaining requests from inside
+            // the socket's readyRead is reentrancy.
             QTimer::singleShot(0, [&]() { run(); });
             return;
         }
@@ -4732,11 +4746,11 @@ bool suggestSelfTest()
                          ok ? ms / ok : 0, ok ? bytes / ok : 0,
                          int(queries.size()) - ok);
         }
-        // El PASS es del endpoint que USA C2 (C1, client=youtube): tiene que
-        // devolver consultas con las CUATRO, incluidas las de espacios. Las
-        // demas sondas son referencia de calidad; si C1 se degrada, el type-ahead
-        // se queda sin sugerencias aunque las otras sigan verdes, asi que el
-        // fallo tiene que salir de aqui.
+        // The PASS belongs to the endpoint C2 USES (C1, client=youtube): it has
+        // to return queries with ALL FOUR, spaces included. The other probes are
+        // a quality reference; if C1 degrades, type-ahead is left without
+        // suggestions even if the others stay green, so the failure has to come
+        // out here.
         int c1Ok = 0;
         int c1ConQuery = 0;
         for (const QString &q : queries) {
@@ -4776,12 +4790,12 @@ bool suggestSelfTest()
         }
 
         const int idx = step - 1;
-        // OJO: estas cuatro son COPIAS a proposito. El transporte guarda los
-        // std::function de setResult/setError y los invoca DESPUES de que este
-        // marco (el de runImpl) haya retornado. Si se capturaran por
-        // referencia, record() leeria p.clientVersion de memoria liberada y
-        // QString::fromLatin1() construiria sobre un const char* basura
-        // (corrupcion de heap, no un fallo legible).
+        // NOTE: these four are COPIES on purpose. The transport stores the
+        // std::function of setResult/setError and invokes them AFTER this frame
+        // (the runImpl one) has returned. If they were captured by reference,
+        // record() would read p.clientVersion from freed memory and
+        // QString::fromLatin1() would build over a garbage const char*
+        // (heap corruption, not a readable failure).
         const Probe p = probes[idx % probeCount];
         const QString q = queries.at(idx / probeCount);
         const bool google = p.url != nullptr;
@@ -4789,8 +4803,8 @@ bool suggestSelfTest()
             QStringLiteral("%1|%2").arg(QLatin1String(p.label), q);
         const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
 
-        // Por referencia solo lo que vive en el marco de suggestSelfTest(), que
-        // sigue activo dentro de exec(): el hash de resultados y stepDone.
+        // By reference only what lives in the suggestSelfTest() frame, which
+        // stays alive inside exec(): the results hash and stepDone.
         QHash<QString, Result> &sink = results;
         const auto &next = stepDone;
 
@@ -4801,11 +4815,11 @@ bool suggestSelfTest()
             res.ms = int(QDateTime::currentMSecsSinceEpoch() - t0);
             res.bytes = body.size();
             if (google) {
-                // Se usa el MISMO parser que C2 (parseSuggestBody), no uno
-                // propio: asi la sonda mide el codigo de produccion, incluido
-                // el recorte del envoltorio window.google.ac.h(...) que solo
-                // necesita client=youtube. firefox/chrome vienen en JSON pelado
-                // y el parser tambien los acepta.
+                // The SAME parser as C2 (parseSuggestBody) is used, not a
+                // custom one: so the probe measures the production code,
+                // including the trimming of the window.google.ac.h(...)
+                // wrapper that only client=youtube needs. firefox/chrome come
+                // as plain JSON and the parser accepts them too.
                 const QVector<Suggestion> items = parseSuggestBody(body);
                 for (const Suggestion &s : items) {
                     ++res.st.total;
@@ -4831,8 +4845,8 @@ bool suggestSelfTest()
             next();
         };
 
-        // Cada peticion captura SUS callbacks al encolarse (el transporte es
-        // FIFO), asi que setResult/setError van antes de CADA request.
+        // Each request captures ITS callbacks when queued (the transport is
+        // FIFO), so setResult/setError go before EACH request.
         http.setResult(record);
         http.setError([&sink, &next, p, q, key, t0](const QString &reason) {
             Result res;
@@ -4887,7 +4901,7 @@ bool feedsProtocolSelfTest()
         : QString::fromUtf8(envChannel);
     std::fprintf(stderr, "FEEDS-PROTO canal=%s\n", channel.toUtf8().constData());
 
-    // Timeout global: los endpoints pueden tardar o fallar, nunca colgar.
+    // Global timeout: the endpoints may take long or fail, never hang.
     QTimer watchdog;
     watchdog.setSingleShot(true);
     QObject::connect(&watchdog, &QTimer::timeout, []() {
@@ -4911,7 +4925,7 @@ bool feedsProtocolSelfTest()
         std::function<void()> next;
     } st{&http, &tube, channel};
 
-    // Cuenta renderers de vídeo en una respuesta (sondeo de diagnóstico).
+    // Counts video renderers in a response (diagnostic probe).
     const auto countRenderers = [](const QJsonObject &root) {
         QHash<QString, int> counts;
         std::function<void(const QJsonValue &)> walk;
@@ -4964,8 +4978,8 @@ bool feedsProtocolSelfTest()
             {n11, dups}, {withTitle, withDur});
     };
 
-    // fases: 0 visitor | 1 diag canal | 2 datos canal (tube) | 3 diag trending
-    // | 4 datos trending (tube) | 5 caso vacío (tube) | 6 fin
+    // phases: 0 visitor | 1 channel diag | 2 channel data (tube) | 3 trending diag
+    // | 4 trending data (tube) | 5 empty case (tube) | 6 end
     st.next = [&st, &countRenderers, &validIds]() {
         switch (st.phase) {
         case 0: {
@@ -5074,7 +5088,7 @@ bool feedsProtocolSelfTest()
         }
     };
 
-    // Resultados de la cadena real por Innertube.
+    // Results of the real Innertube chain.
     QObject::connect(&tube, &Innertube::channelVideosReady,
                      [&st, &validIds](const QString &channelId,
                                       const QVector<VideoInfo> &videos) {
@@ -5095,7 +5109,7 @@ bool feedsProtocolSelfTest()
                                           ids.second.second,
                                           first.toUtf8().constData());
                              if (videos.isEmpty()) {
-                                 st.ok = false; // hoy debe responder (layout roto = señal)
+                                 st.ok = false; // it must respond today (broken layout = signal)
                              } else {
                                  st.ok = st.ok && ids.first.first == videos.size()
                                          && ids.first.second == 0
@@ -5138,24 +5152,24 @@ bool feedsProtocolSelfTest()
 
 namespace {
 
-// Lanza la secuencia de sondeos /browse por cliente. visitant puede estar
-// vacío (entonces cada POST lleva la cabecera de fallback que ya usa el player
-// LOGIN_REQUIRED; en la práctica el fallback fijo funciona).
+// Launches the sequence of /browse probes per client. visitant may be
+// empty (then each POST carries the fallback header the player already uses for
+// LOGIN_REQUIRED; in practice the fixed fallback works).
 void runHomeProbes(Ipv4Https *http, const QString &visitorData)
 {
-    // Secuencia: VISIONOS primero; IOS/ANDROID_VR/WEB_EMBEDDED sólo como
-    // comparación (diagnóstico) y porque hay clientes ya definidos.
+    // Sequence: VISIONOS first; IOS/ANDROID_VR/WEB_EMBEDDED only as
+    // comparison (diagnostic) and because there are already defined clients.
     static const int kProbeClientOrder[] = {0, 1, 4, 2};
 
-    // Clientes de diagnóstico extra para /browse (SOLO este sondeo; NO se usa
-    // en la cascada de producción kPlayerClients). Valores de las tablas de
-    // clientes de referencia (WEB real de navegador y ANDROID real de app).
+    // Extra diagnostic clients for /browse (ONLY this probe; NOT used in the
+    // production cascade kPlayerClients). Values from the reference client
+    // tables (real browser WEB and real app ANDROID).
     static const PlayerClient kDiagClients[] = {
         {"WEB", "2.20260708.00.00", 1, kChromeUA,
          nullptr, nullptr, nullptr, nullptr, 0, false, nullptr},
         {"ANDROID", "21.21.39", 3,
          "com.google.android.youtube/21.21.39 (Linux; U; Android 13; Pixel 7 "
-         "Build/TQ3A.230805.001) gzip", // UA del cliente ANDROID de referencia
+         "Build/TQ3A.230805.001) gzip", // UA of the reference ANDROID client
          "Google", "Pixel 7", "Android", "13", 33, false, nullptr},
     };
 
@@ -5170,8 +5184,8 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData)
         int bestVideos = 0;
         QString bestContinuation;
         bool contDone = false;
-        std::function<void()> next;             // fase 1: sondeo por cliente
-        std::function<void()> probeContinuation; // fase 2: continuación del mejor
+        std::function<void()> next;             // phase 1: per-client probe
+        std::function<void()> probeContinuation; // phase 2: continuation of the best
     };
     auto *st = new State;
     st->http = http;
@@ -5182,8 +5196,8 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData)
                                         / sizeof(kDiagClients[0]));
 
     if (st->visitor.isEmpty()) {
-        // No hay visitorData (ni persistido ni freso): usar el fallback fijo
-        // que ya usa el proyecto (kFallbackVisitorData) para poder probar.
+        // No visitorData (neither persisted nor fresh): use the fixed fallback
+        // the project already uses (kFallbackVisitorData) to be able to probe.
         st->visitor = QString::fromLatin1(kFallbackVisitorData);
         st->usedFallbackVisitor = true;
         std::fprintf(stderr, "HOME-BROWSE visitor: fallback fijo len=%d\n",
@@ -5192,7 +5206,7 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData)
     http->setVisitorId(st->visitor);
 
     st->probeContinuation = [st]() {
-        // Fase 2: una sola petición de continuación en el mejor cliente.
+        // Phase 2: a single continuation request on the best client.
         int bi = st->bestIdx;
         if (bi < 0 || st->bestContinuation.isEmpty() || st->contDone) {
             st->contDone = true;
@@ -5200,8 +5214,8 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData)
             return;
         }
         st->contDone = true;
-        // Resolver el cliente que produjo la continuación (producción o
-        // diagnóstico), igual que en la fase 1.
+        // Resolve the client that produced the continuation (production or
+        // diagnostic), same as in phase 1.
         const int prodCount = static_cast<int>(sizeof(kProbeClientOrder)
                                                / sizeof(kProbeClientOrder[0]));
         const PlayerClient *pc;
@@ -5238,8 +5252,8 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData)
                              hs.videos.size(),
                              hs.continuation.isEmpty() ? "no" : "si");
             }
-            // Reanudar la secuencia para imprimir el RESULTADO y salir: sin
-            // esto el sondeo se quedaba colgado hasta el watchdog global.
+            // Resume the sequence to print the RESULT and exit: without this
+            // the probe hung until the global watchdog.
             st->next();
         });
         st->http->setError([st](const QString &reason) {
@@ -5253,7 +5267,7 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData)
 
     st->next = [st]() {
         if (st->idx >= st->probeCount) {
-            // Fin de la fase 1: continuar con la continuación del mejor.
+            // End of phase 1: continue with the best one's continuation.
             if (st->contDone) {
                 const int prodCount =
                     static_cast<int>(sizeof(kProbeClientOrder)
@@ -5277,8 +5291,8 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData)
             st->probeContinuation();
             return;
         }
-        // Resolver el cliente: primero los de producción (kPlayerClients),
-        // después los de diagnóstico (WEB/ANDROID reales para /browse).
+        // Resolve the client: production ones first (kPlayerClients),
+        // then diagnostic ones (real WEB/ANDROID for /browse).
         const int prodCount = static_cast<int>(sizeof(kProbeClientOrder)
                                                / sizeof(kProbeClientOrder[0]));
         const PlayerClient *pc;
@@ -5308,8 +5322,8 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData)
                          "HOME-BROWSE client=%s status=%d size=%d (%lldms)\n",
                          pc->name, status, body.size(), static_cast<long long>(dt));
             if (status == 200 && body.size() > 50000) {
-                // Guardar el cuerpo 200 grande para inspección offline (saber
-                // qué renderer lleva los vídeos del Home en cada cliente).
+                // Save the large 200 body for offline inspection (to know
+                // which renderer carries the Home videos in each client).
                 QFile out(QStringLiteral("/tmp/home_probe_%1.json").arg(pc->name));
                 if (out.open(QIODevice::WriteOnly))
                     out.write(body);
@@ -5328,7 +5342,7 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData)
                     walkHomeJson(doc.object(), &hs);
                 }
             }
-            // Renderers observados en la respuesta (sin filtrar).
+            // Renderers observed in the response (unfiltered).
             QStringList rnds;
             for (auto it2 = hs.renderers.constBegin(); it2 != hs.renderers.constEnd(); ++it2)
                 rnds << QStringLiteral("%1=%2").arg(it2.key()).arg(it2.value());
@@ -5352,9 +5366,9 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData)
                 st->bestIdx = st->idx - 1;
                 st->bestContinuation = hs.continuation;
             } else if (st->bestIdx < 0 && !hs.continuation.isEmpty()) {
-                // Sin vídeos directos en ningún cliente (esto es lo que ocurre
-                // con el Home de la app: solo llega la shell + token). Guardar
-                // la primera continuación para intentar pedir el feed real.
+                // No direct videos in any client (this is what happens
+                // with the app's Home: only the shell + token arrive). Save
+                // the first continuation to try to fetch the real feed.
                 st->bestIdx = st->idx - 1;
                 st->bestContinuation = hs.continuation;
             }
@@ -5372,9 +5386,9 @@ void runHomeProbes(Ipv4Https *http, const QString &visitorData)
     st->next();
 }
 
-// Selftest de los endpoints de browse de Innertube: búsqueda, ficha de
-// canal, pestañas (videos/shorts/live), detalle de vídeo y playlist. Red real;
-// no toca el reproductor ni SQLite ni ficheros.
+// Selftest of the Innertube browse endpoints: search, channel card,
+// tabs (videos/shorts/live), video detail and playlist. Real network; does not
+// touch the player, SQLite or files.
 
 } // namespace
 
@@ -5404,7 +5418,7 @@ bool innertubeBrowseSelfTest()
     const QString channel = QStringLiteral("UCX6OQ3DkcsbYNE6H8uQQuVA"); // MrBeast
     const QString video = QStringLiteral("dQw4w9WgXcQ");
 
-    // 1) Búsqueda.
+    // 1) Search.
     {
         bool done = false;
         QVector<VideoInfo> got;
@@ -5426,7 +5440,7 @@ bool innertubeBrowseSelfTest()
         ok = ok && good;
     }
 
-    // 2) Ficha de canal.
+    // 2) Channel card.
     {
         bool done = false;
         ChannelInfo info;
@@ -5446,7 +5460,7 @@ bool innertubeBrowseSelfTest()
         ok = ok && good;
     }
 
-    // 3) Pestañas del canal: videos por VISIONOS, shorts/live por WEB.
+    // 3) Channel tabs: videos by VISIONOS, shorts/live by WEB.
     const QStringList tabs{QStringLiteral("videos"), QStringLiteral("shorts"),
                            QStringLiteral("live")};
     for (const QString &tab : tabs) {
@@ -5463,8 +5477,8 @@ bool innertubeBrowseSelfTest()
         int empty = 0;
         for (const VideoInfo &v : got)
             if (v.id.isEmpty()) ++empty;
-        // videos/shorts deben traer datos; live puede estar vacío (el canal
-        // puede no tener directos), pero no debe colgarse.
+        // videos/shorts must bring data; live may be empty (the channel
+        // may have no live streams), but it must not hang.
         const bool good = r && empty == 0
                           && (tab == QLatin1String("live") || !got.isEmpty());
         std::fprintf(stderr,
@@ -5473,9 +5487,9 @@ bool innertubeBrowseSelfTest()
                      more ? 1 : 0, good ? "OK" : "FAIL");
         ok = ok && good;
 
-        // Continuación ("Mostrar más"): solo cuando la página llega al tamaño
-        // pedido (la UI muestra el botón en ese caso). Debe traer vídeos nuevos
-        // sin repetir los de la primera.
+        // Continuation ("Mostrar más"): only when the page reaches the
+        // requested size (the UI shows the button in that case). It must bring
+        // new videos without repeating those of the first page.
         if (good && more && got.size() >= 25) {
             bool done2 = false;
             QVector<VideoInfo> page2;
@@ -5499,7 +5513,7 @@ bool innertubeBrowseSelfTest()
         }
     }
 
-    // 4) Detalle de vídeo.
+    // 4) Video detail.
     {
         bool done = false;
         VideoInfo v;

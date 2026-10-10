@@ -40,18 +40,18 @@
 
 namespace {
 
-constexpr int kVisibleRows = 3;  // filas por defecto antes de "Ver todo"
+constexpr int kVisibleRows = 3;  // rows by default before "Ver todo"
 constexpr int kThumbW = 236;
 constexpr int kThumbH = 133;
-constexpr int kCardMinW = 400;   // ancho mínimo de cada tarjeta (grid)
+constexpr int kCardMinW = 400;   // minimum width of each card (grid)
 constexpr int kMaxCardCols = 4;
-// Cada cuánto se re-comprueba con el /next si un directo del historial sigue
-// en emisión (barato frente al player response, que competiría con la
-// reproducción). 10 min: re-entrar 1 min después de comprobarlo no dispara
-// de nuevo el POST.
+// How often it is rechecked with /next whether a live stream in the history is
+// still broadcasting (cheap compared to the player response, which would compete
+// with playback). 10 min: re-entering 1 min after checking it does not trigger
+// the POST again.
 constexpr qint64 kLiveRecheckMs = 10LL * 60LL * 1000LL;
 
-// Recorta manteniendo el centro y aplica esquinas redondeadas.
+// Crops keeping the center and applies rounded corners.
 QPixmap coverCrop(const QPixmap &pm, const QSize &sz, int radius)
 {
     QPixmap scaled =
@@ -86,9 +86,9 @@ QPixmap roundedSolid(const QSize &sz, int radius, const QPixmap &glyph)
     return out;
 }
 
-// Insignia de la esquina inferior derecha de una miniatura (las mismas
-// medidas que VideoListView::drawBadgeCore): duración en negro translúcido o
-// "En directo" en el acento.
+// Badge of a thumbnail's bottom-right corner (the same
+// measurements as VideoListView::drawBadgeCore): duration in translucent black or
+// "En directo" in the accent.
 void drawThumbBadge(QPainter *p, const QSize &sz, const QString &text,
                     const QColor &bg)
 {
@@ -111,7 +111,7 @@ void drawThumbBadge(QPainter *p, const QSize &sz, const QString &text,
     p->restore();
 }
 
-// Miniatura o avatar que se rellena solo desde ThumbnailCache.
+// Thumbnail or avatar filled only from ThumbnailCache.
 class AsyncThumb : public QLabel
 {
 public:
@@ -152,9 +152,9 @@ public:
         }
     }
 
-    // Fracción de reproducción (0..1) que se pinta al pie de la miniatura, el
-    // mismo "estado de reproducción" que dibuja el delegado de VideoListView
-    // en el Home y la página de Historial. 0 = sin barra.
+    // Playback fraction (0..1) painted at the foot of the thumbnail, the
+    // same "playback state" that the VideoListView delegate draws
+    // on Home and the History page. 0 = no bar.
     void setProgress(double fraction)
     {
         const double f = qBound(0.0, fraction, 1.0);
@@ -164,9 +164,9 @@ public:
         update();
     }
 
-    // Insignia de la esquina inferior derecha: "En directo" (acento) mientras
-    // el vídeo es un directo, o la duración total en otro caso (como YouTube).
-    // La piden las secciones de vídeo; 0 y no-directo = sin insignia.
+    // Bottom-right badge: "En directo" (accent) while
+    // the video is a live stream, or the total duration otherwise (like YouTube).
+    // The video sections request it; 0 and not-live = no badge.
     void setBadgeInfo(int durationSeconds, bool isLive)
     {
         if (m_seconds == durationSeconds && m_live == isLive)
@@ -182,11 +182,11 @@ protected:
         QLabel::paintEvent(e);
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
-        // Mismas medidas que VideoListView::drawProgressBar (2 px de margen,
-        // 3 px de alto, 1 px por encima del borde) para que la barra se lea
-        // igual en todos los sitios. Se recorta al rectángulo redondeado de la
-        // miniatura para no asomar por las esquinas. Un directo NO lleva
-        // barra: su posición va pegada al borde y la barra engañaría.
+        // Same measurements as VideoListView::drawProgressBar (2 px margin,
+        // 3 px high, 1 px above the border) so the bar reads
+        // the same everywhere. It is clipped to the thumbnail's rounded
+        // rectangle so it does not stick out at the corners. A live stream does NOT have a
+        // bar: its position is pinned to the edge and the bar would be misleading.
         if (m_frac > 0.0 && !m_live) {
             const QRectF bar(2, height() - 4, width() - 4, 3);
             if (bar.width() > 0) {
@@ -204,8 +204,8 @@ protected:
                 p.setClipping(false);
             }
         }
-        // Insignia de tiempo/directo (fuera del clip de la miniatura, igual
-        // que el delegado).
+        // Time/live badge (outside the thumbnail's clip, same
+        // as the delegate).
         if (m_live)
             drawThumbBadge(&p, size(), QStringLiteral("En directo"),
                            nt::kAccent);
@@ -243,7 +243,7 @@ private:
     bool m_live = false;
 };
 
-// Fila genérica: miniatura/avatar a la izquierda, texto y botón de acción.
+// Generic row: thumbnail/avatar on the left, text and action button.
 class RowItem : public QWidget
 {
 public:
@@ -482,9 +482,9 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
         header->addWidget(l);
         header->addStretch(1);
         auto *b = new QPushButton(btnText, m_body);
-        // Enlace discreto y no #ghost con marco: son cinco botones (Administrar
-        // + tres "Ver todo") alineados a la derecha de cada titulo, y con
-        // capsula parecian botones de la pagina en vez de enlaces.
+        // Discreet link and not #ghost with a border: there are five buttons (Manage
+        // + three "Ver todo") aligned to the right of each title, and with a
+        // capsule they looked like page buttons instead of links.
         b->setObjectName(QStringLiteral("sectionLink"));
         b->setCursor(Qt::PointingHandCursor);
         header->addWidget(b);
@@ -495,7 +495,7 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
         lay->addLayout(header);
     };
 
-    // ---- Suscripciones -------------------------------------------------
+    // ---- Subscriptions -------------------------------------------------
     QPushButton *manageBtn = nullptr;
     addSectionHeader(QStringLiteral("Suscripciones"), &manageBtn,
                      QStringLiteral("Administrar"), &m_subsTitle);
@@ -522,9 +522,9 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     m_subScroll->setWidgetResizable(false);
     m_subScroll->setFrameShape(QFrame::NoFrame);
     m_subScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    // El scrollbar horizontal está dentro del área y consume altura del
-    // viewport: sin esto, veríamos ~37px de tarjetas de 54px y el logo del
-    // canal quedará recortado por abajo. El mínimo debe incluir esa franja.
+    // The horizontal scrollbar is inside the area and consumes height from the
+    // viewport: without this, we would see ~37px of 54px cards and the channel
+    // logo would be cut off at the bottom. The minimum must include that strip.
     m_subScroll->setMinimumHeight(
         kChannelRowHeight + m_subScroll->horizontalScrollBar()->sizeHint().height());
     m_subScroll->setWidget(m_subHost);
@@ -532,7 +532,7 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
 
     lay->addSpacing(16);
 
-    // ---- Videos que me gustan ------------------------------------------
+    // ---- Videos I like ------------------------------------------
     addSectionHeader(QStringLiteral("Videos que me gustan"), &m_fav.allBtn,
                      QStringLiteral("Ver todo"), &m_fav.title);
     connect(m_fav.allBtn, &QPushButton::clicked, this, [this]() {
@@ -555,7 +555,7 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
 
     lay->addSpacing(16);
 
-    // ---- Ver más tarde -------------------------------------------------
+    // ---- Watch later -------------------------------------------------
     addSectionHeader(QStringLiteral("Ver más tarde"), &m_later.allBtn,
                      QStringLiteral("Ver todo"), &m_later.title);
     connect(m_later.allBtn, &QPushButton::clicked, this, [this]() {
@@ -578,7 +578,7 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
 
     lay->addSpacing(16);
 
-    // ---- Historial -----------------------------------------------------
+    // ---- History -----------------------------------------------------
     addSectionHeader(QStringLiteral("Historial"), &m_historySec.allBtn,
                      QStringLiteral("Ver todo"), &m_historySec.title);
     connect(m_historySec.allBtn, &QPushButton::clicked, this,
@@ -624,17 +624,17 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
 
     outer->addWidget(m_scroll);
 
-    // "Crear / renombrar playlist" ya no necesita setup: es nt::inputText, que
-    // se construye en cada llamada. "Gestionar suscripciones" sí sigue siendo un
-    // popover propio (una lista con scroll, no un diálogo).
+    // "Create / rename playlist" no longer needs setup: it is nt::inputText, which
+    // is built on each call. "Manage subscriptions" is still its own
+    // popover (a list with scroll, not a dialog).
     setupManageSubsPopup();
 
     connect(m_yt, &Yt::channelInfoReady, this, &LibraryPage::onChannelInfo);
 
-    // Re-comprobación de directos del Historial: el /next distingue "sigue en
-    // directo" de "terminó" (viewCountText "viéndolo ahora" frente a "visua-
-    // lizaciones"). Al terminar, la fila pasa a duración + barra sin esperar
-    // a que una superficie vuelva a pedir los renderers.
+    // Recheck of History live streams: /next distinguishes "still
+    // live" from "ended" (viewCountText "viéndolo ahora" vs "visua-
+    // lizaciones"). When it ends, the row switches to duration + bar without waiting
+    // for a surface to request the renderers again.
     connect(m_yt, &Yt::detailReady, this,
             [this](const VideoInfo &video, const QString &, qint64,
                    const QVector<FormatInfo> &) { onLiveDetailReady(video); });
@@ -657,17 +657,17 @@ void LibraryPage::reload()
 
 void LibraryPage::applyAccent()
 {
-    // La barra de progreso de la miniatura la pinta AsyncThumb::paintEvent con
-    // nt::kAccent, que el QSS no alcanza: hay que repintar las miniaturas.
+    // AsyncThumb::paintEvent paints the thumbnail progress bar with
+    // nt::kAccent, which the QSS does not reach: the thumbnails have to be repainted.
     for (AsyncThumb *t : m_body->findChildren<AsyncThumb *>())
         t->update();
 }
 
 // --------------------------------------------------------------------------
-// Suscripciones
+// Subscriptions
 // --------------------------------------------------------------------------
-// Contador de sección: el título base va en la propiedad baseTitle del QLabel y
-// aquí se compone "Título · N" (sin sufijo si N es 0).
+// Section counter: the base title goes in the QLabel's baseTitle property and
+// here "Title · N" is composed (no suffix if N is 0).
 static void setSectionCount(QLabel *l, int n)
 {
     if (!l)
@@ -748,8 +748,8 @@ void LibraryPage::onChannelInfo(const ChannelInfo &channel)
     }
     if (!channel.avatarUrl.isEmpty()) {
         m_thumbs->requestChannelAvatar(channel.id, channel.avatarUrl);
-        // Persistir el avatar para que la suscripción no vuelva a nacer sin él
-        // (p. ej. al suscribirse desde el reproductor sin tener aún los datos).
+        // Persist the avatar so the subscription is not born without it again
+        // (e.g. when subscribing from the player without having the data yet).
         if (m_subs->isSubscribed(channel.id))
             m_subs->setAvatar(channel.id, channel.avatarUrl);
     }
@@ -757,7 +757,7 @@ void LibraryPage::onChannelInfo(const ChannelInfo &channel)
 }
 
 // --------------------------------------------------------------------------
-// Listas de vídeos (filas clicables con menú)
+// Video lists (clickable rows with a menu)
 // --------------------------------------------------------------------------
 void LibraryPage::buildRows(
     QVBoxLayout *lay, const QVector<VideoInfo> &videos, int visible,
@@ -775,9 +775,9 @@ void LibraryPage::buildRows(
         auto *thumb = new AsyncThumb(m_thumbs, QString(),
                                      QStringLiteral("v_%1").arg(v.id), url,
                                      kThumbW, kThumbH, 8, false, row);
-        // Estado de reproducción: barra de progreso al pie de la miniatura
-        // (vacío el mapa = sin barra). Solo lo pasan las secciones que saben
-        // la posición: el Historial.
+        // Playback state: progress bar at the foot of the thumbnail
+        // (empty map = no bar). Only the sections that know the
+        // position pass it: History.
         thumb->setProgress(progress.value(v.id, 0.0));
         thumb->setBadgeInfo(v.durationSeconds, v.isLive);
         row->setLeading(thumb);
@@ -859,15 +859,15 @@ void LibraryPage::rebuildHistory()
     setSectionCount(m_historySec.title, m_historySec.videos.size());
     if (!has)
         return;
-    // Estado de reproducción, igual que en el Home: barra de progreso al pie
-    // de la miniatura de cada fila que se puede reanudar. Un directo NO lleva
-    // barra (su posición va pegada al borde y la barra engañaría): solo la
-    // marca "En directo".
+    // Playback state, same as on Home: progress bar at the foot
+    // of the thumbnail of each row that can be resumed. A live stream does NOT have a
+    // bar (its position is pinned to the edge and the bar would be misleading): only the
+    // "En directo" mark.
     QHash<QString, double> progress;
     for (const VideoInfo &v : m_historySec.videos) {
         if (v.isLive) {
-            // Directo cacheado: re-comprobar si sigue en emisión al re-entrar
-            // (ver maybeRefreshLiveStatus). Sin fracción que pintar.
+            // Cached live stream: recheck if it is still broadcasting when re-entering
+            // (see maybeRefreshLiveStatus). No fraction to paint.
             maybeRefreshLiveStatus(v);
             continue;
         }
@@ -896,16 +896,16 @@ void LibraryPage::rebuildHistory()
               progress);
 }
 
-// Un directo cacheado puede terminar entre visitas. El re-análisis de los
-// renderers (search/canal/home) lo aclararía solo al volver a pedir esa
-// superficie; aquí, al re-entrar en la página, se re-comprueba con el /next
-// (getDetail: NO toca la fase player, encola sin colisionar con la
-// reproducción) la marca de cada directo del Historial. El /next distingue
-// "sigue en directo" (viewCountText "N usuarios viéndolo ahora") de
-// "terminó" ("N visualizaciones"); la DURACIÓN total de un directo terminado
-// solo la da el player response al reproducir, así que al terminar se
-// conserva la última duración conocida (la "hasta ahora" que escribió
-// onDurationKnown durante la emisión).
+// A cached live stream may end between visits. Re-parsing the
+// renderers (search/channel/home) would only clear it up by requesting that
+// surface again; here, when re-entering the page, it is rechecked with /next
+// (getDetail: it does NOT touch the player phase, it enqueues without colliding
+// with playback) the mark of each History live stream. /next distinguishes
+// "still live" (viewCountText "N usuarios viéndolo ahora") from
+// "ended" ("N visualizaciones"); the TOTAL DURATION of an ended live stream
+// is only given by the player response at playback, so when it ends
+// the last known duration is kept (the "hasta ahora" that
+// onDurationKnown wrote during the broadcast).
 void LibraryPage::maybeRefreshLiveStatus(const VideoInfo &v)
 {
     if (!v.isLive || m_liveRefreshPending.contains(v.id))
@@ -923,16 +923,16 @@ void LibraryPage::onLiveDetailReady(const VideoInfo &video)
         return;
     m_liveRefreshedAt.insert(video.id, QDateTime::currentMSecsSinceEpoch());
     if (video.isLive)
-        return; // sigue en emisión: nada que actualizar (se re-comprueba en 10 min)
-    // Terminó: se apaga la marca y la fila pasa a duración + barra de la
-    // posición del usuario.
+        return; // still broadcasting: nothing to update (it is rechecked in 10 min)
+    // Ended: the mark is turned off and the row switches to duration + bar of the
+    // user's position.
     if (m_cache->updateLiveStatus(video.id, false))
         rebuildHistory();
 }
 
-// La lista de acciones es la compartida por TODAS las superficies con fila
-// (nt::addRowMenuActions); aquí solo se pasan las piezas que son de esta
-// página: su popup de "Nueva playlist" y la recarga de la sección al escribir.
+// The action list is the one shared by ALL surfaces with a row
+// (nt::addRowMenuActions); here only the pieces that belong to this
+// page are passed: its "Nueva playlist" popup and the reload of the section on write.
 void LibraryPage::addStandardMenuActions(QMenu *menu, const VideoInfo &v,
                                          bool withWatchLater)
 {
@@ -983,11 +983,11 @@ void LibraryPage::rebuildPlaylists()
         auto *menu = new QMenu(row);
         addMenuAction(menu, QStringLiteral("Renombrar"),
                       [this, p]() { promptRenamePlaylist(p); });
-        // Misma confirmación que el botón "Eliminar" de la página Playlist, y el
-        // motivo es el mismo: la playlist desaparece entera y no hay vuelta atrás.
-        // No hace falta un QTimer::singleShot(0) aquí: addMenuAction ya lo hace,
-        // para que la lista de la que nació el menú no se quede sin la fila con
-        // el diálogo abierto.
+        // Same confirmation as the "Eliminar" button of the Playlist page, and the
+        // reason is the same: the playlist disappears entirely and there is no going back.
+        // No QTimer::singleShot(0) is needed here: addMenuAction already does it,
+        // so that the list the menu was born from does not end up without the row with
+        // the dialog open.
         addMenuAction(menu, QStringLiteral("Eliminar"),
                       [this, p, n = videos.size()]() {
             const QString where = p.title.trimmed().isEmpty()
@@ -1030,15 +1030,15 @@ void LibraryPage::layoutCards(QGridLayout *grid, const QVector<QWidget *> &cards
 }
 
 // --------------------------------------------------------------------------
-// Crear / renombrar playlist: el diálogo de la app (nt::inputText)
+// Create / rename playlist: the app's dialog (nt::inputText)
 // --------------------------------------------------------------------------
-// Antes esta página tenía SU PROPIO QFrame#popupDialog con el campo
-// (setupCreatePlaylistPopup y compañía, ~105 líneas) y el Player tenía otro
-// idéntico. Los dos hacen ahora exactamente lo mismo que nt::confirm y que el
-// prompt de Historial y Playlist: una caja hija de la VENTANA (no de la
-// página), con velo, modal y sin ventana flotante. Antes los dos popoveres no
-// bloqueaban y el del Player ni siquiera cerraba con Escape, así que el mismo
-// "Añadir a playlist" se comportaba de tres maneras según la página.
+// Before, this page had ITS OWN QFrame#popupDialog with the field
+// (setupCreatePlaylistPopup and company, ~105 lines) and the Player had another
+// identical one. Both now do exactly the same as nt::confirm and as the
+// History and Playlist prompt: a box that is a child of the WINDOW (not of the
+// page), with a veil, modal and no floating window. Before, the two popovers did not
+// block and the Player's did not even close with Escape, so the same
+// "Añadir a playlist" behaved in three ways depending on the page.
 void LibraryPage::promptNewPlaylist(const QString &videoId)
 {
     QString name;
@@ -1093,7 +1093,7 @@ void LibraryPage::centerPopup(QFrame *popup)
 }
 
 // --------------------------------------------------------------------------
-// Popup: gestionar suscripciones
+// Popup: manage subscriptions
 // --------------------------------------------------------------------------
 void LibraryPage::setupManageSubsPopup()
 {
@@ -1172,17 +1172,17 @@ void LibraryPage::rebuildManageSubs()
     m_manageLay->addStretch(1);
 }
 
-// Antes este eventFilter solo existia para que Escape cerrara el QLineEdit del
-// popup de playlist. Ese popup es ahora nt::inputText, que gestiona su propio
-// Escape, asi que el filtro sobra entero y se elimina el override.
+// Before, this eventFilter only existed so that Escape would close the QLineEdit of
+// the playlist popup. That popup is now nt::inputText, which handles its own
+// Escape, so the filter is entirely unnecessary and the override is removed.
 
 void LibraryPage::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
     layoutCards(m_playlistGrid, m_playlistCards);
-    // El popup de crear/renombrar playlist ya no se recentra aquí: es
-    // nt::inputText, que es hijo de la VENTANA y no de esta página, así que su
-    // centro no depende del ancho de Biblioteca.
+    // The create/rename playlist popup is no longer re-centered here: it is
+    // nt::inputText, which is a child of the WINDOW and not of this page, so its
+    // center does not depend on Library's width.
     if (m_managePopup && m_managePopup->isVisible())
         centerPopup(m_managePopup);
 }

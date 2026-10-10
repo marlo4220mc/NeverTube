@@ -14,10 +14,10 @@ struct VideoInfo
     QString publishedAt;
     int durationSeconds = 0;
     int viewCount = 0;
-    // Directo actual: lo declaran los renderers (badge LIVE / "En directo",
-    // viewCount "viéndolo ahora" del /next) y el player response
-    // (videoDetails.isLive). Se persiste en la caché (videos.is_live) y las
-    // miniaturas muestran "En directo" en vez de la duración.
+    // Current live stream: declared by the renderers (LIVE badge /
+    // "En directo", /next viewCount "watching now") and by the player response
+    // (videoDetails.isLive). Persisted in the cache (videos.is_live) and the
+    // thumbnails show "En directo" instead of the duration.
     bool isLive = false;
 };
 
@@ -45,17 +45,17 @@ struct StreamInfo
     QString label;
     int height = 0;
     bool multipleUrls = false;
-    // Falso solo para streams CONSTRUIDOS por la app desde un medio finito
-    // (el HLS sintético de AV1: un fMP4 con playlist VOD+ENDLIST). Un stream
-    // así no puede ser un directo por construcción, así que la UI de directo
-    // (EN VIVO, playhead al borde) se desactiva para él aunque el backend
-    // reporte duraciones inestables mientras carga. El resto de flujos (master
-    // de YouTube, filtrado, edge) SÍ pueden ser un directo y quedan con true.
+    // False only for streams BUILT by the app from finite media (the synthetic
+    // AV1 HLS: an fMP4 with a VOD+ENDLIST playlist). Such a stream cannot be a
+    // live stream by construction, so the live UI (EN VIVO, playhead at the
+    // edge) is disabled for it even if the backend reports unstable durations
+    // while loading. The other streams (YouTube master, filtered, edge) CAN be
+    // live and keep true.
     bool canBeLive = true;
-    // Señal AUTORITATIVA de directo (videoDetails.isLive del player response
-    // de YouTube): true solo si YouTube declara el medio como directo actual.
-    // Permite entrar en modo EN VIVO al instante, sin esperar a que la
-    // duración "hasta ahora" crezca (y cubre los directos puros con dur=0).
+    // AUTHORITATIVE live signal (videoDetails.isLive from YouTube's player
+    // response): true only if YouTube declares the media as a current live
+    // stream. Lets us enter EN VIVO mode instantly, without waiting for the
+    // "so far" duration to grow (and covers pure live streams with dur=0).
     bool isLive = false;
 };
 
@@ -68,8 +68,8 @@ struct PlaylistInfo
     int videoCount = 0;
 };
 
-// URL de la miniatura de reserva de un vídeo, cuando la respuesta/feed no trae
-// ninguna. Solo para ids de YouTube válidos (11 caracteres); si no, vacío.
+// Fallback thumbnail URL of a video, when the response/feed brings none. Only
+// for valid YouTube ids (11 characters); empty otherwise.
 inline QString fallbackThumbnailUrl(const QString &videoId)
 {
     return videoId.size() == 11

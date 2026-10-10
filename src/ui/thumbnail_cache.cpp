@@ -65,10 +65,11 @@ QPixmap ThumbnailCache::pixmap(const QString &key) const
         touch(key);
         return it.value();
     }
-    // Fallback a disco: el LRU pudo desalojar la imagen de memoria (p. ej. al
-    // compartir presupuesto search+canal), pero el archivo sigue en m_dir. Sin
-    // esto, el delegate pinta vacío y la miniatura "desaparece" para siempre,
-    // porque nadie vuelve a hacer request() de un ítem ya mostrado.
+    // Disk fallback: the LRU may have evicted the image from memory (e.g. when
+    // sharing the budget between search+channel), but the file is still in
+    // m_dir. Without this the delegate paints empty and the thumbnail
+    // "disappears" forever, because nobody calls request() again for an item
+    // that was already shown.
     const QString path = filePath(key);
     if (!QFile::exists(path))
         return QPixmap();
@@ -91,11 +92,12 @@ static QString stripWebpParam(const QString &url)
     return q.toString(QUrl::FullyEncoded);
 }
 
-// YouTube sirve miniaturas webp bajo i.ytimg.com/vi_webp/<id>/<nombre>.webp.
-// Qt sin plugin webp (ojo: los plugins no son dependencia necesaria) no las
-// decodifica, así que se reescribe a la variante .jpg equivalente (existe para
-// los mismos tamaños: maxresdefault, hq720, hqdefault...). Así se hace UNA
-// sola descarga y siempre jpeg: menos latencia y memoria en máquinas modestas.
+// YouTube serves webp thumbnails under i.ytimg.com/vi_webp/<id>/<name>.webp.
+// Qt without the webp plugin (note: plugins are not a required dependency)
+// cannot decode them, so the URL is rewritten to the equivalent .jpg variant
+// (it exists for the same sizes: maxresdefault, hq720, hqdefault...). That way
+// there is only ONE download and always jpeg: less latency and memory on
+// modest machines.
 static QString jpegEquivalent(const QString &url)
 {
     QUrl q{url};
@@ -104,7 +106,7 @@ static QString jpegEquivalent(const QString &url)
     const QString path = q.path();
     if (!path.startsWith(QLatin1String("/vi_webp/")))
         return url;
-    QString rest = path.mid(9); // "/vi_webp/" -> "…/<nombre>.webp"
+    QString rest = path.mid(9); // "/vi_webp/" -> "…/<name>.webp"
     if (!rest.endsWith(QLatin1String(".webp")))
         return url;
     rest.chop(5);
@@ -112,8 +114,8 @@ static QString jpegEquivalent(const QString &url)
     return q.toString(QUrl::FullyEncoded);
 }
 
-// Miniatura estándar por id de vídeo. Se usa como fallback cuando la URL que
-// trae el panel/radio (p. ej. hq720_custom_1.jpg) responde 404.
+// Standard thumbnail by video id. Used as a fallback when the URL that comes
+// from the panel/radio (e.g. hq720_custom_1.jpg) answers 404.
 static QString standardThumbFor(const QString &key)
 {
     if (!key.startsWith(QLatin1String("v_")))
@@ -187,10 +189,10 @@ void ThumbnailCache::onFinished(QNetworkReply *reply)
     }
     reply->deleteLater();
 
-    // Descarga rota o que no puede decodificarse (p. ej. webp en un Qt sin
-    // plugin webp): reintentar UNA vez con la miniatura estándar por id
-    // (hqdefault.jpg). Sin bucle: si la estándar tampoco sirve, no se vuelve
-    // a llamar (QUrl(stdUrl) == url pedida).
+    // Broken download or one that cannot be decoded (e.g. webp on a Qt without
+    // the webp plugin): retry ONCE with the standard thumbnail by id
+    // (hqdefault.jpg). No loop: if the standard one also fails, there is no
+    // further call (QUrl(stdUrl) == the requested url).
     const bool bad = err != QNetworkReply::NoError || data.isEmpty()
         || image.isNull();
     if (bad) {

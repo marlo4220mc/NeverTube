@@ -9,13 +9,13 @@
 class QLabel;
 class ThumbnailCache;
 
-// Alto fijo y tamaño de avatar de la tarjeta de canal (un único punto de
-// verdad para Biblioteca y Search).
+// Fixed height and avatar size of the channel card (single source of truth
+// for Library and Search).
 inline constexpr int kChannelRowHeight = 140;
 inline constexpr int kChannelRowAvatar = 36;
 
-// Deriva un @handle en minúsculas a partir del nombre del canal (mismo
-// criterio que usa la Biblioteca para las filas de "Suscripciones").
+// Derives a lowercase @handle from the channel name (same criterion Library
+// uses for the "Subscriptions" rows).
 inline QString channelHandleFor(const QString &title)
 {
     QString h;
@@ -32,12 +32,12 @@ inline QString channelHandleFor(const QString &title)
     return QStringLiteral("@%1").arg(h);
 }
 
-// Tarjeta de canal horizontal, igual que la fila de "Suscripciones" de la
-// Biblioteca: avatar circular a la izquierda, nombre + meta (descripción) a la
-// derecha, ancho adaptativo al contenido real, alto fijo, hover y click.
+// Horizontal channel card, same as the Library "Subscriptions" row: circular
+// avatar on the left, name + meta (description) on the right, width adaptive
+// to the real content, fixed height, hover and click.
 //
-// Reutilizada por Biblioteca (fila de suscripciones) y por Search (sección
-// "Canales").
+// Reused by Library (subscriptions row) and by Search (the "Channels"
+// section).
 class ChannelRow : public QWidget
 {
     Q_OBJECT
@@ -47,12 +47,12 @@ public:
                         const QString &avatarUrl, QWidget *parent = nullptr);
 
     void setTitle(const QString &title);
-    // 1 = una línea de texto, 2 = dos líneas (por defecto 2).
+    // 1 = one text line, 2 = two lines (default 2).
     void setTitleLines(int lines);
     void setMeta(const QString &meta);
-    // Aplica el ancho mínimo que la tarjeta necesita para mostrar su texto a
-    // tamaño real (una línea de nombre a 14px bold y la línea de meta más
-    // ancha a 12px). Sin él, QLabel con wordWrap encoge la tarjeta.
+    // Applies the minimum width the card needs to show its text at real size
+    // (one name line at 14px bold and the widest meta line at 12px). Without
+    // it, a QLabel with wordWrap shrinks the card.
     void applyContentWidth();
     void setAvatarUrl(const QString &url);
     void setActionWidget(QWidget *widget);

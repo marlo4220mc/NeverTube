@@ -7,15 +7,15 @@
 
 #include "playback_backend.h"
 
-// Superficie de vídeo + política de reproducción. Todo acceso al motor va por
-// la interfaz PlaybackBackend (en esta fase, MpvBackend; la x86 con FFmpeg
-// llega en fases posteriores): el widget NO conoce mpv. Aquí viven el estado
-// (posición/duración/state), el watchdog de atasco y de sesión gateada
-// (checkStall), la red de seguridad del perfil de códec (hwdec probe/retry y
-// corrección por log), y la espera inicial de buffer en alta resolución — que
-// es la pieza protegida (QOpenGLWidget, redibujado por eventos: el motor
-// notifica frameReady cuando hay un frame nuevo y onFrameReady fuerza
-// QWidget::update(); render directo al FBO en paintGL).
+// Video surface + playback policy. All access to the engine goes through the
+// PlaybackBackend interface (at this stage, MpvBackend; the x86 with FFmpeg
+// comes in later phases): the widget does NOT know mpv. Here live the state
+// (position/duration/state), the stall and gated-session watchdogs
+// (checkStall), the codec-profile safety net (hwdec probe/retry and
+// log-based correction), and the initial high-resolution buffer wait — which
+// is the protected piece (QOpenGLWidget, event-driven redraw: the engine
+// notifies frameReady when there is a new frame and onFrameReady forces
+// QWidget::update(); direct render to the FBO in paintGL).
 class PlayerWidget : public QOpenGLWidget
 {
     Q_OBJECT
@@ -32,19 +32,19 @@ public:
     QString state() const { return m_state; }
     double speed() const;
 
-    // Configuración de decodificación por hardware del motor (mpv "hwdec");
-    // verificado por --selftest-player como "auto".
+    // Engine hardware decoding setting (mpv "hwdec");
+    // verified as "auto" by --selftest-player.
     QString hwdec() const;
 
-    // Acceso de solo lectura para selftest --selftest-player: true cuando el
-    // contexto de render del motor quedó creado (initializeGL corrió). En mpv
-    // ese mismo initGL instala el update callback, así que implica que la
-    // ruta de redibujado por eventos está activa (sin timer de poll).
+    // Read-only access for the --selftest-player selftest: true when the
+    // engine's render context was created (initializeGL ran). In mpv that
+    // same initGL installs the update callback, so it implies the
+    // event-driven redraw path is active (no poll timer).
     bool renderContextReady() const { return m_backend && m_backend->hasRenderContext(); }
-    // Backend de decodificación por hardware que el motor está usando de
-    // verdad para el stream actual, o "no"/vacío si decodifica en software.
+    // Hardware decoding backend the engine is really using for the current
+    // stream, or "no"/empty if it decodes in software.
     QString hwdecCurrent() const;
-    // Códec que el motor está decodificando de verdad para el stream actual
+    // Codec the engine is really decoding for the current stream
     // ("h264", "vp9", "av1", …).
     QString videoCodec() const;
 
@@ -55,23 +55,24 @@ public slots:
     void setPaused(bool paused);
     void seek(double seconds);
     void setVolume(double volume);
-    // Tope máximo del volumen del motor (mpv "volume-max"). Default 100; el
-    // ajuste "Volumen máximo" de Ajustes puede subirlo a 150/175/200 para dar
+    // Engine volume ceiling (mpv "volume-max"). Default 100; the
+    // "Volumen máximo" setting in Ajustes can raise it to 150/175/200 for
     // headroom.
     void setVolumeMax(double maxPercent);
     void setSubVisibility(bool visible);
     void setAudioLanguage(const QString &lang);
-    // Para VP9/webm: agregar pista de audio externa (opus webm direct URL).
-    // En guarda m_pendingAudioFile y se aplica con el comando "audio-file-add"
-    // justo después de MPV_EVENT_FILE_LOADED (en mpv 0.41 la opción --audio-file
-    // es CLI-only y set_option_string falla con OPTION_NOT_FOUND).
+    // For VP9/webm: attach an external audio track (opus webm direct URL).
+    // Stores in m_pendingAudioFile and applies it with the "audio-file-add"
+    // command right after MPV_EVENT_FILE_LOADED (in mpv 0.41 the --audio-file
+    // option is CLI-only and set_option_string fails with OPTION_NOT_FOUND).
     void setAudioFile(const QString &url);
-    // Espera inicial de buffer al arrancar streams de alta resolución (>=1080p):
-    // arranca en pausa y solo reanuda cuando el demuxer ha acumulado `secs`
-    // segundos de contenido (demuxer-cache-duration) según la descarga real
-    // (QTimer de muestreo lanzado en video-params/h). El objetivo se escala por
-    // resolución (1440p/2160p piden más margen). Se tolera con un timeout y se
-    // aborta si la red va por debajo del consumo. secs en segundos; 0 = off.
+    // Initial buffer wait when starting high-resolution streams (>=1080p):
+    // starts paused and only resumes once the demuxer has accumulated `secs`
+    // seconds of content (demuxer-cache-duration) according to the real
+    // download (QTimer sampling launched on video-params/h). The target scales
+    // with resolution (1440p/2160p ask for more margin). It is tolerated with
+    // a timeout and aborted if the network falls behind the consumption. secs in
+    // seconds; 0 = off.
     void setInitialBufferSecs(double secs);
 
 signals:
@@ -81,26 +82,26 @@ signals:
     void mediaError(const QString &message);
     void videoAspectChanged(double aspect);
     void videoSizeChanged(int width, int height);
-    // Se emite al empezar a decodificar cada stream real: el códec y el backend
-    // de decodificación por hardware que el motor usa de verdad (hwdec-current,
-    // p.ej. "vaapi"/"vulkan-copy"; "no"/vacío = software). MainWindow lo usa
-    // como red de seguridad del perfil de códec detectado por HwProbe: si el
-    // códec que el perfil da por HW cae a software, degrada el perfil.
+    // Emitted when each real stream starts decoding: the codec and the hardware
+    // decoding backend the engine really uses (hwdec-current,
+    // e.g. "vaapi"/"vulkan-copy"; "no"/empty = software). MainWindow uses it
+    // as the safety net for the codec profile detected by HwProbe: if the
+    // codec the profile treats as HW falls back to software, the profile is downgraded.
     void streamDecodeInfoReady(const QString &codec, const QString &hcdecBackend);
-    // Cuando un stream termina de cargarse, se emite la mayor altura (píxeles)
-    // disponible entre sus pistas de vídeo. WatchPage la usa para filtrar el
-    // menú de resoluciones: ocultar los ítems por encima de lo que existe para
-    // ese vídeo (evita ofrecer "1080p" en un clip de 720p). 0 si no se pudo
-    // determinar (en ese caso el menú se queda completo).
+    // When a stream finishes loading, the tallest height (pixels)
+    // available among its video tracks is emitted. WatchPage uses it to filter the
+    // resolution menu: hide the items above what exists for
+    // that video (avoids offering "1080p" on a 720p clip). 0 if it could not
+    // be determined (in that case the menu stays complete).
     void qualityLimitsChanged(int maxVideoHeight);
-    // La posición se estancó > 5 s reproduciendo (sin pausa de usuario ni
-    // buffer inicial). El controlador re-resuelve con URLs frescas y reanuda.
+    // The position stalled for > 5 s while playing (no user pause nor
+    // initial buffer). The controller re-resolves with fresh URLs and resumes.
     void streamStalled();
-    // Interrupción de la reproducción distinta de un atasco de posición:
-    // EOF prematuro (posición << duración del vídeo) o pista de audio externa
-    // que nunca abrió (p.ej. 403 de YouTube sobre las URLs de la sesión: el
-    // vídeo avanza en silencio hasta que los segmentos también mueren). El
-    // controlador re-resuelve con URLs frescas y reanuda en la posición.
+    // Playback interruption other than a position stall:
+    // premature EOF (position << video duration) or external audio track
+    // that never opened (e.g. YouTube 403 on the session's URLs: the
+    // video advances silently until the segments die too). The
+    // controller re-resolves with fresh URLs and resumes at the position.
     void streamInterrupted();
 
 protected:
@@ -108,13 +109,13 @@ protected:
     void paintGL() override;
 
 private slots:
-    // Backend ::frameReady: hay un frame nuevo (o cambio de estado) que pintar.
+    // Backend ::frameReady: there is a new frame (or state change) to paint.
     void onFrameReady();
-    // Backend ::fileLoaded: el archivo principal terminó de cargar.
+    // Backend ::fileLoaded: the main file finished loading.
     void onFileLoaded();
-    // Backend ::streamStart: empieza un stream nuevo (re-armar el probe).
+    // Backend ::streamStart: a new stream starts (re-arm the probe).
     void onStreamStart();
-    // Backend ::endFile: fin de archivo con su razón y mensaje de error.
+    // Backend ::endFile: end of file with its reason and error message.
     void onEndFile(PlaybackBackend::EndReason reason, const QString &errorText);
     void onPositionUpdated(double seconds);
     void onDurationUpdated(double seconds);
@@ -126,16 +127,16 @@ private slots:
     void checkInitialBuffer();
     void checkStall();
     void retryHwdec();
-    // x86 (FfmpegBackend): detecta si otra ventana cubre por completo el vídeo
-    // (timer lento; Win7/DWM no avisa de oclusión). Mientras esté cubierto, el
-    // motor deja de convertir y de pintar (ahorro real de CPU/GPU).
+    // x86 (FfmpegBackend): detects whether another window fully covers the video
+    // (slow timer; Win7/DWM gives no occlusion notice). While covered, the
+    // engine stops converting and painting (real CPU/GPU saving).
     void checkVideoCovered();
 
 private:
     void emitAspectIfReady();
-    // Recorrido del z-order de Windows: true si una ventana visible y no
-    // transparente (por encima de nuestra top-level) cubre el rect del vídeo.
-    // Solo Windows; en Linux/Linux no se usa (el FfmpegBackend no salta).
+    // Walk of the Windows z-order: true if a visible, non-transparent
+    // window (above our top-level) covers the video rect.
+    // Windows only; not used on Linux (the FfmpegBackend never skips).
     bool occludedByTopWindow();
 
     PlaybackBackend *m_backend = nullptr;
@@ -144,42 +145,42 @@ private:
     QString m_state;
     int64_t m_videoW = 0;
     int64_t m_videoH = 0;
-    // Altura máxima real entre las pistas de vídeo del archivo cargado
-    // (track-list). 0 si aún no se leyó. Consumida por WatchPage para
-    // filtrar el menú de resoluciones.
+    // Tallest height among the video tracks of the loaded file
+    // (track-list). 0 if not read yet. Consumed by WatchPage to
+    // filter the resolution menu.
     int m_videoMaxH = 0;
     double m_aspect = 0.0;
-    // URL de audio externo pendiente de adjuntar (edge/AV1-HLS): se consume en
-    // el próximo playUrl (audio-files) o, como respaldo, tras el archivo
-    // cargado (attachAudio en fileLoaded).
+    // Pending external audio URL to attach (edge/AV1-HLS): consumed on the
+    // next playUrl (audio-files) or, as a fallback, after the file is
+    // loaded (attachAudio in fileLoaded).
     QString m_pendingAudioFile;
     bool m_hwdecProbed = false;
-    // Veredicto del log del motor para el stream actual: el motor dice
-    // explícitamente "Using software decoding" aunque hwdec-current reporte un
-    // backend (dispositivos de software en GPUs antiguas). Se resetea por
+    // Verdict from the engine's log for the current stream: the engine explicitly
+    // says "Using software decoding" even if hwdec-current reports a
+    // backend (software devices on old GPUs). It is reset per
     // stream.
     bool m_hwdecLogSoftware = false;
-    // hwdec-current llega vacío hasta que el motor activa el decodificador; se
-    // reintenta con este timer para que la red de seguridad del perfil reciba
-    // un backend resuelto ya en el primer vídeo.
+    // hwdec-current arrives empty until the engine activates the decoder; this
+    // timer retries so the profile safety net receives a
+    // resolved backend already on the first video.
     QTimer *m_hwdecRetry = nullptr;
     int m_hwdecRetryAttempts = 0;
-    // Espera inicial de buffer (segundos de contenido), activa para >=1080p.
+    // Initial buffer wait (seconds of content), active for >=1080p.
     double m_initialBufferSecs = 0.0;
     QTimer *m_bufferTimer = nullptr;
     QElapsedTimer m_bufferStart;
-    // Detección de atasco: posición congelada reproduciendo (ver streamStalled).
+    // Stall detection: position frozen while playing (see streamStalled).
     QTimer *m_stallTimer = nullptr;
     qint64 m_lastProgressMs = 0;
     bool m_paused = false;
-    // Detección de "vídeo sin datos": con audio externo la posición avanza
-    // aunque la pista de vídeo no cargue (queda el último frame del vídeo
-    // anterior). m_cacheOk pasa a true cuando el demuxer cachea contenido.
+    // "Video without data" detection: with external audio the position advances
+    // even if the video track never loads (the previous video's last
+    // frame stays). m_cacheOk becomes true when the demuxer caches content.
     qint64 m_videoLoadMs = 0;
     bool m_cacheOk = false;
-    // x86: cobertura del vídeo por otra ventana. Timer lento de 250 ms +
-    // recorrido del z-order; solo FfmpegBackend (occlusionSkipSupported).
-    // En mpv/x64 esto NO aplica (parar el render acumula frames).
+    // x86: video covered by another window. Slow 250 ms timer +
+    // z-order walk; only FfmpegBackend (occlusionSkipSupported).
+    // On mpv/x64 this does NOT apply (stopping the render accumulates frames).
     QTimer *m_occlusionTimer = nullptr;
     bool m_videoOccluded = false;
 };

@@ -16,58 +16,60 @@ inline const QColor kHover(0x24, 0x24, 0x24);
 inline const QColor kText(0xEC, 0xEC, 0xEC);
 inline const QColor kMuted(0x8F, 0x8F, 0x8F);
 
-// Roles que antes vivían como hex literales dentro del QSS de theme.cpp. Se
-// suben aquí para que la paleta tenga UNA fuente: el QSS se genera con
-// placeholders como ya hacía con el acento. Antes el QSS escribía #2A2A2A para
-// bordes (y kBorder es #262626) y #232323 para hover (y kHover es #242424), así
-// que el mismo rol tenía dos valores según se pintara a mano o por QSS.
+// Roles that used to live as hex literals inside the theme.cpp QSS. They are
+// moved up here so the palette has a SINGLE source: the QSS is generated with
+// placeholders as it already did with the accent. The QSS used to write #2A2A2A
+// for borders (and kBorder is #262626) and #232323 for hover (and kHover is
+// #242424), so the same role had two values depending on whether it was painted
+// by hand or through the QSS.
 inline const QColor kDisabled(0x6A, 0x6A, 0x6A);
 inline const QColor kSelection(0x2D, 0x2D, 0x2D);
 inline const QColor kHandle(0x2F, 0x2F, 0x2F);
 inline const QColor kHandleHover(0x3A, 0x3A, 0x3A);
 inline const QColor kPopover(0x20, 0x20, 0x20);
 
-// Texto secundario, en dos pesos. kMuted (#8F8F8F, 5,9:1 sobre kBg) es el
-// atenuado de etiquetas cortas; estos son los de los bloques largos, que se
-// leen de verdad y por eso no se quedan en kMuted:
+// Secondary text, in two weights. kMuted (#8F8F8F, 5.9:1 on kBg) is the
+// dimmed one for short labels; these are for the long blocks, which are really
+// read and so are not left at kMuted:
 //
-//   kMetaText (#9AA2AD, 7,4:1) -> línea de metadatos del vídeo, descripción y
-//     cuerpo del estado vacío del Home. Bajar esto a kMuted quitaba un 20 % de
-//     contraste (7,4:1 -> 5,9:1) en el texto que más se lee de la página.
-//   kTextSoft (#C8C8C8, 11,5:1) -> etiqueta de error del reproductor y cuerpo
-//     del cartelón de sondeo de hardware: texto atenuado sobre superficie negra.
+//   kMetaText (#9AA2AD, 7.4:1) -> video metadata line, description and
+//     Home empty-state body. Lowering this to kMuted removed 20% of
+//     contrast (7.4:1 -> 5.9:1) in the most-read text of the page.
+//   kTextSoft (#C8C8C8, 11.5:1) -> player error label and body of the
+//     hardware probe banner: dimmed text on a black surface.
 //
-// También estaban escritos a mano en #9aa2ad / #c8c8c8 (con dos mayúsculas
-// distintas para el mismo color) en cinco sitios.
+// They were also written by hand as #9aa2ad / #c8c8c8 (with two different
+// capitalizations for the same color) in five places.
 inline const QColor kMetaText(0x9A, 0xA2, 0xAD);
 inline const QColor kTextSoft(0xC8, 0xC8, 0xC8);
 
-// Acento de la app (por defecto el rojo del icono: midiendo el play del icono
-// nuevo sale #FA011B; el acento se alinea a la marca). No es const: se cambia
-// en caliente desde Ajustes (color de acento). Cada widget que pinte con kAccent
-// o construya QSS debe leerlo al repintar/regenerar, no cachearlo en build.
+// App accent (by default the icon's red: measured on the new icon's play
+// button it comes out #FA011B; the accent is aligned to the brand). It is not
+// const: it is changed live from Settings (accent color). Every widget that
+// paints with kAccent or builds QSS must read it when repainting/regenerating,
+// not cache it at build time.
 inline QColor kAccent(0xFA, 0x01, 0x1B);
 
-// Aplica un nuevo acento. Tras llamarla hay que re-generar el stylesheet
-// global (styleSheet()) y repintar los widgets que pintan con kAccent.
+// Applies a new accent. After calling it the global stylesheet (styleSheet())
+// must be regenerated and the widgets that paint with kAccent repainted.
 inline void setAccent(const QColor &c) { kAccent = c; }
 
-// Hex "#rrggbb" del acento y de sus variantes hover/pressed, para QSS
-// generado dinámicamente (theme.cpp y estilos inline de páginas).
+// Hex "#rrggbb" of the accent and its hover/pressed variants, for QSS
+// generated dynamically (theme.cpp and inline styles of pages).
 inline QString accentHex() { return kAccent.name(); }
 
-// Color de la SELECCIÓN DE TEXTO en toda la app: el gris de la app
-// (kSelection, el mismo de los menús y de las vistas desplegadas), no el del
-// tema del escritorio. Hace falta porque el QSS no llega a la descripción del
-// Player: es un QLabel con Qt::TextSelectableByMouse y pinta la selección con
-// QPalette::Highlight, que sin esto salía del tema del sistema (un azul en
-// GTK), un color que no está en la paleta de la app.
+// TEXT SELECTION color across the app: the app's gray (kSelection, the same as
+// the menus and the drop-down views), not the desktop theme's. It is needed
+// because the QSS does not reach the Player description: it is a QLabel with
+// Qt::TextSelectableByMouse and it paints the selection with
+// QPalette::Highlight, which without this came from the system theme (blue on
+// GTK), a color that is not in the app palette.
 //
-// Se tocan SOLO Highlight y HighlightedText: el resto de roles se deja como
-// estaban, para no cambiar el fondo de nada que hoy dependa del tema del
-// escritorio (tooltips, menús, barras de estado) y que el QSS no cubre.
-// HighlightedText va a kText porque sobre kSelection el texto tiene que seguir
-// leyéndose (11:1).
+// ONLY Highlight and HighlightedText are touched: the rest of the roles are
+// left as they were, so as not to change the background of anything that today
+// depends on the desktop theme (tooltips, menus, status bars) and that the QSS
+// does not cover. HighlightedText goes to kText because on kSelection the text
+// must remain readable (11:1).
 inline QColor textSelectionBg() { return kSelection; }
 inline QColor textSelectionFg() { return kText; }
 inline void applyTextSelectionPalette(QPalette &p)
@@ -78,8 +80,8 @@ inline void applyTextSelectionPalette(QPalette &p)
     }
 }
 
-// Variante hover: mezcla ~10% hacia blanco. Del rojo del icono (#FA011B) sale
-// #FF1B35 (lighter() no podía: multiplicar el verde 0 nunca lo sube).
+// Hover variant: mixes ~10% toward white. From the icon's red (#FA011B) it
+// comes out #FF1B35 (lighter() could not: multiplying green 0 never raises it).
 inline QColor accentHover(const QColor &c)
 {
     const int k = 26; // 255*0.10 ≈ 26
@@ -88,15 +90,15 @@ inline QColor accentHover(const QColor &c)
 }
 inline QString accentHoverHex() { return accentHover(kAccent).name(); }
 
-// Variante pressed: ligeramente más oscuro (del rojo del icono #FA011B sale
+// Pressed variant: slightly darker (from the icon's red #FA011B it comes out
 // #D90117).
 inline QColor accentPressed(const QColor &c) { return c.darker(115); }
 inline QString accentPressedHex() { return accentPressed(kAccent).name(); }
 
-// Acento con alfa, como cadena "rgba(r,g,b,a)" lista para QSS. Existe para el
-// relleno translúcido de la nav en su pestaña activa: al generarse desde el
-// acento vigente sigue al cambio en caliente de Ajustes sin tocar los PNG
-// pre-pintados de resources/nav (que son por estado, no por color).
+// Accent with alpha, as an "rgba(r,g,b,a)" string ready for QSS. It exists for
+// the translucent fill of the nav on its active tab: generated from the current
+// accent it follows the hot change in Settings without touching the pre-painted
+// PNGs in resources/nav (which are per state, not per color).
 inline QString accentAlpha(int alpha255)
 {
     return QStringLiteral("rgba(%1,%2,%3,%4)")
@@ -106,49 +108,48 @@ inline QString accentAlpha(int alpha255)
         .arg(alpha255);
 }
 
-// Caja de controles del reproductor (QWidget#playerOverlay). Se queda
-// translucida sobre el video, asi que va con alfa y no con un token opaco.
-// El 165/255 (~65 %) es el de siempre: medido sobre el video, el texto
-// #ECECEC da 16,2:1 en video oscuro, 10,1:1 en medio y 5,5:1 en claro, asi
-// que la opacidad no es lo que hay que tocar. Lo que no leia era el borde, de
-// ahi overlayEdgeRgba().
+// Player control box (QWidget#playerOverlay). It stays translucent over the
+// video, so it uses alpha and not an opaque token. 165/255 (~65%) is the usual
+// one: measured over the video, #ECECEC text gives 16.2:1 on dark video, 10.1:1
+// on medium and 5.5:1 on light, so opacity is not what has to be touched. What
+// did not read was the border, hence overlayEdgeRgba().
 inline QString overlayBgRgba() { return QStringLiteral("rgba(15,15,15,165)"); }
 
-// Canto superior de la caja y contorno de la pista, en blanco al 28 % (71/255).
-// Motivo (medido contra el video, que con la caja flotante es el vecino del
-// borde): el gris #2A2A2A solo da 1,33:1 en video oscuro y este blanco solo da
-// 1,04:1 en video claro. Ninguno delimita la caja por si solo, pero con los
-// dos siempre hay un canto que lee (2,47 / 3,63 / 12,60).
+// Top edge of the box and outline of the track, in white at 28% (71/255).
+// Reason (measured against the video, which with the floating box is the border
+// neighbor): gray #2A2A2A gives only 1.33:1 on dark video and this white gives
+// only 1.04:1 on light video. Neither delimits the box on its own, but with
+// both there is always an edge that reads (2.47 / 3.63 / 12.60).
 inline QString overlayEdgeRgba() { return QStringLiteral("rgba(255,255,255,71)"); }
 
-// Paleta de acentos: etiqueta visible (Ajustes), hex canónico y sufijo de
-// fichero PNG de la navegación (nav/<key>_<state>_<suffix>.png, pre-pintados
-// offline en tools/gen_nav_accent.cpp). FUENTE ÚNICA: settings_page y la nav
-// la consultan; un color nuevo solo se añade aquí y se regeneran los PNG.
+// Accent palette: visible label (Settings), canonical hex and PNG file suffix
+// of the navigation (nav/<key>_<state>_<suffix>.png, pre-painted offline in
+// tools/gen_nav_accent.cpp). SINGLE SOURCE: settings_page and the nav query it;
+// a new color is only added here and the PNGs are regenerated.
 struct AccentOption {
     QString label;
     QString hex;
     QString suffix;
 };
 QVector<AccentOption> accentOptions();
-// Sufijo PNG del acento vigente (p. ej. "azul"); el primero de la paleta si
-// el acento no coincide con ninguna (solo posible editando la BD a mano).
+// PNG suffix of the current accent (e.g. "azul"); the first of the palette if
+// the accent does not match any (only possible by editing the DB by hand).
 QString accentSuffix();
 
 QString styleSheet();
 
-// Selftest PURO del QSS (offline, sin GPU ni red): comprueba que ningun
-// selector se declare dos veces. Un selector repetido NO avisa de nada y el
-// override es mudo (gana el ultimo), que es como un QLabel#sectionTitle de
-// 22px se colo por detras del de 16px y subio los titulos de seccion de TODAS
-// las paginas sin que ningun test lo vieran. Se llama desde --selftest-theme.
+// PURE QSS self-test (offline, no GPU or network): checks that no selector is
+// declared twice. A repeated selector gives no warning and the override is mute
+// (the last one wins), which is how a QLabel#sectionTitle of 22px slipped in
+// behind the 16px one and raised the section titles of ALL pages without any
+// test seeing it. Called from --selftest-theme.
 bool themeSelfTest();
 
-// Selftest de GLIFOS (offline, sin red ni GPU): comprueba que TODO caracter no
-// ASCII de los literales del arbol de fuentes exista en la fuente real de la
-// app. Motivo: la fuente por defecto del sistema no los tiene todos y Qt
-// sustituye el que falta por el marcador de glifo ausente (medido: 2x5 px), o
-// sea un boton invisible. Se llama desde --selftest-glyphs.
+// GLYPH self-test (offline, no network or GPU): checks that EVERY non-ASCII
+// character of the source-tree literals exists in the app's real font. Reason:
+// the system default font does not have them all and Qt replaces the missing
+// one with the missing-glyph box (measured: 2x5 px), i.e. an invisible button.
+// Called from --selftest-glyphs.
 bool glyphSelfTest();
 
 } // namespace nt

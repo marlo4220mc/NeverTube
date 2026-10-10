@@ -10,12 +10,12 @@
 #include "models.h"
 #include "yt_innertube.h"
 
-// Modo de generación de "A continuación" (selección por NEVERTUBE_NEXT_MODE:
-// none | suggestions | radio). Deja elegir entre:
-//   none         -> sin siembra (la cola queda como vino de la entrada),
-//   suggestions  -> /next estático: ~20 recomendaciones del vídeo actual,
-//   radio        -> watch-playlist RDAMVM<videoId> + continuación (estilo
-//                   YouTube Music), regenerada según el vídeo actual.
+// "A continuación" generation mode (selected via NEVERTUBE_NEXT_MODE:
+// none | suggestions | radio). Lets you choose between:
+//   none         -> no seeding (the queue stays as it came in),
+//   suggestions  -> static /next: ~20 recommendations of the current video,
+//   radio        -> RDAMVM<videoId> watch-playlist + continuation (YouTube
+//                   Music style), regenerated according to the current video.
 enum class NextMode
 {
     None,
@@ -34,15 +34,16 @@ class Yt : public QObject
 public:
     explicit Yt(QObject *parent = nullptr);
 
-    // Persistencia del visitorData (settings): si el Innertube consigue uno
-    // nuevo se guarda aquí, y al arrancar se reutiliza para evitar el GET
-    // sw.js_data (una RTT menos antes del POST /player).
+    // visitorData persistence (settings): if Innertube gets a new one it is
+    // saved here, and on startup it is reused to avoid the sw.js_data GET
+    // (one RTT less before the POST /player).
     void setVisitorStorage(SettingsRepo *settings);
 
     void search(const QString &query, int limit = 20, int offset = 0);
-    // Sugerencias de type-ahead del buscador. No lanza una búsqueda: solo pide
-    // las sugerencias del prefijo y las entrega por suggestReady(). Es un GET
-    // plano que no toca la sesión Innertube (ver Innertube::fetchSuggest).
+    // Search type-ahead suggestions. It does not launch a search: it only asks
+    // for the prefix suggestions and delivers them through suggestReady(). It
+    // is a plain GET that does not touch the Innertube session (see
+    // Innertube::fetchSuggest).
     void suggest(const QString &query);
     void trending(int limit = 30);
     void channelVideos(const QString &channelId, int limit = 20);
@@ -51,81 +52,83 @@ public:
     void channelInfo(const QString &channelId);
     void getDetail(const QString &videoId);
     void playlistDetail(const QString &playlistId, int limit = 50);
-    // forceRefresh=true re-resuelve con el POST /player aunque haya caché de
-    // sesión del vídeo (URLs firmadas frescas; ver Innertube::fetchHls).
+    // forceRefresh=true re-resolves with the POST /player even if there is a
+    // session cache for the video (fresh signed URLs; see Innertube::fetchHls).
     void resolveStream(const QString &videoId, int maxHeight,
                        bool forceRefresh = false);
-    // Rota la sesión Innertube (visitorData + URLs firmadas cacheadas): la
-    // siguiente resolveStream se hará con una sesión de YouTube NUEVA. La usa
-    // PlayerController en la recuperación tras una sesión gateada (403 a mitad
-    // de reproducción), donde re-resolver dentro de la misma sesión no sirve.
+    // Rotates the Innertube session (visitorData + cached signed URLs): the
+    // next resolveStream will use a NEW YouTube session. PlayerController uses
+    // it in recovery after a gated session (403 mid-playback), where
+    // re-resolving inside the same session does not help.
     void rotateStreamSession();
-    // Dispara la carga de los relacionados ("A continuación") del vídeo por
-    // Innertube /next. Los resultados llegan por relatedReady().
+    // Triggers the load of the video's related ("A continuación") through
+    // Innertube /next. The results arrive through relatedReady().
     void relatedVideos(const QString &videoId);
-    // Detalle traducido del vídeo actual (/next normal): título y descripción
-    // en el idioma "hl" solicitado, para mostrar en el watch sin tocar la cola.
+    // Translated detail of the current video (normal /next): title and
+    // description in the requested "hl" language, to show in the watch page
+    // without touching the queue.
     void currentDetail(const QString &videoId);
-    // Modo radio (modelo 3): pide la cola del mix RDAMVM del vídeo y, si el
-    // mix tiene más batches, radioMore() encadena el siguiente cuando se
-    // agota. Llegan por radioReady().
+    // Radio mode (model 3): asks for the video's RDAMVM mix queue and, if the
+    // mix has more batches, radioMore() chains the next one when it runs out.
+    // They arrive through radioReady().
     void radioVideos(const QString &videoId);
     void radioMore();
-    // Home real por Innertube (browse FEwhat_to_watch). Los resultados llegan
-    // por homeReady(); vacíos = sin feed. homeMore() pide la continuación si
-    // la respuesta la trajo.
+    // Real Home through Innertube (browse FEwhat_to_watch). The results arrive
+    // through homeReady(); empty = no feed. homeMore() asks for the continuation
+    // if the response brought it.
     void home();
     void homeMore();
     bool homeHasContinuation() const;
 
     static QString videoIdFromUrl(const QString &url);
 
-    // Un fragmento (subsegmento) del fMP4 según la caja sidx del indexRange.
+    // A fragment (subsegment) of the fMP4 according to the sidx box of the
+    // indexRange.
     struct Av1Fragment
     {
         qint64 size = 0;
-        double duration = 0.0; // segundos
+        double duration = 0.0; // seconds
     };
 
-    // Texto de la media playlist HLS sintética para un adaptiveFormat AV1
-    // (sin red ni ficheros): #EXT-X-MAP + segmentos #EXT-X-BYTERANGE con
-    // sufijo /seg.mp4 y &nt distinto por segmento. Vacío si no hay AV1
-    // <= maxHeight con url/initRange. heightOut recibe la altura elegida.
-    // Si `fragments` viene informado, cada segmento equivale a un fragmento
-    // real del fMP4 (fronteras exactas del sidx): imprescindible para que el
-    // seek funcione. Sin él se cae a trozos fijos de ~2 MB (válido solo para
-    // reproducción secuencial desde el inicio). Expuesto para el selftest.
+    // Text of the synthetic HLS media playlist for an AV1 adaptiveFormat
+    // (no network or files): #EXT-X-MAP + #EXT-X-BYTERANGE segments with the
+    // /seg.mp4 suffix and a distinct &nt per segment. Empty if there is no AV1
+    // <= maxHeight with url/initRange. heightOut receives the chosen height.
+    // If `fragments` is given, each segment equals a real fragment of the fMP4
+    // (exact sidx boundaries): essential for the seek to work. Without it it
+    // falls back to fixed ~2 MB chunks (valid only for sequential playback from
+    // the start). Exposed for the selftest.
     static QString av1HlsPlaylist(const QJsonArray &adaptiveFormats,
                                   int maxHeight, int *heightOut,
                                   const QVector<Av1Fragment> &fragments = {},
                                   qint64 fragmentsStart = -1);
 
-    // Parsea la caja sidx (bytes del indexRange) y devuelve los fragmentos.
-    // firstOffsetOut recibe el offset (relativo al final del indexRange) del
-    // primer subsegmento. Vacío si no hay sidx válido.
+    // Parses the sidx box (bytes of the indexRange) and returns the fragments.
+    // firstOffsetOut receives the offset (relative to the end of the indexRange)
+    // of the first subsegment. Empty if there is no valid sidx.
     static QVector<Av1Fragment> av1ParseSidx(const QByteArray &indexBox,
                                              qint64 *firstOffsetOut);
 
-    // Preferencia de idioma de audio para el master filtrado. Vacío (o
-    // "original") = pista original. Un código de idioma (p. ej. "en-US" o
-    // "pt") prioriza el doblaje de IA que coincida, con la original de
-    // respaldo. Ajustes aún no lo configura; queda preparado.
+    // Audio language preference for the filtered master. Empty (or "original")
+    // = original track. A language code (e.g. "en-US" or "pt") prioritizes the
+    // matching AI dubbing, with the original as fallback. Settings does not
+    // configure it yet; it is left ready.
     void setAudioLanguage(const QString &lang);
     QString audioLanguage() const;
-    // Perfil de códec del master edge. Detectado en la primera reproducción
-    // (hwdec-current per-códec) y persistido en codec_profile:
-    //   Modern = AV1 + VP9 (hardware con decodificador AV1; AV1 se prefiere y
-    //            VP9 es el respaldo a igual altura).
-    //   Vp9    = solo VP9 (hardware sin AV1 pero con decodificador VP9).
-    //   Legacy = solo h264 (sin hardware moderno; si además el h264 decodifica
-    //            en software, MainWindow marca el modo "nohw": tope 1080p y
-    //            espera de buffer inicial por porcentaje para 1080p).
+    // Codec profile of the edge master. Detected on the first playback
+    // (hwdec-current per codec) and persisted in codec_profile:
+    //   Modern = AV1 + VP9 (hardware with an AV1 decoder; AV1 is preferred and
+    //            VP9 is the fallback at equal height).
+    //   Vp9    = VP9 only (hardware without AV1 but with a VP9 decoder).
+    //   Legacy = h264 only (no modern hardware; if in addition h264 decodes in
+    //            software, MainWindow sets the "nohw" mode: 1080p cap and
+    //            percentage-based initial buffer wait for 1080p).
     enum class CodecProfile { Modern, Vp9, Legacy };
     void setCodecProfile(CodecProfile profile);
     CodecProfile codecProfile() const { return m_codecProfile; }
-    // Build x86 de Windows sin mpv (NEVERTUBE_NO_MPV): AV1 no decodifica ni
-    // por HW ni por SW en el paquete i686. Con esto codecRankedScore NUNCA lo
-    // elige: VP9 (software) siempre gana sobre un formato que falla siempre.
+    // Windows x86 build without mpv (NEVERTUBE_NO_MPV): AV1 decodes neither by
+    // HW nor by SW in the i686 package. With this codecRankedScore NEVER picks
+    // it: VP9 (software) always wins over a format that always fails.
     void setNoAv1(bool on);
 
 signals:
@@ -138,25 +141,25 @@ signals:
     void channelInfoReady(const ChannelInfo &channel);
     void detailReady(const VideoInfo &video, const QString &description,
                      qint64 likeCount, const QVector<FormatInfo> &formats);
-    // getDetail no obtuvo metadatos válidos del /next (vídeo no disponible o
-    // respuesta vacía).
+    // getDetail did not get valid metadata from the /next (video unavailable or
+    // empty response).
     void detailFailed(const QString &videoId);
     void playlistDetailReady(const PlaylistInfo &info,
                              const QVector<VideoInfo> &videos);
     void streamReady(const StreamInfo &stream);
-    // Alturas de vídeo disponibles del vídeo (adaptiveFormats de Innertube),
-    // independientes del tope que pida el perfil: el menú de resoluciones del
-    // reproductor las usa para ofrecer todas las calidades reales aunque Auto
-    // haya pedido una baja. Vacío = indeterminado (el menú cae al techo del
-    // stream cargado).
+    // Available video heights of the video (Innertube adaptiveFormats),
+    // independent of the cap the profile asks for: the player's resolution menu
+    // uses them to offer all the real qualities even if Auto asked for a low
+    // one. Empty = indeterminate (the menu falls back to the cap of the loaded
+    // stream).
     void streamHeightsReady(const QString &videoId, const QVector<int> &heights);
     void error(const QString &message);
     void resolveError(const QString &message);
     void relatedReady(const QString &videoId, const QVector<VideoInfo> &videos);
     void radioReady(const QString &videoId, const QVector<VideoInfo> &videos);
-    // Detalle traducido del vídeo actual (título y descripción) del /next
-    // normal, en el idioma "hl" solicitado. WatchPage lo usa solo cuando el
-    // idioma de audio es explícito (es/en/pt).
+    // Translated detail of the current video (title and description) from the
+    // normal /next, in the requested "hl" language. WatchPage uses it only when
+    // the audio language is explicit (es/en/pt).
     void currentDetailReady(const QString &videoId, const QString &title,
                             const QString &description);
     void homeReady(const QVector<VideoInfo> &videos);
@@ -167,68 +170,68 @@ private:
                              int preferredClient, bool forceRefresh = false);
     QString buildFilteredMaster(const QString &videoId,
                                 const QByteArray &masterBody, int maxHeight);
-    // HLS sintético local para reproducir AV1 por la vía HLS (YouTube no
-    // publica AV1 en su master: solo VP9/h264). Cada segmento es una petición
-    // Range corta (~2 MB) sobre la URL adaptativa AV1; el throttle por-request
-    // de YouTube no aplica a ráfagas cortas, así que segmentar equivale a la
-    // velocidad del HLS real. Devuelve la ruta del .m3u8 local o vacío si no
-    // hay AV1 <= maxHeight con initRange/url; escribe heightOut con la altura.
+    // Local synthetic HLS to play AV1 through the HLS path (YouTube does not
+    // publish AV1 in its master: only VP9/h264). Each segment is a short Range
+    // request (~2 MB) over the AV1 adaptive URL; YouTube's per-request throttle
+    // does not apply to short bursts, so segmenting equals the speed of the real
+    // HLS. Returns the local .m3u8 path or empty if there is no
+    // AV1 <= maxHeight with initRange/url; writes heightOut with the height.
     QString buildAv1Hls(const QString &videoId,
                         const QJsonArray &adaptiveFormats, int maxHeight,
                         int *heightOut);
-    // Construye el modo "edge" desde los adaptiveFormats del /player:
-    // elige un único vídeo (altura <= maxHeight, h264 preferido) y un único
-    // audio (idioma preferido), y devuelve la URL directa del vídeo (mp4/fMP4).
-    // Escribe audioUrlOut con la URL de la pista de audio directa (para
-    // PlayerWidget::setAudioFile). Devuelve URL vacía si no hay combo
-    // aprovechable (entonces el flujo clásico hlsManifestUrl → fetchMaster se
-    // usa como fallback). Reproducir por URL directa (no HLS de un segmento)
-    // da a mpv duración exacta y seek fiable — el HLS de segmento único perdía
-    // ambos (barra de progreso saltando). 3 perfiles: modern (AV1), vp9-mid
-    // (VP9 webm direct), legacy (h264). audioLang vacío == original.
+    // Builds the "edge" mode from the /player adaptiveFormats: picks a single
+    // video (height <= maxHeight, h264 preferred) and a single audio (preferred
+    // language), and returns the video's direct URL (mp4/fMP4). Writes
+    // audioUrlOut with the direct audio track URL (for
+    // PlayerWidget::setAudioFile). Returns an empty URL if there is no usable
+    // combo (then the classic hlsManifestUrl → fetchMaster flow is used as a
+    // fallback). Playing from a direct URL (not segment HLS) gives mpv exact
+    // duration and reliable seek — single-segment HLS lost both (progress bar
+    // jumping). 3 profiles: modern (AV1), vp9-mid (VP9 webm direct), legacy
+    // (h264). Empty audioLang == original.
     QString buildEdgeMaster(const QString &videoId,
                             const QJsonArray &adaptiveFormats, int maxHeight,
                             const QString &audioLang, int durationSeconds,
                             QString *audioUrlOut);
-    // Puntaje de un formato de vídeo por altura + preferencia de códec según el
-    // perfil de hardware detectado (Modern: AV1>VP9>h264; Vp9: VP9>h264, AV1
-    // penalizado; Legacy: h264). La preferencia de códec pesa ×100000, así que
-    // gana el códec preferido aunque sea más bajo, y dentro de él la mayor
-    // altura.
+    // Score of a video format by height + codec preference according to the
+    // detected hardware profile (Modern: AV1>VP9>h264; Vp9: VP9>h264, AV1
+    // penalized; Legacy: h264). The codec preference weighs ×100000, so the
+    // preferred codec wins even if it is lower, and within it the tallest
+    // height.
     int codecRankedScore(int height, const QString &mimeOrCodecs) const;
 
     static QString qualityName(int height);
     static int closestHeight(int requested, const QVector<int> &heights);
-    // Altura del vídeo que elegiría buildEdgeMaster (mayor altura <= maxHeight
-    // con url directa, h264 preferido). -1 si no hay vídeo aprovechable.
+    // Height of the video buildEdgeMaster would pick (tallest height <= maxHeight
+    // with a direct url, h264 preferred). -1 if there is no usable video.
     int edgeHeight(const QJsonArray &formats, int maxHeight);
 
     HlsServer m_hls;
     Innertube m_innertube;
-    // Última consulta de búsqueda: distingue la primera página (fetchSearch)
-    // de la continuación (fetchSearchMore) en Yt::search.
+    // Last search query: distinguishes the first page (fetchSearch) from the
+    // continuation (fetchSearchMore) in Yt::search.
     QString m_searchQuery;
     SettingsRepo *m_visitorStore = nullptr;
     int m_resolveGen = 0;
     QString m_audioLang;
     CodecProfile m_codecProfile = CodecProfile::Legacy;
-    bool m_noAv1 = false; // x86 (NEVERTUBE_NO_MPV): AV1 imposible, no elegirlo
-    // Cliente Innertube que logró reproducir cada vídeo (índice >= 0). Se usa
-    // para dar prioridad al cambiar de resolución (re-resolver el mismo vídeo).
+    bool m_noAv1 = false; // x86 (NEVERTUBE_NO_MPV): AV1 impossible, do not pick it
+    // Innertube client that managed to play each video (index >= 0). Used to
+    // give it priority when changing resolution (re-resolving the same video).
     QHash<QString, int> m_winningClient;
 };
 
-// Selftest de la cadena real del feed en Yt: canal por Innertube + trending →
-// señales channelVideosFinished/trendingFinished. Verifica que llega un
-// resultado dentro de un plazo, sin cuelgues. No toca el reproductor ni SQLite.
+// Self-test of the real feed chain in Yt: channel through Innertube + trending →
+// channelVideosFinished/trendingFinished signals. Checks that a result arrives
+// within a deadline, without hangs. It does not touch the player or SQLite.
 bool feedsChainSelfTest();
 
-// Selftest de la BÚSQUEDA por Innertube (Yt::search): lanza una búsqueda real
-// (red) y exige vídeos con id no vacío.
+// Self-test of the Innertube SEARCH (Yt::search): launches a real search
+// (network) and requires videos with a non-empty id.
 bool searchSelfTest();
 
-// Selftest offline del HLS sintético de AV1: valida la playlist generada
-// (EXT-X-MAP/BYTERANGE, sufijo /seg.mp4, &nt distinto y consecutivo por
-// segmento, elección de la mayor altura <= maxHeight y descarte correcto sin
-// AV1). Sin red, sin ficheros y sin reproductor.
+// Offline self-test of the synthetic AV1 HLS: validates the generated playlist
+// (EXT-X-MAP/BYTERANGE, /seg.mp4 suffix, distinct and consecutive &nt per
+// segment, choice of the tallest height <= maxHeight and correct discard
+// without AV1). No network, no files and no player.
 bool av1HlsSelfTest();

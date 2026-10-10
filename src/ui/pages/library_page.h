@@ -45,15 +45,15 @@ public:
 
     void reload();
 
-    // La barra de progreso de las miniaturas se pinta a mano con nt::kAccent
-    // (no la alcanza el QSS), así que al cambiar el acento hay que repintar las
-    // filas. Lo llama MainWindow junto al applyAccent() de las demás páginas.
+    // The thumbnails' progress bar is painted by hand with nt::kAccent (the
+    // QSS does not reach it), so rows must be repainted when the accent
+    // changes. MainWindow calls it along with the other pages' applyAccent().
     void applyAccent();
 
-    // Crea una playlist nueva y, si se pasa un vídeo, lo añade a ella. Lo llama
-    // MainWindow desde el menú compartido de fila (Búsqueda, Canal, Playlist):
-    // el diálogo es nt::inputText, el mismo de todas las superficies, así que se
-    // reutiliza en vez de tener uno por página.
+    // Creates a new playlist and, if a video is passed, adds it to it.
+    // MainWindow calls it from the shared row menu (Search, Channel, Playlist):
+    // the dialog is nt::inputText, the same one as every surface, so it is
+    // reused instead of having one per page.
     void createPlaylistForVideo(const QString &videoId);
 
 signals:
@@ -65,7 +65,7 @@ signals:
     void historyAllRequested();
 
 private:
-    // Una sección de lista de vídeos (fila con miniatura, título y menú).
+    // A video list section (row with thumbnail, title and menu).
     struct VideoSection
     {
         QWidget *host = nullptr;
@@ -83,18 +83,18 @@ private:
     void rebuildHistory();
     void rebuildPlaylists();
     void onChannelInfo(const ChannelInfo &channel);
-    // Un directo cacheado puede terminar entre visitas: al re-entrar en la
-    // página se re-comprueba con el /next (no toca la fase player) con
-    // dedup de kLiveRecheckMs e in-flight por vídeo.
+    // A cached live stream may end between visits: on re-entering the page it
+    // is re-checked with /next (it does not touch the player phase), with a
+    // kLiveRecheckMs dedup and a per-video in-flight guard.
     void maybeRefreshLiveStatus(const VideoInfo &v);
     void onLiveDetailReady(const VideoInfo &video);
     void addStandardMenuActions(QMenu *menu, const VideoInfo &v,
                                 bool withWatchLater);
 
     void createPlaylist();
-    // Crear / renombrar playlist: nt::inputText (el diálogo de la app), no un
-    // popover propio. promptNewPlaylist añade además el vídeo pendiente si lo
-    // hay; promptRenamePlaylist parte del nombre actual.
+    // Create / rename playlist: nt::inputText (the app's dialog), not a
+    // popover of its own. promptNewPlaylist also adds the pending video if
+    // there is one; promptRenamePlaylist starts from the current name.
     void promptNewPlaylist(const QString &videoId);
     void promptRenamePlaylist(const PlaylistItem &playlist);
     void centerPopup(QFrame *popup);
@@ -126,16 +126,16 @@ private:
     QScrollArea *m_scroll = nullptr;
     QWidget *m_body = nullptr;
 
-    // Suscripciones
+    // Subscriptions
     QLabel *m_channelHint = nullptr;
     QLabel *m_subsTitle = nullptr;
     QLabel *m_playlistsTitle = nullptr;
     QScrollArea *m_subScroll = nullptr;
     QWidget *m_subHost = nullptr;
     QHBoxLayout *m_subRowLay = nullptr;
-    QHash<QString, QString> m_subTitles;   // channelId → título del canal
-    QHash<QString, ChannelRow *> m_subMeta;    // channelId → tarjeta de suscripción
-    QHash<QString, long long> m_subCounts; // channelId → suscriptores (caché)
+    QHash<QString, QString> m_subTitles;   // channelId → channel title
+    QHash<QString, ChannelRow *> m_subMeta;    // channelId → subscription card
+    QHash<QString, long long> m_subCounts; // channelId → subscribers (cache)
 
     QLabel *m_playlistEmpty = nullptr;
     QGridLayout *m_playlistGrid = nullptr;
@@ -146,8 +146,8 @@ private:
     VideoSection m_later;
     VideoSection m_historySec;
 
-    // Re-comprobación de directos del Historial: ids con una petición /next en
-    // vuelo y la última hora de comprobación de cada uno.
+    // Live re-checks of History: ids with a /next request in flight and the
+    // last check time of each.
     QSet<QString> m_liveRefreshPending;
     QHash<QString, qint64> m_liveRefreshedAt;
 

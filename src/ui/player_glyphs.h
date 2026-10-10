@@ -5,14 +5,14 @@
 class QColor;
 namespace nt {
 
-// Iconos del reproductor y del mini player. La geometría es de Material
-// Symbols (google/material-design-icons, Apache-2.0) y se dibuja con QPainter,
-// como el resto de la app: vectorial, nítida a cualquier tamaño, recoloreable
-// en caliente (acento) sin retint de bitmaps y sin meter PNGs en el .qrc ni
-// enlazar Qt5::Svg (que añadiría Qt5Svg.dll a los dos empaquetados de Windows).
+// Player and mini player icons. The geometry is Material Symbols
+// (google/material-design-icons, Apache-2.0) and it is drawn with QPainter,
+// like the rest of the app: vector, sharp at any size, recolorable on the fly
+// (accent) without bitmap retint and without putting PNGs in the .qrc nor
+// linking Qt5::Svg (which would add Qt5Svg.dll to both Windows packages).
 //
-// El transporte (Play/Pause/Prev/Next) usa la variante rellena de Material,
-// como el reproductor de YouTube; el resto van en contorno.
+// Transport (Play/Pause/Prev/Next) uses Material's filled variant, like the
+// YouTube player; the rest are outlined.
 enum class PlayerIcon {
     Shuffle,
     Prev,
@@ -30,8 +30,8 @@ enum class PlayerIcon {
     Close,
 };
 
-// Devuelve el icono pintado en `color` a `size` px. Replica el contrato de
-// nt::icon(); el resultado se cachea por (icono, tamaño, color).
+// Returns the icon painted in `color` at `size` px. Replicates the contract
+// of nt::icon(); the result is cached by (icon, size, color).
 QIcon playerIcon(PlayerIcon kind, const QColor &color, int size = 20);
 
 } // namespace nt

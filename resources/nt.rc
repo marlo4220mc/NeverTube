@@ -1,11 +1,11 @@
-// Icono del .exe en Windows.
+// Icon of the .exe on Windows.
 //
-// rc.exe resuelve las rutas relativas con /I, y CMake mete resources/ como
-// include dir del target (ver CMakeLists.txt, bloque if(WIN32)). Por eso la
-// ruta es "icon/nt.ico" y no "resources/icon/nt.ico".
+// rc.exe resolves relative paths with /I, and CMake puts resources/ as an
+// include dir of the target (see CMakeLists.txt, if(WIN32) block). That is why the
+// path is "icon/nt.ico" and not "resources/icon/nt.ico".
 //
-// Sin este .rc el .exe sale con el icono por defecto del sistema: se ve en la
-// barra de tareas, en el Explorador y en la lista de apps. Los accesos directos
-// que crea el setup (dist.iss / dist64.iss) usan el MISMO nt.ico, de modo que
-// el icono del acceso directo y el del binario son idénticos.
+// Without this .rc the .exe comes out with the system default icon: it is seen in the
+// taskbar, in Explorer and in the apps list. The shortcuts
+// that the setup creates (dist.iss / dist64.iss) use the SAME nt.ico, so
+// the shortcut icon and the binary's icon are identical.
 IDI_ICON1 ICON    DISCARDABLE "icon/nt.ico"

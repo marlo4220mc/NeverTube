@@ -1,23 +1,23 @@
-; ── Script Inno Setup de nevertube_qt2 x64 (Win10+) ───────────────────────────
-; Gemelo de `dist.iss` (que es el del build x86 / Win7 de 32 bits) con las
-; diferencias que exige el target x64. NO se puede reutilizar el de x86 tal cual:
-; ver las DIFERENCIA 1..5 de abajo ([Setup], [Files] y la ausencia de guard de
-; arquitectura en [Code]).
+; ── Inno Setup script for nevertube_qt2 x64 (Win10+) ──────────────────────────
+; Twin of `dist.iss` (which is the x86 build / 32-bit Win7 one) with the
+; differences required by the x64 target. The x86 one cannot be reused as is:
+; see DIFFERENCES 1..5 below ([Setup], [Files] and the absence of an
+; architecture guard in [Code]).
 ;
-; ATENCIÓN: la sintaxis de Inno EXIGE `[Setup]`, `AppName=…`, etc. a columna 0.
-; Por eso el .iss es un archivo REAL a mano, NO un heredoc dentro del YAML del
-; workflow (un heredoc dentro de `run: |` quedaría a columna 0 y rompería el
-; YAML de GitHub Actions). Este .iss vive en la raíz del repo, junto al `dist/`
-; que generan los pasos previos (windeployqt + DLLs) — por eso las rutas de
-; `[Files]` y `OutputDir` son relativas a la raíz del workspace.
+; WARNING: Inno syntax REQUIRES `[Setup]`, `AppName=…`, etc. at column 0.
+; That is why the .iss is a REAL hand-written file, NOT a heredoc inside the
+; workflow YAML (a heredoc inside `run: |` would end up at column 0 and break
+; the GitHub Actions YAML). This .iss lives at the repo root, next to the
+; `dist/` produced by the previous steps (windeployqt + DLLs) — that is why the
+; paths of `[Files]` and `OutputDir` are relative to the workspace root.
 [Setup]
 AppName=nevertube_qt2
 AppVersion=1.0.0
 AppPublisher=nevertube
 AppPublisherURL=https://github.com/nevertube
-; DIFERENCIA 1 vs x86: en x64 se instala en Program Files de 64 bits. Inno
-; necesita ArchitecturesInstallIn64BitMode para que {autopf} signifique
-; "C:\Program Files" (64 bits) y no "C:\Program Files (x86)".
+; DIFFERENCE 1 vs x86: on x64 it installs into 64-bit Program Files. Inno
+; needs ArchitecturesInstallIn64BitMode so that {autopf} means
+; "C:\Program Files" (64-bit) and not "C:\Program Files (x86)".
 DefaultDirName={autopf}\nevertube_qt2
 DefaultGroupName=nevertube_qt2
 DisableProgramGroupPage=yes
@@ -25,107 +25,107 @@ OutputDir=setup-out
 OutputBaseFilename=nevertube-setup-x64
 Compression=lzma2
 SolidCompression=yes
-; Icono del propio setup (lo primero que se ve al lanzarlo) y de los accesos
-; directos. Rutas relativas al directorio del .iss, que es donde corre iscc.
-; El mismo nt.ico va embebido en el .exe (resources/nt.rc), asi que el icono
-; del acceso directo y el del binario son el mismo fichero.
+; Icon of the setup itself (the first thing seen when launching it) and of the
+; shortcuts. Paths are relative to the directory of the .iss, which is where
+; iscc runs. The same nt.ico is embedded in the .exe (resources/nt.rc), so the
+; shortcut icon and the binary icon are the same file.
 SetupIconFile=resources\icon\nt.ico
-; DIFERENCIA 2 vs x86: este target es Win10+ en 64 bits, así que se declara
-; explícitamente. ArchitecturesAllowed=x64compatible acepta x64 de 64 bits
-; (WoW no es un objetivo) y Win11 ARM vía emulación, donde la app correría
-; emulada. MinVersion=10.0 con la forma 10.0 de Inno: el build x64 usa mpv
-; moderno y Vulkan, que no existen antes de Win10. OJO: Win10/Win11 se reportan
-; como 6.3 a cualquier app sin el manifiesto de compatibilidad; el setup de
-; Inno 6 sí lo lleva (se añadió en la 6.0), así que 10.0 es lo que ve y lo que
-; se puede comparar — con un Inno 5.5.5 este MinVersion rechazaría el propio
+; DIFFERENCE 2 vs x86: this target is Win10+ on 64-bit, so it is declared
+; explicitly. ArchitecturesAllowed=x64compatible accepts 64-bit x64
+; (WoW is not a target) and Win11 ARM via emulation, where the app would run
+; emulated. MinVersion=10.0 with Inno's 10.0 form: the x64 build uses modern
+; mpv and Vulkan, which do not exist before Win10. NOTE: Win10/Win11 report
+; themselves as 6.3 to any app without the compatibility manifest; the Inno 6
+; setup does carry one (it was added in 6.0), so 10.0 is what it sees and what
+; can be checked — with Inno 5.5.5 this MinVersion would reject Win10 itself.
 ; Win10.
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
-; DIFERENCIA 3 vs x86: aquí NO hay problema de UCRT. El target es Win10+, donde
-; la UCRT viene en el sistema, así que NO se empaqueta ucrtbase.dll ni
-; api-ms-win-crt-*.dll app-local (en x86 era obligatorio purgarlos porque la
-; UCRT de la Windows SDK rompe Win7). El CRT sí lo instala VC_redist.x64.exe
-; (aka.ms/vs/17, la variante 2022+: en x64 no hay restricción de imports Win7).
+; DIFFERENCE 3 vs x86: here there is NO UCRT problem. The target is Win10+,
+; which ships the UCRT in the system, so ucrtbase.dll and api-ms-win-crt-*.dll
+; are NOT bundled app-local (on x86 it was mandatory to purge them because the
+; Windows SDK UCRT breaks Win7). The CRT is installed by VC_redist.x64.exe
+; (aka.ms/vs/17, the 2022+ variant: on x64 there is no Win7 import restriction).
 PrivilegesRequired=admin
 
 [Tasks]
-; Igual que el setup x86: acceso directo al escritorio con la casilla marcada
-; POR DEFECTO (sin Flags unchecked). Se crea en la fase de iconos, ya con la
-; app en disco; el runtime C++ corre después en ssPostInstall.
+; Same as the x86 setup: desktop shortcut with the box checked BY DEFAULT
+; (no "unchecked" flag). It is created in the icons phase, with the app already
+; on disk; the C++ runtime runs later in ssPostInstall.
 Name: "desktopicon"; Description: "Crear un acceso directo en el escritorio"; GroupDescription: "Acceso directo:"
 
 [Files]
-; DIFERENCIA 4 vs x86: el nombre del redist. En x86 es VC_redist.x86.exe
-; (2015-2019, aka.ms/vs/16) porque el 2022+ trae imports W8+ que rompen Win7;
-; aquí es el x64 moderno de vs/17. windeployqt --compiler-runtime deja el CRT
-; junto al exe cuando puede, pero en el runner de CI no (viene del VS del host),
-; así que el setup lo instala y es la red de seguridad.
+; DIFFERENCE 4 vs x86: the name of the redist. On x86 it is VC_redist.x86.exe
+; (2015-2019, aka.ms/vs/16) because the 2022+ one brings W8+ imports that
+; break Win7; here it is the modern x64 one from vs/17. windeployqt
+; --compiler-runtime leaves the CRT next to the exe when it can, but on the CI
+; runner it cannot (it comes from the host VS), so the setup installs it and it is the safety net.
 Source: "dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs; Excludes: "VC_redist.x64.exe"
-; nt.ico: lo necesitan los accesos directos de [Icons] (IconFilename). No
-; puede venir de dist\* porque el CI copia allí solo el exe y las DLLs; se
-; toma del repo. Se instala plano en {app} (no en subcarpeta) porque es lo que
-; referencian los IconFilename de abajo.
+; nt.ico: the shortcuts of [Icons] need it (IconFilename). It cannot come
+; from dist\* because the CI copies only the exe and the DLLs there; it is
+; taken from the repo. It is installed flat in {app} (not in a subfolder)
+; because that is what the IconFilename entries below reference.
 Source: "resources\icon\nt.ico"; DestDir: "{app}"; Flags: ignoreversion
-; El redist va a {tmp}: su INSTALACIÓN no corre aquí (AfterInstall), se lanza
-; desde ssPostInstall, DESPUÉS de copiar la app y crear los iconos. Se ejecuta
-; y bloquea con swWaitUntilTerminated para poder comprobar el código de salida: un
-; redist que falla dejaría una app que no arranca. Sin deleteafterinstall: el exe
-; debe seguir en {tmp} cuando corra ssPostInstall ({tmp} se purga al terminar el
-; instalador igualmente).
+; The redist goes to {tmp}: its INSTALLATION does not run here (AfterInstall),
+; it is launched from ssPostInstall, AFTER copying the app and creating the
+; icons. It runs and blocks with swWaitUntilTerminated to be able to check the
+; exit code: a redist that fails would leave an app that does not start. No
+; deleteafterinstall: the exe must remain in {tmp} when ssPostInstall runs
+; ({tmp} is purged when the installer finishes anyway).
 Source: "dist\VC_redist.x64.exe"; DestDir: "{tmp}"
 
-; (Aquí NO hay [InstallDelete] de la UCRT: solo hacía falta en x86 para borrar la
-; UCRT app-local de instalaciones antiguas que rompía Win7. En Win10+ la UCRT del
-; sistema está siempre presente y gana. Ver dist.iss para el detalle.)
+; (Here there is NO [InstallDelete] of the UCRT: it was only needed on x86 to
+; delete the app-local UCRT of old installs that broke Win7. On Win10+ the
+; system UCRT is always present and wins. See dist.iss for the detail.)
 
 [UninstallDelete]
-; Desinstalar DEBE dejar la máquina sin rastro de la app: la BD local y las
-; cachés viven FUERA de {app} (Inno solo borra {app} por defecto; sin esto,
-; reinstalar devolvería una app con los datos antiguos).
-;   - {userdocs}\mini_tube: BD SQLite (ajustes —incluido codec_profile—,
-;     historial, suscripciones, radios) + -wal/-shm. Es UN directorio propio
-;     de la app (nunca toca otros documentos del usuario).
-;   - {localappdata}\nevertube\nevertube: caché de miniaturas (thumbs_*) y de
-;     resolución HLS (hls_resolve_cache.json).
-; {userdocs}/{localappdata} se resuelven con el perfil del usuario que lanza
-; el uninstaller aunque este corra elevado (PrivilegesRequired=admin).
-; Quien quiera borrar SOLO datos sin desinstalar sigue teniendo
-; "Restablecer aplicación" dentro de la app.
+; Uninstalling MUST leave the machine with no trace of the app: the local DB
+; and the caches live OUTSIDE {app} (Inno only deletes {app} by default; without
+; this, reinstalling returned an app with the old data).
+;   - {userdocs}\mini_tube: SQLite DB (settings —including codec_profile—,
+;     history, subscriptions, radios) + -wal/-shm. It is ONE directory owned
+;     by the app (it never touches other user documents).
+;   - {localappdata}\nevertube\nevertube: thumbnail cache (thumbs_*) and HLS
+;     resolution cache (hls_resolve_cache.json).
+; {userdocs}/{localappdata} are resolved with the profile of the user running
+; the uninstaller even if it runs elevated (PrivilegesRequired=admin).
+; Anyone who wants to delete ONLY data without uninstalling still has
+; "Restablecer aplicación" (Reset application) inside the app.
 Type: filesandordirs; Name: "{userdocs}\mini_tube"
 Type: filesandordirs; Name: "{localappdata}\nevertube\nevertube"
 
 [Icons]
-; Icono del grupo de programas + acceso directo al escritorio (casilla marcada
-; por defecto, ver [Tasks] desktopicon). Ambos se crean en esta fase, ya con la
-; app en disco; el runtime C++ corre después en ssPostInstall.
-; IconFilename en los dos: sin esto los accesos directos salen con el icono
-; por defecto de Windows y la app no es reconocible en el escritorio. nt.ico
-; viene de [Files] y es el mismo que va embebido en el .exe (resources/nt.rc).
+; Program group icon + desktop shortcut (checkbox marked
+; by default, see [Tasks] desktopicon). Both are created in this phase, already
+; with the app on disk; the C++ runtime runs later in ssPostInstall.
+; IconFilename on both: without this the shortcuts come out with the default
+; Windows icon and the app is not recognizable on the desktop. nt.ico
+; comes from [Files] and is the same one embedded in the .exe (resources/nt.rc).
 Name: "{group}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"; IconFilename: "{app}\nt.ico"
 Name: "{autodesktop}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"; Tasks: desktopicon; IconFilename: "{app}\nt.ico"
 
 [Code]
-// DIFERENCIA 5 vs x86: aquí NO hay guard de arquitectura que cancele. El de x86
-// (InitializeSetup en dist.iss) rechazaba Windows de 64 bits 10/11 y desviaba al
-// build x64; en este setup el 64 bits ES el objetivo, así que un equipo de 64
-// bits con Win10+ es exactamente el caso para el que existe este instalador, y
-// no hay nada que redirigir. Un Windows de 32 bits no puede instalar un binario
-// de 64 bits, pero no lo decide este código: lo decide ArchitecturesAllowed
-// (x64compatible), que lo impide ANTES de escribir en disco, con su propio
-// mensaje de error. Por eso aquí no hay ningún InitializeSetup: sería un
-// `Result := True` que no hace nada.
+// DIFFERENCE 5 vs x86: here there is NO architecture guard that cancels. The
+// x86 one (InitializeSetup in dist.iss) rejected 64-bit Windows 10/11 and
+// redirected to the x64 build; in this setup 64-bit IS the target, so a 64-bit
+// machine with Win10+ is exactly the case this installer exists for, and there
+// is nothing to redirect. A 32-bit Windows cannot install a 64-bit binary, but
+// this code does not decide that: ArchitecturesAllowed decides it
+// (x64compatible), which prevents it BEFORE writing to disk, with its own
+// error message. That is why there is no InitializeSetup here: it would be a
+// `Result := True` that does nothing.
 //
-// OJO con los comentarios de esta sección: aquí valen los `//` de Pascal
-// Script, NO el `;` del resto del .iss (dentro de [Code] el `;` es separador de
-// sentencias y el compilador lo rechaza). Es lo que hace dist.iss.
+// NOTE about the comments in this section: the `//` of Pascal Script apply
+// here, NOT the `;` of the rest of the .iss (inside [Code] the `;` is a
+// statement separator and the compiler rejects it). This is what dist.iss does.
 
-// Runtime de Microsoft (CRT) para el target. En x64 es el Visual C++ 2022
-// (aka.ms/vs/17) — aquí no hay que tener cuidado con los imports W8+ como en
-// x86, porque el target es Win10+. /install /passive /norestart evita
-// reinicios y muestra progreso (no es silencioso). Códigos aceptables:
-// 0 = instalado, 1638 = ya había una versión más nueva, 3010 = requiere
-// reinicio (instalado igual).
+// Microsoft runtime (CRT) for the target. On x64 it is Visual C++ 2022
+// (aka.ms/vs/17) — here there is no need to be careful with the W8+ imports as
+// on x86, because the target is Win10+. /install /passive /norestart avoids
+// restarts and shows progress (it is not silent). Acceptable codes:
+// 0 = installed, 1638 = a newer version was already present, 3010 = restart
+// required (installed anyway).
 procedure InstallVcRedist();
 var
   R: Integer;
@@ -142,13 +142,13 @@ begin
   end;
 end;
 
-// ORDEN de la instalación, de principio a fin:
-//   1) copiar la app completa a {app}
-//   2) crear iconos: menú + acceso directo al escritorio (casilla marcada)
-//   3) runtime del sistema C++ (VC_redist.x64.exe)
-// El runtime va al final (ssPostInstall) porque su instalación pide UAC y puede
-// pedir reinicio: debe correr con la app ya completa en disco y los iconos
-// creados, no en mitad de la copia de archivos.
+// INSTALLATION ORDER, from start to finish:
+//   1) copy the full app to {app}
+//   2) create icons: menu + desktop shortcut (checkbox marked)
+//   3) C++ system runtime (VC_redist.x64.exe)
+// The runtime goes last (ssPostInstall) because its installation asks for UAC
+// and may ask for a restart: it must run with the app already complete on disk
+// and the icons created, not in the middle of the file copy.
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then begin

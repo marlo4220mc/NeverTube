@@ -123,9 +123,9 @@ static QString audioLangFromValue(const QString &val)
     return QStringLiteral("Original");
 }
 
-// Volumen máximo (mpv "volume-max"): 100% por defecto, 150/175/200 disponibles
-// como "headroom" para quienes necesiten más volumen. Cada opción >100% pide
-// confirmación por seguridad auditiva (riesgo de daño con audífonos).
+// Maximum volume (mpv "volume-max"): 100% by default, 150/175/200 available
+// as "headroom" for those who need more volume. Each option above 100% asks
+// for confirmation for hearing safety (risk of damage with headphones).
 static QStringList volumeMaxOptions()
 {
     return {QStringLiteral("100%"), QStringLiteral("150%"),
@@ -144,12 +144,12 @@ static QString volumeMaxFromValue(const QString &val)
     return val + QStringLiteral("%");
 }
 
-// "Tamaño de las miniaturas". Tres niveles que se traducen a DOS efectos, porque
-// las rejillas del Home y las vistas de lista no se dimensionan igual: las
-// rejillas son dimensionadas por el ancho con un número de columnas FIJO (el
-// factor no hace nada visible: con 5 columnas a 903 px la celda mide 175 px con
-// densidad 1.0 y 175 px con 0.88), mientras que las listas escalan su fila con
-// el factor. Por eso la palanca del Home son las COLUMNAS.
+// "Tamaño de las miniaturas". Three levels that translate into TWO effects, because
+// the Home grids and the list views are not sized the same way: the
+// grids are width-sized with a FIXED number of columns (the
+// factor does nothing visible: with 5 columns at 903 px the cell measures 175 px with
+// density 1.0 and 175 px with 0.88), while the lists scale their row with
+// the factor. That is why the Home lever is the COLUMNS.
 static QStringList thumbSizeOptions()
 {
     return {QStringLiteral("Pequeñas"), QStringLiteral("Normales"),
@@ -192,10 +192,10 @@ int SettingsPage::thumbGridColumns(const QString &value)
     return 5;
 }
 
-// Color de acento de la app. La paleta (labels + hex) vive en la FUENTE ÚNICA
-// nt::accentOptions() (src/ui/theme.h); aquí solo se traduce label<->hex
-// contra ella y se persiste con kAccentKey. El defecto es el rojo NeverTube
-// histórico (primer elemento de la paleta).
+// App accent color. The palette (labels + hex) lives in the SINGLE SOURCE
+// nt::accentOptions() (src/ui/theme.h); here only label<->hex is translated
+// against it and persisted with kAccentKey. The default is the historic NeverTube
+// red (first element of the palette).
 static QStringList accentOptions()
 {
     QStringList out;
@@ -220,7 +220,7 @@ static QString accentFromValue(const QString &val)
     return nt::accentOptions().value(0).label;
 }
 
-// Texto legible del perfil detectado por HwProbe (codec_profile).
+// Readable text of the profile detected by HwProbe (codec_profile).
 static QString codecProfileText(const QString &val)
 {
     if (val == QLatin1String("av1-hw"))
@@ -248,10 +248,10 @@ void SettingsPage::updateCodecProfile(const QString &profile)
 
 void SettingsPage::applyAccent()
 {
-    // El boton de restablecer es #accentOutline en el QSS global, y su color
-    // sale de @ACCENT@: nt::styleSheet() se regenera entero en cada cambio de
-    // acento, asi que ya no hay nada que re-aplicar aqui. El metodo se mantiene
-    // porque MainWindow lo llama en las cuatro paginas por igual.
+    // The reset button is #accentOutline in the global QSS, and its color
+    // comes from @ACCENT@: nt::styleSheet() is regenerated whole on every accent
+    // change, so there is nothing left to re-apply here. The method is kept
+    // because MainWindow calls it on the four pages alike.
 }
 
 QPushButton *SettingsPage::makeActionButton(const QString &text)
@@ -263,44 +263,44 @@ QPushButton *SettingsPage::makeActionButton(const QString &text)
     return btn;
 }
 
-// Botón de VALOR: abre un QMenu con las alternativas. Va deliberadamente
-// igual que un botón de acción: sin triángulo, ni glifo de texto ("  ▼", el
-// que se le puso al principio) ni icono dibujado. El usuario pidió quitarlo y
-// es decoración redundante: el botón ya es un control con caja propia y el
-// menú marca la opción vigente con un check. NO reañadir ningún indicador.
+// VALUE button: opens a QMenu with the alternatives. Deliberately shaped
+// just like an action button: no triangle, no text glyph ("  ▼", the
+// one put on it at first) and no drawn icon. The user asked to remove it and
+// it is redundant decoration: the button is already a control with its own box and the
+// menu marks the current option with a check. Do NOT re-add any indicator.
 QPushButton *SettingsPage::makeValueButton(const QString &text)
 {
     return makeActionButton(text);
 }
 
-// Construye un menú de selección asociado al botón `btn`. La callback `onPick`
-// recibe la opción elegida y se ejecuta SÍNCRONAMENTE: si retorna, se considera
-// el cambio aceptado y el botón pasa a mostrar la opción nueva. Para opciones
-// que necesitan confirmación ASÍNCRONA (modal no modal), usar
-// setupValueMenuWithConfirm() en su lugar.
+// Builds a selection menu attached to button `btn`. The `onPick` callback
+// receives the chosen option and runs SYNCHRONOUSLY: if it returns, the change is
+// considered accepted and the button then shows the new option. For options
+// needing ASYNCHRONOUS confirmation (non-modal dialog), use
+// setupValueMenuWithConfirm() instead.
 void SettingsPage::setupValueMenu(
     QPushButton *btn, const QStringList &options, const QString &current,
     const std::function<void(const QString &)> &onPick)
 {
     auto *menu = new QMenu(btn);
-    // Grupo exclusivo: solo una QAction puede quedar marcada POR MARCO. El
-    // toggle automático de Qt en acciones checkable sueltas marcaba la nueva
-    // sin desmarcar la anterior (doble check); con el grupo, cliquear una
-    // acción desmarca el resto de forma atómica.
+    // Exclusive group: only one QAction can stay checked BY FRAMEWORK. Qt's
+    // automatic toggle on loose checkable actions marked the new one
+    // without unchecking the previous one (double check); with the group, clicking an
+    // action unchecks the rest atomically.
     auto *group = new QActionGroup(menu);
     group->setExclusive(true);
-    // currentOpt: opción vigente (texto exacto de una QAction del menú). Vive
-    // en un shared_ptr porque los triggers se ejecutan mucho después de que
-    // esta función retorne (la pila ya no existe).
+    // currentOpt: current option (exact text of a QAction in the menu). Lives
+    // in a shared_ptr because the triggers run long after this
+    // function returns (the stack no longer exists).
     auto currentOpt = std::make_shared<QString>(current);
     auto syncMenu = [menu, btn](const QString &opt) {
         for (QAction *a : menu->actions())
             a->setChecked(a->text() == opt);
         btn->setText(opt);
     };
-    // Al abrir el menú re-sincroniza checks y texto del botón con la opción
-    // vigente; sin esto, Qt deja el check de la última acción marcada y el
-    // menú reabre con checks viejos ("doble check").
+    // On opening, re-syncs checks and button text with the current
+    // option; without this, Qt leaves the last action's check marked and the
+    // menu reopens with stale checks ("double check").
     connect(btn, &QPushButton::clicked, btn,
             [btn, menu, currentOpt, syncMenu]() {
                 syncMenu(*currentOpt);
@@ -320,15 +320,15 @@ void SettingsPage::setupValueMenu(
     syncMenu(*currentOpt);
 }
 
-// Variante con confirmación ASÍNCRONA (modal no modal). `confirm(opt,
-// applyVisual)` decide por cada opción si aplica directo o muestra el modal:
-//   - Si aplica directo (p. ej. volver a 100%): hace los cambios reales
-//     (BD + signal) y llama applyVisual(opt) para reflejar botón + checks.
-//   - Si muestra modal: al Aceptar aplica los cambios y llama applyVisual(opt);
-//     al Cancelar NO llama applyVisual — el botón y el menú conservan la
-//     opción previa.
-// applyVisual es un wrapper que además registra la opción aceptada como la
-// vigente, para que la próxima apertura del menú la muestre marcada.
+// Variant with ASYNCHRONOUS confirmation (non-modal dialog). `confirm(opt,
+// applyVisual)` decides per option whether to apply directly or show the modal:
+//   - If it applies directly (e.g. back to 100%): it makes the real changes
+//     (DB + signal) and calls applyVisual(opt) to reflect button + checks.
+//   - If it shows the modal: on OK it applies the changes and calls applyVisual(opt);
+//     on Cancel it does NOT call applyVisual — the button and menu keep the
+//     previous option.
+// applyVisual is a wrapper that also records the accepted option as the
+// current one, so the next menu opening shows it checked.
 void SettingsPage::setupValueMenuWithConfirm(
     QPushButton *btn, const QStringList &options, const QString &current,
     const std::function<void(const QString &,
@@ -336,27 +336,27 @@ void SettingsPage::setupValueMenuWithConfirm(
         &confirm)
 {
     auto *menu = new QMenu(btn);
-    // Grupo exclusivo: solo una QAction puede quedar marcada POR MARCO (ver
-    // comentario en setupValueMenu). Con el grupo, al cliquear una opción el
-    // check anterior se desmarca de forma atómica.
+    // Exclusive group: only one QAction can stay checked BY FRAMEWORK (see
+    // comment in setupValueMenu). With the group, clicking an option
+    // unchecks the previous check atomically.
     auto *group = new QActionGroup(menu);
     group->setExclusive(true);
-    // currentOpt: opción visualmente vigente (texto exacto de una QAction).
+    // currentOpt: visually current option (exact text of a QAction).
     auto currentOpt = std::make_shared<QString>(current);
     auto syncMenu = [menu, btn](const QString &opt) {
         for (QAction *a : menu->actions())
             a->setChecked(a->text() == opt);
         btn->setText(opt);
     };
-    // applyVisual que recibe el caller: registra la opción aceptada y la
-    // refleja. Al cancelar el modal el caller NO lo invoca, así currentOpt
-    // queda en la opción previa.
+    // applyVisual handed to the caller: records the accepted option and
+    // reflects it. On modal cancel the caller does NOT invoke it, so currentOpt
+    // stays on the previous option.
     auto applyAndTrack = [currentOpt, syncMenu](const QString &opt) {
         *currentOpt = opt;
         syncMenu(opt);
     };
-    // Antes de abrir, sincroniza el check con la opción vigente (puede haber
-    // cambiado tras un aceptar/cancelar anterior).
+    // Before opening, syncs the check with the current option (it may have
+    // changed after a previous accept/cancel).
     connect(btn, &QPushButton::clicked, btn,
             [btn, menu, currentOpt, syncMenu]() {
                 syncMenu(*currentOpt);
@@ -381,8 +381,8 @@ void SettingsPage::buildUI()
     mainLay->setSpacing(20);
 
     auto *title = new QLabel(QStringLiteral("Ajustes"), this);
-    // A proposito NO es #sectionTitle (16 px): este es el titulo de la pagina
-    // entera, un escalon por encima del titulo de seccion.
+    // Deliberately NOT #sectionTitle (16 px): this is the title of the whole
+    // page, one notch above the section title.
     title->setObjectName(QStringLiteral("pageHeading"));
     mainLay->addWidget(title);
 
@@ -399,15 +399,15 @@ void SettingsPage::buildUI()
     scrollArea->setWidget(content);
     mainLay->addWidget(scrollArea, 1);
 
-    // Cada sección es un grupo "título + tarjeta": las filas van dentro de la
-    // tarjeta (#settingsCard), no sueltas en scrollLay. cardLay apunta a la
-    // tarjeta de la sección vigente y lo consumen los helpers de fila
-    // (addOptionRow, addActionButton y los bloques en línea).
+    // Each section is a "title + card" group: rows go inside the
+    // card (#settingsCard), not loose in scrollLay. cardLay points at the
+    // current section's card and is consumed by the row helpers
+    // (addOptionRow, addActionButton and the inline blocks).
     QVBoxLayout *cardLay = nullptr;
 
-    // Encabezado de sección de Ajustes (INTERFAZ, REPRODUCCION, DATOS...). A
-    // propósito NO es #sectionSub: ese es el subtitulo de 12 px de las demas
-    // paginas, y aqui son 11 px en versalitas con algo de tracking.
+    // Settings section header (INTERFAZ, REPRODUCCION, DATOS...). Deliberately
+    // NOT #sectionSub: that is the 12 px subtitle of the other
+    // pages, and here they are 11 px small-caps with some tracking.
     auto addSectionTitle = [scrollLay, &cardLay](const QString &t) {
         auto *group = new QWidget;
         auto *gv = new QVBoxLayout(group);
@@ -426,8 +426,8 @@ void SettingsPage::buildUI()
         cardLay = cv;
     };
 
-    // Nota aclaratoria bajo un ajuste: siempre se agrupa con su fila en un
-    // bloque de espaciado corto (nunca suelta en scrollLay, que separa con 24px).
+    // Clarifying note under a setting: always grouped with its row in a
+    // short-spacing block (never loose in scrollLay, which spaces with 24px).
     auto addNote = [content](const QString &text) {
         auto *note = new QLabel(text, content);
         note->setObjectName(QStringLiteral("settingsNote"));
@@ -443,8 +443,8 @@ void SettingsPage::buildUI()
                             const std::function<QString(const QString &)> &fromVal,
                             const std::function<void(const QString &)> &onPick,
                             const QString &note = QString()) {
-        // Bloque "fila + nota": la nota queda pegada a su ajuste (spacing 4);
-        // el spacing de 24 de scrollLay separa bloques completos, no fila-nota.
+        // "Row + note" block: the note stays glued to its setting (spacing 4);
+        // scrollLay's 24 spacing separates whole blocks, not row-note.
         auto *block = new QVBoxLayout;
         block->setSpacing(4);
         auto *row = new QHBoxLayout;
@@ -462,12 +462,12 @@ void SettingsPage::buildUI()
         Q_UNUSED(defaultVal);
     };
 
-    // --- REPRODUCCIÓN ---
+    // --- PLAYBACK ---
     addSectionTitle(QStringLiteral("REPRODUCCIÓN"));
 
-    // Calidad de reproducción: tope de resolución que la app pide a YouTube.
-    // Auto usa el último valor efectivo guardado (por defecto 360p) y la
-    // propia reproducción lo re-memoriza sin cambiar en caliente.
+    // Playback quality: resolution ceiling the app asks YouTube for.
+    // Auto uses the last effective value saved (default 360p) and playback
+    // itself re-memorizes it live without changing anything hot.
     addOptionRow(
         QStringLiteral("Calidad de reproducción"),
         qualityOptions(m_settings->getString(
@@ -491,9 +491,9 @@ void SettingsPage::buildUI()
             }
         });
 
-    // Modo "A continuación": qué se siembra en la cola al reproducir un vídeo.
-    // Radio: mezcla tipo radio de la app (RAMDV). Sugerencias: lista de
-    // recomendaciones del vídeo. Desactivado: la cola queda como vino.
+    // "A continuación" mode: what gets seeded into the queue when playing a video.
+    // Radio: app-style radio mix (RAMDV). Suggestions: list of
+    // recommendations for the video. Disabled: the queue stays as it came.
     addOptionRow(
         QStringLiteral("Modo \"A continuación\""), nextModeOptions(),
         m_settings->getString(QStringLiteral("next_mode"),
@@ -505,10 +505,10 @@ void SettingsPage::buildUI()
             emit nextModeChanged(val);
         });
 
-    // Vídeo en el mini player: si el vídeo en vivo ocupa el hueco del mini bar
-    // cuando se sale de la página Player, o si se prefiere ver solo la
-    // miniatura estática (en ambos casos el vídeo sigue renderizando en
-    // segundo plano para que no haya salto al volver).
+    // Video in the mini player: whether the live video fills the mini bar gap
+    // when leaving the Player page, or whether only the
+    // static thumbnail is preferred (in both cases the video keeps rendering in the
+    // background so there is no jump on return).
     addOptionRow(
         QStringLiteral("Vídeo en mini player"), miniVideoOptions(),
         m_settings->getString(QStringLiteral("mini_video"),
@@ -520,9 +520,9 @@ void SettingsPage::buildUI()
             emit miniVideoModeChanged(val);
         });
 
-    // Aceleración de vídeo: resultado del sondeo offline (HwProbe). Solo
-    // informativo; "Volver a detectar" borra el perfil y relanza el sondeo al
-    // momento (MainWindow::redetectHwRequested).
+    // Video acceleration: result of the offline probe (HwProbe). Informational
+    // only; "Volver a detectar" (Redetect) clears the profile and re-runs the probe on the
+    // spot (MainWindow::redetectHwRequested).
     {
         auto *row = new QHBoxLayout;
         row->setSpacing(8);
@@ -547,8 +547,8 @@ void SettingsPage::buildUI()
         cardLay->addLayout(row);
     }
 
-    // Idioma de audio: pista preferida cuando el vídeo la ofrece (incluye
-    // doblajes automáticos/IA si vienen con LANGUAGE).
+    // Audio language: preferred track when the video offers one (includes
+    // automatic/AI dubs if they come with LANGUAGE).
     addOptionRow(
         QStringLiteral("Idioma de audio"), audioLangOptions(),
         m_settings->getString(QStringLiteral("audio_language"),
@@ -563,13 +563,13 @@ void SettingsPage::buildUI()
             "Nota: la preferencia se aplica solo cuando el vídeo tiene una "
             "pista en ese idioma. Si no existe, se usará el audio original."));
 
-    // Volumen máximo (mpv "volume-max"): permite headroom sobre el 100%.
-    // Cualquier opción por encima del 100% pide confirmación antes de aplicar:
-    // a niveles altos el audio puede dañar audífonos/oidos. Para evitar
-    // sorpresas, el volumen persistido se CAPA a 100% — al cerrar la app
-    // siempre arranca en 100% aunque la sesión anterior hubiera subido más.
-    // Si el usuario CANCELA el modal, el botón sigue mostrando la opción
-    // previa (setupValueMenuWithConfirm no aplica visualmente al cancelar).
+    // Maximum volume (mpv "volume-max"): allows headroom above 100%.
+    // Any option above 100% asks for confirmation before applying:
+    // at high levels audio can damage headphones/ears. To avoid
+    // surprises, the persisted volume is CAPPED at 100% — on closing the app
+    // it always starts at 100% even if the previous session went higher.
+    // If the user CANCELS the modal, the button still shows the
+    // previous option (setupValueMenuWithConfirm does not apply visually on cancel).
     {
         auto *block = new QVBoxLayout;
         block->setSpacing(4);
@@ -583,22 +583,22 @@ void SettingsPage::buildUI()
         QPushButton *btn = makeValueButton(volumeMaxFromValue(saved));
         row->addWidget(btn, 1, Qt::AlignRight);
         block->addLayout(row);
-        // `current` es el TEXTO del menú ("150%"), no el valor crudo ("150"):
-        // los checks y el texto del botón comparan contra el texto de las
-        // QAction (que incluye el %).
+        // `current` is the menu TEXT ("150%"), not the raw value ("150"):
+        // checks and the button text compare against the QAction
+        // text (which includes the %).
         setupValueMenuWithConfirm(
             btn, volumeMaxOptions(), volumeMaxFromValue(saved),
             [this](const QString &text,
                    const std::function<void(const QString &)> &applyVisual) {
                 const QString val = valueFromVolumeMax(text);
                 if (val == QStringLiteral("100")) {
-                    // Sin modal: aplica directo.
+                    // No modal: applies directly.
                     m_settings->set(QStringLiteral("volume_max"), val);
                     emit volumeMaxChanged(val);
                     applyVisual(text);
                     return;
                 }
-                // Con modal: aplicamos SOLO al Aceptar.
+                // With modal: we apply ONLY on OK.
                 const QString confirmText = QStringLiteral(
                     "Subir el volumen máximo a %1 puede causar daño auditivo "
                     "permanente. Úsalo solo con altavoces externos y a un "
@@ -613,10 +613,10 @@ void SettingsPage::buildUI()
                         emit volumeMaxChanged(val);
                         applyVisual(text);
                     });
-                // Al Cancelar: no se llama applyVisual, no se toca BD, no se
-                // emite signal. El botón y el menú conservan la opción previa.
+                // On Cancel: applyVisual is not called, no DB write, no
+                // signal emitted. Button and menu keep the previous option.
             });
-        // Nota pegada al bloque (antes colgaba suelta con el spacing de 24).
+        // Note glued to the block (it used to hang loose with the 24 spacing).
         block->addWidget(addNote(QStringLiteral(
             "Por seguridad, el volumen solo se guarda hasta el 100%. Al "
             "reiniciar la app, aunque el ajuste siga por encima, el "
@@ -624,13 +624,13 @@ void SettingsPage::buildUI()
         cardLay->addLayout(block);
     }
 
-    // --- INTERFAZ ---
+    // --- INTERFACE ---
     addSectionTitle(QStringLiteral("INTERFAZ"));
 
-    // Color de acento: tono de los elementos interactivos (sliders, barra de
-    // progreso, botón primario, selección, nav activa, iconos activos de la
-    // barra inferior). Se aplica en caliente (MainWindow re-genera el
-    // stylesheet global y re-tiñe los iconos de la nav al recibir
+    // Accent color: tone of interactive elements (sliders, progress
+    // bar, primary button, selection, active nav, active icons on the
+    // bottom bar). Applied hot (MainWindow regenerates the
+    // global stylesheet and re-tints the nav icons when it receives
     // accentChanged).
     addOptionRow(
         QStringLiteral("Color de acento"), accentOptions(),
@@ -644,16 +644,16 @@ void SettingsPage::buildUI()
         QStringLiteral("Se aplica al instante: sliders, progreso, botones "
                        "resaltados, selección de texto e iconos activos."));
 
-    // Tamaño de las miniaturas: Pequeñas (6 por fila, filas cortas), Normales
-    // (5 por fila) o Grandes (4 por fila, filas altas). Es el ajuste que el
-    // usuario percibe de verdad, y el que SÍ mueve la rejilla del Home.
+    // Thumbnail size: "Pequeñas" (6 per row, short rows), "Normales"
+    // (5 per row) or "Grandes" (4 per row, tall rows). It is the setting the
+    // user really perceives, and the one that DOES move the Home grid.
     //
-    // Migración: el ajuste anterior se llamaba "Densidad de cuadrícula"
-    // ("cozy"/"compact") y solo escalaba un factor, que en las rejillas del
-    // Home no producía ningún cambio visible (la celda es 175 px con y sin
-    // factor). Se lee su valor la primera vez para no perder la elección:
-    // "compact" → "Pequeñas", "cozy" → "Normales". La clave vieja se deja en
-    // la BD (inofensiva) y se reescribe sola al elegir una opción.
+    // Migration: the previous setting was called "Densidad de cuadrícula"
+    // ("cozy"/"compact") and only scaled a factor, which on the Home
+    // grids produced no visible change (the cell is 175 px with and without the
+    // factor). Its value is read the first time so the choice is not lost:
+    // "compact" → "Pequeñas", "cozy" → "Normales". The old key is left in
+    // the DB (harmless) and gets rewritten on its own when an option is picked.
     m_thumbSize = m_settings->getString(
         QString::fromLatin1(kThumbSizeKey), QString());
     if (m_thumbSize.isEmpty()) {
@@ -677,12 +677,12 @@ void SettingsPage::buildUI()
                        "cortas en búsqueda, historial y cola. Grandes: 4 por "
                        "fila y miniatura más grande."));
 
-    // --- DATOS ---
+    // --- DATA ---
     addSectionTitle(QStringLiteral("DATOS"));
 
-    // Los botones de la sección DATOS. Hay dos: el normal (#actionBtn) y el de
-    // restablecer (#accentOutline, con borde y color de acento). El acento sale
-    // del QSS global, asi que ya no hace falta re-aplicarlo al cambiarlo.
+    // The buttons of the DATOS (Data) section. There are two: the normal one (#actionBtn) and the
+    // reset one (#accentOutline, with border and accent color). The accent comes
+    // from the global QSS, so it no longer needs re-applying when changed.
     auto addActionButton = [&cardLay](const QString &text, bool conAcento) {
         auto *btn = new QPushButton(text);
         btn->setObjectName(conAcento ? QStringLiteral("accentOutline")
@@ -693,8 +693,8 @@ void SettingsPage::buildUI()
         return btn;
     };
 
-    // Limpiar caché de miniaturas: borra solo las imágenes guardadas en disco
-    // (se vuelven a descargar solas al mostrar vídeos). No toca datos ni la BD.
+    // Clear thumbnail cache: deletes only the images saved to disk
+    // (they are re-downloaded on their own when videos are shown). Touches no data nor the DB.
     QPushButton *clearBtn = addActionButton(
         QStringLiteral("Limpiar caché de miniaturas"), false);
     connect(clearBtn, &QPushButton::clicked, this, [this]() {
@@ -705,9 +705,9 @@ void SettingsPage::buildUI()
             QStringLiteral("Eliminar"), [this]() { emit clearThumbsRequested(); });
     });
 
-    // Restablecer aplicación: borra la BD local (historial, búsquedas,
-    // suscripciones y ajustes) y el caché, y reinicia la app con defaults.
-    // Nunca toca archivos personales ni vídeos descargados.
+    // Reset app: deletes the local DB (history, searches,
+    // subscriptions and settings) and the cache, and restarts the app with defaults.
+    // Never touches personal files or downloaded videos.
     QPushButton *resetBtn = addActionButton(
         QStringLiteral("Restablecer aplicación"), true);
     connect(resetBtn, &QPushButton::clicked, this, [this]() {
@@ -722,7 +722,7 @@ void SettingsPage::buildUI()
             QStringLiteral("Restablecer"), [this]() { emit resetRequested(); });
     });
 
-    // --- ACERCA DE ---
+    // --- ABOUT ---
     addSectionTitle(QStringLiteral("ACERCA DE"));
 
     auto *verLabel = new QLabel(QStringLiteral("Versión 1.0 (nevertube_qt2)"),
@@ -738,18 +738,18 @@ void SettingsPage::buildUI()
                        "Todo permanece local en tu dispositivo.")));
     cardLay->addLayout(aboutBlock);
 
-    // El sobrante vertical va al FINAL: las secciones quedan pegadas arriba con
-    // separacion uniforme. Antes habia dos addStretch intermedios (1:3) que
-    // abrian huecos grandes entre REPRODUCCION/INTERFAZ/DATOS.
+    // The vertical remainder goes at the END: sections stay glued to the top with
+    // uniform spacing. Before there were two intermediate addStretch (1:3) that
+    // opened big gaps between REPRODUCCION/INTERFAZ/DATOS.
     scrollLay->addStretch(1);
 
-    // Las confirmaciones ("Volumen por encima del 100%", "Limpiar caché de
-    // miniaturas" y "Restablecer aplicación") ya no se montan aquí: son
-    // nt::confirm, el overlay modal de la app, igual que en Biblioteca,
-    // Historial, Playlist y Búsqueda. No hay que construir nada al arrancar.
+    // The confirmations ("Volumen por encima del 100%", "Limpiar caché de
+    // miniaturas" and "Restablecer aplicación") are no longer built here: they are
+    // nt::confirm, the app's modal overlay, same as in Library,
+    // History, Playlist and Search. Nothing has to be built at startup.
 }
 
-// showConfirmPopup, closeConfirmPopup, centerPopup y el resizeEvent que
-// recentraba el popup se han ido con él: nt::confirm construye su overlay cada
-// vez que se llama y lo destruye al terminar, así que no hay nada que Recentrar
-// ni que recordar entre llamadas.
+// showConfirmPopup, closeConfirmPopup, centerPopup and the resizeEvent that
+// re-centered the popup are gone with it: nt::confirm builds its overlay every
+// time it is called and destroys it when done, so there is nothing to re-center
+// nor to remember between calls.

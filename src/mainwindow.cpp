@@ -56,37 +56,36 @@
 
 namespace {
 
-// Versión de la lógica del sondeo HW (HwProbe). Al subir esta versión la app
-// re-sondea la GPU UNA vez al arrancar, aunque haya un perfil persistido: así
-// un falso positivo escrito por una versión antigua (p.ej. av1-hw del i5 con
-// qsv-copy) se autocorrige sin tener que re-sondear en cada arranque (algo que
-// penalizaría la máquina de pruebas, donde el sondeo es lento).
+// Version of the HW probing logic (HwProbe). Bumping this version makes the
+// app re-probe the GPU ONCE at startup, even with a persisted profile: that way
+// a false positive written by an old version (e.g. av1-hw from the i5 with
+// qsv-copy) self-corrects without having to re-probe on every launch (which
+// would penalize the test machine, where probing is slow).
 constexpr int kCodecProbeVersion = 2;
 
-// Anti-rebote y presupuesto de la escalera de descenso de perfil (evidencia de
-// códec/HW). Un mismo episodio no debe degradar varias veces seguidas (el
-// decoder puede emitir "software" repetido); y como mucho se descienden 3
-// peldaños por sesión (av1-hw -> vp9-hw -> h264-hw -> soft-all).
+// Anti-bounce and budget of the profile descent ladder (codec/HW evidence).
+// The same episode must not degrade several times in a row (the decoder can
+// emit repeated "software"); and at most 3 steps are descended per session
+// (av1-hw -> vp9-hw -> h264-hw -> soft-all).
 constexpr qint64 kDescendCooldownMs = 15000;
 constexpr int kDescendMaxPerSession = 3;
 
-// Botón de la barra de navegación inferior. Usa los PNG adjuntos por estado
-// (inicio/buscar/biblioteca/ajustes × inactivo/activo/hover/presionado/
-// deshabilitado). El QSS no puede cambiar qproperty-icon dinámicamente, así
-// que el icono se elige aquí según el estado real del botón. Los estados de
-// acento (activo/hover/presionado) usan PNGs pre-pintados por color de acento
-// (nav/<key>_<state>_<suffix>.png, generados en tools/gen_nav_accent.cpp): sin
-// retint en runtime — el cambio de acento en caliente solo re-evalúa el
-// sufijo, y la clase de bugs del retint (alfa del "cuadrado negro", acento
-// congelado en estático) no puede existir. Inactivo y deshabilitado usan sus
-// grises nativos del PNG.
+// Button of the bottom navigation bar. Uses the PNGs attached per state
+// (home/search/library/settings × inactive/active/hover/pressed/disabled).
+// The QSS cannot change qproperty-icon dynamically, so the icon is chosen here
+// based on the button's real state. The accent states (active/hover/pressed)
+// use PNGs pre-painted per accent color (nav/<key>_<state>_<suffix>.png,
+// generated in tools/gen_nav_accent.cpp): no runtime retint — a hot accent
+// change only re-evaluates the suffix, and the retint bug class ("black
+// square" alpha, accent frozen in a static) cannot exist. Inactive and
+// disabled use the PNG's native grays.
 class NavButton : public QToolButton
 {
 public:
     using QToolButton::QToolButton;
 
-    // Estado visible (prioridad alta→baja): disabled > pressed > hover >
-    // checked > normal. El color de acento se aplica en los estados activos.
+    // Visible state (high→low priority): disabled > pressed > hover >
+    // checked > normal. The accent color is applied on the active states.
     void updateIcon()
     {
         const QString key = property("navKey").toString();
@@ -101,8 +100,8 @@ public:
             state = QStringLiteral("hover");
         else if (isChecked())
             state = QStringLiteral("active");
-        // Estados de acento: PNG pre-pintado por sufijo del acento vigente;
-        // inactivo/deshabilitado usan sus grises nativos sin sufijo.
+        // Accent states: PNG pre-painted with the suffix of the current accent;
+        // inactive/disabled use their native grays without suffix.
         const bool accentState = state == QLatin1String("active")
                                  || state == QLatin1String("hover")
                                  || state == QLatin1String("pressed");
@@ -155,22 +154,22 @@ private:
     bool m_pressed = false;
 };
 
-// Barra del mini player: cualquier click en zona no-botón emite la vuelta a la
-// página Player. Los botones internos consumen su propio click y no llegan aquí
-// (la propagación de eventos de ratón no aceptados sube al widget padre).
+// Mini player bar: any click outside a button emits the go-back to the Player
+// page. The internal buttons consume their own click and it never reaches here
+// (unaccepted mouse events propagate up to the parent widget).
 class MiniPlayerBar : public QWidget
 {
 public:
     explicit MiniPlayerBar(QWidget *parent = nullptr) : QWidget(parent)
     {
-        // Al cambiar de ventana o de espacio de trabajo la app se desactiva y
-        // no llega ningún Leave: apagar el hover en el acto. Al reactivar NO se
-        // re-evalúa con QCursor::pos(): con la app inactiva esa posición queda
-        // CONGELADA en el último punto conocido (Wayland no entrega eventos de
-        // puntero al cambiar de workspace) y, si el puntero estaba sobre la
-        // barra al desactivar, re-iluminaría en falso al volver aunque el
-        // puntero real esté en otro sitio. El hover solo se re-enciende con un
-        // enterEvent real (o al mover el puntero sobre la barra).
+        // On switching window or workspace the app deactivates and no Leave
+        // arrives: turn the hover off on the spot. On reactivating it is NOT
+        // re-evaluated with QCursor::pos(): with the app inactive that position
+        // stays FROZEN at the last known point (Wayland delivers no pointer
+        // events on workspace switch) and, if the pointer was over the bar when
+        // deactivated, it would falsely re-light on return even if the real
+        // pointer is elsewhere. The hover only re-lights with a real
+        // enterEvent (or on moving the pointer over the bar).
         connect(qApp, &QGuiApplication::applicationStateChanged, this,
                 [this](Qt::ApplicationState state) {
                     if (state == Qt::ApplicationInactive)
@@ -178,9 +177,9 @@ public:
                 });
     }
     std::function<void()> onActivate;
-    // Barra de progreso pegada al borde inferior y a todo el ancho. Va fuera
-    // del layout (que lleva márgenes laterales) y se recoloca aquí: es lo que
-    // la deja "flush" como en YouTube.
+    // Progress bar stuck to the bottom edge and full width. It lives outside
+    // the layout (which carries side margins) and is repositioned here: that is
+    // what leaves it "flush" like on YouTube.
     QProgressBar *progress = nullptr;
 
 protected:
@@ -202,9 +201,10 @@ protected:
         QWidget::keyPressEvent(event);
     }
 
-    // Hover en toda la barra: aclara el fondo para señalar que es clicable
-    // (expande al Player). El estado va por propiedad dinámica para no meter un
-    // setStyleSheet inline; la regla vive en el QSS (QWidget#miniBar[hover]).
+    // Hover over the whole bar: lightens the background to signal it is
+    // clickable (expands to the Player). The state travels via dynamic property
+    // to avoid an inline setStyleSheet; the rule lives in the QSS
+    // (QWidget#miniBar[hover]).
     void enterEvent(QEvent *event) override
     {
         setHover(true);
@@ -213,10 +213,11 @@ protected:
 
     void leaveEvent(QEvent *event) override
     {
-        // No apagar el hover si el cursor sigue dentro de la barra: al pasar de
-        // la barra a un botón hijo, Qt manda Leave al padre y el fondo
-        // parpadearía. El guard solo se evalúa cuando llega un Leave (interacción
-        // activa, donde QCursor::pos() sí está fresco).
+        // Do not turn the hover off if the cursor is still inside the bar: when
+        // moving from the bar to a child button, Qt sends Leave to the parent
+        // and the background would flicker. The guard is only evaluated when a
+        // Leave arrives (active interaction, where QCursor::pos() is actually
+        // fresh).
         if (!rect().contains(mapFromGlobal(QCursor::pos())))
             setHover(false);
         QWidget::leaveEvent(event);
@@ -232,17 +233,18 @@ protected:
         }
     }
 
-    // Al ocultar (salir de la página Player) el hover no debe sobrevivir: el
-    // Leave no llega si el cursor seguía dentro de la barra en el ocultado.
+    // On hiding (leaving the Player page) the hover must not survive: the
+    // Leave does not arrive if the cursor was still inside the bar at hide
+    // time.
     void hideEvent(QHideEvent *event) override
     {
         setHover(false);
         QWidget::hideEvent(event);
     }
 
-    // Al re-mostrar (volver de la página Player) Qt no siempre re-manda Enter
-    // bajo el cursor: re-evaluar contra la posición real. Si el puntero quedó
-    // sobre la barra se re-ilumina; si no, se mantiene apagado.
+    // On re-showing (returning from the Player page) Qt does not always
+    // re-send Enter under the cursor: re-evaluate against the real position. If
+    // the pointer ended up over the bar it re-lights; otherwise it stays off.
     void showEvent(QShowEvent *event) override
     {
         QWidget::showEvent(event);
@@ -255,17 +257,17 @@ private:
         if (property("hover").toBool() == on)
             return;
         setProperty("hover", on);
-        // La propiedad dinámica solo repinta tras re-polish (obligatorio).
+        // The dynamic property only repaints after re-polish (mandatory).
         style()->unpolish(this);
         style()->polish(this);
     }
 };
 
-// Miniatura del mini player con las esquinas redondeadas DE VERDAD: el
-// border-radius del QSS solo redondea el FONDO del QLabel, no el QPixmap que se
-// pinta encima (se veían esquinas cuadradas, el mismo caso que circularAvatar).
-// Con pixmap, lo dibuja recortado a un rect redondeado; sin pixmap delega en
-// QLabel (estado "sin miniatura" con el fondo y el texto del QSS).
+// Mini player thumbnail with corners rounded FOR REAL: the QSS border-radius
+// only rounds the QLabel BACKGROUND, not the QPixmap painted on top (square
+// corners showed, same case as circularAvatar). With a pixmap it draws it
+// clipped to a rounded rect; without pixmap it delegates to QLabel ("no
+// thumbnail" state with the QSS background and text).
 class RoundedThumb : public QLabel
 {
 public:
@@ -284,15 +286,16 @@ protected:
         QPainterPath clip;
         clip.addRoundedRect(QRectF(rect()), 6.0, 6.0);
         p.setClipPath(clip);
-        // Centrado y sin reescalar: el pixmap ya viene "cover" (>= label) y el
-        // clip recorta el sobrante, así no se deforma si el aspect no cuadra.
+        // Centered and not scaled: the pixmap already comes "cover" (>= label)
+        // and the clip cuts the surplus, so it does not deform if the aspect
+        // does not match.
         p.drawPixmap((width() - pm.width()) / 2, (height() - pm.height()) / 2,
                      pm);
     }
 };
 
-// Migra los nombres de perfil de códec antiguos (detección reactiva) a los del
-// sondeo offline de HwProbe. Se persiste la migración para no repetirla.
+// Migrates old codec profile names (reactive detection) to the ones from
+// HwProbe's offline probe. The migration is persisted so it is not repeated.
 QString normalizeCodecProfile(const QString &raw)
 {
     if (raw == QLatin1String("modern"))
@@ -319,47 +322,48 @@ MainWindow::MainWindow(QWidget *parent)
 {
     m_db.open();
     m_yt->setVisitorStorage(&m_settings);
-    // Auto-reinicio por sesión gateada: si esta instancia vino de un reinicio
-    // de recuperación (guard armado en settings), el último vídeo debe reanudar
-    // donde se cortó. El guard NO se desarma al abrir: solo cuando la
-    // reproducción se estabiliza 5 min (recoveryHealthy) o al agotar sin éxito
-    // (onRecoveryExhausted), para que un reinicio nunca encadene otro.
+    // Auto-restart on gated session: if this instance came from a recovery
+    // restart (guard armed in settings), the last video must resume where it
+    // was cut off. The guard is NOT disarmed on open: only when playback
+    // stabilizes for 5 min (recoveryHealthy) or when exhausted without success
+    // (onRecoveryExhausted), so a restart never chains another one.
     if (m_settings.getInt(QStringLiteral("gate_restart_armed"), 0) == 1)
         m_gateResumeMs = m_settings.getInt(QStringLiteral("gate_restart_pos"), 0);
     connect(&m_player, &PlayerController::recoveryExhausted, this,
             &MainWindow::onRecoveryExhausted);
     connect(&m_player, &PlayerController::recoveryHealthy, this,
             &MainWindow::onRecoveryHealthy);
-    // Perfil de códec de vídeo. HwProbe sondea la GPU con micro-clips offline y
-    // deja un perfil persistido (av1-hw|vp9-hw|h264-hw|soft-all). Si no hay
-    // resultado se aplica soft-all (conservador) sin persistir, y mientras se
-    // sondea no se reproduce (la petición se encola). El perfil se decide y
-    // persiste SOLO en el arranque: la red reactiva (streamDecodeInfoReady)
-    // queda como traza de diagnóstico y ya NO degrada el perfil en caliente
-    // (la detección correcta al inicio es responsabilidad de HwProbe).
+    // Video codec profile. HwProbe probes the GPU with offline micro-clips and
+    // leaves a persisted profile (av1-hw|vp9-hw|h264-hw|soft-all). If there is
+    // no result, soft-all (conservative) is applied without persisting, and
+    // while probing runs nothing plays (the request is queued). The profile is
+    // decided and persisted ONLY at startup: the reactive network path
+    // (streamDecodeInfoReady) remains as a diagnostic trace and no longer
+    // degrades the profile hot (correct detection at startup is HwProbe's
+    // responsibility).
     const QString rawProfile = m_settings.getString(
         QStringLiteral("codec_profile"), QString());
     const QString savedProfile = normalizeCodecProfile(rawProfile);
     if (!rawProfile.isEmpty() && savedProfile != rawProfile)
         m_settings.set(QStringLiteral("codec_profile"), savedProfile);
 #ifdef NEVERTUBE_NO_MPV
-    // Build x86 sin mpv (Fase 5): no hay HwProbe (sondea con mpv). El perfil
-    // se decide por plataforma — el target x86 va por DXVA2, H.264 es el techo; los
-    // av1/vp9 irán a SW y la escalera reactiva (streamDecodeInfoReady ->
-    // hwdecCurrent()=="no") ya los descendería en caliente. Sin valor
-    // guardado = h264-hw, persistido para que Ajustes lo muestre.
+    // x86 build without mpv (Phase 5): no HwProbe (it probes with mpv). The
+    // profile is decided per platform — the x86 target goes through DXVA2,
+    // H.264 is the ceiling; av1/vp9 will go to SW and the reactive ladder
+    // (streamDecodeInfoReady -> hwdecCurrent()=="no") would already descend
+    // them hot. No saved value = h264-hw, persisted so Settings shows it.
 #if defined(Q_OS_WIN)
-    // CLAVE x86: un perfil av1-hw/vp9-hw guardado por la era mpv (HwProbe
-    // corría ahí) pediría códecs que el paquete i686 no puede reproducir —
-    // AV1 NO decodifica ni por HW ni por SW (el decoder nativo de FFmpeg 9 no
-    // soporta decode nativo) y la escalera reactiva no lo puede bajar porque
-    // AV1 jamás produce un frame (sin streamDecodeInfoReady no hay descenso:
-    // quedaría con el error de decodificador para siempre). Los únicos
-    // perfiles x86 válidos son h264-hw (techo DXVA2) o soft-all (si DXVA2 no
-    // inicia, lo decide la escalera en caliente); cualquier otro se CLAMPA a
-    // h264-hw y se persiste. Además se prohíbe elegir AV1 en la selección de
-    // formato (Yt::codecRankedScore): el perfil Legacy puede tocar av01 de
-    // YouTube cuando el vídeo no ofrece h264, y eso también debe fallar a vp9.
+    // KEY x86: an av1-hw/vp9-hw profile saved by the mpv era (HwProbe ran
+    // there) would request codecs the i686 package cannot play — AV1 decodes
+    // neither by HW nor by SW (the FFmpeg 9 native decoder does not support
+    // native decode) and the reactive ladder cannot lower it because AV1 never
+    // produces a frame (without streamDecodeInfoReady there is no descent: it
+    // would keep the decoder error forever). The only valid x86 profiles are
+    // h264-hw (DXVA2 ceiling) or soft-all (if DXVA2 does not start, the hot
+    // ladder decides); anything else is CLAMPED to h264-hw and persisted.
+    // Also, picking AV1 in the format selection is forbidden
+    // (Yt::codecRankedScore): the Legacy profile can hit YouTube's av01 when
+    // the video offers no h264, and that must also fall back to vp9.
     m_yt->setNoAv1(true);
     if (savedProfile != QLatin1String("h264-hw")
         && savedProfile != QLatin1String("soft-all")) {
@@ -379,10 +383,10 @@ MainWindow::MainWindow(QWidget *parent)
     }
 #endif
 #else
-    // El perfil se re-sondea al arranque si no hay valor persistido o si fue
-    // escrito por otra versión del sondeo (codec_probe_v). El valor guardado
-    // se usa como fallback mientras se sondea; el veredicto fresco lo
-    // reemplaza. No se reproduce hasta tener el veredicto (cola pendiente).
+    // The profile is re-probed at startup if there is no persisted value or if
+    // it was written by another probe version (codec_probe_v). The saved value
+    // is used as a fallback while probing; the fresh verdict replaces it.
+    // Nothing plays until the verdict arrives (pending queue).
     const int probeVersion = m_settings
                                  .getString(QStringLiteral("codec_probe_v"),
                                             QString())
@@ -399,23 +403,23 @@ MainWindow::MainWindow(QWidget *parent)
 #endif
     connect(m_playerWidget, &PlayerWidget::streamDecodeInfoReady, this,
             [this](const QString &codec, const QString &hwdecBackend) {
-                // hwdec-current llega "vacío" en el primer video-params (mpv
-                // aún no activó el decodificador) y "no" cuando el decoder se
-                // sabe en software; el widget reintenta hasta tenerlo resuelto.
+                // hwdec-current arrives "empty" on the first video-params (mpv
+                // has not activated the decoder yet) and "no" when the decoder
+                // knows it is in software; the widget retries until resolved.
                 //
-                // Escalera de descenso: si el perfil ACTIVO promete hardware y
-                // mpv decodifica en SOFTWARE, el veredicto del arranque no se
-                // sostiene en la reproducción -> se baja un peldaño y se
-                // RE-RESUELVE con el perfil nuevo (reloadCurrent sin rotar
-                // sesión: un problema de códec no es de sesión).
+                // Descent ladder: if the ACTIVE profile promises hardware and
+                // mpv decodes in SOFTWARE, the startup verdict does not hold
+                // during playback -> drop one step and RE-RESOLVE with the new
+                // profile (reloadCurrent without rotating the session: a codec
+                // problem is not a session problem).
                 //
-                // Regla dura: NUNCA por red. Un 403, un visitorData vencido o
-                // un atasco de caché no cambian hwdec-current; esta señal solo
-                // existe con frames decodificados en software. Sin evidencia de
-                // códec/HW (arriba: hwdecBackend != "no") no se toca nada.
+                // Hard rule: NEVER on network. A 403, an expired visitorData or
+                // a cache stall do not change hwdec-current; this signal only
+                // exists with frames decoded in software. With no codec/HW
+                // evidence (above: hwdecBackend != "no") nothing is touched.
                 if (hwdecBackend != QLatin1String("no")) {
-                    // Decodifica en hardware: el perfil acertó -> una racha
-                    // sana reinicia el presupuesto del descenso.
+                    // Decoding in hardware: the profile hit -> a healthy streak
+                    // resets the descent budget.
                     m_descendAttempts = 0;
                     return;
                 }
@@ -425,7 +429,7 @@ MainWindow::MainWindow(QWidget *parent)
                          m_activeProfile.toUtf8().constData(),
                          codec.toUtf8().constData(),
                          lower.isEmpty() ? "(nada)" : lower.toUtf8().constData());
-                // soft-all es el suelo; un perfil desconocido tampoco se toca.
+                // soft-all is the floor; an unknown profile is not touched either.
                 if (lower.isEmpty())
                     return;
                 if (m_descendAttempts >= kDescendMaxPerSession)
@@ -433,12 +437,12 @@ MainWindow::MainWindow(QWidget *parent)
                 const qint64 now = QDateTime::currentMSecsSinceEpoch();
                 if (m_lastDescendMs > 0
                     && now - m_lastDescendMs < kDescendCooldownMs)
-                    return; // anti-rebote: el mismo episodio no baja varias veces
+                    return; // anti-bounce: the same episode does not drop several times
                 ++m_descendAttempts;
                 m_lastDescendMs = now;
-                // Efímero: se aplica EN MEMORIA (persist=false). Un fallo
-                // puntual no debe "condenar" la máquina a un perfil menor
-                // (Ajustes -> "Volver a detectar" lo restaura).
+                // Ephemeral: applied IN MEMORY (persist=false). A one-off
+                // failure must not "condemn" the machine to a lower profile
+                // (Settings -> "Volver a detectar" restores it).
                 applyCodecProfile(lower, /*persist=*/false);
                 NT_DEBUG("E2E codec_profile descenso=%s intento=%d -> reload\n",
                          lower.toUtf8().constData(), m_descendAttempts);
@@ -446,8 +450,8 @@ MainWindow::MainWindow(QWidget *parent)
             });
     m_elapsed.start();
     m_player.setPlayer(m_playerWidget);
-    // Filtro a nivel de aplicación: recibe todos los KeyPress aunque el foco
-    // esté en un widget profundo (QScrollArea, listas…), no solo en MainWindow.
+    // Application-level filter: receives every KeyPress even when focus is on
+    // a deep widget (QScrollArea, lists…), not just MainWindow.
     QCoreApplication::instance()->installEventFilter(this);
 
     const QString savedQ = m_settings.getString(
@@ -462,35 +466,35 @@ MainWindow::MainWindow(QWidget *parent)
         else
             m_player.setMaxHeight(720);
     }
-    // Sin HW: nunca pedir más de 1080p (a un CPU puro un 1440p+ le revienta).
+    // No HW: never ask for more than 1080p (1440p+ kills a pure CPU).
     if (m_noHw && m_player.maxHeight() > 1080)
         m_player.setMaxHeight(1080);
     m_player.setMaxHeight(m_player.maxHeight());
 
 
-    // Volumen/silencio persistidos en la sesión anterior.
-    // "volume_max" es el ajuste "Volumen máximo" de Ajustes (100/150/175/200);
-    // "volume" solo se persiste si ≤ 100, así que con boost activo el slider
-    // SIEMPRE arranca al 100% (independiente del valor que dejó el usuario).
+    // Volume/mute persisted from the previous session.
+    // "volume_max" is the Settings "Volumen máximo" option (100/150/175/200);
+    // "volume" is only persisted if ≤ 100, so with boost active the slider
+    // ALWAYS starts at 100% (regardless of the value the user left).
     const int volumeMax = m_settings.getInt(QStringLiteral("volume_max"), 100);
     m_player.setVolumeMax(volumeMax);
     const double savedVol = m_settings.getInt(QStringLiteral("volume"), 100);
     m_player.setVolume(savedVol);
     if (m_settings.getInt(QStringLiteral("volume_muted"), 0) == 1)
         m_player.setMuted(true);
-    // Preferencia de idioma de audio
+    // Audio language preference
     const QString savedAL = m_settings.getString(
         QStringLiteral("audio_language"), QStringLiteral("original"));
     if (m_yt)
         m_yt->setAudioLanguage(savedAL);
 
-    // Color de acento persistido. Se aplica ANTES de generar el stylesheet
-    // global (setStyleSheet(nt::styleSheet()) al final del constructor), así
-    // que el QSS ya nace con el acento elegido.
+    // Persisted accent color. Applied BEFORE generating the global stylesheet
+    // (setStyleSheet(nt::styleSheet()) at the end of the constructor), so the
+    // QSS is born with the chosen accent.
     {
-        // Migración: el rojo por defecto era #FF0033 y ahora es el rojo del
-        // icono #FA011B. El viejo default ya no está en la paleta (nadie lo
-        // eligió a mano: era el de fábrica), así que se trata como ausente.
+        // Migration: the default red was #FF0033 and is now the icon red
+        // #FA011B. The old default is no longer in the palette (nobody picked
+        // it by hand: it was the factory one), so it is treated as absent.
         const QString savedAccent = m_settings.getString(
             QStringLiteral("ui_accent"), nt::accentHex());
         const QColor accent(savedAccent.toLower() == QStringLiteral("#ff0033")
@@ -500,7 +504,7 @@ MainWindow::MainWindow(QWidget *parent)
             nt::setAccent(accent);
     }
 
-    // Modo de generación de cola
+    // Queue generation mode
     const QString savedNext = m_settings.getString(
         QStringLiteral("next_mode"), QStringLiteral("radio"));
     if (savedNext == QStringLiteral("none"))
@@ -530,8 +534,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_home = new HomePage(m_yt, &m_subs, &m_history, &m_discoverRadios,
                           &m_videoCache, m_homeThumbs, &m_settings,
                           &m_homeCache, this);
-    // Alta/baja de suscripción: refresca el feed "Nuevos de tus suscripciones"
-    // al momento, sin esperar a re-entrar a Home.
+    // Subscribe/unsubscribe: refreshes the "Nuevos de tus suscripciones" feed
+    // right away, without waiting to re-enter Home.
     connect(&m_subs, &SubscriptionsRepo::changed,
             m_home, &HomePage::refreshDynamic);
     m_search = new SearchPage(m_yt, &m_settings, m_globalThumbs, this);
@@ -561,10 +565,9 @@ MainWindow::MainWindow(QWidget *parent)
                     } else
                         m_player.setMaxHeight(360);
                 }
-                // El cambio de calidad aplicada al reproductor se refleja en
-                // el siguiente vídeo; el botón de calidad del overlay se
-                // actualizará al cargar el siguiente vídeo (WatchPage lee
-                // settings al abrir).
+                // The quality change applied to the player is reflected on the
+                // next video; the overlay's quality button will update when the
+                // next video loads (WatchPage reads settings on open).
             });
     connect(m_settingsPage, &SettingsPage::nextModeChanged,
             this, [this](const QString &val) {
@@ -582,32 +585,32 @@ MainWindow::MainWindow(QWidget *parent)
                 if (m_yt)
                     m_yt->setAudioLanguage(val);
             });
-    // Volumen máximo: aplica el tope a mpv en caliente. Como el volumen actual
-    // se cape a 100 en persistVolume, al activar >100 el volumen visible
-    // SE QUEDA en su valor (≤100) y el slider del overlay se reajusta solo.
+    // Maximum volume: applies the cap to mpv hot. Since the current volume is
+    // capped to 100 in persistVolume, enabling >100 leaves the visible volume
+    // AT its value (≤100) and the overlay slider readjusts itself.
     connect(m_settingsPage, &SettingsPage::volumeMaxChanged,
             this, [this](const QString &val) {
                 m_player.setVolumeMax(val.toInt());
-                // Refresca el slider del overlay para reflejar el nuevo rango.
+                // Refreshes the overlay slider to reflect the new range.
                 m_watch->refreshVolumeSlider();
                 persistVolume();
             });
     connect(m_settingsPage, &SettingsPage::miniVideoModeChanged,
             this, [this]() {
-                // Si se cambia estando ya en el mini (Ajustes es visible con el
-                // mini bar), re-aplica el modo en caliente: vídeo vivo o
-                // miniatura encima.
+                // If changed while already in the mini (Settings is visible
+                // with the mini bar), re-applies the mode hot: live video or
+                // thumbnail on top.
                 applyMiniVideoMode();
             });
     connect(m_settingsPage, &SettingsPage::thumbSizeChanged,
             this, [this](const QString &val) { applyThumbSize(val); });
-    // Color de acento: se aplica en caliente. Se re-genera el stylesheet
-    // global (sliders, botón primario, selección, nav activa, scrollbar…), se
-    // re-tiñen los iconos de la nav y se repintan las vistas que dibujan con
-    // kAccent (barra de progreso de miniaturas, borde "Reproduciendo"). Las
-    // páginas re-aplican además sus estilos inline que dependen del acento
-    // (botón Suscribirse, acciones activas, enlaces de descripción, empty
-    // state y botón reset de Ajustes).
+    // Accent color: applied hot. The global stylesheet is re-generated
+    // (sliders, primary button, selection, active nav, scrollbar…), the nav
+    // icons are re-tinted and the views that draw with kAccent are repainted
+    // (thumbnail progress bar, "Reproduciendo" border). The pages additionally
+    // re-apply their inline styles that depend on the accent (Subscribe button,
+    // active actions, description links, empty state and the Settings reset
+    // button).
     connect(m_settingsPage, &SettingsPage::accentChanged,
             this, [this](const QString &hex) {
                 const QColor accent(hex);
@@ -636,14 +639,14 @@ MainWindow::MainWindow(QWidget *parent)
                     if (t)
                         t->clear();
             });
-    // El popup custom de Ajustes ya pide confirmación; sin QMessageBox
-    // nativo (secuestraba el puntero con un segundo diálogo).
+    // The custom Settings popup already asks for confirmation; no native
+    // QMessageBox (it hijacked the pointer with a second dialog).
     connect(m_settingsPage, &SettingsPage::resetRequested,
             this, [this]() { resetAppData(); });
-    // "Volver a detectar hardware": la página ya borró codec_profile; relanzar
-    // HwProbe. Si hay reproducción en curso no se interrumpe el vídeo actual,
-    // pero la app queda en modo "sondeando" (no admite otra reproducción) hasta
-    // que termine.
+    // "Volver a detectar hardware": the page already cleared codec_profile;
+    // relaunch HwProbe. If playback is in progress the current video is not
+    // interrupted, but the app enters "probing" mode (no other playback is
+    // accepted) until it finishes.
     connect(m_settingsPage, &SettingsPage::redetectHwRequested,
             this, [this]() { startHwProbe(); });
 
@@ -713,8 +716,8 @@ MainWindow::MainWindow(QWidget *parent)
             &MainWindow::showPreviousTab);
     connect(m_playlist, &PlaylistPage::openRequested, this,
             &MainWindow::openWatch);
-    // Botón de opciones de fila en las tres superficies sin repos: el menú
-    // compartido se muestra desde la ventana, una sola implementación.
+    // Row options button on the three surfaces without repos: the shared menu
+    // is shown from the window, a single implementation.
     connect(m_search, &SearchPage::rowMenuRequested, this,
             &MainWindow::showVideoRowMenu);
     connect(m_channel, &ChannelPage::rowMenuRequested, this,
@@ -747,13 +750,13 @@ MainWindow::MainWindow(QWidget *parent)
 
     setCentralWidget(central);
     setStyleSheet(nt::styleSheet());
-    // La barra de estado de QMainWindow no muestra ningún mensaje: se oculta
-    // para que la barra de navegación inferior toque el borde inferior de la
-    // ventana (sin la franja vacía con borde que quedaba debajo).
+    // QMainWindow's status bar shows no message at all: it is hidden so the
+    // bottom navigation bar touches the window's bottom edge (without the
+    // empty bordered strip that stayed below).
     statusBar()->hide();
 
-    // "Tamaño de las miniaturas" guardado: se aplica antes de pintar nada, con
-    // el mismo punto único que el cambio en caliente (applyThumbSize).
+    // Saved "Tamaño de las miniaturas": applied before painting anything, via
+    // the same single point as the hot change (applyThumbSize).
     if (m_settingsPage)
         applyThumbSize(m_settingsPage->thumbSize());
 
@@ -763,12 +766,12 @@ MainWindow::MainWindow(QWidget *parent)
             [this](const QString &) { updateMiniPlayer(); });
     connect(&m_player, &PlayerController::phaseChanged, this,
             [this](const QString &phase) {
-                // "Generación al reproducir": al confirmarse la reproducción
-                // (mpv -> playing) la semilla del vídeo actual da la radio que
-                // se guarda para Descubre. Solo en modo NO Radio: en modo
-                // Radio la radio de "A continuación" ya la pidió
-                // WatchPage::triggerRadio y este radioReady también se guarda
-                // (onRadioReadyDiscover), evitando duplicar la cola.
+                // "Generation on playback": once playback is confirmed
+                // (mpv -> playing) the current video's seed yields the radio
+                // that gets saved for Descubre. Only in NON-Radio mode: in
+                // Radio mode WatchPage::triggerRadio already requested the
+                // "A continuación" radio and this radioReady also gets saved
+                // (onRadioReadyDiscover), avoiding duplicating the queue.
                 if (phase != QLatin1String("playing"))
                     return;
                 const VideoInfo cur = m_player.current();
@@ -787,12 +790,12 @@ MainWindow::MainWindow(QWidget *parent)
             });
     connect(&m_player, &PlayerController::currentChanged, this,
             [this]() {
-                // Vídeo nuevo: la detección de directo parte de cero.
+                // New video: live detection starts from scratch.
                 m_miniLiveDet.reset();
                 m_miniLive = false;
                 updateMiniPlayer();
                 m_home->setCurrentVideoId(m_player.current().id);
-                // Cuando cambia el video, copiar a cache del Home si es necesario
+                // When the video changes, copy to the Home cache if needed
             });
     connect(&m_player, &PlayerController::metadataChanged, this,
             [this]() { updateMiniBar(); });
@@ -800,29 +803,29 @@ MainWindow::MainWindow(QWidget *parent)
             [this]() { updateMiniIcons(); });
     connect(&m_player, &PlayerController::positionChanged, this,
             [this](double pos, double dur) {
-                // Misma regla de directo que el overlay (nt::LiveDetector):
-                // evidencia de duración inestable con desbloqueo automático.
-                // Un vídeo normal no se marca; un directo real llena la barra
-                // al borde en vez de saltar hacia atrás con cada segmento.
-                // EXCEPCIÓN: el HLS sintético de AV1 (construido por la app
-                // desde un fMP4 finito) nunca es un directo — se excluye de la
-                // detección aunque su duración oscile mientras carga.
+                // Same live rule as the overlay (nt::LiveDetector): unstable
+                // duration evidence with automatic unlock. A normal video is
+                // not marked; a real live fills the bar to the edge instead of
+                // jumping backward on every segment.
+                // EXCEPTION: the synthetic AV1 HLS (built by the app from a
+                // finite fMP4) is never a live — it is excluded from the
+                // detection even if its duration wobbles while loading.
                 const bool appStream = !m_player.currentCanBeLive();
                 if (appStream && m_miniLive)
                     m_miniLive = false;
-                // Señal AUTORITATIVA (videoDetails.isLive): mismo criterio que
-                // el overlay — entrada inmediata en modo EN VIVO, sin esperar
-                // los 2 ascensos de duración (y cubre los directos puros con
-                // dur=0). El detector sigue gobernando la salida.
+                // AUTHORITATIVE signal (videoDetails.isLive): same criterion
+                // as the overlay — immediate entry into EN VIVO mode, without
+                // waiting for the 2 duration ascents (and it covers pure lives
+                // with dur=0). The detector still governs the exit.
                 if (!appStream && m_player.currentIsLive())
                     m_miniLiveDet.forceLive();
                 const bool live = !appStream && m_miniLiveDet.feed(dur);
                 m_miniLive = live;
                 if (m_miniProgress) {
-                    // dur<=0 (aún sin duración) NO va en modo "busy": el rango
-                    // 0,0 dibuja un chunk animado. En directo, la barra llena
-                    // marca el borde del live (playhead al final, como el
-                    // overlay); sin duración, pista vacía.
+                    // dur<=0 (no duration yet) must NOT go into "busy" mode:
+                    // the 0,0 range draws an animated chunk. On a live, the
+                    // full bar marks the live edge (playhead at the end, like
+                    // the overlay); with no duration, empty track.
                     if (dur > 0 && !m_miniLive) {
                         m_miniProgress->setRange(0, qRound(dur));
                         m_miniProgress->setValue(qRound(pos));
@@ -854,7 +857,7 @@ MainWindow::~MainWindow() = default;
 
 bool MainWindow::handleShortcut(QKeyEvent *event)
 {
-    // No robar teclas cuando se está escribiendo en un campo de texto.
+    // Do not steal keys while typing in a text field.
     if (const auto *fw = focusWidget()) {
         if (qobject_cast<const QLineEdit *>(fw)
             || qobject_cast<const QTextEdit *>(fw)
@@ -869,9 +872,9 @@ bool MainWindow::handleShortcut(QKeyEvent *event)
 
     switch (event->key()) {
     case Qt::Key_Space:
-        // El espacio nunca debe activar un botón con foco: está reservado
-        // para play/pausa. Si el foco está en un botón, lo consumimos igual
-        // (con o sin reproductor) para que no se pulse con la barra.
+        // Space must never activate a focused button: it is reserved
+        // for play/pause. If focus is on a button, we consume it anyway
+        // (with or without player) so the spacebar does not press it.
         if (qobject_cast<QAbstractButton *>(focusWidget())) {
             if (m_player.isActive())
                 m_player.playPause();
@@ -897,31 +900,32 @@ bool MainWindow::handleShortcut(QKeyEvent *event)
         m_player.seek(m_player.position() + 5.0);
         return true;
     case Qt::Key_J:
-        // -10 s (estilo YouTube).
+        // -10 s (YouTube style).
         if (!m_player.isActive())
             return false;
         m_player.seek(m_player.position() - 10.0);
         return true;
     case Qt::Key_L:
-        // +10 s (estilo YouTube).
+        // +10 s (YouTube style).
         if (!m_player.isActive())
             return false;
         m_player.seek(m_player.position() + 10.0);
         return true;
     case Qt::Key_N:
-        // Siguiente vídeo de la cola.
+        // Next video in the queue.
         if (!m_player.isActive())
             return false;
         if (m_player.hasNext())
             m_player.next();
         return true;
     case Qt::Key_P:
-        // Igual que el botón "Anterior" (YouTube): si el vídeo pasó de
-        // kPrevRestartThreshold (5 s) reinicia el vídeo actual; si está al
-        // principio, salta al vídeo anterior de la cola. En el primer vídeo
-        // sin avanzar no hace nada (no hay anterior al que saltar), igual que
-        // el botón deshabilitado. Shift+P entra por el mismo case (el filtro
-        // de arriba solo descarta Ctrl/Alt/Meta): ambas hacen lo mismo.
+        // Same as the "Anterior" button (YouTube): if the video is past
+        // kPrevRestartThreshold (5 s) restart the current video; if it is at
+        // the start, jump to the previous video of the queue. On the first
+        // video without progress it does nothing (there is no previous to jump
+        // to), just like the disabled button. Shift+P goes through the same
+        // case (the filter above only discards Ctrl/Alt/Meta): both do the
+        // same.
         if (!m_player.isActive())
             return false;
         m_player.previous();
@@ -929,8 +933,8 @@ bool MainWindow::handleShortcut(QKeyEvent *event)
     case Qt::Key_Up:
         if (!m_player.isActive())
             return false;
-        // Respetar volume_max (150/175/200 con boost): capar a 100 haría BAJAR
-        // el volumen si ya estamos por encima de 100 mientas se sube.
+        // Respect volume_max (150/175/200 with boost): capping to 100 would
+        // LOWER the volume if we are already above 100 while turning it up.
         m_player.setVolume(qMin(m_player.volume() + 5.0,
                                 double(m_player.volumeMax())));
         persistVolume();
@@ -951,8 +955,8 @@ bool MainWindow::handleShortcut(QKeyEvent *event)
         updateMiniIcons();
         return true;
     case Qt::Key_F:
-        // Pantalla completa solo desde la página del reproductor: el atajo no
-        // debe escalar la ventana cuando el usuario está en Home, Ajustes, etc.
+        // Fullscreen only from the player page: the shortcut must not scale
+        // the window when the user is on Home, Settings, etc.
         if (m_pages->currentWidget() != m_watch)
             return false;
         m_watch->toggleFullscreen();
@@ -991,18 +995,18 @@ void MainWindow::setupNav()
 {
     m_nav = new QWidget(this);
     m_nav->setObjectName(QStringLiteral("navBottom"));
-    // Alto de la barra. Es el ÚLTIMO widget del layout raíz, así que queda
-    // pegado al borde inferior de la ventana sea cual sea su alto (recortar
-    // aquí NO la separa del borde). Cada botón es una cápsula FIJA de 104x52
-    // (no Expanding): el contenido icono 26 + hueco + línea de texto 11px
-    // necesita ~46 y con el padding vertical de 3px del QSS (theme.cpp,
-    // QToolButton#navBtn) caben 52 en 60. Bajar más el alto recorta el texto o
-    // el icono, no los encoge.
+    // Height of the bar. It is the LAST widget of the root layout, so it stays
+    // stuck to the window's bottom edge no matter its height (trimming it here
+    // does NOT separate it from the edge). Each button is a FIXED 104x52
+    // capsule (not Expanding): the icon 26 + gap + 11px text line content
+    // needs ~46 and with the QSS 3px vertical padding (theme.cpp,
+    // QToolButton#navBtn) 52 fits in 60. Lowering the height more clips the
+    // text or the icon, it does not shrink them.
     m_nav->setFixedHeight(60);
 
     auto *lay = new QHBoxLayout(m_nav);
     lay->setContentsMargins(0, 0, 0, 0);
-    lay->setSpacing(6);            // hueco entre cápsulas
+    lay->setSpacing(6);            // gap between capsules
 
     auto *group = new QButtonGroup(m_nav);
     group->setExclusive(true);
@@ -1014,9 +1018,9 @@ void MainWindow::setupNav()
         b->setProperty("navKey", key);
         b->setText(text);
         b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-        // Cápsula compacta: ancho fijo, no 1/4 de la ventana. Con Expanding el
-        // relleno de la pestaña activa medía 474 px en una ventana de 1896 y se
-        // leía como una banda, no como un indicador de posición.
+        // Compact capsule: fixed width, not 1/4 of the window. With Expanding
+        // the active tab's fill measured 474 px in an 1896 window and read as
+        // a band, not as a position indicator.
         b->setFixedSize(104, 52);
         b->setIconSize(QSize(26, 26));
         b->updateIcon();
@@ -1024,7 +1028,7 @@ void MainWindow::setupNav()
         lay->addWidget(b);
         m_navButtons.append(b);
     };
-    // El grupo va CENTRADO: un muelle a cada lado.
+    // The group goes CENTERED: a stretch on each side.
     lay->addStretch(1);
     addBtn(QStringLiteral("home"), QStringLiteral("Inicio"), 0);
     addBtn(QStringLiteral("search"), QStringLiteral("Buscar"), 1);
@@ -1042,10 +1046,10 @@ void MainWindow::onNavButton(int index)
     switch (index) {
     case 0:
         m_currentTab = 0;
-        // Guardar ANTES de refrescar: refreshDynamic() lee la posición del
-        // historial para pintar "Continuar viendo", y aquí se llama con la
-        // página aún oculta (el setCurrentIndex va después), así que el
-        // changed() del guardado lo salta el guard de visibilidad de HomePage.
+        // Save BEFORE refreshing: refreshDynamic() reads the history position
+        // to paint "Continuar viendo", and here it is called with the page
+        // still hidden (the setCurrentIndex comes after), so HomePage's
+        // visibility guard skips the changed() of the save.
         m_player.savePositionNow();
         m_home->refreshDynamic();
         break;
@@ -1085,8 +1089,8 @@ void MainWindow::setupMiniBar()
     auto *row = new QHBoxLayout;
     row->setSpacing(6);
 
-    // Hueco fijo donde se incrusta el PlayerWidget en vivo cuando el mini está
-    // activo; si no, muestra la miniatura estática.
+    // Fixed slot where the live PlayerWidget is embedded when the mini is
+    // active; otherwise it shows the static thumbnail.
     m_miniVideoHost = new QWidget(m_miniBar);
     m_miniVideoHost->setObjectName(QStringLiteral("miniVideoHost"));
     m_miniVideoHost->setFixedSize(112, 63);
@@ -1101,16 +1105,17 @@ void MainWindow::setupMiniBar()
     hostLay->addWidget(m_miniThumb);
     row->addWidget(m_miniVideoHost);
 
-    // Bloque de texto: título arriba y, debajo, "Canal · tiempo" a la
-    // izquierda (junto, no alineado a la derecha: pegado al canal se lee bien y
-    // no queda bajo los botones).
+    // Text block: title on top and, below, "Canal · time" at the left
+    // (adjacent, not right-aligned: next to the channel it reads well and does
+    // not end up under the buttons).
     auto *textBox = new QVBoxLayout;
     textBox->setSpacing(2);
     m_miniTitle = new QLabel(QStringLiteral("Nada en reproducción"), m_miniBar);
     m_miniTitle->setObjectName(QStringLiteral("miniTitle"));
     m_miniTitle->setTextInteractionFlags(Qt::NoTextInteraction);
-    // Una sola línea con elipsis: updateMiniTitleElide() recorta al ancho real y
-    // el eventFilter de la ventana lo recalcula al redimensionar la etiqueta.
+    // Single line with ellipsis: updateMiniTitleElide() truncates to the real
+    // width and the window's eventFilter recomputes it when the label is
+    // resized.
     m_miniTitle->setWordWrap(false);
     m_miniTitleFull = QStringLiteral("Nada en reproducción");
     m_miniTitle->installEventFilter(this);
@@ -1152,13 +1157,13 @@ void MainWindow::setupMiniBar()
 
     lay->addLayout(row);
 
-    // Progreso a todo el ancho y pegado al borde inferior: va FUERA del layout
-    // (que tiene márgenes laterales) y MiniPlayerBar::resizeEvent lo recoloca.
+    // Full-width progress stuck to the bottom edge: it lives OUTSIDE the layout
+    // (which has side margins) and MiniPlayerBar::resizeEvent repositions it.
     m_miniProgress = new QProgressBar(m_miniBar);
     m_miniProgress->setObjectName(QStringLiteral("miniProgress"));
     m_miniProgress->setTextVisible(false);
     m_miniProgress->setFixedHeight(4);
-    // Los clics del progreso no deben robar el "expandir" de la barra.
+    // Progress clicks must not steal the bar's "expand".
     m_miniProgress->setAttribute(Qt::WA_TransparentForMouseEvents);
     bar->progress = m_miniProgress;
 
@@ -1183,9 +1188,9 @@ void MainWindow::setupMiniBar()
     updateMiniPlayer();
 }
 
-// Regla de visibilidad del mini player: nunca a la vez con la página Player.
-// Se muestra al salir de Player con reproducción activa/pausada y se oculta al
-// volver a Player o si se detiene la reproducción (isActive()==false).
+// Mini player visibility rule: never at the same time as the Player page.
+// It is shown when leaving Player with active/paused playback and hidden when
+// going back to Player or when playback stops (isActive()==false).
 void MainWindow::updateMiniPlayer()
 {
     const bool watching = m_pages && m_pages->currentIndex() == 3;
@@ -1199,15 +1204,15 @@ void MainWindow::updateMiniPlayer()
         m_miniBar->setVisible(show);
     if (m_home)
         m_home->setMiniPlayerVisible(show);
-    // Vídeo en vivo en el mini: al mostrarlo, el PlayerWidget se reparenta al
-    // hueco del mini bar y sigue renderizando (sin reconf del decodificador ni
-    // frames acumulados). Al volver a la página Player se reintegra al área de
-    // vídeo. Solo en los cambios de estado, no en cada llamada.
+    // Live video in the mini: on showing it, the PlayerWidget is reparented to
+    // the mini bar slot and keeps rendering (no decoder reconf and no
+    // accumulated frames). On returning to the Player page it is reinserted
+    // into the video area. Only on state changes, not on every call.
     if (show && !m_miniDetached && m_watch && m_miniVideoHost) {
         m_watch->detachPlayerTo(m_miniVideoHost);
-        // El modo de la miniatura: "video" muestra el vídeo en vivo; "thumb"
-        // pone la miniatura estática POR ENCIMA del PlayerWidget (el vídeo
-        // sigue renderizando detrás: pipeline caliente, sin reconf ni backlog).
+        // The thumbnail mode: "video" shows the live video; "thumb" puts the
+        // static thumbnail ON TOP of the PlayerWidget (the video keeps
+        // rendering behind: hot pipeline, no reconf and no backlog).
         m_miniDetached = true;
         applyMiniVideoMode();
     } else if (!show && m_miniDetached && m_watch) {
@@ -1218,9 +1223,9 @@ void MainWindow::updateMiniPlayer()
         updateMiniBar();
 }
 
-// Al pulsar en cualquier zona del mini bar (excepto sus botones) se vuelve al
-// Player completo sin volver a resolver el stream: la reproducción ya sigue
-// viva en el mismo PlayerController durante la navegación.
+// Clicking anywhere on the mini bar (except its buttons) returns to the full
+// Player without re-resolving the stream: playback is already alive in the
+// same PlayerController throughout the navigation.
 void MainWindow::goToPlayerPage()
 {
     m_lastTab = m_currentTab;
@@ -1228,10 +1233,10 @@ void MainWindow::goToPlayerPage()
     m_pages->setCurrentIndex(3);
 }
 
-// Aplica el modo del mini player mientras hay vídeo incrustado (detached):
-// "video" → el PlayerWidget queda a la vista (miniatura oculta);
-// "thumb"  → la miniatura estática va por encima y el vídeo renderiza detrás.
-// En ningún caso mpv deja de dibujar, por eso no hay salto al volver.
+// Applies the mini player mode while there is embedded video (detached):
+// "video" → the PlayerWidget stays visible (thumbnail hidden);
+// "thumb"  → the static thumbnail goes on top and the video renders behind.
+// In no case does mpv stop drawing, hence there is no jump on return.
 void MainWindow::applyMiniVideoMode()
 {
     if (!m_miniDetached || !m_miniThumb)
@@ -1249,8 +1254,8 @@ void MainWindow::applyMiniVideoMode()
 
 void MainWindow::applyThumbSize(const QString &value)
 {
-    // Listas (búsqueda, canal, historial, playlists, cola "A continuación"):
-    // la fila y la miniatura se escalan con el factor.
+    // Lists (search, channel, history, playlists, "A continuación" queue):
+    // the row and the thumbnail scale with the factor.
     const qreal scale = SettingsPage::thumbListScale(value);
     if (m_pages) {
         const auto lists = m_pages->findChildren<VideoListView *>();
@@ -1258,10 +1263,10 @@ void MainWindow::applyThumbSize(const QString &value)
             if (l)
                 l->setDensity(scale);
     }
-    // Rejillas del Home: aquí el factor no hace nada visible (la celda la
-    // dimensiona el ancho con las columnas fijas), así que la palanca es el
-    // número de columnas por fila. HomePage le aplica el tope por ancho para
-    // que la celda no baje de kMinCellW en ventanas estrechas.
+    // Home grids: here the factor does nothing visible (the width dimensions
+    // the cell with the fixed columns), so the lever is the number of columns
+    // per row. HomePage applies the width cap to it so the cell never drops
+    // below kMinCellW in narrow windows.
     if (m_home)
         m_home->setCellColumns(SettingsPage::thumbGridColumns(value));
 }
@@ -1306,9 +1311,10 @@ void MainWindow::setMiniThumb()
         return;
     }
     m_miniThumb->setText(QString());
-    // Con miniatura real el fondo gris del QSS (miniThumb) estorba: el mapa de
-    // bits es el contenido, asi que se queda solo el radio. NO es un inline de
-    // tema pendiente de migrar, es estado dinamico (con o sin miniatura).
+    // With a real thumbnail the QSS gray background (miniThumb) gets in the
+    // way: the bitmap is the content, so only the radius remains. It is NOT a
+    // pending-to-migrate theme inline, it is dynamic state (with or without
+    // thumbnail).
     m_miniThumb->setStyleSheet(
         QStringLiteral("background:transparent; border-radius:6px;"));
     m_miniThumb->setPixmap(
@@ -1316,12 +1322,12 @@ void MainWindow::setMiniThumb()
                   Qt::SmoothTransformation));
 }
 
-// Persiste volumen y silencio actuales del controlador (src/db/settings:
-// claves "volume" / "volume_muted"); MainWindow::persistVolume() al arranque
-// los vuelve a aplicar. Se llama tras cada cambio hecho por el usuario.
-// NOTA: si el ajuste "Volumen máximo" está activo (>100), el volumen persistido
-// se CAPA a 100 para que al reiniciar la app el slider arranque al 100% y NO
-// quede en el valor alto de la sesión anterior (protección auditiva).
+// Persists the controller's current volume and mute (src/db/settings: keys
+// "volume" / "volume_muted"); MainWindow::persistVolume() at startup applies
+// them again. Called after every user-made change.
+// NOTE: if the "Volumen máximo" setting is active (>100), the persisted volume
+// is CAPPED to 100 so that on app restart the slider starts at 100% and does
+// NOT sit at the previous session's high value (hearing protection).
 void MainWindow::persistVolume()
 {
     const double v = qMin(m_player.volume(), 100.0);
@@ -1348,8 +1354,8 @@ void MainWindow::updateMiniIcons()
     }
 }
 
-// El título del mini cabe una sola línea: se recorta con elipsis al ancho real
-// (el eventFilter lo recalcula al redimensionar la etiqueta).
+// The mini title fits one line: elided to the real width (the eventFilter
+// recomputes it when the label is resized).
 void MainWindow::updateMiniTitleElide()
 {
     if (!m_miniTitle)
@@ -1359,10 +1365,10 @@ void MainWindow::updateMiniTitleElide()
     m_miniTitle->setText(elided);
 }
 
-// Segunda línea del mini: "Canal · m:ss / m:ss". En un directo no hay duración
-// final: solo la marca "EN VIVO" (la barra va llena al borde del live). Con la
-// duración aún desconocida (arranque de un vídeo normal) se muestra solo el
-// transcurrido, para no pintar un "/ 0:00" que salta al materializarse.
+// Mini's second line: "Canal · m:ss / m:ss". A live has no final duration:
+// only the "EN VIVO" mark (the bar runs full to the live edge). With the
+// duration still unknown (start of a normal video) only the elapsed time is
+// shown, to avoid painting a "/ 0:00" that jumps once it materializes.
 void MainWindow::updateMiniTimeText()
 {
     if (!m_miniTime)
@@ -1425,12 +1431,12 @@ void MainWindow::openHistory()
     m_pages->setCurrentIndex(7);
 }
 
-// Menú de opciones de una fila de vídeo para las superficies que no tienen los
-// repos (Búsqueda, Canal, Playlist): la ventana sí, y por eso el menú se
-// construye AQUÍ y no otra vez en cada página. Las acciones son las MISMAS que
-// ofrecen Biblioteca, Historial y "A continuación" (nt::addRowMenuActions), y
-// lo único que aporta esta ventana es el popup de "Nueva playlist" (el de
-// Biblioteca) y la navegación al canal.
+// Options menu for a video row, for the surfaces that do not have the repos
+// (Search, Channel, Playlist): the window does, and that is why the menu is
+// built HERE and not again on every page. The actions are the SAME ones
+// offered by Library, History and "A continuación" (nt::addRowMenuActions),
+// and the only thing this window adds is the "Nueva playlist" popup (the
+// Library one) and the navigation to the channel.
 void MainWindow::showVideoRowMenu(const VideoInfo &video, const QPoint &globalPos)
 {
     if (video.id.isEmpty())
@@ -1455,32 +1461,33 @@ void MainWindow::goSettings()
 
 void MainWindow::resetAppData()
 {
-    // 1. Quiescer reproductor (evita escritura de posición al cerrar)
+    // 1. Quiesce the player (avoids position writes on exit)
     m_player.stop();
-    // 2. Cerrar SQLite y permitir borrado en Windows
+    // 2. Close SQLite and allow deletion on Windows
     m_db.close();
-    // 3. Borrar datos propios de la aplicación (no archivos personales)
+    // 3. Delete the application's own data (not personal files)
     const QString dbPath = m_db.path();
     if (!dbPath.isEmpty()) {
         QFile::remove(dbPath);
         QFile::remove(dbPath + QStringLiteral("-wal"));
         QFile::remove(dbPath + QStringLiteral("-shm"));
     }
-    // 3b. Borrar el caché de resoluciones HLS en disco (evita reusar URLs
-    // caducadas/estranguladas; la BD ya no guarda nada de esto).
+    // 3b. Delete the on-disk HLS resolution cache (avoids reusing expired/
+    // throttled URLs; the DB no longer stores any of this).
     QFile::remove(Innertube::hlsCacheFilePath());
-    // 4. Limpiar cachés de miniaturas (solo directorios propios)
+    // 4. Clear thumbnail caches (own directories only)
     for (ThumbnailCache *t : {m_homeThumbs, m_globalThumbs,
                                 m_libraryThumbs}) {
         if (t)
             t->clear();
     }
-    // 5. Reiniciar la aplicación con defaults; la BD se recreará al abrir
+    // 5. Restart the application with defaults; the DB will be recreated on
+    // open
     QProcess::startDetached(
         QCoreApplication::applicationFilePath(),
         QCoreApplication::arguments(),
         QDir::currentPath());
-    // El proceso actual sale; la nueva instancia arranca limpia.
+    // The current process exits; the new instance starts clean.
     QTimer::singleShot(200, this, [this]() {
         qApp->quit();
     });
@@ -1494,12 +1501,12 @@ void MainWindow::showPreviousTab()
     m_pages->setCurrentIndex(dest);
     m_currentTab = dest;
     if (dest == 0) {
-        // Igual que en onNavButton: la posición se guarda antes de que
-        // "Continuar viendo" la lea de la BD.
+        // Same as in onNavButton: the position is saved before
+        // "Continuar viendo" reads it from the DB.
         m_player.savePositionNow();
         m_home->refreshDynamic();
     }
-    // Canal (2) y reproductor (3) no tienen botón de nav: no marcar ninguno.
+    // Channel (2) and player (3) have no nav button: mark none.
     if (m_currentTab == 2 || m_currentTab == 3)
         return;
     const int nav = m_currentTab == 4 ? 2 : m_currentTab == 5 ? 3 : m_currentTab;
@@ -1509,7 +1516,8 @@ void MainWindow::showPreviousTab()
 
 void MainWindow::applyCodecProfile(const QString &profile, bool persist)
 {
-    // Perfil activo en memoria (la escalera compara contra este; ver m_activeProfile).
+    // Active profile in memory (the ladder compares against this; see
+    // m_activeProfile).
     m_activeProfile = profile;
     if (persist)
         m_settings.set(QStringLiteral("codec_profile"), profile);
@@ -1521,15 +1529,15 @@ void MainWindow::applyCodecProfile(const QString &profile, bool persist)
         m_yt->setCodecProfile(Yt::CodecProfile::Vp9);
         m_playerWidget->setInitialBufferSecs(1.0);
     } else if (profile == QLatin1String("soft-all")) {
-        // Sin HW: h264 (universal) -> perfil Legacy, espera agresiva y tope
-        // 1080p (a un CPU puro un 1440p+ le revienta).
+        // No HW: h264 (universal) -> Legacy profile, aggressive wait and 1080p
+        // cap (1440p+ kills a pure CPU).
         m_yt->setCodecProfile(Yt::CodecProfile::Legacy);
         m_playerWidget->setInitialBufferSecs(6.0);
         if (m_player.maxHeight() > 1080)
             m_player.setMaxHeight(1080);
     } else {
-        // h264-hw (y perfiles desconocidos): h264 por hardware, margen bajo el
-        // throttle -> espera corta.
+        // h264-hw (and unknown profiles): h264 by hardware, margin under the
+        // throttle -> short wait.
         m_yt->setCodecProfile(Yt::CodecProfile::Legacy);
         m_playerWidget->setInitialBufferSecs(1.5);
     }
@@ -1546,8 +1554,9 @@ void MainWindow::showHwPopup()
     m_hwPopup = new QFrame(this);
     m_hwPopup->setObjectName(QStringLiteral("hwProbePopup"));
     m_hwPopup->setAttribute(Qt::WA_StyledBackground, true);
-    // Estilo en el QSS global (QWidget#hwProbePopup): aquí era un inline con
-    // rgba(18,18,18,0.96) y #3a3a3a, que no existían como token.
+    // Style in the global QSS (QWidget#hwProbePopup): this used to be an
+    // inline with rgba(18,18,18,0.96) and #3a3a3a, which did not exist as
+    // tokens.
     auto *lay = new QVBoxLayout(m_hwPopup);
     lay->setContentsMargins(28, 22, 28, 22);
     lay->setSpacing(8);
@@ -1585,8 +1594,9 @@ void MainWindow::startHwProbe()
 #ifndef NEVERTUBE_NO_MPV
     if (m_hwProbing)
         return;
-    // HwProbe es de un solo uso (m_done): re-crearlo en cada re-detección, si no
-    // start() sería un no-op y m_hwProbing quedaría colgado para siempre.
+    // HwProbe is single-use (m_done): re-create it on every re-detection,
+    // otherwise start() would be a no-op and m_hwProbing would stay hung
+    // forever.
     if (m_hwProbe) {
         m_hwProbe->deleteLater();
         m_hwProbe = nullptr;
@@ -1604,15 +1614,15 @@ void MainWindow::startHwProbe()
                     m_hwPopup = nullptr;
                 }
                 if (profile.isEmpty()) {
-                    // Indeterminado (los clips no decodifican): perfil
-                    // conservador sin persistir. NO asumir HW (era el falso
-                    // positivo); se reintenta el sondeo en el próximo arranque
-                    // (no se marca la versión del sondeo).
+                    // Indeterminate (the clips do not decode): conservative
+                    // profile without persisting. Do NOT assume HW (that was
+                    // the false positive); the probe retries on the next
+                    // launch (the probe version is not marked).
                     applyCodecProfile(QStringLiteral("soft-all"), false);
                 } else {
                     applyCodecProfile(profile, true);
-                    // Sondeo de esta versión completado: no se repite en cada
-                    // arranque (crítico en GPUs lentas).
+                    // Probe of this version completed: not repeated on every
+                    // launch (critical on slow GPUs).
                     m_settings.set(QStringLiteral("codec_probe_v"),
                                    QString::number(kCodecProbeVersion));
                 }
@@ -1624,8 +1634,8 @@ void MainWindow::startHwProbe()
                     openWatchAt(v, idx, pos);
                 }
             });
-    // El cartel solo aparece si el sondeo tarda (PC básico); en un PC rápido el
-    // resultado llega antes de 300 ms y el usuario no ve nada.
+    // The notice only appears if the probe takes a while (basic PC); on a fast
+    // PC the result arrives before 300 ms and the user sees nothing.
     if (!m_hwPopupTimer) {
         m_hwPopupTimer = new QTimer(this);
         m_hwPopupTimer->setSingleShot(true);
@@ -1644,11 +1654,11 @@ void MainWindow::openWatch(const QVector<VideoInfo> &videos, int startIndex)
     openWatchAt(videos, startIndex, 0);
 }
 
-// Captura TODA radio que llegue (del triggerRadio de "A continuación" en modo
-// Radio o de la generación por marcha del reproductor) y la guarda como fuente
-// de Descubre. Idempotente por semilla: una radio por vídeo reproducido. Los
-// metadatos de sus vídeos se meten en el caché "videos" para que Descubre
-// pueda resolverlos sin red.
+// Captures ANY radio that arrives (from "A continuación"'s triggerRadio in
+// Radio mode or from generation by player playback) and saves it as a
+// Descubre source. Idempotent per seed: one radio per played video. The
+// metadata of its videos goes into the "videos" cache so Descubre can resolve
+// them without network.
 void MainWindow::onRadioReadyDiscover(const QString &videoId,
                                       const QVector<VideoInfo> &videos)
 {
@@ -1658,9 +1668,9 @@ void MainWindow::onRadioReadyDiscover(const QString &videoId,
         m_radioSeedsRequested.remove(videoId);
         return;
     }
-    // Metadatos de la caché: se hace ANTES de tocar la radio guardada, porque
-    // esta llegada también puede ser un REFRESCO (la radio guardada tenía los
-    // metadatos incompletos y "A continuación" la volvió a pedir).
+    // Cache the metadata: done BEFORE touching the saved radio, because this
+    // arrival can also be a REFRESH (the saved radio had incomplete metadata
+    // and "A continuación" requested it again).
     QVector<VideoInfo> valid;
     for (const VideoInfo &v : videos) {
         if (v.id.size() != 11)
@@ -1672,17 +1682,18 @@ void MainWindow::onRadioReadyDiscover(const QString &videoId,
     if (valid.isEmpty())
         return;
     if (m_discoverRadios.hasRadio(videoId)) {
-        // Radio ya guardada: esta llegada es un refresco de metadatos, así que
-        // se reescribe su lista de ids (saveRadio no sobrescribe a propósito).
-        // Sin esto, la radio seguiría apuntando a los ids viejos (sin visitas
-        // ni fecha) y cada apertura volvería a refrescar en vano.
+        // Radio already saved: this arrival is a metadata refresh, so its id
+        // list is rewritten (saveRadio does not overwrite on purpose). Without
+        // this, the radio would keep pointing at the old ids (no views nor
+        // date) and every opening would refresh again in vain.
         NT_DEBUG("E2E discover radio refresh seed=%s n=%d\n",
                  videoId.toUtf8().constData(), (int)valid.size());
         m_discoverRadios.clearForSeed(videoId);
     }
     m_discoverRadios.saveRadio(videoId, valid);
-    // El sistema ya generó radios alguna vez: Descubre vacío (p. ej. tras
-    // "Borrar todo" el historial) no vuelve a auto-sembrarse solo.
+    // The system already generated radios at some point: an empty Descubre
+    // (e.g. after "Borrar todo" on the history) does not auto-seed itself
+    // again.
     m_settings.set(QStringLiteral("discover_seeded"), QStringLiteral("1"));
     NT_DEBUG("E2E discover radio guardada seed=%s n=%d total=%d\n",
              videoId.toUtf8().constData(), (int)valid.size(),
@@ -1700,16 +1711,16 @@ void MainWindow::openWatchResume(const QVector<VideoInfo> &videos,
 void MainWindow::openWatchAt(const QVector<VideoInfo> &videos, int startIndex,
                              qlonglong startPositionMs)
 {
-    // Guarda defensiva: datos procedentes de red/BD no deben poder crashear
-    // por un índice inválido (vector vacío o startIndex fuera de rango).
+    // Defensive guard: data coming from network/DB must not be able to crash
+    // on an invalid index (empty vector or startIndex out of range).
     if (startIndex < 0 || startIndex >= videos.size()) {
         NT_DEBUG("E2E openWatchAt rechazado startIndex=%d size=%d\n",
                  startIndex, (int)videos.size());
         return;
     }
-    // Sondeo de hardware en curso: no se puede reproducir todavía. Se encola la
-    // petición (con su posición de reanudación) y se muestra el cartel, que se
-    // cierra al terminar el sondeo, momento en que se abre el vídeo.
+    // Hardware probe in progress: playback not possible yet. The request (with
+    // its resume position) is queued and the notice is shown, which closes
+    // when the probe finishes, at which point the video opens.
     if (m_hwProbing) {
         m_pendingWatch = videos;
         m_pendingIndex = startIndex;
@@ -1718,43 +1729,43 @@ void MainWindow::openWatchAt(const QVector<VideoInfo> &videos, int startIndex,
         showHwPopup();
         return;
     }
-    // Deja de sembrar radios de Descubre: al abrir un vídeo la radio de
-    // "A continuación" pasa a ser el único consumidor de fetchRadio()
-    // (single-flight en Innertube).
+    // Stop seeding Descubre radios: on opening a video the "A continuación"
+    // radio becomes the only consumer of fetchRadio() (single-flight in
+    // Innertube).
     if (m_home)
         m_home->interruptDiscover();
-    // Ir a la página Player ANTES de activar la cola: si se activa primero,
-    // updateMiniPlayer ve "reproduciendo fuera de Player" y engancha el mini
-    // un frame, para desengancharlo al cambiar de página (parpadeo al abrir).
+    // Go to the Player page BEFORE activating the queue: if activated first,
+    // updateMiniPlayer sees "playing outside Player" and attaches the mini for
+    // a frame, then detaches it on page change (flicker when opening).
     m_lastTab = m_currentTab;
     m_currentTab = 3;
     m_pages->setCurrentIndex(3);
     const NextMode mode = nextMode();
     if (mode == NextMode::Radio) {
-        // Modo radio: abrir solo con el vídeo clicado y generar la cola del
-        // mix RDAMVM para "A continuación". Click explícito desde fuera de la
-        // lista (search, home, channel) dispara la radio; dentro de la lista
-        // no se regenera.
+        // Radio mode: open with only the clicked video and generate the queue
+        // of the RDAMVM mix for "A continuación". An explicit click from
+        // outside the list (search, home, channel) triggers the radio; inside
+        // the list it is not regenerated.
         m_player.playQueue(QVector<VideoInfo>{videos.at(startIndex)}, 0,
                            startPositionMs);
         m_watch->setWatchData(m_player.queue(), m_player.index());
         const QString &id = videos.at(startIndex).id;
-        // La radio de este vídeo ya se generó antes: se reusa desde la BD para
-        // "A continuación" sin volver a pedirla a YouTube. Solo si los
-        // metadatos de sus vídeos están completos (canal + visitas o fecha):
-        // una radio guardada por una versión anterior del parser no los trae y
-        // se refresca una vez al abrirla (el fetch nuevo sí, ver
-        // Innertube::requestRadioWeb). Tras ese refresco la caché queda con
-        // metadatos y los siguientes arranques reusan sin red.
+        // This video's radio was already generated before: reused from the DB
+        // for "A continuación" without asking YouTube again. Only if the
+        // metadata of its videos is complete (channel + views or date): a
+        // radio saved by an earlier parser version does not bring it and gets
+        // refreshed once on opening (the new fetch does, see
+        // Innertube::requestRadioWeb). After that refresh the cache holds
+        // metadata and the following launches reuse without network.
         bool reused = false;
         if (id.size() == 11 && m_discoverRadios.hasRadio(id)
             && !m_discoverRadios.radioVideoIdsForSeed(id).isEmpty()) {
             const QStringList saved = m_discoverRadios.radioVideoIdsForSeed(id);
             const QVector<VideoInfo> fromCache = m_videoCache.getMany(saved);
-            // Basta con que la radio traiga canal y ALGÚN metadato (visitas o
-            // fecha): una radio guardada por un parser que no los traía tiene
-            // todas las filas a 0/vacías y se refresca una vez; los vídeos que
-            // YouTube devuelve sin fecha (directos, estrenos) no fuerzan nada.
+            // It is enough for the radio to carry a channel and SOME metadata
+            // (views or date): a radio saved by a parser that did not bring
+            // them has all rows at 0/empty and gets refreshed once; the videos
+            // YouTube returns without date (lives, premieres) force nothing.
             bool anyMeta = false;
             bool anyChannel = false;
             for (const VideoInfo &cv : fromCache) {
@@ -1794,8 +1805,8 @@ void MainWindow::playVideo(const QString &url)
         return;
     VideoInfo v;
     v.id = id;
-    // Instancia nueva tras un reinicio por sesión gateada: reanuda donde se
-    // cortó (un solo vídeo: la cola no se restaura).
+    // New instance after a gated-session restart: resumes where it was cut
+    // off (a single video: the queue is not restored).
     if (m_gateResumeMs > 0) {
         openWatchResume(QVector<VideoInfo>{v}, 0, m_gateResumeMs);
         m_gateResumeMs = 0;
@@ -1806,17 +1817,17 @@ void MainWindow::playVideo(const QString &url)
 
 void MainWindow::onRecoveryExhausted()
 {
-    // Único auto-reinicio de la app y SOLO en este error (recuperación de
-    // sesión gateada agotada): relanza con el último vídeo, porque reiniciar
-    // sale de la sesión gateada (verificación del usuario: al reiniciar se
-    // arregla el audio). Guard en memoria: el mismo episodio no reinicia dos
-    // veces (PlayerController puede reemitir la señal en una cascada de EOF).
+    // The app's ONLY auto-restart and ONLY on this error (gated-session
+    // recovery exhausted): relaunches with the last video, because restarting
+    // gets out of the gated session (user verification: on restart the audio
+    // is fixed). In-memory guard: the same episode does not restart twice
+    // (PlayerController can re-emit the signal in an EOF cascade).
     if (m_gateRestarting)
         return;
     m_gateRestarting = true;
-    // Guard en settings: si esta instancia YA venía de un reinicio (armed=1),
-    // la sesión nueva también está gateada -> se muestra el error y se desarma
-    // el guard para no encadenar reinicios en bucle.
+    // Guard in settings: if this instance ALREADY came from a restart
+    // (armed=1), the new session is also gated -> the error is shown and the
+    // guard is disarmed so restarts do not chain in a loop.
     if (m_settings.getInt(QStringLiteral("gate_restart_armed"), 0) == 1) {
         NT_DEBUG("E2E gate reinicio ya intentado -> error (sin 2º reinicio)\n");
         m_settings.set(QStringLiteral("gate_restart_armed"),
@@ -1839,15 +1850,15 @@ void MainWindow::onRecoveryExhausted()
              url.toUtf8().constData(), m_player.position());
     QProcess::startDetached(QCoreApplication::applicationFilePath(),
                             QStringList() << url, QDir::currentPath());
-    // La instancia nueva arranca "http://..." -> playVideo reanuda el último
-    // vídeo (ver gate_restart_armed en el constructor).
+    // The new instance starts with "http://..." -> playVideo resumes the last
+    // video (see gate_restart_armed in the constructor).
     QTimer::singleShot(200, this, [this]() { qApp->quit(); });
 }
 
 void MainWindow::onRecoveryHealthy()
 {
-    // Reproducción estable ≥5 min tras el reinicio: el episodio terminó y la
-    // próxima sesión gateada podrá volver a reiniciar.
+    // Stable playback ≥5 min after the restart: the episode is over and the
+    // next gated session may restart again.
     if (m_settings.getInt(QStringLiteral("gate_restart_armed"), 0) != 1)
         return;
     NT_DEBUG("E2E gate guard desarmado (reproducción estable)\n");

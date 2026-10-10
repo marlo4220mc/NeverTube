@@ -13,19 +13,19 @@
 
 #include "debug.h"
 
-// Toda la maquinaria de sondeo con clips usa mpv: solo existe en builds con
-// mpv. En el build x86 sin mpv (NEVERTUBE_NO_MPV, Fase 5) el perfil de códec
-// se decide por plataforma (DXVA2 -> h264-hw como tope) y la escalera
-// reactiva de streamDecodeInfoReady cubre a las máquinas sin HW; aquí solo
-// quedan los helpers puros (hwprobe::clipVerdict / lowerProfile) de abajo.
+// The whole clip-probing machinery uses mpv: it only exists in builds with
+// mpv. In the x86 build without mpv (NEVERTUBE_NO_MPV, Phase 5) the codec
+// profile is decided by platform (DXVA2 -> h264-hw as the cap) and the
+// reactive ladder of streamDecodeInfoReady covers machines without HW; here
+// only the pure helpers (hwprobe::clipVerdict / lowerProfile) below remain.
 #ifndef NEVERTUBE_NO_MPV
 namespace {
 
-// Orden deliberado: si AV1 tiene HW, es el mejor códec y no hace falta probar
-// más; VP9 solo se acepta si AV1 cayó a software (misma semántica que la
-// escalera anterior); H.264 HW confirma el perfil legacy; H.264 software es la
-// prueba de que no hay HW en absoluto (el H.264 lo decodifican en HW todas las
-// GPUs con decodificador de vídeo).
+// Deliberate order: if AV1 has HW, it is the best codec and there is no need
+// to test further; VP9 is only accepted if AV1 fell back to software (same
+// semantics as the previous ladder); H.264 HW confirms the legacy profile;
+// H.264 software is the proof that there is no HW at all (H.264 is decoded
+// in HW by every GPU with a video decoder).
 struct ClipSpec
 {
     const char *resource;
@@ -41,18 +41,18 @@ const ClipSpec kClips[] = {
 constexpr int kClipCount = 3;
 
 constexpr int kPollMs = 10;
-// 8 s por clip (con un reintento) es de sobra para un clip local de 512x288.
-// En máquinas virtuales/runners el PRIMER init del decodificador por hardware
-// (DXVA/VAAPI) puede tardar varios segundos; si tras el reintento tampoco hay
-// veredicto, el clip queda indeterminado y se continúa con el siguiente códec.
+// 8 s per clip (with one retry) is plenty for a local 512x288 clip.
+// On virtual machines/runners the FIRST hardware decoder init
+// (DXVA/VAAPI) can take several seconds; if after the retry there is still
+// no verdict, the clip stays indeterminate and it moves to the next codec.
 constexpr qint64 kClipTimeoutMs = 8000;
-// Gracia tras el primer frame: el veredicto del decodificador (log y errores
-// de ffmpeg) se encola 1-10 ms DESPUÉS del primer video-params. Decidir sin
-// esperarlo es lo que producía falsos positivos (av1-hw en i5 con qsv-copy:
-// los errores "av1_qsv: unsupported" llegaban 5 ms después del veredicto).
+// Grace after the first frame: the decoder verdict (log and ffmpeg
+// errors) is queued 1-10 ms AFTER the first video-params. Deciding without
+// waiting for it is what produced false positives (av1-hw on i5 with qsv-copy:
+// the "av1_qsv: unsupported" errors arrived 5 ms after the verdict).
 constexpr qint64 kGraceMs = 400;
 
-// El códec del clip actual, p.ej. "av1-hw" -> "av1".
+// Codec of the current clip, e.g. "av1-hw" -> "av1".
 QByteArray codecOf(int index)
 {
     const QString profile = QLatin1String(kClips[index].profile);
@@ -60,9 +60,9 @@ QByteArray codecOf(int index)
     return profile.left(dash).toUtf8();
 }
 
-// Error del intento de HW del códec en el log de ffmpeg/vd: el intento falló
-// pero el clip puede seguir decodificándose por software. Es la señal que
-// desmiente un hwdec-current = "<api>-copy" activo (i5/HD4600, av1_qsv).
+// Error of the codec's HW attempt in the ffmpeg/vd log: the attempt failed
+// but the clip may still be decoding in software. It is the signal that
+// contradicts an active hwdec-current = "<api>-copy" (i5/HD4600, av1_qsv).
 bool hwAttemptFailed(const QString &prefix, const QString &text,
                      const QByteArray &codec)
 {
@@ -96,7 +96,7 @@ QString clipVerdict(bool sawHwLog, bool sawSwLog, bool sawHwFailed,
     if (sawHwLog)
         return QStringLiteral("HW");
     if (!hwdecCurrent.isEmpty())
-        return QStringLiteral("HW"); // respaldo: backend activo, nada en contra
+        return QStringLiteral("HW"); // fallback: backend active, nothing against it
     return QString();
 }
 
@@ -108,7 +108,7 @@ QString lowerProfile(const QString &profile)
         return QStringLiteral("h264-hw");
     if (profile == QLatin1String("h264-hw"))
         return QStringLiteral("soft-all");
-    // soft-all es el suelo; un perfil desconocido no se toca.
+    // soft-all is the floor; an unknown profile is left untouched.
     return QString();
 }
 
@@ -135,7 +135,7 @@ void HwProbe::start()
 {
     if (m_done || m_mpv)
         return;
-    // mpv exige LC_NUMERIC=C: sin esto mpv_create devuelve NULL.
+    // mpv requires LC_NUMERIC=C: without this mpv_create returns NULL.
     std::setlocale(LC_NUMERIC, "C");
 
     if (!m_tmpDir.isValid()) {
@@ -170,9 +170,9 @@ void HwProbe::start()
         finish(QString());
         return;
     }
-    // Headless: sin ventana ni audio. auto-copy es lo que permite que vo=null
-    // acepte el frame en cualquier plataforma (vulkan-copy / d3d11va-copy /
-    // vaapi-copy): los modos sin -copy exigirían un VO GPU real.
+    // Headless: no window and no audio. auto-copy is what lets vo=null
+    // accept the frame on any platform (vulkan-copy / d3d11va-copy /
+    // vaapi-copy): the modes without -copy would require a real GPU VO.
     mpv_set_option_string(m_mpv, "vo", "null");
     mpv_set_option_string(m_mpv, "hwdec", "auto-copy");
     mpv_set_option_string(m_mpv, "audio", "no");
@@ -180,10 +180,10 @@ void HwProbe::start()
     mpv_set_option_string(m_mpv, "config", "no");
     mpv_set_option_string(m_mpv, "load-scripts", "no");
     mpv_set_option_string(m_mpv, "terminal", "no");
-    // vd=v (veredicto del decodificador: "Using hardware decoding (...)" /
-    // "Using software decoding") + ffmpeg=v (errores del intento HW, p.ej.
-    // "av1_qsv: Error ... unsupported (-3)"). El módulo ffmpeg estaba en "no"
-    // y por eso el probe no veía que el intento HW había fallado.
+    // vd=v (decoder verdict: "Using hardware decoding (...)" /
+    // "Using software decoding") + ffmpeg=v (HW attempt errors, e.g.
+    // "av1_qsv: Error ... unsupported (-3)"). The ffmpeg module was set to "no"
+    // and that is why the probe did not see that the HW attempt had failed.
     mpv_set_option_string(m_mpv, "msg-level", "all=no,vd=v,ffmpeg=v");
     mpv_set_option_string(m_mpv, "keep-open", "yes");
     mpv_set_option_string(m_mpv, "force-window", "no");
@@ -194,7 +194,7 @@ void HwProbe::start()
         finish(QString());
         return;
     }
-    // Los eventos de log traen el veredicto de HW (ver comentario del header).
+    // The log events carry the HW verdict (see the header comment).
     mpv_request_log_messages(m_mpv, "v");
 
     m_index = 0;
@@ -215,8 +215,8 @@ void HwProbe::loadCurrent()
         return;
     const QByteArray p = m_clipPaths[m_index].toUtf8();
     const char *cmd[] = { "loadfile", p.constData(), "replace", nullptr };
-    // Nuevo clip, nuevo veredicto: ni el log ni el estado de decode anteriores
-    // cuentan para este clip.
+    // New clip, new verdict: neither the previous log nor the previous decode
+    // state counts for this clip.
     m_sawHwLog = false;
     m_sawSwLog = false;
     m_sawHwFailed = false;
@@ -225,8 +225,8 @@ void HwProbe::loadCurrent()
     NT_DEBUG("E2E hwprobe load %d=%s\n", m_index, p.constData());
 }
 
-// Siguiente códec de la escalera (o fin). Un clip "indeterminado" también
-// avanza: abortar dejaba al i5-4590 sin llegar a H.264, su perfil real.
+// Next codec of the ladder (or end). An "indeterminate" clip also
+// advances: aborting left the i5-4590 without ever reaching H.264, its real profile.
 void HwProbe::advance()
 {
     if (m_done)
@@ -247,9 +247,9 @@ void HwProbe::advance()
 
 void HwProbe::endOfLadder()
 {
-    // H.264 sin HW: si algún códec dio un SW decisivo real, "soft-all" es un
-    // veredicto (se persiste); si todo fue indeterminado, vacío (no persistir,
-    // reintentar al arrancar).
+    // H.264 without HW: if some codec gave a real decisive SW, "soft-all" is a
+    // verdict (it is persisted); if everything was indeterminate, empty (do not
+    // persist, retry at startup).
     if (m_swVerdicts > 0) {
         finish(QStringLiteral("soft-all"));
     } else {
@@ -263,10 +263,10 @@ void HwProbe::poll()
     if (!m_mpv || m_done)
         return;
 
-    // Veredicto de un clip. Requiere frames decodificados (m_decoded) y que la
-    // ventana de gracia haya pasado para que lleguen los mensajes del
-    // decodificador (veredicto del log y errores del intento HW). HW solo si
-    // el log lo confirma; SW y UNKNOWN avanzan en la escalera.
+    // Verdict of a clip. It requires decoded frames (m_decoded) and that the
+    // grace window has passed so the decoder messages arrive (log
+    // verdict and HW attempt errors). HW only if
+    // the log confirms it; SW and UNKNOWN move along the ladder.
     const auto decide = [this](const QString &hwdec) {
         const QString verdict = hwprobe::clipVerdict(
             m_sawHwLog, m_sawSwLog, m_sawHwFailed, hwdec);
@@ -323,20 +323,20 @@ void HwProbe::poll()
         m_decodedTimer.restart();
     }
 
-    // 1) Primer frame decodificado + fin de la gracia -> decidir.
+    // 1) First decoded frame + end of grace -> decide.
     if (m_decoded && m_decodedTimer.elapsed() >= kGraceMs) {
         decide(hwdec);
         return;
     }
-    // 2) El clip terminó por error SIN llegar a decodificar: indeterminado.
+    // 2) The clip ended with an error WITHOUT decoding: indeterminate.
     if (ended && !m_decoded) {
         NT_DEBUG("E2E hwprobe %s decode-error -> siguiente códec\n",
                  kClips[m_index].file);
         advance();
         return;
     }
-    // 3) Timeout del clip (init del decodificador lento en VMs): un reintento,
-    // y si tampoco, indeterminado (avanza a siguiente códec).
+    // 3) Clip timeout (slow decoder init on VMs): one retry,
+    // and if that fails too, indeterminate (moves to the next codec).
     if (m_clipTimer.elapsed() > kClipTimeoutMs) {
         if (!m_clipRetried) {
             m_clipRetried = true;

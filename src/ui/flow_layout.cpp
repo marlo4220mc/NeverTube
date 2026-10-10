@@ -3,8 +3,8 @@
 #include <QWidget>
 #include <QWidgetItem>
 
-// Descripción reducida de doLayout: filas envueltas, cada item con su
-// sizeHint, espaciados fijos horizontal y vertical.
+// Brief description of doLayout: wrapped rows, each item at its sizeHint,
+// fixed horizontal and vertical spacing.
 
 FlowLayout::FlowLayout(QWidget *parent, int margin, int hSpacing, int vSpacing)
     : QLayout(parent)

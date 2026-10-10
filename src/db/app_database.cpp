@@ -98,10 +98,10 @@ void AppDatabase::createSchema(QSqlDatabase &db)
         return q.exec(sql);
     };
 
-    // Migración de una home_cache antigua (fila por vídeo, sin fetched_at)
-    // descartada por el nuevo esquema por-sección. Es caché reconstruible:
-    // si existe sin la columna fetched_at se sustituye (una sola vez; con el
-    // esquema nuevo el CREATE IF NOT EXISTS no la tocaría nunca más).
+    // Migration from an old home_cache (one row per video, no fetched_at)
+    // rejected by the new per-section schema. It is rebuildable cache:
+    // if it exists without the fetched_at column it is dropped (once; with the
+    // new schema the CREATE IF NOT EXISTS would never touch it again).
     if (tableExists(db, QStringLiteral("home_cache"))) {
         bool hasFetchedAt = false;
         QSqlQuery p(db);
@@ -130,8 +130,8 @@ void AppDatabase::createSchema(QSqlDatabase &db)
         "  description TEXT NOT NULL DEFAULT '',"
         "  is_live INTEGER NOT NULL DEFAULT 0"
         ")"));
-    // Migración de la caché de vídeos anterior a is_live (directos): la
-    // columna nueva se añade con ALTER (caché con datos, no se descarta).
+    // Migration of the video cache from before is_live (live streams): the
+    // new column is added with ALTER (cache with data, it is not dropped).
     if (tableExists(db, QStringLiteral("videos"))) {
         bool hasIsLive = false;
         QSqlQuery pv(db);
@@ -188,11 +188,11 @@ void AppDatabase::createSchema(QSqlDatabase &db)
         "  position INTEGER NOT NULL,"
         "  PRIMARY KEY (playlist_id, video_id)"
         ")"));
-    // Radios guardadas para Descubre. NO se regeneran al entrar Home: se
-    // construyen al reproducir vídeos (el reproductor usa la semilla como
-    // Yt::radioVideos y lo que llega por radioReady se guarda aquí) y Descubre
-    // solo las consume. Los metadatos de los vídeos reutilizan la tabla
-    // "videos"; aquí se guardan solo los ids y posiciones.
+    // Radios saved for Discover. NOT regenerated when entering Home: they are
+    // built while playing videos (the player uses the seed as Yt::radioVideos
+    // and whatever arrives via radioReady is saved here) and Discover only
+    // consumes them. Video metadata reuses the "videos" table; here only the
+    // ids and positions are stored.
     exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS discover_radios ("
         "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -225,12 +225,12 @@ void AppDatabase::createSchema(QSqlDatabase &db)
         "  key TEXT PRIMARY KEY,"
         "  value TEXT NOT NULL"
         ")"));
-    // Caché persistente del Home por sección (refresco inteligente): solo se
-    // guardan secciones de RED (recomendado/feed/tendencias). Los metadatos de
-    // los vídeos reutilizan la tabla "videos" (VideoCacheRepo): aquí solo ids
-    // ordenados + momento en que se guardaron (para decidir el refresco tras
-    // reiniciar). Continuar viendo se deriva del historial y Descubre de las
-    // radios guardadas, así que ninguna de las dos se duplica aquí.
+    // Persistent per-section Home cache (smart refresh): only NETWORK sections
+    // are stored (recommended/feed/trending). Video metadata reuses the
+    // "videos" table (VideoCacheRepo): here only ordered ids + the moment they
+    // were saved (to decide the refresh after a restart). Continue watching is
+    // derived from history and Discover from the saved radios, so neither of
+    // the two is duplicated here.
     exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS home_cache ("
         "  section TEXT PRIMARY KEY,"

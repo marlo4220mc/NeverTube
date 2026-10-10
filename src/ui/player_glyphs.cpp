@@ -10,13 +10,13 @@
 namespace nt {
 namespace {
 
-// Lienzo de Material Symbols: todos los paths usan viewBox "0 -960 960 960",
-// con el eje y hacia ARRIBA (el origen está abajo a la izquierda).
+// Material Symbols canvas: all paths use viewBox "0 -960 960 960", with the
+// y axis pointing UP (the origin is at the bottom left).
 constexpr qreal kGrid = 960.0;
 
-// Geometría por icono, en el ORDEN del enum PlayerIcon. Fuente:
+// Geometry per icon, in the ORDER of the PlayerIcon enum. Source:
 // google/material-design-icons (Apache-2.0),
-// symbols/web/<nombre>/materialsymbolsoutlined/<nombre>[_fill1]_24px.svg
+// symbols/web/<name>/materialsymbolsoutlined/<name>[_fill1]_24px.svg
 const char *const kGlyphs[] = {
     // Shuffle
     "M560-160v-80h104L537-367l57-57 126 126v-102h80v240H560Zm-344 0-56-56 504-504H560"
@@ -72,21 +72,21 @@ const char *const kGlyphs[] = {
     "-224 224Z",
 };
 
-// Parser del subconjunto de SVG path que usan estos 15 glifos:
-// M m L l H h V v Q q T t Z. Qt no expone un parser de `d` sin QtSvg, y
-// enlazarlo metería Qt5Svg.dll en los dos empaquetados de Windows; este
-// subconjunto es todo lo que necesita Material Symbols aquí.
+// Parser for the SVG path subset these 15 glyphs use:
+// M m L l H h V v Q q T t Z. Qt does not expose a `d` parser without QtSvg,
+// and linking it would add Qt5Svg.dll to both Windows packages; this subset is
+// all Material Symbols needs here.
 struct PathBuilder {
     QPainterPath &path;
     QString d;
     int i = 0;
-    qreal x = 0.0;  // punto actual
+    qreal x = 0.0;  // current point
     qreal y = 0.0;
-    qreal sx = 0.0; // inicio del subpath actual
+    qreal sx = 0.0; // start of the current subpath
     qreal sy = 0.0;
-    qreal cx = 0.0; // último control de la cuadrática (para T/t)
+    qreal cx = 0.0; // last quadratic control point (for T/t)
     qreal cy = 0.0;
-    QChar prev;     // comando anterior
+    QChar prev;     // previous command
     bool hasCtrl = false;
     bool ok = true;
 
@@ -136,7 +136,7 @@ struct PathBuilder {
                 cmd = d.at(i);
                 ++i;
             } else if (!numberAhead()) {
-                ++i; // separador suelto
+                ++i; // stray separator
                 continue;
             }
             if (cmd.isNull())
@@ -155,7 +155,7 @@ struct PathBuilder {
                 y = sy = py;
                 hasCtrl = false;
                 prev = cmd;
-                // Los pares siguientes del mismo moveto son lineto (SVG).
+                // Further pairs of the same moveto are lineto (SVG).
                 cmd = rel ? QLatin1Char('l') : QLatin1Char('L');
                 break;
             }
@@ -221,8 +221,9 @@ struct PathBuilder {
                     px += x;
                     py += y;
                 }
-                // El control es el reflejo del anterior solo si la última
-                // curva fue cuadrática (Q/q/T/t); si no, es el punto actual.
+                // The control point is the reflection of the previous one only
+                // if the last curve was quadratic (Q/q/T/t); otherwise it is
+                // the current point.
                 qreal c1x = x, c1y = y;
                 const QChar p = prev.toLower();
                 if (hasCtrl
@@ -264,9 +265,9 @@ QIcon playerIcon(PlayerIcon kind, const QColor &color, int size)
 {
     if (size <= 0)
         size = 20;
-    // Cache por (icono, tamaño, color). El color entra por su hex, así que un
-    // cambio de acento en caliente crea una entrada nueva en vez de congelar
-    // el color de la primera llamada (bug ya visto en la nav).
+    // Cache by (icon, size, color). The color is keyed by its hex, so a hot
+    // accent change creates a new entry instead of freezing the color of the
+    // first call (bug already seen in the nav).
     const QString key = QStringLiteral("%1|%2|%3")
                             .arg(static_cast<int>(kind))
                             .arg(size)
@@ -278,9 +279,9 @@ QIcon playerIcon(PlayerIcon kind, const QColor &color, int size)
 
     const int idx = static_cast<int>(kind);
     QPainterPath path;
-    // Material diseña para relleno "nonzero" (el de SVG); en Qt eso es
-    // WindingFill. Con OddEvenFill los huecos de p. ej. el engranaje y el
-    // altavoz cambiarían.
+    // Material designs for a "nonzero" fill (the SVG one); in Qt that is
+    // WindingFill. With OddEvenFill the holes of e.g. the gear and the speaker
+    // would change.
     path.setFillRule(Qt::WindingFill);
     PathBuilder builder(path);
     builder.d = QString::fromLatin1(kGlyphs[idx]);
@@ -291,9 +292,9 @@ QIcon playerIcon(PlayerIcon kind, const QColor &color, int size)
     if (parsed) {
         QPainter p(&pm);
         p.setRenderHint(QPainter::Antialiasing, true);
-        // Lienzo 960 con y hacia arriba -> caja size x size con origen arriba
-        // a la izquierda: trasladar y escalar en positivo (sin "flip"), de modo
-        // que y=-960 (arriba del glifo) caiga en 0 y y=0 en `size`.
+        // 960 canvas with y up -> size x size box with the origin at the top
+        // left: translate and scale in positive values (no "flip"), so that
+        // y=-960 (top of the glyph) lands on 0 and y=0 on `size`.
         const qreal s = size / kGrid;
         p.translate(0.0, size);
         p.scale(s, s);

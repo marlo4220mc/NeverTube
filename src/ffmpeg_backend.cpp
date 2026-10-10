@@ -1,29 +1,29 @@
 #include "ffmpeg_backend.h"
 
-// FfmpegBackend — implementación (Fases 2-4: decode con HW opcional
+// FfmpegBackend — implementation (Phases 2-4: decode with optional HW
 // VAAPI/DXVA2, render GL frame-driven, audio pulse-simple/QAudioOutput).
 //
-// Construido sobre la receta probada en spike/cheapplayer (rama
-// spike/cheap-player): demux HLS/local + decode + sws -> RGB + write de audio
-// bloqueante como reloj maestro. Diferencias frente al spike:
-//   - vive en la app bajo PlaybackBackend (mismas señales que MpvBackend);
-//   - las señales se emiten SIEMPRE desde el hilo GUI (invocaciones
-//     diferidas), así las conexiones directas del widget conservan el orden;
-//   - stop() corta la red al instante (interrupt callback de avformat);
-//   - pausa cortando el sink (pa_simple_cork / QAudioOutput suspend);
-//   - seek con flush de decodificadores y reinicio del reloj maestro;
-//   - Fase 4: al abrir se pide aceleración por hardware a FFmpeg (VAAPI en
-//     Linux / DXVA2 en Windows) con copy-back de la superficie a memoria
-//     antes de swscale; si no hay device o el códec no soporta HW, se
-//     decodifica en software (el flujo es el mismo, solo cambia el origen).
+// Built on the recipe proven in spike/cheapplayer (branch
+// spike/cheap-player): HLS/local demux + decode + sws -> RGB + blocking
+// audio write as master clock. Differences vs the spike:
+//   - it lives in the app under PlaybackBackend (same signals as MpvBackend);
+//   - signals are ALWAYS emitted from the GUI thread (deferred invocations),
+//     so the widget's direct connections keep their order;
+//   - stop() cuts network reads instantly (avformat interrupt callback);
+//   - pause by corking the sink (pa_simple_cork / QAudioOutput suspend);
+//   - seek with decoder flush and master clock rebase;
+//   - Phase 4: on open, hardware acceleration is requested from FFmpeg (VAAPI on
+//     Linux / DXVA2 on Windows) with copy-back of the surface to memory
+//     before swscale; if there is no device or the codec does not support HW, it
+//     decodes in software (the flow is the same, only the source changes).
 //
-// Reloj maestro: con pista de audio, el reloj es el propio AUDIO (muestras
-// escritas al sink desde la base de cada seek), NO wall-time: el vídeo se
-// ajusta a la pista descartando frames adelantados (>0.35 s) y saltando
-// frames muy atrasados (>0.5 s, catch-up con audio externo lento). Sin audio,
-// el propio vídeo pacea durmiendo hasta su pts (wall-time con corrección por
-// pausa/seek). Position = reloj de audio (lo que se ha oído) o pts del último
-// frame mostrado si no hay audio; pausa/seek no revierten la posición.
+// Master clock: with an audio track, the clock is the AUDIO itself (samples
+// written to the sink from each seek's base), NOT wall-time: the video is
+// adjusted to the track by dropping early frames (>0.35 s) and skipping
+// very late frames (>0.5 s, catch-up with slow external audio). With no audio,
+// the video itself paces by sleeping until its pts (wall-time corrected by
+// pause/seek). Position = audio clock (what has been heard) or the last
+// shown frame's pts if there is no audio; pause/seek do not revert the position.
 
 #include <QDebug>
 #include <QOpenGLBuffer>
@@ -67,25 +67,25 @@ extern "C" {
 // ---------------------------------------------------------------------------
 // Constantes
 
-// Tolerancia de "frame en el futuro" frente al reloj maestro antes de
-// descartarlo (el vídeo nunca se adelanta más de ~0.35 s al audio).
+// Tolerance of a "future frame" against the master clock before dropping it
+// (the video never runs ahead of the audio by more than ~0.35 s).
 static constexpr double kFrameAheadToleranceSec = 0.35;
 
-// Tolerancia de "frame muy atrasado" frente al reloj maestro: con audio como
-// reloj, si la pista de vídeo va más de ~0.5 s POR DETRÁS del audio (p. ej.
-// decode SW lento, audio externo de YouTube por delante), se saltan frames
-// para alcanzar a la pista de audio (mpv hace lo mismo). Sin salto, el vídeo
-// se atrasa indefinidamente y el audio sigue avanzando.
+// Tolerance of a "very late frame" against the master clock: with audio as
+// the clock, if the video track runs more than ~0.5 s BEHIND the audio (e.g.
+// slow SW decode, YouTube's external audio ahead), frames are skipped to
+// catch up with the audio track (mpv does the same). Without skipping, the
+// video falls behind indefinitely while the audio keeps advancing.
 static constexpr double kFrameBehindToleranceSec = 0.5;
 
 // ---------------------------------------------------------------------------
-// Estado publicado por el hilo de decode y leído por el GUI.
+// State published by the decode thread and read by the GUI.
 
 struct FfmpegBackend::Impl
 {
     FfmpegBackend *owner = nullptr;
 
-    // ---- comandos (GUI -> hilo de decode) ----
+    // ---- commands (GUI -> decode thread) ----
     std::thread thread;
     std::atomic<bool> stop{false};
     std::atomic<bool> pause{false};
@@ -93,28 +93,28 @@ struct FfmpegBackend::Impl
     std::atomic<double> seekSec{0.0};
     std::atomic<double> volume{1.0}; // 1.0 = 100%
     std::atomic<bool> bench{false};
-    // Cubierto por otra ventana (lo detecta el widget, timer de 250 ms, solo en
-    // el backend x86): mientras es true, el hilo de decode NO transfiere
-    // (copy-back) ni convierte (swscale) frames y renderGL no sube texturas ni
-    // pinta. Ahorro real de CPU/GPU bajo una ventana flotante (Win7/DWM no
-    // avisa de oclusión: sin esto la app seguiría trabajando a pleno debajo de
-    // la ventana y el compositor competiría con la GMA 950).
+    // Covered by another window (detected by the widget, 250 ms timer, only
+    // on the x86 backend): while true, the decode thread does NOT transfer
+    // (copy-back) nor convert (swscale) frames and renderGL uploads no
+    // textures nor paints. Real CPU/GPU saving under a floating window
+    // (Win7/DWM does not report occlusion: without this the app would keep
+    // working at full tilt under the window, competing with the GMA 950).
     std::atomic<bool> covered{false};
-    // Tamaño del surface de render (px físicos, ya con dpr), actualizado por
-    // renderGL. frameToImage escala SOLO hacia abajo hasta aquí: menos píxeles
-    // en swscale y en la subida de textura. 0 = sin surface (resolución
-    // completa, como antes). Si el surface es mayor que el frame, se queda a
-    // resolución completa (el upscale lo hace GL).
+    // Render surface size (physical px, dpr already applied), updated by
+    // renderGL. frameToImage scales ONLY down to here: fewer pixels
+    // in swscale and in the texture upload. 0 = no surface (full
+    // resolution, as before). If the surface is larger than the frame, it stays
+    // at full resolution (GL does the upscale).
     std::atomic<int> renderW{0};
     std::atomic<int> renderH{0};
 
-    // carga en curso (leída por el hilo al arrancar)
+    // current load (read by the thread on startup)
     QString url;
     QString audioUrl;
     double startAt = 0.0;
-    QString reqHwdec; // device HW pedido ("vaapi"/"dxva2") -> configuredHwdec()
+    QString reqHwdec; // HW device requested ("vaapi"/"dxva2") -> configuredHwdec()
 
-    // ---- snapshot público (consultas thread-safe) ----
+    // ---- public snapshot (thread-safe queries) ----
     mutable QMutex snapMtx;
     struct Snap {
         double position = 0.0;
@@ -124,8 +124,8 @@ struct FfmpegBackend::Impl
         int maxVideoH = 0;
         bool cacheIdle = false;
         bool audioActive = false;
-        QString codec;           // códec del vídeo ("h264"/"vp9"/"av1", …)
-        QString hwdec;           // "no" (SW) / nombre del device HW (Fase 4)
+        QString codec;           // video codec ("h264"/"vp9"/"av1", …)
+        QString hwdec;           // "no" (SW) / HW device name (Phase 4)
         int framesDecoded = 0;
     } snap;
 
@@ -135,11 +135,11 @@ struct FfmpegBackend::Impl
         return snap;
     }
 
-    // ---- frame más reciente (hilo de decode -> render GL) ----
+    // ---- latest frame (decode thread -> GL render) ----
     QMutex frameMtx;
     QImage latest;
 
-    // ---- recursos GL (solo hilo GUI, creados de forma perezosa) ----
+    // ---- GL resources (GUI thread only, created lazily) ----
     QOpenGLShaderProgram *prog = nullptr;
     QOpenGLBuffer *vbo = nullptr;
     QOpenGLVertexArrayObject *vao = nullptr;
@@ -150,7 +150,7 @@ struct FfmpegBackend::Impl
 };
 
 // ---------------------------------------------------------------------------
-// Events del hilo de decode hacia el GUI (kind de onEngineEvent).
+// Decode thread -> GUI events (kind of onEngineEvent).
 
 enum Ev {
     EvFileLoaded = 1,
@@ -165,29 +165,29 @@ enum Ev {
 };
 
 // ---------------------------------------------------------------------------
-// Sink de audio: write bloqueante que pacea el reloj maestro (equivalente al
-// sink de mpv). La variante se elige por plataforma.
+// Audio sink: blocking write that paces the master clock (equivalent to mpv's
+// sink). The variant is chosen per platform.
 
 struct Sink
 {
     virtual ~Sink() = default;
-    // Abre salida PCM S16 interleaved estéreo a `rate` Hz. false → sin audio.
+    // Opens an interleaved stereo S16 PCM output at `rate` Hz. false → no audio.
     virtual bool open(int rate) = 0;
-    // Escribe `frames` (estéreo). Bloquea según el ritmo del sink.
+    // Writes `frames` (stereo). Blocks according to the sink's pace.
     virtual void writeSamples(const int16_t *data, int frames) = 0;
-    // Descartar lo pendiente (seek): no bloquear.
+    // Drop what is pending (seek): do not block.
     virtual void flush() = 0;
-    // Pausa/reanuda sin perder buffers.
+    // Pause/resume without losing buffers.
     virtual void cork(bool paused) = 0;
-    // Espera a que lo escrito haya sonado (final de archivo).
+    // Wait for what was written to have played (end of file).
     virtual void drain() = 0;
     virtual void close() = 0;
     virtual bool opened() const = 0;
 };
 
 #if !defined(Q_OS_WIN) && defined(NEVERTUBE_HAS_PULSE)
-// pulse-simple: el write bloquea hasta que el servidor acepta el dato, así el
-// bucle queda paceado por el audio real (receta del spike).
+// pulse-simple: the write blocks until the server accepts the data, so the
+// loop stays paced by the real audio (spike recipe).
 class PulseSink final : public Sink
 {
 public:
@@ -207,10 +207,10 @@ public:
 
     void writeSamples(const int16_t *data, int frames) override
     {
-        // Si el server murió (m_failed), no insistir con syscalls: el bucle
-        // sigue contando muestras y el vídeo continúa mudo, SIN disparar el
-        // watchdog de audio de la app en falso (la pista sigue activa en el
-        // demux; es el sink el que no suena).
+        // If the server died (m_failed), do not insist with syscalls: the loop
+        // keeps counting samples and the video stays mute, WITHOUT falsely
+        // triggering the app's audio watchdog (the track is still active in the
+        // demux; it is the sink that does not sound).
         if (!m_pa || m_failed || frames <= 0)
             return;
         const size_t bytes = static_cast<size_t>(frames) * 4u;
@@ -226,17 +226,17 @@ public:
 
     void cork(bool paused) override
     {
-        // pulse-simple no tiene cork (eso es pa_stream del API completo);
-        // pausar = descartar lo encolado en el servidor: el audio se congela
-        // al instante y al reanudar simplemente se vuelve a escribir.
+        // pulse-simple has no cork (that is pa_stream of the full API);
+        // pause = drop what is queued on the server: the audio freezes
+        // instantly and on resume it is simply written again.
         if (m_pa && paused)
             pa_simple_flush(m_pa, nullptr);
     }
 
     void drain() override
     {
-        // No hay pa_simple_drain: spin hasta que la latencia del servidor se
-        // vacíe (lo escrito ya ha sonado) para no cortar la cola al final.
+        // No pa_simple_drain: spin until the server latency is
+        // emptied (what was written has already played) so as not to cut the tail at the end.
         if (!m_pa)
             return;
         int perr = 0;
@@ -244,7 +244,7 @@ public:
             const pa_usec_t lat = pa_simple_get_latency(m_pa, &perr);
             if (perr < 0)
                 break;
-            if (lat <= 30000) // <= 30 ms pendiente -> prácticamente sonado
+            if (lat <= 30000) // <= 30 ms pending -> practically played
                 break;
             QThread::msleep(5);
         }
@@ -266,10 +266,10 @@ private:
     bool m_failed = false;
 };
 #elif defined(Q_OS_WIN)
-// QAudioOutput (Qt Multimedia): el write no bloquea; el bucle pacea esperando
-// hueco en el buffer del sink (equivalente al write bloqueante de pulse).
-// Solo entra en la compilación del build x86 (Fase 5); en esta fase el .cpp
-// Windows aún no se compila.
+// QAudioOutput (Qt Multimedia): the write does not block; the loop paces waiting
+// for a gap in the sink buffer (equivalent to pulse's blocking write).
+// It only enters the x86 build compilation (Phase 5); in this phase the Windows
+// .cpp is not compiled yet.
 class QAudioSink final : public Sink
 {
 public:
@@ -285,8 +285,8 @@ public:
         fmt.setByteOrder(QAudioFormat::LittleEndian);
         fmt.setSampleType(QAudioFormat::SignedInt);
         m_out = std::make_unique<QAudioOutput>(fmt, nullptr);
-        // Cola de ~0.8 s: margen para que el bucle no se atore con el ritmo
-        // del sink.
+        // ~0.8 s queue: margin so the loop does not stall with the sink's
+        // pace.
         m_out->setBufferSize(rate * 4 / 5);
         m_dev = m_out->start();
         return m_dev != nullptr;
@@ -296,8 +296,8 @@ public:
     {
         if (!m_out || frames <= 0)
             return;
-        // Device caído (cable/sink): no escribir, seguir contando muestras
-        // (vídeo mudo pero la pista sigue activa para el watchdog de la app).
+        // Device down (cable/sink): do not write, keep counting samples
+        // (video mute but the track stays active for the app's watchdog).
         if (m_out->error() != QAudio::NoError ||
             m_out->state() == QAudio::StoppedState)
             return;
@@ -316,8 +316,8 @@ public:
         if (!m_out)
             return;
         m_out->stop();
-        // start() arranca el sink y devuelve el QIODevice: solo hace falta
-        // llamarlo una vez (la llamada previa duplicada se descartaba).
+        // start() starts the sink and returns the QIODevice: it only needs
+        // to be called once (the previous duplicate call was dropped).
         m_dev = m_out->start();
     }
 
@@ -356,10 +356,10 @@ private:
     QIODevice *m_dev = nullptr;
 };
 #else
-// Sin sink real (Linux sin pulse-simple): no hay quien pacee el write, así
-// que el propio sink duerme el tiempo real equivalente a los frames escritos.
-// Solo para builds de desarrollo sin pulse; la reproducción real de la x86
-// (Fase 5) lleva su propio sink (WASAPI/QAudioOutput).
+// No real sink (Linux without pulse-simple): there is no one to pace the write, so
+// the sink itself sleeps the real time equivalent to the frames written.
+// Only for development builds without pulse; the x86 real playback
+// (Phase 5) carries its own sink (WASAPI/QAudioOutput).
 class NullSink final : public Sink
 {
 public:
@@ -395,8 +395,8 @@ static std::unique_ptr<Sink> makeSink()
 // ---------------------------------------------------------------------------
 // Helpers
 
-// Callback de interrupción de avformat: hace que stop() corte los reads de
-// red al instante (sin él, av_read_frame puede bloquear segundos).
+// avformat interrupt callback: makes stop() cut network reads
+// instantly (without it, av_read_frame can block for seconds).
 static int interruptCb(void *ctx)
 {
     const FfmpegBackend::Impl *m =
@@ -404,16 +404,16 @@ static int interruptCb(void *ctx)
     return m->stop.load() ? 1 : 0;
 }
 
-// Abre el contenedor con el callback de interrupción y, para URLs http no
-// locales, con http_multiple (varios rangos en paralelo: el throttle de
-// YouTube es POR PETICIÓN, y una descarga continua de /videoplayback se
-// estrangula a ~150 KB/s mientras que varias en paralelo no).
+// Opens the container with the interrupt callback and, for non-local http
+// URLs, with http_multiple (several ranges in parallel: YouTube's throttle
+// is PER REQUEST, and a continuous download of /videoplayback is
+// throttled to ~150 KB/s while several in parallel are not).
 static bool openFormat(AVFormatContext **out, const QString &url, void *ictx)
 {
     if (url.isEmpty())
         return false;
     *out = avformat_alloc_context();
-    if (!*out) // OOM: sin contexto no hay donde colgar el callback
+    if (!*out) // OOM: with no context there is nowhere to attach the callback
         return false;
     (*out)->interrupt_callback = { interruptCb, ictx };
     AVDictionary *opts = nullptr;
@@ -423,8 +423,8 @@ static bool openFormat(AVFormatContext **out, const QString &url, void *ictx)
         avformat_open_input(out, url.toUtf8().constData(), nullptr, &opts);
     av_dict_free(&opts);
     if (rc < 0) {
-        // El contexto lo preasignamos nosotros -> la propiedad sigue siendo
-        // nuestra si avformat_open_input falla (no lo libera él).
+        // We preallocate the context ourselves -> ownership stays
+        // ours if avformat_open_input fails (it does not free it).
         if (*out)
             avformat_free_context(*out);
         *out = nullptr;
@@ -433,25 +433,25 @@ static bool openFormat(AVFormatContext **out, const QString &url, void *ictx)
     return true;
 }
 
-// ¿El frame viene de una superficie de hardware (VAAPI/DXVA2)? Esos no se
-// pueden pasar a swscale directamente: primero hay que traerlos a memoria.
+// Does the frame come from a hardware surface (VAAPI/DXVA2)? Those cannot
+// be passed to swscale directly: first they must be brought into memory.
 static bool isHwPixelFormat(AVPixelFormat fmt)
 {
     const AVPixFmtDescriptor *d = av_pix_fmt_desc_get(fmt);
     return d && (d->flags & AV_PIX_FMT_FLAG_HWACCEL);
 }
 
-// ¿El códec expone un hwaccel usable con el device que creamos?
-// (avcodec_get_hw_config refleja SOLO lo compilado en el paquete). Si NO hay
-// hwaccel, no se adjunta el hw_device_ctx — el decoder va a software PURO:
-//   - h264 (dxva2 en el build i686) -> con device -> DXVA2 en el target x86; si
-//     el hardware no soporta el hwaccel (una plataforma sin h264 DXVA2), el open
-//     con device FALLA y runLoop reintenta el decoder en software PURO;
-//   - av1/vp9/aac/opus... (sin hwaccel compilado) -> software. Es OBLIGATORIO
-//     para av1: el decoder nativo de FFmpeg 9 aborta todo el clip con ENOSYS
+// Does the codec expose a hwaccel usable with the device we created?
+// (avcodec_get_hw_config reflects ONLY what is compiled in the package). If there is NO
+// hwaccel, the hw_device_ctx is not attached — the decoder goes to PURE software:
+//   - h264 (dxva2 in the i686 build) -> with device -> DXVA2 on the x86 target; if
+//     the hardware does not support the hwaccel (a platform without h264 DXVA2), the
+//     open with device FAILS and runLoop retries the decoder in PURE software;
+//   - av1/vp9/aac/opus... (no compiled hwaccel) -> software. It is MANDATORY
+//     for av1: FFmpeg 9's native decoder aborts the whole clip with ENOSYS
 //     ("Your platform doesn't support hardware accelerated AV1 decoding",
-//     av1dec.c) si ve el hw_device_ctx pero no logra un hwaccel, en lugar de
-//     caer a software como h264.
+//     av1dec.c) if it sees the hw_device_ctx but does not get a hwaccel, instead of
+//     falling back to software like h264.
 static bool codecSupportsHw(const AVCodec *codec, AVHWDeviceType type)
 {
     for (int i = 0;; ++i) {
@@ -465,9 +465,9 @@ static bool codecSupportsHw(const AVCodec *codec, AVHWDeviceType type)
     return false;
 }
 
-// Abre un decodificador a partir de codecpar. Solo se adjunta el device HW si
-// el códec tiene un hwaccel compilado para él (codecSupportsHw); si no, la
-// cadena es la misma pero en software (av1/vp9 en el target x86, y el audio).
+// Opens a decoder from codecpar. The HW device is attached only if
+// the codec has a hwaccel compiled for it (codecSupportsHw); if not, the
+// chain is the same but in software (av1/vp9 on the x86 target, and the audio).
 static AVCodecContext *openDecoder(const AVCodecParameters *par,
                                    AVBufferRef *hwDevice,
                                    AVHWDeviceType hwType)
@@ -485,11 +485,11 @@ static AVCodecContext *openDecoder(const AVCodecParameters *par,
     if (hwDevice && codecSupportsHw(codec, hwType)) {
         cc->hw_device_ctx = av_buffer_ref(hwDevice);
     } else {
-        // Decodificación SOFTWARE (target x86, h264 a 1 solo hilo por defecto):
-        // h264/vp9/av1 paralelizan por frame-threading. min(núcleos, 4) como
-        // tope para no sobresuscribir CPUs de 2 núcleos. NO se toca con
-        // hwDevice activo (DXVA2/VAAPI ya decodifica; esos hwaccels no se
-        // mezclan con frame-threading).
+        // SOFTWARE decoding (x86 target, h264 with a single thread by default):
+        // h264/vp9/av1 parallelize by frame-threading. min(cores, 4) as
+        // a cap so as not to oversubscribe 2-core CPUs. NOT touched with
+        // hwDevice active (DXVA2/VAAPI already decodes; those hwaccels do not
+        // mix with frame-threading).
         const int cores = qMax(1, QThread::idealThreadCount());
         cc->thread_count = qMin(cores, 4);
     }
@@ -500,8 +500,8 @@ static AVCodecContext *openDecoder(const AVCodecParameters *par,
     return cc;
 }
 
-// Altura máxima entre las pistas de VÍDEO del contenedor (ignora poster
-// adjuntos tipo "attached_pic", p. ej. el mjpeg de los mp3 con carátula).
+// Maximum height among the container's VIDEO tracks (ignores attached
+// posters like "attached_pic", e.g. the mjpeg of mp3s with cover art).
 static int maxVideoHeight(const AVFormatContext *fmt)
 {
     int best = 0;
@@ -517,13 +517,13 @@ static int maxVideoHeight(const AVFormatContext *fmt)
     return best;
 }
 
-// Receta del spike: sws -> RGB24 dentro de un QImage reutilizable.
+// Spike recipe: sws -> RGB24 into a reusable QImage.
 struct SwsState
 {
     SwsContext *ctx = nullptr;
     int w = 0;
     int h = 0;
-    int tw = 0; // tamaño objetivo de conversión (surface de render); 0 = w/h
+    int tw = 0; // conversion target size (render surface); 0 = w/h
     int th = 0;
     AVPixelFormat fmt = AV_PIX_FMT_NONE;
 
@@ -534,12 +534,12 @@ struct SwsState
     }
 };
 
-// Convierte `f` a RGB24 en `img`. Si maxW/maxH > 0 y son menores que el frame,
-// escala SOLO hacia abajo hasta ese tamaño (surface de render, px físicos)
-// respetando el aspect del stream: menos píxeles en swscale Y en la subida de
-// textura (la iGPU de la máquina de pruebas agradece el margen de GPU cuando el DWM
-// compone ventanas encima). Si el surface es mayor que el frame, se queda a
-// resolución completa (el upscale lo hace GL, como antes).
+// Converts `f` to RGB24 into `img`. If maxW/maxH > 0 and smaller than the frame,
+// scales ONLY down to that size (render surface, physical px)
+// respecting the stream aspect: fewer pixels in swscale AND in the texture
+// upload (the test machine's iGPU appreciates the GPU margin when DWM
+// composites windows on top). If the surface is larger than the frame, it stays
+// at full resolution (GL does the upscale, as before).
 static void frameToImage(const AVFrame *f, QImage &img, SwsState &st,
                          int maxW, int maxH)
 {
@@ -577,7 +577,7 @@ static void frameToImage(const AVFrame *f, QImage &img, SwsState &st,
     sws_scale(st.ctx, f->data, f->linesize, 0, h, dst, linesize);
 }
 
-// Ganancia de volumen en software (S16): 1.0 no toca nada.
+// Software volume gain (S16): 1.0 does not touch anything.
 static void applyGain(int16_t *s, int n, float g)
 {
     if (g == 1.0f)
@@ -589,7 +589,7 @@ static void applyGain(int16_t *s, int n, float g)
     }
 }
 
-// Entrega un evento al hilo GUI (invocación diferida -> onEngineEvent).
+// Delivers an event to the GUI thread (deferred invocation -> onEngineEvent).
 static void emitPost(FfmpegBackend *be, int kind, double a, double b, int c,
                      const QString &s)
 {
@@ -599,7 +599,7 @@ static void emitPost(FfmpegBackend *be, int kind, double a, double b, int c,
                               Q_ARG(QString, s));
 }
 
-// Entrega un frame al hilo GUI (invocación diferida -> deliverFrame).
+// Delivers a frame to the GUI thread (deferred invocation -> deliverFrame).
 static void emitFrame(FfmpegBackend *be, const QImage &img)
 {
     QMetaObject::invokeMethod(be, "deliverFrame", Qt::QueuedConnection,
@@ -607,24 +607,24 @@ static void emitFrame(FfmpegBackend *be, const QImage &img)
 }
 
 // ---------------------------------------------------------------------------
-// Hilo de decode
+// Decode thread
 
 static void runLoop(FfmpegBackend::Impl *m)
 {
     FfmpegBackend *be = m->owner;
     const bool bench = m->bench.load();
 
-    // Contenedores y decodificadores (liberados en cleanup).
+    // Containers and decoders (freed in cleanup).
     AVFormatContext *vFmt = nullptr;
     AVFormatContext *aFmt = nullptr; // audio externo (audioUrl)
-    AVCodecContext *vc = nullptr;    // vídeo
-    AVCodecContext *ac = nullptr;    // audio (muxed de vFmt o externo)
-    bool extAudio = false;           // ac proviene de aFmt
-    int muxAudioIdx = -1;            // pista de audio muxed en vFmt (si ac vive ahí)
+    AVCodecContext *vc = nullptr;    // video
+    AVCodecContext *ac = nullptr;    // audio (muxed from vFmt or external)
+    bool extAudio = false;           // ac comes from aFmt
+    int muxAudioIdx = -1;            // audio track muxed in vFmt (if ac lives there)
     int extAudioIdx = -1;
-    // Device HW (Fase 4): la referencia se libera SIEMPRE aquí (también en las
-    // rutas de error posteriores a su creación). openDecoder hace un
-    // av_buffer_ref() propio, así que este unref no toca a los codec contexts.
+    // HW device (Phase 4): the reference is ALWAYS freed here (also on the
+    // error paths after its creation). openDecoder does its own
+    // av_buffer_ref(), so this unref does not touch the codec contexts.
     AVBufferRef *hwDevice = nullptr;
 
     auto cleanup = [&]() {
@@ -668,9 +668,9 @@ static void runLoop(FfmpegBackend::Impl *m)
         return;
     }
 
-    // --- Fase 4: device de aceleración por hardware (si existe) ---
-    // Windows x86: DXVA2 (H.264 de la iGPU del target x86). Linux: VAAPI.
-    // Si no se puede crear, se decodifica en software (el flujo manda).
+    // --- Phase 4: hardware acceleration device (if any) ---
+    // Windows x86: DXVA2 (the H.264 of the x86 target iGPU). Linux: VAAPI.
+    // If it cannot be created, it decodes in software (the flow decides).
     const char *hwName = nullptr;
     AVHWDeviceType hwType = AV_HWDEVICE_TYPE_NONE;
 #if defined(Q_OS_WIN)
@@ -684,7 +684,7 @@ static void runLoop(FfmpegBackend::Impl *m)
     hwType = AV_HWDEVICE_TYPE_VAAPI;
     if (av_hwdevice_ctx_create(&hwDevice, AV_HWDEVICE_TYPE_VAAPI, nullptr,
                                nullptr, 0) < 0) {
-        // Sin display X11 (headless/CI): intentar el render node por defecto.
+        // No X11 display (headless/CI): try the default render node.
         av_hwdevice_ctx_create(&hwDevice, AV_HWDEVICE_TYPE_VAAPI,
                                "/dev/dri/renderD128", nullptr, 0);
     }
@@ -698,14 +698,14 @@ static void runLoop(FfmpegBackend::Impl *m)
 
     vc = openDecoder(vFmt->streams[vs]->codecpar, hwDevice, hwType);
     if (!vc && hwDevice) {
-        // El device se creó (DXVA2/VAAPI) pero el decodificador NO arranca
-        // CON él: codecSupportsHw solo refleja lo COMPILADO en el paquete,
-        // no lo que el hardware soporta — p. ej. DXVA2 de h264 en un
-        // Plataforma sin h264 por hardware: avcodec_open2 con el device
-        // adjunto falla. Sin este reintento en SOFTWARE PURO el clip entero
-        // moriría con "Sin decodificador de vídeo" (EvEndFile Error) en vez
-        // de caer a SW. nunca cambia el open del av1 (codecSupportsHw=no ->
-        // SW directo, sin device que revertir).
+        // The device was created (DXVA2/VAAPI) but the decoder does NOT start
+        // WITH it: codecSupportsHw only reflects what is COMPILED in the package,
+        // not what the hardware supports — e.g. DXVA2 of h264 on a
+        // platform without hardware h264: avcodec_open2 with the attached
+        // device fails. Without this retry in PURE SOFTWARE the whole clip
+        // would die with "Sin decodificador de vídeo" (EvEndFile Error) instead
+        // of falling back to SW. It never changes the av1 open (codecSupportsHw=no ->
+        // direct SW, with no device to revert).
         NT_DEBUG("E2E ffmpeg: decoder HW no inicia (%s) -> reintentando SW\n",
                  hwName);
         vc = openDecoder(vFmt->streams[vs]->codecpar, nullptr,
@@ -728,14 +728,14 @@ static void runLoop(FfmpegBackend::Impl *m)
         m->snap.maxVideoH = maxVideoHeight(vFmt);
         m->snap.vw = vFmt->streams[vs]->codecpar->width;
         m->snap.vh = vFmt->streams[vs]->codecpar->height;
-        // hwdec se resuelve con el PRIMER frame procesado (mpv deja
-        // hwdec-current vacío hasta que el decodificador activa; el widget
-        // reintenta con retryHwdec hasta saberlo).
+        // hwdec is resolved with the FIRST processed frame (mpv keeps
+        // hwdec-current empty until the decoder activates; the widget
+        // retries with retryHwdec until it knows).
         m->snap.hwdec.clear();
-        m->snap.cacheIdle = true; // sin modelo de "cache": se puede tocar ya
+        m->snap.cacheIdle = true; // no "cache" model: it can be touched now
     }
 
-    // --- audio: externo si viene y abre; si no, el muxed del vídeo ---
+    // --- audio: external if it comes and opens; if not, the muxed one ---
     if (!m->audioUrl.isEmpty()) {
         if (openFormat(&aFmt, m->audioUrl, m) &&
             avformat_find_stream_info(aFmt, nullptr) >= 0) {
@@ -759,7 +759,7 @@ static void runLoop(FfmpegBackend::Impl *m)
                              hwType);
     }
 
-    // Sink (solo reproducción real; el banco decodifica sin sonido).
+    // Sink (real playback only; the bench decodes without sound).
     std::unique_ptr<Sink> sink;
     const bool hasAudio = ac != nullptr;
     if (hasAudio && !bench) {
@@ -774,7 +774,7 @@ static void runLoop(FfmpegBackend::Impl *m)
                  ac->ch_layout.nb_channels,
                  extAudio ? "externa" : "muxed");
 
-    // Resampler a S16 estéreo 48 kHz.
+    // Resampler to stereo S16 48 kHz.
     SwrContext *swr = nullptr;
     uint8_t *abuf = nullptr;
     int abufCap = 0;
@@ -791,7 +791,7 @@ static void runLoop(FfmpegBackend::Impl *m)
         }
     }
 
-    // --- eventos iniciales (orden básico de mpv: loaded -> dur -> tamaño) ---
+    // --- initial events (basic mpv order: loaded -> dur -> size) ---
     emitPost(be, EvFileLoaded, 0, 0, 0, QString());
     emitPost(be, EvDuration, duration, 0, 0, QString());
     if (m->snap.vw > 0 && m->snap.vh > 0)
@@ -806,23 +806,23 @@ static void runLoop(FfmpegBackend::Impl *m)
     emitPost(be, EvCache, 1.0, 0, 0, QString());
     emitPost(be, EvStreamStart, 0, 0, 0, QString());
 
-    // --- reloj maestro y helpers ---
-    int64_t t0 = av_gettime_relative(); // re-basado en seek inicial y seeks
+    // --- master clock and helpers ---
+    int64_t t0 = av_gettime_relative(); // rebased on the initial seek and later seeks
     int64_t pausedUs = 0;
     int64_t pauseStartUs = 0;
     bool wasPaused = false;
-    int64_t audioSamples = 0; // muestras estéreo escritas (posición de audio)
-    // Base del reloj de AUDIO: con pista de audio, el reloj maestro es el
-    // propio audio (lo que se ha escrito al sink), NO wall-time — así pausas,
-    // seeks y atascos del vídeo no desincronizan HD: el vídeo se ajusta a la
-    // pista. Base = posición del contenido en el momento de (re)arrancar la
-    // cuenta (startAt / destino del seek), porque audioSamples cuenta desde 0
-    // tras cada seek.
+    int64_t audioSamples = 0; // stereo samples written (audio position)
+    // AUDIO clock base: with an audio track, the master clock is the
+    // audio itself (what has been written to the sink), NOT wall-time — so pauses,
+    // seeks and video stalls do not desync HD: the video adjusts to the
+    // track. Base = content position at the moment of (re)starting the
+    // count (startAt / seek target), because audioSamples counts from 0
+    // after each seek.
     double audioClockBase = m->startAt;
     double lastVideoPtsShown = 0.0;
     bool audioActiveOnce = false;
     int64_t lastPosEmitUs = 0;
-    bool hwdecResolved = false; // veredicto HW/SW definido con el primer frame
+    bool hwdecResolved = false; // HW/SW verdict set on the first frame
 
     auto audioPos = [&]() {
         return static_cast<double>(audioSamples) / 48000.0;
@@ -857,7 +857,7 @@ static void runLoop(FfmpegBackend::Impl *m)
         pauseStartUs = wasPaused ? av_gettime_relative() : 0;
     };
 
-    // --- seek inicial (reanudar posición) ---
+    // --- initial seek (resume position) ---
     if (m->startAt > 0.0) {
         const int64_t us = static_cast<int64_t>(m->startAt * 1e6);
         avformat_seek_file(vFmt, -1, INT64_MIN, us, INT64_MAX, 0);
@@ -874,15 +874,15 @@ static void runLoop(FfmpegBackend::Impl *m)
         NT_DEBUG("E2E ffmpeg reanuda %.1fs\n", m->startAt);
     }
 
-    // --- bucle principal ---
+    // --- main loop ---
     int appliedSeekTick = 0;
-    bool vReadDone = false; // lectura del contenedor vídeo agotada (EOF)
-    bool aReadDone = false; // lectura del audio externo agotada (EOF)
-    bool draining = false;  // drenado final: NO descartar frames "futuros"
+    bool vReadDone = false; // video container read exhausted (EOF)
+    bool aReadDone = false; // external audio read exhausted (EOF)
+    bool draining = false;  // final drain: do NOT drop "future" frames
 
     AVFrame *frame = av_frame_alloc();
     AVPacket *pkt = av_packet_alloc();
-    AVFrame *hwScratch = av_frame_alloc(); // copia SW del frame HW (copy-back)
+    AVFrame *hwScratch = av_frame_alloc(); // SW copy of the HW frame (copy-back)
     SwsState swsState;
     QImage outFrame;
 
@@ -892,33 +892,33 @@ static void runLoop(FfmpegBackend::Impl *m)
             (f->pts == AV_NOPTS_VALUE) ? wall : static_cast<double>(f->pts) * tb;
         if (!draining && f->pts != AV_NOPTS_VALUE &&
             pts > wall + kFrameAheadToleranceSec)
-            return; // demasiado en el futuro (el audio pacea) -> descartar
+            return; // too far in the future (the audio paces) -> drop
         if (!draining && ac && f->pts != AV_NOPTS_VALUE &&
             pts < wall - kFrameBehindToleranceSec)
-            return; // muy ATRASADO frente al audio: saltar para alcanzar la
-                    // pista de audio (decode SW lento / audio externo)
+            return; // too far BEHIND the audio: skip to catch up with the
+                    // audio track (slow SW decode / external audio)
         if (!ac && !draining) {
-            // sin audio: el reloj es el propio vídeo; dormir hasta su pts.
+            // no audio: the clock is the video itself; sleep until its pts.
             const double d = pts - wall;
             if (d > 0.002)
                 av_usleep(static_cast<unsigned>(d * 1e6));
         }
-        // Cubierto por otra ventana (x86): no transferir (copy-back) ni
-        // convertir ni emitir — el frame se descarta sin tocar CPU/RAM. El
-        // audio sigue y la posición se actualiza con el reloj de audio (sin
-        // esto, el watchdog de atasco del widget vería la posición congelada
-        // > 5 s con el vídeo tapado y dispararía un falso streamStalled). El
-        // decode se mantiene caliente; al destaparse se muestra el frame más
-        // reciente (frame-driven, sin ráfaga).
+        // Covered by another window (x86): do not transfer (copy-back) nor
+        // convert nor emit — the frame is dropped without touching CPU/RAM. The
+        // audio continues and the position is updated with the audio clock (without
+        // this, the widget's stall watchdog would see the position frozen
+        // > 5 s with the video covered and would fire a false streamStalled). The
+        // decode stays warm; on uncover the most recent frame
+        // is shown (frame-driven, no burst).
         if (m->covered.load()) {
             lastVideoPtsShown = pts;
             if (ac)
                 setPosition(audioClockBase + audioPos(), false);
             return;
         }
-        // Fase 4: si el frame viene de una superficie HW (VAAPI/DXVA2),
-        // traerlo a memoria (copy-back) antes de swscale; un fallo aquí solo
-        // descarta ese frame.
+        // Phase 4: if the frame comes from a HW surface (VAAPI/DXVA2),
+        // bring it to memory (copy-back) before swscale; a failure here only
+        // drops that frame.
         AVFrame *src = f;
         const bool hwFrame =
             isHwPixelFormat(static_cast<AVPixelFormat>(f->format));
@@ -935,8 +935,8 @@ static void runLoop(FfmpegBackend::Impl *m)
         if (!bench)
             emitFrame(be, outFrame);
         if (!hwdecResolved) {
-            // Primer frame procesado: veredicto HW/SW para el widget
-            // (streamDecodeInfoReady) y la escalera reactiva de códec.
+        // First processed frame: HW/SW verdict for the widget
+        // (streamDecodeInfoReady) and the reactive codec ladder.
             hwdecResolved = true;
             QMutexLocker l(&m->snapMtx);
             m->snap.hwdec =
@@ -1011,7 +1011,7 @@ static void runLoop(FfmpegBackend::Impl *m)
             if (ac)
                 avcodec_flush_buffers(ac);
             if (swr)
-                swr_close(swr); // vacía el estado interno del resampler
+                swr_close(swr); // empties the resampler's internal state
             if (sink)
                 sink->flush();
             vReadDone = false;
@@ -1046,14 +1046,14 @@ static void runLoop(FfmpegBackend::Impl *m)
             continue;
         }
 
-        // ---- leer del contenedor de vídeo (vídeo + audio muxed) ----
+        // ---- read from the video container (video + muxed audio) ----
         if (!vReadDone && !m->stop.load()) {
             const int r = av_read_frame(vFmt, pkt);
             if (r < 0) {
                 if (r == AVERROR_EOF) {
                     vReadDone = true;
                 } else if (r == AVERROR(EAGAIN)) {
-                    // HLS en vivo: esperar un poco y seguir.
+                    // HLS live: wait a bit and continue.
                     av_usleep(100 * 1000);
                 } else {
                     if (m->stop.load())
@@ -1066,7 +1066,7 @@ static void runLoop(FfmpegBackend::Impl *m)
                 }
             } else {
                 if (pkt->stream_index == vs) {
-                    // decodificar vídeo
+                    // decode video
                     if (avcodec_send_packet(vc, pkt) >= 0) {
                         while (!m->stop.load()) {
                             const int gr = avcodec_receive_frame(vc, frame);
@@ -1087,7 +1087,7 @@ static void runLoop(FfmpegBackend::Impl *m)
             }
         }
 
-        // ---- leer del contenedor de audio externo ----
+        // ---- read from the external audio container ----
         if (extAudio && !aReadDone && !m->stop.load()) {
             const int r = av_read_frame(aFmt, pkt);
             if (r < 0) {
@@ -1111,11 +1111,11 @@ static void runLoop(FfmpegBackend::Impl *m)
             }
         }
 
-        // ---- fin: drenar decodificadores y cerrar con EOF ----
+        // ---- end: drain decoders and close with EOF ----
         if (vReadDone && (!extAudio || aReadDone)) {
             draining = true;
 
-            // Drenar el vídeo (puede quedar algún frame en cola).
+            // Drain the video (some frame may remain queued).
             avcodec_send_packet(vc, nullptr);
             while (!m->stop.load()) {
                 const int gr = avcodec_receive_frame(vc, frame);
@@ -1127,7 +1127,7 @@ static void runLoop(FfmpegBackend::Impl *m)
                     break;
                 }
             }
-            // Drenar el audio (muxed o externo).
+            // Drain the audio (muxed or external).
             if (ac) {
                 avcodec_send_packet(ac, nullptr);
                 while (!m->stop.load()) {
@@ -1157,8 +1157,8 @@ static void runLoop(FfmpegBackend::Impl *m)
             break;
         }
 
-        // Pausa corta entre ciclos cuando el vídeo va más deprisa que el
-        // audio (evita un bucle candente en video-only con frames sin pts).
+        // Short pause between cycles when the video runs faster than the
+        // audio (avoids a hot loop in video-only with frames without pts).
         if (!ac && !vReadDone)
             QThread::usleep(2000);
     } // while (!m->stop.load())
@@ -1173,9 +1173,9 @@ static void runLoop(FfmpegBackend::Impl *m)
 }
 
 // ---------------------------------------------------------------------------
-// Render GL (solo hilo GUI; paintGL llama renderGL con el contexto actual).
+// GL render (GUI thread only; paintGL calls renderGL with the current context).
 
-// Comprime el render en un bloque estático para tenerlo todo a la vista.
+// Compresses the render into a single static block to keep it all in view.
 static void renderGLCore(FfmpegBackend::Impl *m, const QImage &img, int w,
                          int h)
 {
@@ -1225,7 +1225,7 @@ static void renderGLCore(FfmpegBackend::Impl *m, const QImage &img, int w,
     if (img.isNull() || img.width() <= 0 || img.height() <= 0)
         return;
 
-    // Textura RGB888 (subida completa solo si cambia el tamaño).
+    // RGB888 texture (full upload only if the size changes).
     if (!m->tex)
         fn->glGenTextures(1, &m->tex);
     fn->glActiveTexture(GL_TEXTURE0);
@@ -1245,8 +1245,8 @@ static void renderGLCore(FfmpegBackend::Impl *m, const QImage &img, int w,
     fn->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     fn->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    // Quad ajustado al aspect del frame (letterbox: el widget ya se dimensiona
-    // al aspect por WatchPage, pero redondeos de 1 px no deben estirar).
+    // Quad fitted to the frame aspect (letterbox: the widget is already sized
+    // to the aspect by WatchPage, but 1 px roundings must not stretch).
     const float imgA = static_cast<float>(img.width()) / img.height();
     const float winA = static_cast<float>(w) / static_cast<float>(h ? h : 1);
     float nx1 = -1.f, nx2 = 1.f, ny1 = -1.f, ny2 = 1.f;
@@ -1259,7 +1259,7 @@ static void renderGLCore(FfmpegBackend::Impl *m, const QImage &img, int w,
         ny1 = -dh / static_cast<float>(h);
         ny2 = dh / static_cast<float>(h);
     }
-    // v=0 arriba (primera fila del QImage), v=1 abajo -> imagen derecha.
+    // v=0 top (first row of the QImage), v=1 bottom -> upright image.
     const GLfloat verts[16] = {
         nx1, ny1, 0.f, 1.f, nx2, ny1, 1.f, 1.f,
         nx1, ny2, 0.f, 0.f, nx2, ny2, 1.f, 0.f,
@@ -1338,12 +1338,12 @@ void *FfmpegBackend::renderContextHandle() const { return nullptr; }
 
 void FfmpegBackend::renderGL(int, int width, int height)
 {
-    // El hilo de decode escala la conversión hasta el tamaño del surface (solo
-    // hacia abajo): avisarle del tamaño actual en cada paint.
+    // The decode thread scales the conversion down to the surface size (only
+    // downwards): tell it the current size on every paint.
     m->renderW.store(width);
     m->renderH.store(height);
     if (m->covered.load())
-        return; // cubierto: el decode ya no convierte; no subir texturas ni pintar
+        return; // covered: decode no longer converts; do not upload textures nor paint
     QImage img;
     {
         QMutexLocker l(&m->frameMtx);
@@ -1370,14 +1370,14 @@ bool FfmpegBackend::playUrl(const QString &url, double startAt,
     m->audioUrl = audioUrl;
     m->startAt = std::max(0.0, startAt);
     m->pause = false;
-    // Reset del seek pendiente: sin esto, un seek hecho en el vídeo anterior
-    // (seekTick != 0) se reaplicaba al arrancar el siguiente, porque runLoop
-    // parte con appliedSeekTick=0 y el primer ciclo ve tick distintos. El hilo
-    // viejo ya está joineado aquí, así que no hay carrera con el reset.
+    // Reset of the pending seek: without this, a seek made on the previous video
+    // (seekTick != 0) was reapplied when starting the next one, because runLoop
+    // starts with appliedSeekTick=0 and the first cycle sees different ticks. The
+    // old thread is already joined here, so there is no race with the reset.
     m->seekTick = 0;
     m->seekSec = 0.0;
-    // Device HW solicitado para configuredhwdec() (lo que de verdad se usa
-    // se resuelve con el primer frame -> hwdecCurrent()).
+    // HW device requested for configuredhwdec() (what is really used
+    // is resolved on the first frame -> hwdecCurrent()).
     m->reqHwdec = QLatin1String(
 #if defined(Q_OS_WIN)
         "dxva2"
@@ -1388,7 +1388,7 @@ bool FfmpegBackend::playUrl(const QString &url, double startAt,
     {
         QMutexLocker l(&m->snapMtx);
         m->snap = Impl::Snap{};
-        m->snap.hwdec.clear(); // desconocido hasta el primer frame (mpv-style)
+        m->snap.hwdec.clear(); // unknown until the first frame (mpv-style)
         m->snap.cacheIdle = true;
     }
     {
@@ -1396,8 +1396,8 @@ bool FfmpegBackend::playUrl(const QString &url, double startAt,
         m->latest = QImage();
     }
     m->thread = std::thread([this] { runLoop(m); });
-    // El audio externo se gestiona dentro de la propia carga (como mpv con
-    // "audio-files"): devolvemos true para que el widget descarte el respaldo.
+    // External audio is handled inside the load itself (like mpv with
+    // "audio-files"): we return true so the widget drops the fallback.
     return true;
 }
 
@@ -1414,7 +1414,7 @@ void FfmpegBackend::seek(double seconds) { m->seekSec = seconds; m->seekTick++; 
 
 void FfmpegBackend::setVolume(double volume)
 {
-    // El volumen llega en % (0..100, con tope posible hasta 200). 1.0 = 100%.
+    // Volume arrives in % (0..100, possibly capped up to 200). 1.0 = 100%.
     const double g = volume / 100.0;
     m->volume = std::max(0.0, std::min(4.0, g));
 }
@@ -1433,8 +1433,8 @@ double FfmpegBackend::speed() const { return 1.0; }
 
 QString FfmpegBackend::configuredHwdec() const
 {
-    // El device pedido para el próximo load; el que de verdad se usa tras el
-    // primer frame es hwdecCurrent() (puede acabar en SW si no hay device).
+    // Device requested for the next load; the one really used after the
+    // first frame is hwdecCurrent() (it may end up in SW if there is no device).
     return m->reqHwdec.isEmpty() ? QStringLiteral("no") : m->reqHwdec;
 }
 
@@ -1454,10 +1454,10 @@ bool FfmpegBackend::hasActiveAudio() const
 
 double FfmpegBackend::cacheDuration() const
 {
-    // Este backend no tiene modelo de "cache" medible: el demuxer lee directo
-    // del socket y no mantiene un colchón propio (cacheIdle es siempre true).
-    // Se devuelve 0.0 como mpv con colchón vacío; el watchdog de la app no
-    // depende de este valor en este motor.
+    // This backend has no measurable "cache" model: the demuxer reads directly
+    // from the socket and keeps no buffer of its own (cacheIdle is always true).
+    // 0.0 is returned as mpv with an empty buffer; the app's watchdog does not
+    // depend on this value in this engine.
     return 0.0;
 }
 

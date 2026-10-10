@@ -25,21 +25,22 @@
 
 namespace {
 
-// Avatar de la ficha: 80 px y circular. Antes eran 64 px con setScaledContents,
-// que deforma cualquier avatar que no sea cuadrado y además lo pintaba en un
-// cuadrado (el radio del QSS solo redondea el fondo, no el pixmap).
+// Avatar of the card: 80 px and circular. It used to be 64 px with
+// setScaledContents, which distorts any non-square avatar and also painted it
+// in a square (the QSS border-radius only rounds the background, not the
+// pixmap).
 const int kAvatar = 80;
-// Líneas de la descripción antes de colapsar. El Player recorta a 3 (kDescLines
-// en watch_page.cpp) y aquí se adopta el mismo corte: el tope en píxeles que
-// usaba esta página dependía del interlineado de la fuente, así que cambiaba de
-// una máquina a otra.
+// Description lines before collapsing. The Player caps at 3 (kDescLines in
+// watch_page.cpp) and here the same cut is adopted: the pixel cap this page
+// used depended on the font line spacing, so it changed from machine to
+// machine.
 const int kDescLines = 3;
-// Vídeos por página. Es también lo que decide si hay más que cargar: si la
-// respuesta viene llena, existe una página siguiente.
+// Videos per page. It also decides whether there is more to load: if the
+// response comes back full, there is a next page.
 const int kTabPage = 25;
 
-// Texto del estado vacío de una pestaña sin vídeos. Cada pestaña tiene su
-// palabra, para que se sepa cuál se abrió.
+// Empty-state text for a tab without videos. Each tab has its own word, so
+// you can tell which one was opened.
 QString emptyTextFor(const QString &tab)
 {
     if (tab == QLatin1String("shorts"))
@@ -62,9 +63,9 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     root->setContentsMargins(16, 16, 16, 16);
     root->setSpacing(12);
 
-    // Mismo "Volver" en las cuatro superficies con vuelta atrás (Historial,
-    // Playlist y el Player): el token #backLink, que es un enlace discreto y
-    // no una cápsula. Es navegación, no un control de la página.
+    // Same "Volver" on the four surfaces with a way back (History, Playlist
+    // and the Player): the #backLink token, a discreet link rather than a
+    // capsule. It is navigation, not a page control.
     auto *top = new QHBoxLayout;
     auto *back = new QPushButton(QStringLiteral("Volver"), this);
     back->setObjectName(QStringLiteral("backLink"));
@@ -76,10 +77,10 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     top->addStretch(1);
     root->addLayout(top);
 
-    // --- Ficha del canal ---------------------------------------------------
-    // Caja #channelCard: avatar, nombre, suscriptores y las dos acciones (la
-    // pastilla de Suscribirse y el chip de Compartir), con la descripción
-    // debajo. Antes todo eso iba suelto sobre el fondo de la página.
+    // --- Channel card ------------------------------------------------------
+    // #channelCard box: avatar, name, subscribers and the two actions (the
+    // Suscribirse pill and the Compartir chip), with the description below.
+    // All of that used to sit loose on the page background.
     m_card = new QFrame(this);
     m_card->setObjectName(QStringLiteral("channelCard"));
     m_card->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
@@ -129,8 +130,8 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     m_description = new QLabel(m_card);
     m_description->setObjectName(QStringLiteral("channelDesc"));
     m_description->setWordWrap(true);
-    // RichText con enlaces, como la descripción del Player: cada URL va en un
-    // <a> del color del acento (format::descriptionHtml) y se abre externo.
+    // RichText with links, like the Player description: each URL goes in an
+    // <a> of the accent color (format::descriptionHtml) and opens externally.
     m_description->setTextFormat(Qt::RichText);
     m_description->setTextInteractionFlags(Qt::TextSelectableByMouse
                                            | Qt::LinksAccessibleByMouse);
@@ -138,9 +139,9 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     m_description->hide();
     cardLay->addWidget(m_description);
 
-    // Degradado sobre las últimas líneas mientras la descripción está
-    // colapsada: es el mismo #descFade de la tarjeta del Player (y al fondo
-    // #181818, el mismo de la caja, así que funde sin costura).
+    // Gradient over the last lines while the description is collapsed: it is
+    // the same #descFade as the Player card (and #181818 at the bottom, the
+    // same as the box, so it blends seamlessly).
     m_descFade = new QFrame(m_card);
     m_descFade->setObjectName(QStringLiteral("descFade"));
     m_descFade->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -155,7 +156,7 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     cardLay->addWidget(m_descToggle, 0, Qt::AlignLeft);
     root->addWidget(m_card);
 
-    // --- Pestañas ----------------------------------------------------------
+    // --- Tabs -------------------------------------------------------------
     const QStringList names{QStringLiteral("Videos"), QStringLiteral("Shorts"),
                             QStringLiteral("Directos")};
     const QStringList keys{QStringLiteral("videos"), QStringLiteral("shorts"),
@@ -192,19 +193,19 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
 
         auto *list = new VideoListView(m_thumbs, page);
         list->showVideos(QVector<VideoInfo>(), VideoListView::ListMode);
-        // Botón de opciones por fila (mismo criterio que Search): la página
-        // re-emite el vídeo y es MainWindow quien tiene los repos y muestra el
-        // menú.
+        // Per-row options button (same rule as Search): the page re-emits the
+        // video and it is MainWindow that owns the repos and shows the menu.
         list->setRowMoreVisible(true);
         pageLay->addWidget(list, 1);
 
-        // Estado vacío de la pestaña (caja punteada, el mismo #emptyState de la
-        // Biblioteca). Solo se ve cuando la respuesta llegó vacía: por eso la
-        // lista se oculta a la vez (los dos con stretch partirían la caja).
-        // El alto FIJO de 96 px importa: medido, una etiqueta con stretch 0 en un
-        // QVBoxLayout cuyo único elemento con stretch está oculto se estira a
-        // TODO el alto del área (700 px de caja punteada); con alto fijo queda
-        // como una banda centrada verticalmente (y=302 de 700, ancho completo).
+        // Tab empty state (dotted box, the same #emptyState as Library). It
+        // only shows when the response arrived empty: that is why the list is
+        // hidden at the same time (the two with stretch would split the box).
+        // The FIXED height of 96 px matters: measured, a label with stretch 0
+        // inside a QVBoxLayout whose only stretch item is hidden stretches to
+        // the FULL height of the area (700 px of dotted box); with a fixed
+        // height it stays as a vertically centered band (y=302 of 700, full
+        // width).
         auto *empty = new QLabel(nt::emptyStateHtml(emptyTextFor(keys.at(i))),
                                  page);
         empty->setObjectName(QStringLiteral("emptyState"));
@@ -213,9 +214,9 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
         empty->hide();
         pageLay->addWidget(empty);
 
-        // Paginación: un ghost centrado. El botón era #primary de 180 px fijos
-        // (una barra roja ancha bajo la lista); "cargar más" no es la acción
-        // principal de la página, es una ayuda para bajar.
+        // Pagination: a centered ghost. The button used to be #primary with
+        // 180 px fixed (a wide red bar under the list); "load more" is not the
+        // main action of the page, it is a help to go further down.
         auto *more = new QPushButton(QStringLiteral("Cargar más vídeos"), page);
         more->setObjectName(QStringLiteral("ghost"));
         more->setCursor(Qt::PointingHandCursor);
@@ -288,8 +289,8 @@ void ChannelPage::openChannel(const QString &channelId)
     m_descText.clear();
     m_description->hide();
     m_description->setMaximumHeight(QWIDGETSIZE_MAX);
-    // Nueva descripción: siempre arranca colapsada con el tope aplicado
-    // (si el texto no cabe se re-evalúa en onChannelInfo).
+    // New description: always starts collapsed with the cap applied (if the
+    // text does not fit it is re-evaluated in onChannelInfo).
     m_descExpanded = false;
     m_descCollapsible = false;
     m_descToggle->hide();
@@ -305,16 +306,16 @@ void ChannelPage::openChannel(const QString &channelId)
         button->setVisible(false);
         button->setEnabled(true);
     }
-    // Cada pestaña vuelve a su lista: si la anterior estaba vacía, su estado
-    // vacío había ocultado la lista y sin esto el hueco se queda en negro
-    // hasta que llegue la respuesta del canal nuevo.
+    // Each tab falls back to its list: if the previous one was empty, its
+    // empty state had hidden the list and without this the slot stays black
+    // until the new channel's response arrives.
     for (auto *list : std::as_const(m_lists))
         list->show();
     for (auto *empty : std::as_const(m_emptyLabels))
         empty->hide();
     m_yt->channelInfo(channelId);
-    // Carga perezosa: solo se piden los vídeos al abrir; shorts/directos al
-    // entrar en su pestaña (cada respuesta pesa ~400-500 KB).
+    // Lazy loading: only the videos are requested on open; shorts/live when
+    // entering their tab (each response weighs ~400-500 KB).
     m_tabLoaded.fill(0);
     showTab(0);
     loadTab(0);
@@ -342,9 +343,9 @@ void ChannelPage::showTab(int index)
         m_pages.at(i)->setVisible(i == index);
         auto *btn = m_tabButtons.at(i);
         btn->setProperty("selected", i == index);
-        // La propiedad elige el selector del QSS, así que hay que re-polish:
-        // sin esto Qt no vuelve a resolver las reglas y el botón se queda con
-        // el aspecto del estado anterior.
+        // The property picks the QSS selector, so a re-polish is required:
+        // without it Qt does not re-resolve the rules and the button keeps the
+        // appearance of the previous state.
         btn->style()->unpolish(btn);
         btn->style()->polish(btn);
         btn->update();
@@ -356,8 +357,8 @@ void ChannelPage::updateTabCount()
 {
     const int n = m_currentTab < m_videos.size() ? m_videos.at(m_currentTab).size()
                                                  : 0;
-    // Con 0 vídeos no se pone nada: el estado vacío de la pestaña ya lo dice (y
-    // el contador se conoce al vuelo, así que solo en un canal de verdad se ve
+    // With 0 videos nothing is shown: the tab's empty state already says it
+    // (and the counter is computed on the fly, so only a real channel shows
     // "1 vídeo").
     m_tabCount->setVisible(n > 0);
     m_tabCount->setText(n == 1 ? QStringLiteral("1 vídeo")
@@ -370,8 +371,8 @@ void ChannelPage::onChannelInfo(const ChannelInfo &channel)
         return;
     m_channelName = channel.name;
     m_title->setText(channel.name);
-    // Suscriptores con el mismo formato compacto que usa el resto de la app
-    // (compactCount): antes salía el número en crudo ("1234567 suscriptores").
+    // Subscribers with the same compact format the rest of the app uses
+    // (compactCount): it used to print the raw number ("1234567 suscriptores").
     m_meta->setText(channel.subscriberCount > 0
                         ? QStringLiteral("%1 suscriptores")
                               .arg(compactCount(channel.subscriberCount))
@@ -381,15 +382,15 @@ void ChannelPage::onChannelInfo(const ChannelInfo &channel)
         m_description->setText(QString());
         m_description->hide();
     } else {
-        // Mismo HTML que la descripción del Player: texto plano guardado aparte
-        // (m_descText) para el chequeo de vacío del tope de líneas, que no debe
-        // depender del HTML renderizado.
+        // Same HTML as the Player description: the plain text is stored apart
+        // (m_descText) for the empty check of the line cap, which must not
+        // depend on the rendered HTML.
         m_descText = channel.description;
         m_description->setText(descriptionHtml(channel.description));
         m_description->show();
     }
-    // Tras el layout: aplicar el tope de líneas y medir la caja en E2E (solo
-    // con NEVERTUBE_DEBUG=1). El retardo deja asentar la geometría.
+    // After the layout: apply the line cap and measure the box in E2E (only
+    // with NEVERTUBE_DEBUG=1). The delay lets the geometry settle.
     QTimer::singleShot(120, this, [this]() {
         if (m_channelId.isEmpty())
             return;
@@ -435,26 +436,26 @@ void ChannelPage::updateSubscribeButton(bool subscribed)
 {
     m_subscribeBtn->setText(subscribed ? QStringLiteral("Suscrito")
                                        : QStringLiteral("Suscribirse"));
-    // El aspecto de los dos estados vive en el QSS global (QPushButton#subscribe
-    // y #subscribed) y lo distingue la propiedad booleana `subscribed`. El
-    // acento lo pone nt::styleSheet(), que se regenera entero en cada cambio, asi
-    // que ya no hace falta re-pintar el boton a mano.
+    // The look of the two states lives in the global QSS (QPushButton#subscribe
+    // and #subscribed) and the boolean `subscribed` property tells them apart.
+    // The accent is set by nt::styleSheet(), which is regenerated whole on every
+    // change, so there is no need to repaint the button by hand anymore.
     m_subscribeBtn->setProperty("subscribed", subscribed);
-    // La propiedad cambia el selector del QSS, asi que hay que re-polish: sin
-    // esto Qt no vuelve a resolver las reglas y el boton se queda con el
-    // aspecto del estado anterior.
+    // The property changes the QSS selector, so a re-polish is required:
+    // without it Qt does not re-resolve the rules and the button keeps the
+    // appearance of the previous state.
     m_subscribeBtn->style()->unpolish(m_subscribeBtn);
     m_subscribeBtn->style()->polish(m_subscribeBtn);
     m_subscribeBtn->update();
 }
 
-// Re-aplica el botón Suscribirse con el acento vigente (llamada desde
-// MainWindow al cambiar el color de acento en Ajustes).
+// Re-applies the Suscribirse button with the current accent (called from
+// MainWindow when the accent color changes in Ajustes).
 void ChannelPage::applyAccent()
 {
     updateSubscribeButton(m_subs->isSubscribed(m_channelId));
-    // El chip de Compartir pinta su icono a mano, y los iconos llevan el color
-    // embebido: hay que rehacerlos con el acento/cTexto vigente.
+    // The Compartir chip paints its icon by hand, and icons carry their color
+    // embedded: they must be rebuilt with the current accent/kText.
     m_shareBtn->setIcon(nt::icon(nt::Icon::Share, nt::kText, 18));
 }
 
@@ -480,8 +481,8 @@ void ChannelPage::onTabVideos(const QString &channelId, const QString &tab,
         m_videos[index] += loaded;
         m_lists.at(index)->appendVideos(loaded);
     }
-    // Respuesta vacía = pestaña sin vídeos: sale el estado vacío y la lista se
-    // oculta (si no, los dos se partirían la caja con los dos stretch).
+    // Empty response = tab without videos: the empty state shows and the list
+    // is hidden (otherwise the two would split the box with the two stretches).
     const bool empty = m_videos.at(index).isEmpty();
     m_lists.at(index)->setVisible(!empty);
     m_emptyLabels.at(index)->setVisible(empty);
@@ -489,10 +490,10 @@ void ChannelPage::onTabVideos(const QString &channelId, const QString &tab,
     updateTabCount();
 }
 
-// Tope de la descripción: si el texto completo no cabe en kDescLines líneas se
-// recorta a ese alto, aparece "…más" y un degradado sobre la última línea. Con
-// el texto desplegado pasa a "…menos". Se re-evalúa también en el resize (el
-// re-wrap por ancho cambia elalto necesario) y al cambiar de canal.
+// Description cap: if the full text does not fit in kDescLines lines it is cut
+// to that height, "…más" appears and a gradient shows over the last line. With
+// the text expanded it becomes "…menos". It is also re-evaluated on resize (the
+// re-wrap by width changes the required height) and when switching channel.
 void ChannelPage::applyDescriptionCap()
 {
     if (!m_description)
@@ -532,8 +533,8 @@ void ChannelPage::toggleDescription()
     applyDescriptionCap();
 }
 
-// El degradado es un hijo de la caja FUERA del layout (como en el Player), así
-// que hay que colocarlo a mano sobre las últimas líneas del texto.
+// The gradient is a child of the box OUTSIDE the layout (as in the Player), so
+// it must be positioned by hand over the last lines of the text.
 void ChannelPage::positionDescFade()
 {
     if (!m_descFade || !m_card)

@@ -68,10 +68,10 @@ static void paintArrow(QPainter &p, const QRectF &r, bool right)
     p.drawPath(path);
 }
 
-// Pulgar relleno (estilo YouTube): palma redondeada + barra del pulgar,
-// con una muesca que separa ambos y da la silueta clásica del fave.
-// Pulgar relleno (geometría Material "thumb_up" normalizada a 24px): la
-// silueta en dos piezas (pulgar + mano con muesca) es legible a 20px.
+// Filled thumb (YouTube style): rounded palm + thumb bar,
+// with a notch separating both that gives the classic fave silhouette.
+// Filled thumb (Material "thumb_up" geometry normalized to 24px): the
+// two-piece silhouette (thumb + hand with notch) is legible at 20px.
 static void paintThumb(QPainter &p, const QRectF &r, bool down)
 {
     const qreal w = r.width();
@@ -83,7 +83,7 @@ static void paintThumb(QPainter &p, const QRectF &r, bool down)
         return QPointF(r.left() + x / 24.0 * w, r.top() + y / 24.0 * h);
     };
 
-    // Mano (pieza grande).
+    // Hand (large piece).
     QPainterPath hand;
     hand.setFillRule(Qt::WindingFill);
     hand.moveTo(P(23, 10));
@@ -106,7 +106,7 @@ static void paintThumb(QPainter &p, const QRectF &r, bool down)
     hand.lineTo(P(23, 10));                              // v-2
     hand.closeSubpath();
 
-    // Base del pulgar (pieza pequeña a la izquierda).
+    // Thumb base (small piece on the left).
     QPainterPath base;
     base.setFillRule(Qt::WindingFill);
     base.moveTo(P(1, 21));
@@ -191,7 +191,7 @@ QIcon icon(Icon kind, const QColor &color, int size)
         paintPause(p, r);
         break;
     case Icon::Next: {
-        // Barra vertical (izquierda) + triángulo relleno hacia la derecha: |▶
+        // Vertical bar (left) + filled triangle pointing right: |▶
         p.setPen(QPen(color, size * 0.10, Qt::SolidLine, Qt::RoundCap,
                       Qt::RoundJoin));
         p.setBrush(Qt::NoBrush);
@@ -208,7 +208,7 @@ QIcon icon(Icon kind, const QColor &color, int size)
         break;
     }
     case Icon::Prev: {
-        // Barra vertical (derecha) + triángulo relleno hacia la izquierda: ◀|
+        // Vertical bar (right) + filled triangle pointing left: ◀|
         p.setPen(QPen(color, size * 0.10, Qt::SolidLine, Qt::RoundCap,
                       Qt::RoundJoin));
         p.setBrush(Qt::NoBrush);
@@ -293,7 +293,7 @@ QIcon icon(Icon kind, const QColor &color, int size)
         const qreal t = r.top();
         const qreal rr = r.right();
         const qreal b = r.bottom();
-        // Esquinas: (l,t) sup-izq, (rr,t) sup-der, (l,b) inf-izq, (rr,b) inf-der.
+        // Corners: (l,t) top-left, (rr,t) top-right, (l,b) bottom-left, (rr,b) bottom-right.
         p.drawLine(QPointF(l, t), QPointF(l + arm, t));
         p.drawLine(QPointF(l, t), QPointF(l, t + arm));
         p.drawLine(QPointF(rr, t), QPointF(rr - arm, t));
@@ -332,8 +332,8 @@ QIcon icon(Icon kind, const QColor &color, int size)
         paintThumb(p, r, true);
         break;
     case Icon::Share: {
-        // Nodo central con dos conexiones (estilo compartir): nodos más
-        // grandes y limpios para que coincidan con el grosor del resto del set.
+        // Central node with two connections (share style): bigger, cleaner
+        // nodes so they match the stroke width of the rest of the set.
         const qreal rad = size * 0.10;
         p.setPen(QPen(color, size * 0.09, Qt::SolidLine, Qt::RoundCap,
                       Qt::RoundJoin));
@@ -459,7 +459,7 @@ QPixmap appLogo(int size)
 {
     if (size <= 0)
         return QPixmap();
-    // La entrada de 256 es la mayor del .qrc (el maestro de 1024 no se embebe).
+    // The 256 entry is the largest in the .qrc (the 1024 master is not embedded).
     static const QPixmap src(QStringLiteral(":/icon/nt_256.png"));
     if (src.isNull())
         return QPixmap();

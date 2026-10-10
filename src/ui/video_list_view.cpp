@@ -19,9 +19,9 @@ namespace {
 const int kGridW = 320;
 const int kGridH = 258;
 const int kListH = 86;
-// Hueco a la izquierda del bloque de texto de una fila de lista: miniatura
-// (136 px) + 6 px de margen + 10 px de aire. Lo comparten el título y la meta,
-// y de él se parte el ancho útil que calculan removeButtonRect/moreButtonRect.
+// Gap to the left of a list row's text block: thumbnail (136 px) + 6 px
+// margin + 10 px breathing room. Shared by the title and the meta line, and
+// from it starts the usable width computed by removeButtonRect/moreButtonRect.
 const qreal kListTextX = 152;
 
 QString cacheKeyFor(const VideoInfo &v)
@@ -29,9 +29,9 @@ QString cacheKeyFor(const VideoInfo &v)
     return QStringLiteral("v_%1").arg(v.id);
 }
 
-// Fuente reducida sin warnings: si la fuente base no trae point size definido
-// (devuelve -1, lo normal si la app usa pixel size), partimos de un tamaño
-// lógico por defecto y nunca bajamos de 4pt.
+// Shrunken font without warnings: if the base font has no point size set
+// (returns -1, the usual case when the app uses pixel size), we start from a
+// default logical size and never go below 4 pt.
 QFont shrunkFont(const QFont &base, qreal delta)
 {
     QFont f = base;
@@ -42,9 +42,9 @@ QFont shrunkFont(const QFont &base, qreal delta)
     return f;
 }
 
-// Rectángulo del botón "X" de borrado (modo lista), centrado verticalmente a
-// la derecha de la fila. Compartido entre el delegate (paint) y el hit-test de
-// clics del view para que coincidan exactamente.
+// Rectangle of the "X" delete button (list mode), vertically centered on the
+// right side of the row. Shared between the delegate (paint) and the view's
+// click hit-test so they match exactly.
 QRectF removeButtonRect(const QRect &cell, qreal scale)
 {
     const qreal side = 26 * scale;
@@ -53,10 +53,11 @@ QRectF removeButtonRect(const QRect &cell, qreal scale)
                   side, side);
 }
 
-// Rectángulo del botón de opciones "⋯". Cuando la fila también lleva la X va
-// justo a su izquierda; sin X ocupa el borde derecho, como el botón de opciones
-// de Biblioteca (que es un widget del layout, pegado al borde). Reservar el
-// hueco de una X que no se pinta le robaba 34 px de texto a la fila.
+// Rectangle of the options button "⋯". When the row also carries the X it
+// goes right to its left; without the X it takes the right edge, like
+// Library's options button (a layout widget flush against the edge).
+// Reserving the space of an X that is never painted was stealing 34 px of
+// text from the row.
 QRectF moreButtonRect(const QRect &cell, qreal scale, bool withRemove)
 {
     const qreal side = 26 * scale;
@@ -81,23 +82,23 @@ public:
     void setMode(int mode)
     {
         if (mode != m_mode)
-            m_thumbCache.clear(); // cambia el tamaño pintado de la miniatura
+            m_thumbCache.clear(); // the painted thumbnail size changes
         m_mode = mode;
     }
 
     void setScale(qreal scale)
     {
         if (!qFuzzyCompare(m_scale, scale))
-            m_thumbCache.clear(); // cambia el tamaño pintado de la miniatura
+            m_thumbCache.clear(); // the painted thumbnail size changes
         m_scale = scale;
     }
 
-    // Ancho/alto de celda efectivos cuando la rejilla llena el ancho
-    // disponible (0,0 = tamaño base fijo).
+    // Effective cell width/height when the grid fills the available width
+    // (0,0 = fixed base size).
     void setCellSize(int w, int h)
     {
         if (w != m_cellW || h != m_cellH)
-            m_thumbCache.clear(); // cambia el tamaño pintado de la miniatura
+            m_thumbCache.clear(); // the painted thumbnail size changes
         m_cellW = w;
         m_cellH = h;
     }
@@ -117,8 +118,8 @@ public:
         m_showMore = show;
     }
 
-    // Mapa (opcional) de fracciones de progreso por videoId que el delegado
-    // dibuja como barra al pie de la miniatura en modo rejilla.
+    // Optional map of progress fractions per videoId that the delegate
+    // draws as a bar at the foot of the thumbnail in grid mode.
     void setProgressMap(const QHash<QString, double> *progress)
     {
         m_progress = progress;
@@ -146,7 +147,7 @@ public:
         p->restore();
     }
 
-    // Marca la fila que está siendo reproducida: recuadro + insignia.
+    // Marks the row that is currently being played: outline + badge.
     void drawCurrentMark(QPainter *p, const QRect &r) const
     {
         p->save();
@@ -222,31 +223,32 @@ public:
         drawBadgeCore(p, r, text, QColor(0, 0, 0, 200));
     }
 
-    // Pastilla de directo: el acento de fondo (como la marca "EN VIVO" del
-    // reproductor y la píldora roja de YouTube) en vez del negro translúcido
-    // de la duración. Mientras un vídeo está en directo no hay duración que
-    // mostrar: el badge la sustituye.
+    // Live pill: accent as background (like the player's "EN VIVO" mark and
+    // YouTube's red pill) instead of the translucent black used for the
+    // duration. While a video is live there is no duration to show: the
+    // badge replaces it.
     static void drawLiveBadge(QPainter *p, const QRectF &r)
     {
         drawBadgeCore(p, r, QStringLiteral("En directo"), nt::kAccent);
     }
 
-    // Escalado de miniatura cacheado por tamaño de destino. `m_thumbs->pixmap()`
-    // devuelve el ORIGINAL de disco (hq720 = 1280x720) y drawThumb lo reescalaba
-    // con SmoothTransformation en CADA paint: ~2,4 ms por frame de 20 celdas
-    // visibles, el 70 % del coste de pintar la rejilla, lo que tironaba el
-    // scroll del Home. Con la cache el frame baja a ~1,04 ms y la miniatura
-    // sale IDENTICA (comprobado pixel a pixel en los tres ajustes de "Tamaño de
-    // las miniaturas" —0,88/1,0/1,15— y en anchos de ventana de 900 a 1900 px).
+    // Thumbnail scaling cached by target size. `m_thumbs->pixmap()` returns
+    // the ORIGINAL from disk (hq720 = 1280x720) and drawThumb used to
+    // re-scale it with SmoothTransformation on EVERY paint: ~2.4 ms per frame
+    // for 20 visible cells, 70% of the cost of painting the grid, which
+    // dragged the Home scroll. With the cache the frame drops to ~1.04 ms and
+    // the thumbnail comes out IDENTICAL (checked pixel by pixel in the three
+    // "Thumbnail size" settings —0.88/1.0/1.15— and in window widths from 900
+    // to 1900 px).
     //
-    // La clave incluye la key del video: sin eso, la entrada de un tamaño
-    // seria reutilizada por el video pintado despues y TODAS las miniaturas
-    // saldrian iguales. El tamaño de destino es el que fija la celda, asi que
-    // cambiar el ancho de ventana o el ajuste solo invalida lo que ya no
-    // sirve (m_thumbCache se vacia en setScale/setCellSize/setMode, los
-    // unicos puntos donde cambia el tamaño). No depende de la red: si el
-    // pixmap de origen aun no llego, no hay nada que cachear y al llegar se
-    // escala una vez.
+    // The key includes the video's key: without it, the entry for one size
+    // would be reused by the video painted next and ALL thumbnails would come
+    // out the same. The target size is the one the cell sets, so changing the
+    // window width or the setting only invalidates what no longer applies
+    // (m_thumbCache is cleared in setScale/setCellSize/setMode, the only
+    // points where the size changes). It doesn't depend on the network: if
+    // the source pixmap hasn't arrived yet, there is nothing to cache and it
+    // gets scaled once when it does.
     static inline QString claveEscalado(const QString &key, const QSize &s)
     {
         return key + QLatin1Char('@') + QString::number(s.width())
@@ -256,10 +258,10 @@ public:
     const QPixmap &thumbEscalada(const QString &key, const QSize &destino,
                                 const QPixmap &orig) const
     {
-        // Se vacia en setScale/setCellSize cuando cambia el tamaño, asi que
-        // aqui solo crece con los videos nuevos de una misma rejilla/lista.
+        // It is cleared in setScale/setCellSize when the size changes, so
+        // here it only grows with the new videos of a same grid/list.
         if (m_thumbCache.size() > 64)
-            m_thumbCache.clear(); // defensa: no deberia lanzarse nunca
+            m_thumbCache.clear(); // defense: should never trigger
         const QString k = claveEscalado(key, destino);
         const auto it = m_thumbCache.constFind(k);
         if (it != m_thumbCache.constEnd())
@@ -303,11 +305,11 @@ public:
             drawBadge(p, r, duration);
     }
 
-    // Reparte el texto en `lines` líneas con wrap voraz por palabras; la ÚLTIMA
-    // lleva todo lo que queda desde el principio de esa línea, elidado. Lo usan
-    // la PINTURA (drawGridTitle) y la GEOMETRÍA (paintList decide con size()
-    // cuántas líneas ocupa el título para pegar la meta justo debajo): una sola
-    // función, así no pueden divergir.
+    // Lays out the text in `lines` lines with greedy word wrap; the LAST one
+    // carries everything left from the start of that line, elided. Used by
+    // both PAINTING (drawGridTitle) and GEOMETRY (paintList decides with
+    // size() how many lines the title takes to stick the meta right below
+    // it): a single function, so they cannot diverge.
     static QStringList wrapTitle(const QFontMetricsF &fm, const QString &text,
                                  qreal w, int lines)
     {
@@ -331,9 +333,10 @@ public:
                 const QString cand = line.isEmpty()
                                          ? words.at(i)
                                          : line + QLatin1Char(' ') + words.at(i);
-                // Con la línea ya empezado no entra: se pasa a la siguiente. Con
-                // la línea vacía se acepta la palabra aunque no quepa (una sola
-                // palabra más ancha que la celda), si no el bucle no avanzaría.
+                // Once the line has started, a word that doesn't fit moves to
+                // the next line. With an empty line the word is accepted even
+                // if it doesn't fit (a single word wider than the cell),
+                // otherwise the loop would never advance.
                 if (fm.horizontalAdvance(cand) > w && !line.isEmpty())
                     break;
                 line = cand;
@@ -356,12 +359,12 @@ public:
         return out;
     }
 
-    // Título con salto de línea: si no cabe en una fila, usa las siguientes
-    // (wrap voraz por palabras) en lugar de cortarse con "…" a media palabra. En
-    // la ÚLTIMA línea entra todo lo que queda desde el principio de esa línea,
-    // elidado, para que se lea el arranque del resto y no un corte en seco. La
-    // caja la reserva la celda (applyGridGeometry usa la misma
-    // gridTextBlockH), así que no hay solape con la línea de canal.
+    // Title with line wrapping: if it doesn't fit on one row it uses the
+    // following ones (greedy word wrap) instead of being cut with "…" mid
+    // word. On the LAST line goes everything left from the start of that
+    // line, elided, so the beginning of the rest is readable instead of a
+    // hard cut. The cell reserves the box (applyGridGeometry uses the same
+    // gridTextBlockH), so there is no overlap with the channel line.
     static void drawGridTitle(QPainter *p, const QRect &r, const QString &text,
                               int lineH, int lines)
     {
@@ -385,18 +388,18 @@ private:
         const qreal gw = m_cellW > 0 ? m_cellW : kGridW * m_scale;
         const QRectF thumbR(r.left() + 6 * m_scale, r.top() + 6 * m_scale,
                             gw - 12 * m_scale, (gw - 12 * m_scale) * 9.0 / 16.0);
-        // Se pasa la clave, no el pixmap: el escalado va cacheado por
-        // (video, tamano), asi que hace falta la clave para consultarlo.
+        // The key is passed, not the pixmap: the scaling is cached by
+        // (video, size), so the key is needed to look it up.
         drawThumb(p, thumbR, cacheKeyFor(v), durationLabel(v.durationSeconds),
                   v.isLive);
         drawProgressBar(p, thumbR, v);
 
-        // Título y línea de canal al tamaño que manda en ESTA celda (ver
-        // gridTitlePx): 12 px en celda pequeña, 16 px en celda ancha. El
-        // interlineado lo fija la misma función pura que usa la celda, así que la
-        // segunda línea cae dentro de la caja reservada. En NEGRITA: se probó sin
-        // ella y el usuario pidió volver a ella (con la letra ya 1 px más pequeña
-        // el título se distingue de la línea de canal).
+        // Title and channel line at the size ruled by THIS cell (see
+        // gridTitlePx): 12 px in a small cell, 16 px in a wide one. The line
+        // height is set by the same pure function the cell uses, so the
+        // second line falls inside the reserved box. In BOLD: it was tried
+        // without it and the user asked to bring it back (with the font
+        // already 1 px smaller the title stands out from the channel line).
         const int titlePx = VideoListView::gridTitlePx(qRound(gw));
         const int lineH = VideoListView::gridTitleLineH(qRound(gw));
 
@@ -415,9 +418,9 @@ private:
 
         p->save();
         QFont m = p->font();
-        // La línea de canal/vistas/fecha del Home va un poco más pequeña que el
-        // título (2 px menos, con suelo de 10): el usuario la pidió más discreta
-        // que la del título, y a 1 px menos cantaba igual que él.
+        // The Home channel/views/date line is a little smaller than the title
+        // (2 px less, floor of 10): the user asked for it to be more discreet
+        // than the title's, and at 1 px less it still stood out as much as it.
         m.setPixelSize(qMax(10, titlePx - 2));
         p->setFont(m);
         p->setPen(nt::kMuted);
@@ -428,23 +431,23 @@ private:
         p->restore();
     }
 
-    // Métricas del bloque de texto de una fila de lista. La tipografía NO se
-    // toca: la que ya usaban las listas (título en la fuente de la app y en
-    // negrita, meta reducida). Lo único que unifica con Biblioteca es la FORMA
-    // de la fila (miniatura, canal • visitas • fecha y botón de opciones), no el
-    // tamaño de letra ni la negrita.
+    // Metrics of a list row's text block. The typography is NOT touched: the
+    // one the lists already used (title in the app font and bold, reduced
+    // meta). The only thing unified with Library is the row's SHAPE
+    // (thumbnail, channel • views • date and options button), not the font
+    // size nor the boldness.
     //
-    // QFontMetricsF no tiene constructor por defecto, así que aquí van las
-    // medidas (alto y ascendencia) y no la métrica en sí: quien pinta crea la
-    // suya con la misma fuente.
+    // QFontMetricsF has no default constructor, so here go the measurements
+    // (height and ascent) rather than the metric itself: whoever paints
+    // creates its own with the same font.
     struct ListTextMetrics
     {
         QFont title;
         QFont meta;
-        qreal lineH = 0;      // interlineado del título
-        qreal metaH = 0;      // alto de la línea de meta
-        qreal metaAscent = 0; // ascendencia de la meta (para su línea base)
-        qreal gap = 0;        // hueco entre título y meta
+        qreal lineH = 0;      // title line height
+        qreal metaH = 0;      // meta line height
+        qreal metaAscent = 0; // meta ascent (for its baseline)
+        qreal gap = 0;        // gap between title and meta
     };
 
     ListTextMetrics listMetrics(const QFont &base) const
@@ -457,16 +460,16 @@ private:
         const QFontMetricsF metaFm(m.meta);
         m.metaH = metaFm.height();
         m.metaAscent = metaFm.ascent();
-        // Hueco entre el título y la meta: 6 px, para que no se lean como una
-        // sola línea de texto.
+        // Gap between the title and the meta: 6 px, so they don't read as a
+        // single line of text.
         m.gap = 6 * m_scale;
         return m;
     }
 
-    // Meta de la fila de lista: UNA línea "canal • visitas • fecha" con la
-    // misma función format::metaLine que usa la rejilla del Home y las
-    // secciones de Biblioteca. Antes esta fila pintaba solo "canal • visitas"
-    // a 11,3 px: el mismo vídeo se leía distinto según la página.
+    // Meta of the list row: ONE line "channel • views • date" with the same
+    // format::metaLine function used by the Home grid and the Library
+    // sections. This row used to paint only "channel • views" at 11.3 px: the
+    // same video read differently depending on the page.
     void paintListMeta(QPainter *p, const QRect &r, const VideoInfo &v,
                        const ListTextMetrics &m, qreal blockTop,
                        int titleLines) const
@@ -486,23 +489,23 @@ private:
         p->restore();
     }
 
-    // Ancho útil del texto de la fila: el de la celda menos la miniatura (por
-    // la izquierda) y los botones de la derecha, con la MISMA cuenta que
-    // removeButtonRect/moreButtonRect, para que el título y la meta nunca
-    // queden debajo de ellos. Es lo que hace la fila de Biblioteca, donde el
-    // botón es un widget del layout y el texto no puede invadir su hueco.
+    // Usable width of the row's text: the cell's minus the thumbnail (on the
+    // left) and the buttons on the right, with the SAME arithmetic as
+    // removeButtonRect/moreButtonRect, so the title and the meta never end up
+    // beneath them. That's what Library's row does, where the button is a
+    // layout widget and the text cannot invade its space.
     //
-    // La cuenta es la de los rectángulos de arriba: 12 px de margen y, si hay
-    // botones, sus 26 px (más los 8 de separación cuando van los dos). Medido:
-    // sin descontar el botón, el título llegaba a x=839 y los puntos del ⋯ están
-    // en 838-841, o sea el texto se metía debajo.
+    // The arithmetic is the one of the rectangles above: 12 px of margin and,
+    // if there are buttons, their 26 px (plus the 8 of separation when both
+    // are shown). Measured: without discounting the button, the title reached
+    // x=839 with the ⋮ dots at 838-841, i.e. the text ran underneath.
     qreal textWidth(const QRect &r, qreal leftGutter) const
     {
-        qreal right = 12 * m_scale; // margen del borde
+        qreal right = 12 * m_scale; // edge margin
         if (m_showMore)
-            right += 26 * m_scale; // hueco del botón de opciones
+            right += 26 * m_scale; // options button space
         if (m_showMore && m_showRemove)
-            right += 8 * m_scale; // separación de los dos botones
+            right += 8 * m_scale; // separation of the two buttons
         if (m_showRemove)
             right += 26 * m_scale;
         return r.width() - leftGutter - right;
@@ -512,10 +515,10 @@ private:
                    const VideoInfo &v, int row) const
     {
         const QRect r = opt.rect;
-        // Hover redondeado con 2 px de aire: se lee como una tarjeta
-        // destacada y no como una franja de color a sangre (es lo que ya
-        // llevaba la fila enriquecida de Search y lo que mejor casa con las
-        // secciones de Biblioteca, cuya fila también va sobre una tarjeta).
+        // Rounded hover with 2 px of breathing room: it reads as a highlighted
+        // card and not as a full-bleed color strip (this is what Search's
+        // enriched row already had and what best matches the Library sections,
+        // whose row also sits on a card).
         if (opt.state & QStyle::State_MouseOver) {
             p->save();
             p->setRenderHint(QPainter::Antialiasing);
@@ -530,22 +533,22 @@ private:
         const QRectF thumbR(r.left() + 6 * m_scale,
                             r.top() + (r.height() - 76 * m_scale) / 2.0,
                             136 * m_scale, 76 * m_scale);
-        // Se pasa la clave, no el pixmap: el escalado va cacheado por
-        // (video, tamano), asi que hace falta la clave para consultarlo.
+        // The key is passed, not the pixmap: the scaling is cached by
+        // (video, size), so the key is needed to look it up.
         drawThumb(p, thumbR, cacheKeyFor(v), durationLabel(v.durationSeconds),
                   v.isLive);
         drawProgressBar(p, thumbR, v);
 
-        // Título: la fuente de la app en negrita (la que ya tenía la fila) y 2
-        // líneas, como la fila de Biblioteca. El interlineado es el natural de
-        // la fuente y son 2 líneas (no las 3 de la rejilla): la fila de lista
-        // tiene altura fija.
+        // Title: the app font in bold (the one the row already had) and 2
+        // lines, like Library's row. The line spacing is the font's natural
+        // one and it is 2 lines (not the grid's 3): the list row has a fixed
+        // height.
         const ListTextMetrics m = listMetrics(p->font());
         const qreal titleW = textWidth(r, kListTextX * m_scale);
-        // Líneas que ocupa REALMENTE el título (1 o 2). El bloque se centra con
-        // esa altura y la meta va pegada a su última línea: antes se reservaban
-        // 2 líneas siempre, así que con un título de una línea la meta quedaba
-        // un renglón entero más abajo (el usuario lo pidió pegado al título).
+        // Lines the title ACTUALLY occupies (1 or 2). The block is centered
+        // with that height and the meta goes stuck to its last line: before,
+        // 2 lines were always reserved, so with a one-line title the meta
+        // ended a whole row lower (the user asked for it stuck to the title).
         const int titleLines = titleW >= 20
             ? qMax(1, wrapTitle(QFontMetricsF(m.title), v.title, titleW, 2).size())
             : 1;
@@ -597,9 +600,9 @@ private:
 
     ThumbnailCache *m_thumbs;
     const QHash<QString, double> *m_progress = nullptr;
-    // Miniaturas ya escaladas al tamaño de celda, por (key de video, tamaño).
-    // mutable porque drawThumb/paint son const: la cache es un efecto del
-    // pintado, no estado de la vista. Se vacia en setScale/setCellSize/setMode.
+    // Thumbnails already scaled to the cell size, by (video key, size).
+    // mutable because drawThumb/paint are const: the cache is a painting
+    // effect, not view state. Cleared in setScale/setCellSize/setMode.
     mutable QHash<QString, QPixmap> m_thumbCache;
     int m_mode = VideoListView::ListMode;
     int m_currentRow = -1;
@@ -664,8 +667,8 @@ int VideoListView::clampGridColumns(int wanted, int viewportW, int minCellW)
 {
     if (wanted <= 0)
         return 1;
-    // Sin ancho aún (layout inicial) no hay tope que aplicar: el resizeEvent
-    // del Home lo ajustará en cuanto lo haya.
+    // With no width yet (initial layout) there is no clamp to apply: Home's
+    // resizeEvent will adjust it as soon as there is one.
     if (viewportW <= 0 || minCellW <= 0)
         return wanted;
     return qMax(1, qMin(wanted, qMax(3, viewportW / minCellW)));
@@ -675,11 +678,11 @@ int VideoListView::gridTitlePx(int cellW)
 {
     if (cellW <= 0)
         return 12;
-    // 140 px de celda -> 12 px, 340 px -> 16 px (5 px por cada 200 px de celda).
-    // Los topes importan en las dos direcciones: por debajo de ~150 px el título
-    // no debe bajar de 12 px (a 11 px deja de leerse) y por encima de ~320 px no
-    // tiene que seguir creciendo. Todo este rango bajó 1 px (y el techo 18 -> 16)
-    // porque con 14 px en negrita el usuario veía el título demasiado grande.
+    // 140 px cell -> 12 px, 340 px -> 16 px (5 px per 200 px of cell). The
+    // bounds matter in both directions: below ~150 px the title must not drop
+    // under 12 px (at 11 px it stops being readable) and above ~320 px it
+    // doesn't have to keep growing. This whole range dropped 1 px (and the
+    // ceiling 18 -> 16) because at 14 px bold the user saw the title too big.
     return qBound(12, qRound(12.0 + (cellW - 140) * 0.025), 16);
 }
 
@@ -690,9 +693,9 @@ int VideoListView::gridTitleLineH(int cellW)
 
 int VideoListView::gridTextBlockH(int cellW)
 {
-    // kGridTitleLines líneas de título + 14 px hasta la línea de canal + 20 px
-    // de pie. La celda reserva exactamente esto y la pintura dibuja en una caja
-    // de kGridTitleLines*lineH, así que el texto no puede salirse de la celda.
+    // kGridTitleLines title lines + 14 px up to the channel line + 20 px of
+    // foot. The cell reserves exactly this and painting draws into a
+    // kGridTitleLines*lineH box, so the text cannot escape the cell.
     return kGridTitleLines * gridTitleLineH(cellW) + 14 + 20;
 }
 
@@ -707,22 +710,22 @@ void VideoListView::applyGridGeometry()
     const int cols = gridColumns();
     const int avail = vw - (cols - 1) * spacing;
     const int cellW = qMax(1, avail / qMax(1, cols));
-    // La altura de la celda se deriva del contenido real: miniatura 16:9 +
-    // bloque de texto (hueco + título + línea de canal). El bloque se calcula
-    // con la MISMA función pura que usa la pintura (gridTextBlockH), así que la
-    // celda reserva de verdad lo que ocupa el título y nunca hay solape. Con un
-    // ratio fijo, al estrechar la ventana el texto se sale de la celda y el
-    // vídeo siguiente tapa el nombre del canal.
+    // The cell height derives from the real content: 16:9 thumbnail + text
+    // block (gap + title + channel line). The block is computed with the SAME
+    // pure function painting uses (gridTextBlockH), so the cell really
+    // reserves what the title takes and there is never overlap. With a fixed
+    // ratio, narrowing the window pushes the text out of the cell and the
+    // next video covers the channel name.
     const int cellH = qRound(qreal(cellW - 12 * m_scale) * 9.0 / 16.0)
                       + qRound(6 * m_scale) + 8 + gridTextBlockH(cellW);
     setGridSize(QSize(cellW, cellH));
-    // En IconMode el tamaño de la celda lo manda el sizeHint del MODELO, no
-    // gridSize(): dejando el kGridH fijo (258) en el sizeHint mientras aquí se
-    // calcula otro cellH, las filas ocupaban 258 y la página dimensionaba la
-    // sección con este cellH, así que la sección se quedaba más corta que el
-    // contenido y la ÚLTIMA fila no se veía (y con ella la línea de canal del
-    // vídeo). Se escribe aquí para que sizeHint, gridSize, delegate y alto de
-    // sección salgan todos del mismo cálculo.
+    // In IconMode the cell size is ruled by the MODEL's sizeHint, not
+    // gridSize(): leaving the fixed kGridH (258) in the sizeHint while here a
+    // different cellH was computed, rows took 258 while the page sized the
+    // section with this cellH, so the section came out shorter than the
+    // content and the LAST row was not visible (nor the video's channel line
+    // with it). It is written here so sizeHint, gridSize, delegate and section
+    // height all come out of the same calculation.
     const QSize cell(cellW, cellH);
     if (cell != m_gridCell) {
         m_gridCell = cell;
@@ -736,8 +739,8 @@ void VideoListView::applyGridGeometry()
 
 QRect VideoListView::gridItemRect(int row) const
 {
-    // visualRect (público) devuelve el rect del item YA COLOCADO por el layout,
-    // que es lo que hay que comparar con la altura de la sección.
+    // visualRect (public) returns the rect of the item ALREADY PLACED by the
+    // layout, which is what has to be compared against the section height.
     return visualRect(m_model->index(row, 0));
 }
 
@@ -777,9 +780,9 @@ void VideoListView::showVideos(const QVector<VideoInfo> &videos, Mode mode)
                               : QSize(0, qRound(kListH * m_scale)));
         m_model->appendRow(item);
     }
-    // applyGridGeometry escribe el sizeHint de los items con el tamaño de celda
-    // REAL, así que se llama DESPUÉS de crearlos: si se llama antes (con el
-    // modelo ya vaciado) no tendría items que corregir.
+    // applyGridGeometry writes the items' sizeHint with the REAL cell size,
+    // so it is called AFTER creating them: if called before (with the model
+    // already cleared) it would have no items to fix.
     if (mode == GridMode)
         applyGridGeometry();
     refreshThumbnails();
@@ -861,9 +864,9 @@ void VideoListView::appendVideos(const QVector<VideoInfo> &videos)
         m_model->appendRow(item);
     }
     m_videos += videos;
-    // Por el mismo motivo que en showVideos: el sizeHint de la rejilla lo fija
-    // applyGridGeometry con el tamaño de celda real, y los items nuevos ya
-    // nazcan con el (gridItemSize) pero la geometría puede haber cambiado.
+    // For the same reason as in showVideos: the grid's sizeHint is set by
+    // applyGridGeometry with the real cell size, and although the new items
+    // are already born with it (gridItemSize) the geometry may have changed.
     if (m_mode == GridMode)
         applyGridGeometry();
     refreshThumbnails();
@@ -901,8 +904,8 @@ void VideoListView::mouseReleaseEvent(QMouseEvent *event)
     if (event->button() == Qt::LeftButton) {
         const QModelIndex idx = indexAt(event->pos());
         if (idx.isValid() && idx.row() >= 0 && idx.row() < m_videos.size()) {
-            // En modo lista con la X activa, el click sobre ella borra en vez
-            // de reproducir.
+            // In list mode with the X enabled, clicking on it deletes instead
+            // of playing.
             if (m_rowMore && m_mode == ListMode) {
                 const QRect cell = visualRect(idx);
                 if (moreButtonRect(cell, m_scale, m_rowRemove)

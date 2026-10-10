@@ -11,25 +11,25 @@
 #include "yt.h"
 
 namespace {
-// Cada cuánto se guarda la posición en el historial. 20 s (antes 60 s): es lo
-// que marca el retardo de la barra de progreso de "Continuar viendo" — con 60 s
-// el usuario veía un progreso hasta un minuto viejo. El coste por escritura es
-// UN INSERT OR REPLACE de una fila en SQLite local, y savePosition() descarta
-// la escritura si la posición no ha avanzado (vídeo en pausa), así que bajar el
-// intervalo no se nota ni en CPU ni en disco. El resto de guardas (pausa, cambio
-// de vídeo, aboutToQuit) siguen salvando al instante.
+// How often the position is saved to history. 20 s (was 60 s): that is what
+// caused the delay of the "Continuar viendo" progress bar — with 60 s
+// the user saw progress up to a minute stale. The cost per write is
+// ONE INSERT OR REPLACE of a row in local SQLite, and savePosition() discards
+// the write if the position has not advanced (video paused), so lowering the
+// interval is noticeable neither in CPU nor on disk. The rest of the save points (pause, video
+// change, aboutToQuit) still save instantly.
 constexpr int kPositionFlushMs = 20000;
-// Avance mínimo (ms) para dar por nueva la posición a guardar. Evita reescribir
-// la misma fila cuando el flush cae con el vídeo parado.
+// Minimum advance (ms) to treat the position to save as new. Avoids rewriting
+// the same row when the flush fires with the video stopped.
 constexpr qlonglong kPositionFlushMinDeltaMs = 2000;
-// Ventana de reproducción "estable" que reinicia el presupuesto de intentos de
-// recuperación (una interrupción puntual tras un tramo largo sano no debe
-// agotar lo acumulado). 5 min y NO 60 s: la sesión gateada de YouTube muere a
-// los ~60 s de carga (EOF prematuro a ~1:03) y con 60 s el reinicio borraba el
-// presupuesto justo antes de cada muerte → reload → 60 s → reload… bucle sin
-// fin. Con 5 min el gate nunca llega a reiniciar y el presupuesto se agota
-// (máx. 3 intentos → error claro); las interrupciones genuinamente raras
-// (pasados 5 min de reproducción sana) siguen sin gastar presupuesto.
+// "Stable" playback window that resets the recovery attempt
+// budget (a one-off interruption after a long healthy stretch must not
+// drain what was accumulated). 5 min and NOT 60 s: YouTube's gated session dies at
+// ~60 s of loading (premature EOF at ~1:03) and with 60 s the restart wiped the
+// budget right before each death → reload → 60 s → reload… endless
+// loop. With 5 min the gate never gets to restart and the budget is drained
+// instead (max. 3 attempts → clear error); genuinely rare interruptions
+// (past 5 min of healthy playback) still do not spend budget.
 constexpr qint64 kRecoverBudgetResetMs = 300000;
 }
 
@@ -46,10 +46,10 @@ PlayerController::PlayerController(Yt *yt, PlayerWidget *player,
     m_flushTimer->setInterval(kPositionFlushMs);
     connect(m_flushTimer, &QTimer::timeout, this, [this] {
         savePosition();
-        // Reproducción estable ≥5 min seguidos: cierra el episodio de
-        // recuperación (MainWindow desarma el reinicio automático por sesión
-        // gateada; sin esto, tras un reinicio que funcionó, la próxima sesión
-        // gateada ya no podría reiniciar).
+        // Stable playback ≥5 min in a row: closes the recovery
+        // episode (MainWindow disarms the gated-session auto-restart; without
+        // this, after a restart that worked, the next gated session could no
+        // longer restart).
         if (m_phase == QLatin1String("playing") && m_stableSince.isValid()
             && m_stableSince.elapsed() > kRecoverBudgetResetMs) {
             m_stableSince.restart();
@@ -140,21 +140,22 @@ bool PlayerController::removeFromQueue(int index)
 {
     if (index < 0 || index >= m_queue.size())
         return false;
-    // El vídeo en reproducción no se quita: hacerlo dejaría la cola apuntando
-    // al siguiente con el estado de reproducción del que se fue, y "A
-    // continuación" marcaría como sonando uno que el usuario no eligió.
+    // The video being played is not removed: doing so would leave the queue
+    // pointing at the next one while carrying the playback state of the one
+    // that left, and "A continuación" would mark as playing one the user did
+    // not choose.
     if (index == m_index)
         return false;
 
     m_queue.remove(index);
-    // Todo lo que estaba por detrás del quitado se desplaza un índice hacia
-    // atrás, así que hay que reindexar la tabla de posiciones de reanudación:
-    // si no, un "continuar viendo" arrancaría en la posición de otro vídeo.
+    // Everything behind the removed one shifts one index back, so the resume
+    // position table must be reindexed: otherwise a "continue watching" would
+    // start at another video's position.
     QHash<int, qlonglong> shifted;
     for (auto it = m_indexStartMs.constBegin();
          it != m_indexStartMs.constEnd(); ++it) {
         if (it.key() == index)
-            continue; // el vídeo quitado
+            continue; // the removed video
         shifted.insert(it.key() > index ? it.key() - 1 : it.key(), it.value());
     }
     m_indexStartMs = shifted;
@@ -176,10 +177,10 @@ void PlayerController::playIndex(int index)
     m_pendingStartMs = m_indexStartMs.value(index, 0);
     m_recoverAttempts = 0;
     m_lastRecoverMs = 0;
-    // Stream nuevo: por defecto puede ser un directo hasta que llegue el
-    // streamReady (el sintético de AV1 lo traerá a false), y NO es un directo
-    // declarado (la señal autoritativa llega con el streamReady, a true solo
-    // si el player response lo marcó como directo actual).
+    // New stream: by default it can be a live stream until streamReady
+    // arrives (the AV1 synthetic will bring it as false), and it is NOT a
+    // declared live stream (the authoritative signal arrives with streamReady,
+    // true only if the player response marked it as a current live broadcast).
     m_streamCanBeLive = true;
     m_streamIsLive = false;
     setPhase(QStringLiteral("loading"));
@@ -188,9 +189,9 @@ void PlayerController::playIndex(int index)
     const VideoInfo &v = m_queue[index];
     if (m_history && !v.id.isEmpty()) {
         m_history->add(v.id, m_pendingStartMs);
-        // La fila del vídeo nuevo se acaba de escribir con la posición de
-        // reanudación: la línea base del descarte de escrituras redundantes es
-        // esa, no la del vídeo anterior.
+        // The new video's row was just written with the resume
+        // position: the baseline for discarding redundant writes is
+        // that one, not the previous video's.
         m_lastSavedId = v.id;
         m_lastSavedMs = m_pendingStartMs;
     }
@@ -229,8 +230,8 @@ void PlayerController::onStreamResolved(const StreamInfo &stream)
         m_errorMessage = QStringLiteral("No se obtuvo URL de streaming.");
         return;
     }
-    // El sintético de AV1 (construido desde un fMP4 finito) nunca es un
-    // directo; el resto de flujos pueden serlo.
+    // The AV1 synthetic (built from a finite fMP4) is never a live
+    // stream; the other streams can be.
     m_streamCanBeLive = stream.canBeLive;
     m_streamIsLive = stream.isLive;
     double from = m_seekBack;
@@ -238,16 +239,16 @@ void PlayerController::onStreamResolved(const StreamInfo &stream)
         from = double(m_pendingStartMs) / 1000.0;
         m_pendingStartMs = 0;
     }
-    // Consumida: el mismo índice no vuelve a arrancar desde esa posición en
-    // futuras visitas (p. ej. previous() tras terminar).
+    // Consumed: the same index does not start again from that position on
+    // future visits (e.g. previous() after finishing).
     m_indexStartMs.remove(m_index);
-    // La preferencia de idioma de audio se aplica justo antes de cargar la
-    // fuente: sin "alang" mpv elegiría la pista con DEFAULT=YES (el original)
-    // aunque el master venga reordenado con el doblaje primero.
+    // The audio language preference is applied right before loading the
+    // source: without "alang" mpv would pick the track with DEFAULT=YES (the original)
+    // even if the master comes reordered with the dub first.
     m_player->setAudioLanguage(m_yt->audioLanguage());
-    // Reproducción directa (edge): la pista de audio es un flujo aparte que
-    // mpv fusiona con --audio-file (duración exacta + seek fiable, sin el HLS
-    // de segmento único). Vacío limpia la opción para el flujo clásico.
+    // Direct playback (edge): the audio track is a separate stream that
+    // mpv merges with --audio-file (exact duration + reliable seek, without the single-segment
+    // HLS). Empty clears the option for the classic stream.
     m_player->setAudioFile(stream.audioUrl);
     NT_DEBUG("E2E playIndex=%d from=%.1f resumeMs=0 audioUrl=%d\n", m_index,
              from, int(!stream.audioUrl.isEmpty()));
@@ -280,8 +281,8 @@ void PlayerController::onPlayerState()
             savePosition();
             playIndex(m_index + 1);
         } else if (m_repeat && !m_queue.isEmpty()) {
-            // Repetir la cola entera: al terminar el último, se vuelve al
-            // primero (con cola de un solo vídeo, esto es "repetir uno").
+            // Repeat the whole queue: when the last one ends, it goes back
+            // to the first (with a one-video queue, this is "repeat one").
             savePosition();
             playIndex(0);
         } else {
@@ -299,17 +300,17 @@ void PlayerController::onPlayerPosition()
     emit positionChanged(m_position, m_duration);
 }
 
-// La duración del medio cambió de verdad (el backend ya la tiene). Se avisa por
-// separado de positionChanged porque esta llega ~1/s durante la reproducción y
-// escribir en la caché de vídeos en cada tick sería trabajo inútil en BD.
+// The media duration really changed (the backend already has it). It is notified
+// separately from positionChanged because the latter arrives ~1/s during playback and
+// writing to the video cache on every tick would be useless DB work.
 void PlayerController::onPlayerDuration()
 {
     const double d = m_player->duration();
     if (d <= 0 || qAbs(d - m_reportedDuration) < 0.5)
         return;
-    // Se compara contra la duración YA NOTIFICADA, no contra m_duration: los
-    // ticks de posición también la actualizan y podrían "consumirse" el aviso
-    // antes de que llegue la señal (el vídeo se quedaría sin cachear).
+    // Compared against the ALREADY NOTIFIED duration, not m_duration: the
+    // position ticks also update it and could "consume" the notification
+    // before the signal arrives (the video would go un-cached).
     m_reportedDuration = d;
     m_duration = d;
     emit durationChanged(d);
@@ -372,9 +373,9 @@ void PlayerController::applyCurrentDetail(const VideoInfo &detail)
         cur.viewCount = detail.viewCount;
         changed = true;
     }
-    // La fecha del detalle (/next dateText) también se aplica. Faltaba: el
-    // item de la cola quedaba sin fecha aunque el detalle la trajera, y su fila
-    // de "A continuación" (y la meta de la página) salían sin ella.
+    // The detail's date (/next dateText) is applied too. It was missing: the
+    // queue item stayed without a date even if the detail brought one, and its
+    // "A continuación" row (and the page meta) came out without it.
     if (cur.publishedAt.isEmpty() && !detail.publishedAt.isEmpty()) {
         cur.publishedAt = detail.publishedAt;
         changed = true;
@@ -383,10 +384,10 @@ void PlayerController::applyCurrentDetail(const VideoInfo &detail)
         emit metadataChanged();
 }
 
-// Sobrescribe el título del ítem actual con la traducción del /next
-// (solo si el id coincide). Actualiza también las instantáneas si el ítem
-// está guardado en ellas, para que la UI de la cola/overlay muestre el título
-// traducido sin reconstruir la lista.
+// Overwrites the current item's title with the /next translation
+// (only if the id matches). Also updates the snapshots if the item
+// is stored in them, so the queue/overlay UI shows the translated
+// title without rebuilding the list.
 void PlayerController::renameCurrent(const QString &videoId,
                                      const QString &title)
 {
@@ -411,9 +412,9 @@ void PlayerController::next()
 
 void PlayerController::previous()
 {
-    // Comportamiento de YouTube: si el vídeo actual ya está avanzado (más del
-    // umbral), "Anterior" vuelve al inicio del vídeo actual; solo si está al
-    // principio salta al vídeo previo de la cola.
+    // YouTube behavior: if the current video is already ahead (past the
+    // threshold), "Anterior" restarts the current video; only if it is at the
+    // beginning does it jump to the previous video in the queue.
     if (m_position > kPrevRestartThreshold) {
         seek(0.0);
         return;
@@ -427,12 +428,12 @@ void PlayerController::previousTrack()
         playIndex(m_index - 1);
 }
 
-// Barajar: reordena al azar SOLO la cola que queda por delante del vídeo en
-// reproducción; el actual no se mueve de sitio (como YouTube). Fisher-Yates con
-// QRandomGenerator::global. Las posiciones de reanudación van por ÍNDICE y el
-// reordenado invalida las de los índices que se mueven, así que se descartan
-// todas menos la del actual (que sigue donde estaba). Al reactivar el modo se
-// vuelve a barajar lo que quede.
+// Shuffle: randomly reorders ONLY the queue ahead of the video being
+// played; the current one does not move (like YouTube). Fisher-Yates with
+// QRandomGenerator::global. Resume positions are keyed by INDEX and the
+// reordering invalidates those of the indices that move, so all are
+// discarded except the current one (which stays where it was). Re-enabling the mode
+// shuffles whatever remains.
 void PlayerController::setShuffle(bool on)
 {
     if (m_shuffle == on)
@@ -474,10 +475,10 @@ void PlayerController::savePosition()
     if (!m_history || !active || cur.id.isEmpty())
         return;
     const qlonglong posMs = qRound(m_position * 1000.0);
-    // Descarta la escritura si es el MISMO vídeo y la posición apenas ha
-    // movido (flush con el vídeo en pausa, o posición idéntica). Con el
-    // intervalo corto (20 s) esto es lo que mantiene el coste en un solo
-    // INSERT por cada 2 s de reproducción real.
+    // Discards the write if it is the SAME video and the position barely
+    // moved (flush with the video paused, or identical position). With the
+    // short interval (20 s) this is what keeps the cost at one INSERT
+    // per 2 s of real playback.
     if (cur.id == m_lastSavedId
         && qAbs(posMs - m_lastSavedMs) < kPositionFlushMinDeltaMs)
         return;
@@ -529,7 +530,7 @@ void PlayerController::setVolume(double volume)
 void PlayerController::setVolumeMax(double maxPercent)
 {
     m_volumeMax = qBound(100, int(qRound(maxPercent)), 200);
-    // El volumen actual puede quedar por encima del nuevo tope: capar.
+    // The current volume may sit above the new cap: clamp it.
     if (m_volume > double(m_volumeMax))
         m_volume = double(m_volumeMax);
     m_player->setVolumeMax(double(m_volumeMax));
@@ -559,23 +560,23 @@ void PlayerController::onStreamStalled()
 {
     if (m_index < 0)
         return;
-    // Un atasco con la reproducción estabilizada el rato suficiente no cuenta
-    // contra el límite de intentos (caso normal: presupuesto de URL agotado
-    // tras un tramo largo).
+    // A stall with playback stabilized long enough does not count
+    // against the attempt limit (normal case: URL budget drained
+    // after a long stretch).
     if (m_stableSince.isValid() && m_stableSince.elapsed() > kRecoverBudgetResetMs)
         m_recoverAttempts = 0;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    // Recaída rápida (<8s desde el último intento): el micro-seek local no
-    // bastó -> síntoma de red real (URL caducada/cortada/sesión gateada). Aquí
-    // sí se consume el presupuesto y se re-resuelve con URLs frescas vía
-    // reloadCurrent(); solo se abandona cuando el presupuesto se agota.
+    // Rapid relapse (<8s since the last attempt): the local micro-seek was
+    // not enough -> symptom of real network trouble (URL expired/cut/gated session). Here
+    // the budget IS spent and it re-resolves with fresh URLs via
+    // reloadCurrent(); it only gives up when the budget is exhausted.
     const bool rapidRelapse = m_lastRecoverMs > 0
                               && now - m_lastRecoverMs < 8000;
     if (rapidRelapse) {
         if (m_recoverAttempts >= 3) {
-            // Presupuesto agotado: se abandona. La app reinicia con el último
-            // vídeo (lo escucha MainWindow) porque reiniciar sale de la sesión
-            // gateada.
+            // Budget exhausted: give up. The app restarts with the last
+            // video (MainWindow listens for it) because restarting gets out of
+            // the gated session.
             setPhase(QStringLiteral("error"));
             m_errorMessage = QStringLiteral(
                 "La reproducción se interrumpió y no se pudo recuperar.");
@@ -584,22 +585,22 @@ void PlayerController::onStreamStalled()
         }
         ++m_recoverAttempts;
         m_lastRecoverMs = now;
-        // Recaída con síntomas de sesión gateada: rotar la sesión (visitorData
-        // nuevo) antes de re-resolver, o la re-resolución dentro de la misma
-        // sesión vuelve a fallar (el gate es de sesión, no de URL).
+        // Relapse with gated-session symptoms: rotate the session (new
+        // visitorData) before re-resolving, or the re-resolution inside the
+        // same session fails again (the gate is per session, not per URL).
         m_yt->rotateStreamSession();
         NT_DEBUG("E2E streamStalled -> reloadCurrent intento=%d pos=%.1f\n",
                  m_recoverAttempts, m_player->position());
         reloadCurrent();
         return;
     }
-    // Primer atasco detectado: el audio-buffer de mpv se agotó pero el vídeo
-    // sigue (HW); como el usuario comprobó, un micro-seek a la posición actual
-    // revive la pista al instante sin re-resolver red (reloadCurrent() hubiera
-    // tardado 8-25s re-bajando URLs). Es local y barato: no cuenta contra el
-    // presupuesto de intentos de red. mpv puede emitir streamStalled repetido
-    // mientras el demuxer se re-prima; si recae antes de 8s la rama anterior
-    // decide que es red real y re-resuelve consumiendo presupuesto.
+    // First stall detected: mpv's audio buffer ran dry but the video
+    // keeps going (HW); as the user verified, a micro-seek to the current
+    // position revives the track instantly without re-resolving the network (reloadCurrent() would have
+    // taken 8-25s re-downloading URLs). It is local and cheap: it does not count against the
+    // network attempt budget. mpv can emit streamStalled repeatedly
+    // while the demuxer re-primes; if it relapses before 8s the previous branch
+    // decides it is real network trouble and re-resolves spending budget.
     m_lastRecoverMs = now;
     NT_DEBUG("E2E streamStalled -> micro-seek local pos=%.1f\n",
              m_player->position());
@@ -607,27 +608,27 @@ void PlayerController::onStreamStalled()
     return;
 }
 
-// Interrupción de la reproducción (EOF prematuro por sesión de URLs gateada
-// con 403, o pista de audio externa que nunca abrió): a diferencia del atasco
-// (micro-seek local, barato) aquí el stream ya se terminó o va sin audio, así
-// que la recuperación es rotar la sesión (el gate es de sesión, no de URL) y
-// re-resolver con URLs frescas en una sesión NUEVA, reanudando en la posición
-// actual. Acotado por el mismo presupuesto de intentos.
+// Playback interruption (premature EOF from a gated URL session with 403, or
+// an external audio track that never opened): unlike the stall
+// (local micro-seek, cheap), here the stream is already finished or running without audio, so
+// the recovery is to rotate the session (the gate is per session, not per URL) and
+// re-resolve with fresh URLs in a NEW session, resuming at the current
+// position. Bounded by the same attempt budget.
 void PlayerController::onStreamInterrupted()
 {
     if (m_index < 0)
         return;
-    // Reproducción estable el rato suficiente: reinicia el contador de
-    // intentos (una interrupción puntual cada muchos segundos no debe
-    // agotar el presupuesto acumulado de cortes anteriores). 5 min, NO 60 s:
-    // la sesión gateada muere a los ~60 s y con 60 s el reinicio borraba el
-    // presupuesto justo antes de cada muerte → bucle de reload sin fin.
+    // Stable playback long enough: resets the attempt
+    // counter (a one-off interruption every many seconds must not
+    // drain the budget accumulated from earlier cuts). 5 min, NOT 60 s:
+    // the gated session dies at ~60 s and with 60 s the restart wiped the
+    // budget right before each death → endless reload loop.
     if (m_stableSince.isValid() && m_stableSince.elapsed() > kRecoverBudgetResetMs)
         m_recoverAttempts = 0;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    // Recaída rápida (<8s desde el último intento) o presupuesto agotado:
-    // la sesión sigue gateada -> se abandona (MainWindow escucha la señal y
-    // reinicia la app con el último vídeo: reiniciar sale de la sesión).
+    // Rapid relapse (<8s since the last attempt) or budget exhausted:
+    // the session is still gated -> give up (MainWindow listens for the signal and
+    // restarts the app with the last video: restarting gets out of the session).
     if (m_recoverAttempts >= 3 || (m_lastRecoverMs > 0
                                    && now - m_lastRecoverMs < 8000)) {
         setPhase(QStringLiteral("error"));
@@ -638,9 +639,9 @@ void PlayerController::onStreamInterrupted()
     }
     m_lastRecoverMs = now;
     ++m_recoverAttempts;
-    // Rotar la sesión ANTES de re-resolver: con el visitorData nuevo la
-    // re-resolución sale de la sesión gateada (si la sesión nueva tampoco
-    // respira, el presupuesto se agota en ≤3 intentos y se muestra el error).
+    // Rotate the session BEFORE re-resolving: with the new visitorData the
+    // re-resolution leaves the gated session (if the new session does not
+    // breathe either, the budget is exhausted in ≤3 attempts and the error is shown).
     m_yt->rotateStreamSession();
     NT_DEBUG("E2E streamInterrupted -> reloadCurrent intento=%d pos=%.1f\n",
              m_recoverAttempts, m_player->position());

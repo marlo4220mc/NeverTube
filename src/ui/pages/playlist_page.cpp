@@ -26,7 +26,7 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
     root->setContentsMargins(16, 16, 16, 16);
     root->setSpacing(10);
 
-    // "Volver" con el token #backLink, igual que Canal, Historial y el Player.
+    // "Volver" (Back) with the #backLink token, same as Channel, History and Player.
     auto *top = new QHBoxLayout;
     auto *back = new QPushButton(QStringLiteral("Volver"), this);
     back->setObjectName(QStringLiteral("backLink"));
@@ -39,14 +39,14 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
     top->addStretch(1);
     root->addLayout(top);
 
-    // --- Ficha de la playlist ----------------------------------------------
-    // La MISMA caja que la ficha del canal (#channelCard, #channelName,
-    // #channelMeta): el nombre y el recuento en una columna, las cuatro
-    // acciones a la derecha. Antes iba todo suelto sobre el fondo de la página,
-    // en tres filas (título, meta, acciones), y la única caja de la superficie
-    // era la lista, así que la cabecera no se leía como una ficha.
-    // Los tokens son los mismos a propósito: es una sola forma para las dos
-    // superficies de detalle, no dos cosas parecidas.
+    // --- Playlist card ------------------------------------------------------
+    // The SAME box as the channel card (#channelCard, #channelName,
+    // #channelMeta): name and count in one column, the four
+    // actions on the right. Before, everything sat loose on the page background
+    // in three rows (title, meta, actions), and the only box on the surface
+    // was the list, so the header did not read as a card.
+    // The tokens are the same on purpose: it is a single shape for both
+    // detail surfaces, not two similar things.
     m_card = new QFrame(this);
     m_card->setObjectName(QStringLiteral("channelCard"));
     m_card->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
@@ -68,9 +68,9 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
     titleCol->addWidget(m_meta);
     head->addLayout(titleCol, 1);
 
-    // Reproducir es la acción principal de la página (#primary) y las otras tres
-    // son de gestión de la lista, no de reproducción: por eso van como ghosts
-    // al lado y no como cuatro botones del mismo peso.
+    // Play is the page's main action (#primary) and the other three are
+    // list management, not playback: that is why they go as ghosts
+    // beside it and not as four buttons of equal weight.
     auto *playBtn = new QPushButton(QStringLiteral("Reproducir"), m_card);
     playBtn->setObjectName(QStringLiteral("primary"));
     playBtn->setCursor(Qt::PointingHandCursor);
@@ -81,12 +81,12 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
     });
     head->addWidget(playBtn, 0, Qt::AlignVCenter);
 
-    // El botón quita la fila MARCADA, no una "seleccionada": la lista es
-    // NoSelection y el único estado es la fila activa (m_currentRow, la del
-    // último clic, que además es la que se está reproduciendo). Decir
-    // "seleccionado" prometía algo que no existe, así que el texto dice lo que
-    // hace. Sigue empezando deshabilitado: sin fila marcada no hay nada que
-    // quitar, y con el texto corto el botón no compite con "Reproducir".
+    // The button removes the MARKED row, not a "selected" one: the list is
+    // NoSelection and the only state is the active row (m_currentRow, the one from the
+    // last click, which is also the one being played). Saying
+    // "selected" promised something that does not exist, so the label says what it
+    // actually does. It still starts disabled: with no marked row there is nothing to
+    // remove, and with the short label the button does not compete with "Reproducir".
     m_removeBtn = new QPushButton(QStringLiteral("Quitar"), m_card);
     m_removeBtn->setObjectName(QStringLiteral("ghost"));
     m_removeBtn->setCursor(Qt::PointingHandCursor);
@@ -122,20 +122,20 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
                 m_removeBtn->setEnabled(index >= 0 && index < m_videos.size());
                 emit openRequested(m_videos, index);
             });
-    // Botón de opciones por fila, igual que Search/Canal/Historial: la página
-    // pide el vídeo y MainWindow muestra el menú compartido.
+    // Per-row options button, same as Search/Channel/History: the page
+    // asks for the video and MainWindow shows the shared menu.
     m_list->setRowMoreVisible(true);
     connect(m_list, &VideoListView::moreRequested, this,
             [this](int, const VideoInfo &v, const QPoint &pos) {
                 emit rowMenuRequested(v, pos);
             });
-    // Estado vacío: una playlist sin vídeos no dejaba más que la lista en negro
-    // pelado. Es la misma caja punteada #emptyState de la Biblioteca, de las
-    // pestañas del Canal y del Historial, con el alto FIJO de 96 px para que no
-    // se estire a todo el alto del área.
-    // Sin el glifo U+22EE (tres puntos verticales) en el texto: no está en la
-    // fuente de la app y saldría el marcador de glifo ausente. De ahí que se
-    // diga "el menú" y no "el ⋮"; --selftest-glyphs avisa de esto.
+    // Empty state: a playlist with no videos left nothing but the bare black
+    // list. It is the same dotted #emptyState box as Library, Channel
+    // tabs and History, with a FIXED height of 96 px so it does not
+    // stretch to the full height of the area.
+    // No U+22EE glyph (three vertical dots) in the text: it is not in the
+    // app's font and the missing-glyph marker would show up. Hence the text
+    // says "el menú" (the menu) and not "el ⋮"; --selftest-glyphs warns about this.
     m_empty = new QLabel(
         nt::emptyStateHtml(QStringLiteral(
             "Esta playlist todavía no tiene vídeos. Añádelos desde el menú de cualquier vídeo.")),
@@ -146,24 +146,24 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
     m_empty->setFixedHeight(116);
     m_empty->hide();
 
-    // Lista y caja vacía van en un CONTENEDOR con stretch 1, y no sueltas en el
-    // layout de la página. Motivo medido: al ocultar la lista, un QVBoxLayout
-    // reparte el sobrante vertical como separación EXTRA entre sus elementos, así
-    // que la cabecera se iba hacia abajo (con la lista vacía, "Volver" caía a
-    // y=195 en vez de y=16 y la ficha a y=417 en vez de y=59). Con el contenedor
-    // el sobrante se lo queda él y la cabecera no se mueve: la lista y la caja
-    // vacía empiezan siempre en el mismo sitio.
+    // List and empty box go in a CONTAINER with stretch 1, not loose in the
+    // page layout. Measured reason: hiding the list makes a QVBoxLayout
+    // distribute the leftover vertical space as EXTRA spacing between its items, so
+    // the header slid down (with an empty list, "Volver" fell to
+    // y=195 instead of y=16 and the card to y=417 instead of y=59). With the container
+    // it keeps the leftover space itself and the header does not move: the list and the
+    // empty box always start at the same place.
     m_area = new QWidget(this);
     auto *areaLay = new QVBoxLayout(m_area);
     areaLay->setContentsMargins(0, 0, 0, 0);
     areaLay->setSpacing(0);
     areaLay->addWidget(m_list, 1);
-    // La caja vacía va con stretch 1 y SIN alineación, a propósito: con
-    // Qt::AlignHCenter el layout le da solo el sizeHint y la caja sale estrecha
-    // (medido: 174 px) con el texto cortado, y la política Expanding no lo
-    // cambia. Sin alineación ocupa todo el ancho del área y, como el alto es
-    // fijo de 96, Qt la centra en el hueco que le reparte (medido: 909x96 en
-    // y=500 dentro del área de y=141..956), igual que las pestañas del Canal.
+    // The empty box goes with stretch 1 and NO alignment, on purpose: with
+    // Qt::AlignHCenter the layout gives it only the sizeHint and the box comes out narrow
+    // (measured: 174 px) with the text cut off, and the Expanding policy does not
+    // change that. With no alignment it takes the full width of the area and, since the height is
+    // fixed at 96, Qt centers it in the space it gets (measured: 909x96 at
+    // y=500 inside the area y=141..956), same as the Channel tabs.
     areaLay->addWidget(m_empty, 1);
     root->addWidget(m_area, 1);
 }
@@ -185,14 +185,14 @@ void PlaylistPage::reload()
     m_list->setCurrentRow(-1);
     m_removeBtn->setEnabled(false);
     m_meta->setText(QStringLiteral("%1 vídeos").arg(m_videos.size()));
-    // Lista o caja vacía, nunca las dos (ver el comentario del constructor).
+    // List or empty box, never both (see the constructor's comment).
     m_empty->setVisible(m_videos.isEmpty());
     m_list->setVisible(!m_videos.isEmpty());
 }
 
-// Quita de la playlist la fila MARCADA (currentRow, la del último clic). La
-// lista es NoSelection: no hay selección múltiple, así que esto quita UN vídeo,
-// el que el botón muestra marcado con el borde de acento.
+// Removes from the playlist the MARKED row (currentRow, the one from the last
+// click). The list is NoSelection: there is no multi-selection, so this removes ONE
+// video, the one the button shows marked with the accent border.
 void PlaylistPage::onRemoveMarked()
 {
     const int row = m_list->currentRow();
@@ -218,11 +218,11 @@ void PlaylistPage::onRename()
 
 void PlaylistPage::onDelete()
 {
-    // Confirmación antes de borrar la playlist entera: es lo único que queda de
-    // ella, y los vídeos sí se pueden volver a añadir uno a uno. El diálogo de la
-    // app (nt::confirm) y no QMessageBox, por el mismo motivo que el de la
-    // página Buscar. El cuerpo lleva el nombre de la playlist y su recuento, que
-    // es lo que dice qué se va a perder.
+    // Confirmation before deleting the whole playlist: it is all that is left of
+    // it, and the videos can in fact be re-added one by one. The app's dialog
+    // (nt::confirm) and not QMessageBox, for the same reason as the one on the
+    // Search page. The body carries the playlist's name and its count, which
+    // is what says what will be lost.
     if (m_playlistId.isEmpty())
         return;
     const QString name = m_title->text().trimmed();

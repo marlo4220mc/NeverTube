@@ -9,10 +9,10 @@
 
 namespace nt {
 
-// Logging de depuración controlado por la variable de entorno NEVERTUBE_DEBUG.
-// Desactivado por defecto para no ensuciar stderr en el bucle de 33 ms del
-// reproductor. Reactivar sin recompilar: NEVERTUBE_DEBUG=1 ./nevertube_qt2
-// Imita una macro variádica: nt::debug("E2E phase=%s\n", s).
+// Debug logging gated by the NEVERTUBE_DEBUG environment variable.
+// Off by default so it does not pollute stderr in the player's 33 ms loop.
+// Re-enable without recompiling: NEVERTUBE_DEBUG=1 ./nevertube_qt2
+// Mimics a variadic macro: nt::debug("E2E phase=%s\n", s).
 inline bool debugEnabled()
 {
     static const bool enabled =
@@ -21,9 +21,9 @@ inline bool debugEnabled()
     return enabled;
 }
 
-// Timestamp monotónico en ms desde el primer NT_DEBUG de la sesión. Se imprime
-// delante de cada línea (p. ej. "+1234 ms") para medir tiempos de arranque,
-// buffering y micro-pausas sin depender de relojes externos.
+// Monotonic timestamp in ms since the first NT_DEBUG of the session. It is
+// printed in front of each line (e.g. "+1234 ms") to measure startup, buffering
+// and micro-pause timings without relying on external clocks.
 inline long long debugMs()
 {
     static const qint64 start = QDateTime::currentMSecsSinceEpoch();

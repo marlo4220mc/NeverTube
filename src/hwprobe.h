@@ -12,56 +12,57 @@ class QTimer;
 
 namespace hwprobe {
 
-// Veredicto de un clip tras el primer frame decodificado y el fin de la
-// ventana de gracia. Decidir ANTES de que el decodificador se pronuncie es el
-// origen de los falsos positivos de HW (p.ej. av1-hw en i5/HD4600 QSV: el
-// probe veía hwdec-current=qsv-copy y los errores "av1_qsv: unsupported" +
-// la caída a libdav1d llegaban 5 ms después del veredicto).
+// Verdict for a clip after the first decoded frame and the end of the
+// grace window. Deciding BEFORE the decoder speaks up is the
+// origin of the HW false positives (e.g. av1-hw on i5/HD4600 QSV: the
+// probe saw hwdec-current=qsv-copy and the "av1_qsv: unsupported" errors +
+// the fall back to libdav1d arrived 5 ms after the verdict).
 //
-//   - "HW": mpv confirmó hardware ("Using hardware decoding") y NADA lo
-//     desmiente (ni caída a software ni intento HW fallido ni hwdec=no).
-//     El backend activo en hwdec-current sin señales en contra es un respaldo
-//     para GPUs cuyo log no llegara (mismo comportamiento que antes, pero ya
-//     con la gracia consumida).
-//   - "SW": mpv confirmó software ("Using software decoding", intento HW del
-//     códec que falló en ffmpeg, o hwdec-current == "no").
-//   - "":   indeterminado; el llamante continúa la escalera sin concluir.
+//   - "HW": mpv confirmed hardware ("Using hardware decoding") and NOTHING
+//     contradicts it (neither a fallback to software nor a failed HW attempt
+//     nor hwdec=no). The backend active in hwdec-current with no signals
+//     against is a fallback for GPUs whose log did not arrive (same behavior
+//     as before, but with the grace already consumed).
+//   - "SW": mpv confirmed software ("Using software decoding", a HW attempt of
+//     the codec that failed in ffmpeg, or hwdec-current == "no").
+//   - "":   undetermined; the caller continues the ladder without concluding.
 QString clipVerdict(bool sawHwLog, bool sawSwLog, bool sawHwFailed,
                     const QString &hwdecCurrent);
 
-// Escalera de descenso de perfiles (degradación por reproducción). Devuelve el
-// perfil inmediatamente inferior al dado, o vacío si no procede.
+// Profile descent ladder (degradation by playback). Returns the profile
+// immediately below the given one, or empty if it does not apply.
 //
-// Se usa SOLO con evidencia de códec/HW: el perfil activo promete hardware para
-// el códec que se está reproduciendo y mpv decodifica en SOFTWARE. La red no
-// puede producir esa señal (un 403, un visitorData vencido o un atasco de caché
-// no cambian hwdec-current), así que la escalera NUNCA degrada por red.
-//   av1-hw -> vp9-hw -> h264-hw -> soft-all -> (vacío: es el suelo)
+// It is used ONLY with codec/HW evidence: the active profile promises hardware
+// for the codec being played and mpv decodes in SOFTWARE. The network cannot
+// produce that signal (a 403, an expired visitorData or a cache stall do not
+// change hwdec-current), so the ladder NEVER degrades because of the network.
+//   av1-hw -> vp9-hw -> h264-hw -> soft-all -> (empty: it is the floor)
 QString lowerProfile(const QString &profile);
 
 } // namespace hwprobe
 
-// La maquinaria de sondeo usa mpv (clips headless): la clase solo existe en
-// builds con mpv. En el build x86 (NEVERTUBE_NO_MPV) el perfil se decide por
-// plataforma (DXVA2 -> h264-hw) sin HwProbe; sin este guard, AUTOMOC genera el
-// Q_OBJECT con el slot poll() y el enlazado falla (LNK2019: poll sin definir).
+// The probing machinery uses mpv (headless clips): the class only exists in
+// builds with mpv. In the x86 build (NEVERTUBE_NO_MPV) the profile is decided
+// per platform (DXVA2 -> h264-hw) without HwProbe; without this guard, AUTOMOC
+// generates the Q_OBJECT with the poll() slot and linking fails (LNK2019: poll
+// undefined).
 #ifndef NEVERTUBE_NO_MPV
 
-// Sondeo de capacidades de decodificación por hardware al arranque. Reproduce
-// en headless (vo=null, hwdec=auto-copy) un micro-clip por códec en orden
-// AV1 -> VP9 -> H.264 desde resources/clips.
+// Probing of hardware decoding capabilities at startup. Plays in
+// headless (vo=null, hwdec=auto-copy) one micro-clip per codec in order
+// AV1 -> VP9 -> H.264 from resources/clips.
 //
-// El veredicto de HW sale del LOG de mpv (módulos vd y ffmpeg), no de
-// hwdec-current: mpv emite "Using hardware decoding (<api>)" /
-// "Using software decoding" y, cuando un intento HW falla (p.ej. av1_qsv en
-// HD 4600), los errores se ven en ffmpeg. hwdec-current queda solo como
-// respaldo. Regla (la misma para cualquier GPU):
-//   - primer códec con veredicto "HW" -> "av1-hw" / "vp9-hw" / "h264-hw"
-//   - todos "SW"            -> "soft-all" (persistido: es un veredicto real)
-//   - sin veredicto fiable   -> perfil vacío (soft-all transitorio sin
-//     persistir; el sondeo se reintenta en el próximo arranque)
-// Un resultado "indeterminado" NO aborta: se continúa probando los códecs
-// siguientes (el i5-4590 llega así a H.264, que sí decodifica por HW).
+// The HW verdict comes from the mpv LOG (vd and ffmpeg modules), not from
+// hwdec-current: mpv emits "Using hardware decoding (<api>)" /
+// "Using software decoding" and, when a HW attempt fails (e.g. av1_qsv on
+// HD 4600), the errors are seen in ffmpeg. hwdec-current remains only as a
+// fallback. Rule (the same for any GPU):
+//   - first codec with a "HW" verdict -> "av1-hw" / "vp9-hw" / "h264-hw"
+//   - all "SW"            -> "soft-all" (persisted: it is a real verdict)
+//   - no reliable verdict -> empty profile (transient soft-all without
+//     persisting; the probe is retried on the next startup)
+// An "undetermined" result does NOT abort: it keeps testing the following
+// codecs (the i5-4590 reaches H.264 this way, which it does decode in HW).
 class HwProbe : public QObject
 {
     Q_OBJECT
@@ -73,9 +74,10 @@ public:
     void start();
 
 signals:
-    // Perfil detectado: "av1-hw" | "vp9-hw" | "h264-hw" | "soft-all".
-    // Vacío si no se pudo determinar de forma fiable: el llamante mantiene el
-    // default conservador sin persistir y el sondeo se reintenta al arrancar.
+    // Detected profile: "av1-hw" | "vp9-hw" | "h264-hw" | "soft-all".
+    // Empty if it could not be determined reliably: the caller keeps the
+    // conservative default without persisting and the probe is retried at
+    // startup.
     void finished(const QString &profileName);
 
 private slots:
@@ -94,20 +96,19 @@ private:
     QString m_clipPaths[3];
     int m_index = 0;
     bool m_done = false;
-    // Veredicto del clip actual (se resetea en cada loadCurrent). El log del
-    // decodificador puede encolarse 1-10 ms DESPUÉS del primer video-params;
-    // por eso se espera la gracia (m_decoded + m_decodedTimer) antes de
-    // concluir.
+    // Verdict for the current clip (reset on each loadCurrent). The decoder
+    // log can be queued 1-10 ms AFTER the first video-params; that is why the
+    // grace (m_decoded + m_decodedTimer) is awaited before concluding.
     bool m_sawHwLog = false;
     bool m_sawSwLog = false;
-    bool m_sawHwFailed = false; // el intento HW del códec falló (ffmpeg)
-    bool m_decoded = false;     // primer frame del clip actual
+    bool m_sawHwFailed = false; // the codec's HW attempt failed (ffmpeg)
+    bool m_decoded = false;     // first frame of the current clip
     QElapsedTimer m_decodedTimer;
-    // Nº de clips con veredicto SW decisivo: al llegar a h264 sin HW, si hubo
-    // algún SW concluyente se persiste soft-all (veredicto real); si todo fue
-    // indeterminado, vacío (sin persistir).
+    // Number of clips with a decisive SW verdict: upon reaching h264 without
+    // HW, if there was some conclusive SW, soft-all is persisted (real
+    // verdict); if everything was undetermined, empty (without persisting).
     int m_swVerdicts = 0;
-    // Un reintento por clip si expira el timeout (init de hw lento en VMs).
+    // One retry per clip if the timeout expires (slow hw init in VMs).
     bool m_clipRetried = false;
 };
 

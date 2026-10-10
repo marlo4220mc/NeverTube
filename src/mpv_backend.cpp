@@ -22,8 +22,8 @@ static void *getProcAddress(void *ctx, const char *name)
     return glc ? reinterpret_cast<void *>(glc->getProcAddress(name)) : nullptr;
 }
 
-// Construye un mpv_node de tipo string con el valor indicado. El buffer lo
-// asigna el llamador y lo libera con mpvNodeFreeStr().
+// Builds an mpv_node of string type with the given value. The buffer is
+// allocated by the caller and freed with mpvNodeFreeStr().
 static void mpvNodeSetStr(mpv_node *n, const QByteArray &s)
 {
     n->format = MPV_FORMAT_STRING;
@@ -42,10 +42,11 @@ static void mpvNodeFreeStr(mpv_node *n)
     n->format = MPV_FORMAT_NONE;
 }
 
-// loadfile con la opción per-file "audio-files": el vídeo y el audio externo se
-// abren y se sincronizan en la misma carga. Sin esto mpv arranca solo con el
-// vídeo y el audio entra después (vídeo mudo inicial + dropfps del re-sync; y
-// en re-resoluciones el audio puede no llegar). Devuelve el código del comando.
+// loadfile with the per-file "audio-files" option: the video and the external
+// audio are opened and synced in the same load. Without this mpv starts with
+// video only and the audio joins afterwards (initial muted video + re-sync
+// dropfps; and on re-resolutions the audio may never arrive). Returns the
+// command's result code.
 static int loadFileWithAudio(mpv_handle *mpv, const QByteArray &videoUrl,
                              const QString &audioUrl)
 {
@@ -75,23 +76,24 @@ static int loadFileWithAudio(mpv_handle *mpv, const QByteArray &videoUrl,
     optList.values = optv;
     options.format = MPV_FORMAT_NODE_MAP;
     options.u.list = &optList;
-    // mpv interpreta audio-files como una lista de strings separada por ':';
-    // un URL https://... se parte en trozos (https, //host, etc.). Escapamos
-    // cada ':' con '\:' para que el valor llegue íntegro como una sola entrada.
+    // mpv interprets audio-files as a list of strings separated by ':';
+    // an https://... URL gets split into chunks (https, //host, etc.). We escape
+    // each ':' with '\:' so the value arrives intact as a single entry.
     QByteArray audioEsc = audioUrl.toUtf8();
     audioEsc.replace(':', "\\:");
     mpvNodeSetStr(&optv[0], audioEsc);
 
-    // Firma moderna (mpv >= 0.38): loadfile url replace index=<int> options.
-    // Firma vieja (mpv 0.33-0.37, p. ej. bundle Windows): sin el argumento
-    // "index", las opciones van en cuarta posición. Se prueba la moderna y, si
-    // el mpv no la entiende (INVALID_PARAMETER), se reintenta con la vieja.
+    // Modern signature (mpv >= 0.38): loadfile url replace index=<int> options.
+    // Old signature (mpv 0.33-0.37, e.g. the Windows bundle): without the
+    // "index" argument, the options go in the fourth position. The modern one
+    // is tried first and, if that mpv does not understand it
+    // (INVALID_PARAMETER), it is retried with the old one.
     int r = MPV_ERROR_INVALID_PARAMETER;
     for (int pass = 0; pass < 2 && r == MPV_ERROR_INVALID_PARAMETER; ++pass) {
         if (pass == 0) {
             argList.num = 5;
             argList.values = argv;
-            argv[3].format = MPV_FORMAT_INT64; // índice (ignorado con replace)
+            argv[3].format = MPV_FORMAT_INT64; // index (ignored with replace)
             argv[3].u.int64 = -1;
             argv[4] = options;
         } else {
@@ -127,28 +129,28 @@ MpvBackend::MpvBackend(QObject *parent)
 
     mpv_set_option_string(m_mpv, "vo", "libmpv");
     mpv_set_option_string(m_mpv, "hwdec", "auto");
-    // vd=v: el veredicto real del decodificador ("Using hardware/software
-    // decoding") es verbose y es lo que valida la red de seguridad del perfil.
+    // vd=v: the decoder's real verdict ("Using hardware/software decoding") is
+    // verbose and it is what validates the profile's safety net.
     mpv_set_option_string(m_mpv, "message-level",
                           "all=warn,vo=info,vd=v,cache=info,stream=info,network=info");
     mpv_set_option_string(m_mpv, "cache", "yes");
-    // Colchón de demux (estilo Chrome, versión contenida): 96 MiB para absorber
-    // los picos del decodificador software y el throttle de descarga de YouTube
-    // sin disparar la RAM (150 MiB era el default de mpv, demasiado para una
-    // máquina débil/x64; 64 MiB original quedaba corto en las
-    // micro-pausas de arranque). Con el cache activo este tope es además el
-    // límite REAL del readahead: cache-secs default es "muy alto" y
-    // demuxer-readahead-secs queda "mostly ignored" (manual de mpv), así que
-    // no hace falta fijar un readahead en segundos.
+    // Demux buffer (Chrome-style, contained size): 96 MiB to absorb the
+    // software decoder's peaks and YouTube's download throttle without
+    // spiking the RAM (150 MiB was mpv's default, too much for a weak/x64
+    // machine; the original 64 MiB fell short during startup micro-pauses).
+    // With the cache enabled this cap is also the REAL readahead limit:
+    // cache-secs defaults to "very high" and demuxer-readahead-secs stays
+    // "mostly ignored" (mpv manual), so there is no need to fix a readahead
+    // in seconds.
     mpv_set_option_string(m_mpv, "demuxer-max-bytes", "96MiB");
-    // Amortiguación al arranque: sin esto, con el throttle de YouTube la primera
-    // decena de segundos reproduce "en seco" y mpv hace micro-pausas a los ~6 y
-    // ~10 s hasta que la descarga paralela (http_multiple) se estabiliza.
+    // Startup cushioning: without this, with YouTube's throttle the first ten
+    // seconds play "dry" and mpv micro-pauses at ~6 and ~10 s until the
+    // parallel download (http_multiple) stabilizes.
     mpv_set_option_string(m_mpv, "cache-initial", "3MiB");
-    // Hilos del decodificador SOFTWARE (vd=lavc -> h264/vp9/av1 paralelizan por
-    // frame-threading). Ideal = nº de núcleos con tope 4: subir más en CPUs de
-    // 2 núcleos es sobresuscripción de hilos. Con hwdec activo no interviene
-    // (decodifica el HW, no lavc).
+    // SOFTWARE decoder threads (vd=lavc -> h264/vp9/av1 parallelize via
+    // frame-threading). Ideal = core count capped at 4: going higher on
+    // 2-core CPUs is thread oversubscription. With hwdec active it does not
+    // take part (the HW decodes, not lavc).
     const int cores = qMax(1, QThread::idealThreadCount());
     const QByteArray lavcThreads = QByteArray::number(qMin(cores, 4));
     mpv_set_option_string(m_mpv, "vd-lavc-threads", lavcThreads.constData());
@@ -156,8 +158,8 @@ MpvBackend::MpvBackend(QObject *parent)
 
     if (mpv_initialize(m_mpv) < 0) {
         qWarning("player: mpv_initialize fallo");
-        // Handle inservible: al anularlo isValid() devuelve false y ningún
-        // comando posterior toca un mpv muerto.
+        // Useless handle: nulling it makes isValid() return false and no later
+        // command touches a dead mpv.
         mpv_destroy(m_mpv);
         m_mpv = nullptr;
         return;
@@ -222,12 +224,12 @@ bool MpvBackend::initGL()
 {
     if (!m_mpv || m_rctx)
         return m_rctx != nullptr;
-    // Diagnóstico del contexto GL real (experimento ANGLE / desktop GL):
-    // vendor "Google ... (ANGLE ...)" + es=1 confirman que el contexto del
-    // widget es ANGLE y que mpv podrá intentar el hwdec zero-copy d3d11-egl
-    // con hwdec=auto (en video/out/gpu/hwdec.c d3d11-egl va ANTES que
-    // d3d11va; con GL de escritorio eglGetCurrentDisplay() es NULL y solo
-    // queda d3d11va-copy, el copy-back del CPU al 100% en x64).
+    // Diagnostics of the real GL context (ANGLE / desktop GL experiment):
+    // vendor "Google ... (ANGLE ...)" + es=1 confirm that the widget's context
+    // is ANGLE and that mpv will be able to attempt the zero-copy d3d11-egl
+    // hwdec with hwdec=auto (in video/out/gpu/hwdec.c d3d11-egl comes BEFORE
+    // d3d11va; with desktop GL eglGetCurrentDisplay() is NULL and only
+    // d3d11va-copy remains, the CPU-to-100% copy-back on x64).
     if (QOpenGLContext *glc = QOpenGLContext::currentContext()) {
         QOpenGLFunctions *glf = glc->functions();
         const GLubyte *vendor = glf->glGetString(GL_VENDOR);
@@ -289,47 +291,49 @@ void MpvBackend::renderGL(int fbo, int width, int height)
 bool MpvBackend::playUrl(const QString &url, double startAt,
                          const QString &audioUrl)
 {
-    // Preferencia de idioma de audio ("alang"): solo con preferencia explícita
-    // mpv elige un doblaje (aunque tenga DEFAULT=NO) en lugar de la pista
-    // marcada DEFAULT=YES por YouTube (normalmente el audio original).
+    // Audio language preference ("alang"): only with an explicit preference
+    // does mpv pick a dub (even if it has DEFAULT=NO) instead of the track
+    // marked DEFAULT=YES by YouTube (normally the original audio).
     const QByteArray lang = m_audioLang.toUtf8();
     mpv_set_option_string(m_mpv, "alang", lang.constData());
-    // YouTube estrangula la descarga continua de la URL directa a ~initcwndbps
-    // (~1,4 Mbps), insuficiente para 1080p: pausas de buffering a los 6-10 s.
-    // ffmpeg descarga por rangos en paralelo ("http_multiple") y los Range
-    // cortos no están estrangulados (35 MB/s) -> acaba con el throttle.
-    // Solo para URLs externas: el master HLS local no soporta Range requests.
+    // YouTube strangles the continuous download of the direct URL to
+    // ~initcwndbps (~1.4 Mbps), not enough for 1080p: buffering pauses at
+    // 6-10 s. ffmpeg downloads ranges in parallel ("http_multiple") and the
+    // short Range requests are not strangled (35 MB/s) -> it defeats the
+    // throttle. Only for external URLs: the local HLS master does not support
+    // Range requests.
     if (isLocalStreamUrl(url))
         mpv_set_option_string(m_mpv, "stream-lavf-o", "");
     else
         mpv_set_option_string(m_mpv, "stream-lavf-o", "http_multiple=1");
     const QByteArray u = url.toUtf8();
-    // "start" SIEMPRE con valor concreto: mpv ignora/reserva el valor anterior si
-    // se le pasa una cadena vacía, y un vídeo reanudado (start=X) dejaría ese X
-    // como salida para TODOS los siguientes (cada vídeo de la cola arrancaría
-    // desde la posición del primero). Valor absoluto, sin el prefijo "+".
+    // "start" ALWAYS with a concrete value: mpv ignores/reserves the previous
+    // value if an empty string is passed, and a resumed video (start=X) would
+    // leave that X as the output for ALL the following ones (every video in
+    // the queue would start at the first one's position). Absolute value,
+    // without the "+" prefix.
     const QByteArray opt = QByteArray::number(startAt > 0.0 ? startAt : 0.0, 'f', 2);
     mpv_set_option_string(m_mpv, "start", opt.constData());
     if (startAt > 0.0)
         NT_DEBUG("E2E playUrl start=%s\n", opt.constData());
     const char *cmd[] = { "loadfile", u.constData(), nullptr };
-    // Cada vídeo nuevo arranca reproduciendo: mpv conserva el estado de pausa
-    // entre loadfile, y un vídeo anterior dejado en pausa dejaba el siguiente
-    // en pausa ("vídeo que clickeo empieza pausado").
+    // Every new video starts playing: mpv keeps the pause state across
+    // loadfile, and a previously paused video left the next one paused
+    // ("video I click starts paused").
     int paused = 0;
     mpv_set_property(m_mpv, "pause", MPV_FORMAT_FLAG, &paused);
     NT_DEBUG("E2E playUrl len=%d http=%d audio=%d\n", int(u.size()),
              url.startsWith(QLatin1String("http")) ? 1 : 0,
              int(!audioUrl.isEmpty()));
-    // Con audio externo (edge/AV1-HLS) el vídeo y el audio se abren en el MISMO
-    // loadfile (opción per-file "audio-files"): mpv los sincroniza desde el
-    // arranque, sin el vídeo mudo inicial y el dropfps del re-sync posterior.
-    // Si el comando falla (mpv viejo sin la opción), se conserva el loadfile
-    // simple y FILE_LOADED hará el audio-add de antes.
+    // With external audio (edge/AV1-HLS) the video and the audio are opened
+    // in the SAME loadfile (per-file "audio-files" option): mpv syncs them
+    // from the start, without the initial muted video and the later re-sync
+    // dropfps. If the command fails (old mpv without the option), the plain
+    // loadfile is kept and FILE_LOADED will do the previous audio-add.
     if (!audioUrl.isEmpty()) {
         const int r = loadFileWithAudio(m_mpv, u, audioUrl);
         if (r >= 0) {
-            return true; // audio adjuntado: el llamador puede descartar la URL
+            return true; // audio attached: the caller can discard the URL
         }
         NT_DEBUG("E2E loadfile+audio-files fallo (%s); fallback audio-add\n",
                  mpv_error_string(r));
@@ -337,7 +341,7 @@ bool MpvBackend::playUrl(const QString &url, double startAt,
     } else {
         mpv_command_async(m_mpv, 0, cmd);
     }
-    return false; // se cargó sin audio: el llamador conserva la URL pendiente
+    return false; // loaded without audio: the caller keeps the pending URL
 }
 
 void MpvBackend::setYtdlFormat(const QString &format)
@@ -399,12 +403,13 @@ int MpvBackend::attachAudio(const QString &url)
     if (!m_mpv)
         return MPV_ERROR_UNINITIALIZED;
     const QByteArray u = url.toUtf8();
-    // audio-add select: añade la pista y la selecciona como audio actual.
+    // audio-add select: adds the track and selects it as the current audio.
     const char *cmd[] = { "audio-add", u.constData(), "select", nullptr };
     const int r = mpv_command(m_mpv, cmd);
     m_audioAdded = r >= 0;
-    // La pista vieja (oído de un vídeo anterior) que mpv conserve se descarta
-    // si hubo reemplazo: cada loadfile solo debe tener su audio propio.
+    // Any old track (leftover audio of a previous video) that mpv kept is
+    // discarded if there was a replacement: each loadfile must only have its
+    // own audio.
     NT_DEBUG("E2E audio-add res=%d len=%d\n", r, int(u.size()));
     return r;
 }
@@ -413,9 +418,9 @@ void MpvBackend::dropExternalAudio()
 {
     if (!m_mpv)
         return;
-    // Flujo clásico: nada que añadir; además limpia la pista externa
-    // de un vídeo anterior con audio-file merodeando en mpv. El rc se ignora:
-    // MPV_ERROR_COMMAND (sin pista que quitar) no es un fallo para nosotros.
+    // Classic flow: nothing to add; it also clears the external track
+    // of a previous video with an audio-file lingering in mpv. The rc is
+    // ignored: MPV_ERROR_COMMAND (no track to remove) is not a failure for us.
     const char *drop[] = { "audio-file-remove", "auto", nullptr };
     mpv_command(m_mpv, drop);
     m_audioAdded = false;
@@ -472,9 +477,10 @@ int MpvBackend::probeMaxVideoHeight() const
     return maxH;
 }
 
-// true si el motor tiene una pista de audio activa ("audio-params"). Con el
-// audio externo (audio-files) rechazado por YouTube (403), el motor reproduce
-// el vídeo sin ninguna pista de audio; "audio-params" no existe / queda vacío.
+// true if the engine has an active audio track ("audio-params"). With the
+// external audio (audio-files) rejected by YouTube (403), the engine plays
+// the video without any audio track; "audio-params" does not exist / stays
+// empty.
 bool MpvBackend::hasActiveAudio() const
 {
     if (!m_mpv)
@@ -579,7 +585,7 @@ void MpvBackend::handleEvent(mpv_event *event)
             if (log->text)
                 emit logMessage(QString::fromUtf8(log->prefix),
                                 QString::fromUtf8(log->text));
-            // Veredicto del decodificador y errores del motor en bruto.
+            // Decoder verdict and raw engine errors.
             NT_DEBUG("[mpv:%s] %s", log->prefix, log->text);
         }
         break;

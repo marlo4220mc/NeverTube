@@ -26,10 +26,10 @@
 
 namespace {
 
-// Centinela para m_winningClient (los índices de cliente Innertube son >= 0).
-constexpr int kResolveUnknown = -2;    // aún sin ganador registrado
+// Sentinel for m_winningClient (Innertube client indexes are >= 0).
+constexpr int kResolveUnknown = -2;    // no winner registered yet
 
-// Devuelve el valor del atributo EXT-X-MEDIA dado (p. ej. LANGUAGE, NAME).
+// Returns the value of the given EXT-X-MEDIA attribute (e.g. LANGUAGE, NAME).
 QString mediaAttr(const QString &line, const QLatin1String attr)
 {
     const QString needle = QLatin1String(attr.data()) + QStringLiteral("=\"");
@@ -93,16 +93,16 @@ QStringList selectAudioTracks(const QStringList &audioLines,
             }
         }
         if (!prefLang.isEmpty() && !preflight.isEmpty()) {
-            // Preferencia encontrada: ese doblaje primero (mpv lo elige con
-            // alang). El resto de doblajes del grupo se descartan para no
-            // inflar el master (ralentiza el arranque del vídeo).
+            // Preference found: that dub first (mpv picks it with
+            // alang). The rest of the dubs in the group are discarded so as not to
+            // bloat the master (it slows down video startup).
             out.append(preflight);
         }
         if (!original.isEmpty() && !out.contains(original)) {
             out.append(original);
         } else if (original.isEmpty() && !tracks.isEmpty()) {
-            // Sin pista original reconocible (vídeos sin `acont=original`):
-            // conservar la primera del grupo para no dejar el vídeo sin audio.
+            // No recognizable original track (videos without `acont=original`):
+            // keep the first of the group so as not to leave the video without audio.
             out.append(tracks.first());
         }
     }
@@ -120,7 +120,7 @@ Yt::Yt(QObject *parent)
     qRegisterMetaType<StreamInfo>("StreamInfo");
     qRegisterMetaType<PlaylistInfo>("PlaylistInfo");
 
-    // /next: reenvío directo del Innertube al resto de la app.
+    // /next: direct forwarding from Innertube to the rest of the app.
     connect(&m_innertube, &Innertube::relatedReady, this,
             &Yt::relatedReady);
     connect(&m_innertube, &Innertube::radioReady, this,
@@ -137,8 +137,8 @@ Yt::Yt(QObject *parent)
             });
     connect(&m_innertube, &Innertube::trendingReady, this,
             &Yt::trendingFinished);
-    // Búsqueda, ficha/pestañas de canal, detalle de vídeo y playlist por
-    // Innertube: se reenvían a las señales de Yt que consume la UI.
+    // Search, channel info/tabs, video detail and playlist via
+    // Innertube: they are forwarded to the Yt signals the UI consumes.
     connect(&m_innertube, &Innertube::searchReady, this,
             [this](const QString &query, const QVector<VideoInfo> &videos,
                    bool) { emit searchFinished(query, videos); });
@@ -162,10 +162,10 @@ Yt::Yt(QObject *parent)
             });
     connect(&m_innertube, &Innertube::playlistReady, this,
             &Yt::playlistDetailReady);
-    // Alturas de vídeo disponibles del vídeo para el menú de resoluciones:
-    // llegan del master HLS (videoHeights de adaptiveFormats) y, como respaldo,
-    // del /player (formatsReady). No tocan la resolución resuelta; solo
-    // informan a la UI para que Auto no oculte calidades que el vídeo sí tiene.
+    // Video heights available for the resolutions menu:
+    // they come from the HLS master (adaptiveFormats' videoHeights) and, as a
+    // fallback, from /player (formatsReady). They do not affect the resolved
+    // resolution; they only inform the UI so Auto does not hide qualities the video does have.
     connect(&m_innertube, &Innertube::hlsReady, this,
             [this](const QString &videoId, const QString &,
                    const QVector<int> &heights) {
@@ -195,15 +195,15 @@ void Yt::setVisitorStorage(SettingsRepo *settings)
     m_visitorStore = settings;
     if (!settings)
         return;
-    // Reutilizar un visitorData persistido no caducado: evita el GET
-    // sw.js_data de arranque y una RTT antes del POST /player.
+    // Reuse a persisted, non-expired visitorData: it avoids the startup
+    // sw.js_data GET and one RTT before the POST /player.
     const QString saved =
         settings->getString(QStringLiteral("visitorData"));
     const qlonglong savedExp =
         settings->getInt(QStringLiteral("visitorDataExpiresAt"), 0);
     if (!saved.isEmpty())
         m_innertube.seedVisitorData(saved, savedExp);
-    // y guardar los nuevos que lleguen en ejecución.
+    // and save the new ones that arrive at runtime.
     connect(&m_innertube, &Innertube::visitorDataReady, this,
             [this](const QString &data, qlonglong expiresAt) {
                 if (!m_visitorStore)
@@ -283,9 +283,9 @@ void Yt::setAudioLanguage(const QString &lang)
                                 Qt::CaseInsensitive) == 0
             ? QString()
             : clean;
-    // Propagar el idioma al Innertube para que /next y /player entreguen
-    // títulos y descripciones traducidos (hl). original mantiene "es" por
-    // defecto (evita auto-traducción automática al inglés).
+    // Propagate the language to Innertube so /next and /player deliver
+    // translated titles and descriptions (hl). original keeps "es" by
+    // default (avoids automatic auto-translation to English).
     const QString hl = m_audioLang.isEmpty() ? QStringLiteral("es")
                                              : m_audioLang;
     m_innertube.setHl(hl);
@@ -308,7 +308,7 @@ void Yt::setNoAv1(bool on)
 
 void Yt::search(const QString &query, int limit, int offset)
 {
-    // Innertube: offset 0 = primera página; offset > 0 = continuación.
+    // Innertube: offset 0 = first page; offset > 0 = continuation.
     if (offset <= 0) {
         m_searchQuery = query;
         m_innertube.fetchSearch(query, limit);
@@ -331,7 +331,7 @@ void Yt::trending(int limit)
 void Yt::channelVideos(const QString &channelId, int limit)
 {
     Q_UNUSED(limit);
-    // Innertube: browse de la pestaña "Vídeos" del canal (compactVideoRenderer).
+    // Innertube: browse of the channel's "Vídeos" tab (compactVideoRenderer).
     m_innertube.fetchChannelVideos(channelId);
 }
 
@@ -351,14 +351,14 @@ void Yt::channelInfo(const QString &channelId)
 
 void Yt::getDetail(const QString &videoId)
 {
-    // Detalle del vídeo (título traducido, descripción, vistas, fecha y likes)
-    // desde el /next de Innertube.
+    // Video detail (translated title, description, views, date and likes)
+    // from Innertube's /next.
     m_innertube.fetchVideoDetail(videoId);
 }
 
 void Yt::playlistDetail(const QString &playlistId, int limit)
 {
-    // Innertube: browse VL<id> (cabecera + playlistVideoRenderer).
+    // Innertube: browse VL<id> (header + playlistVideoRenderer).
     m_innertube.fetchPlaylist(playlistId, limit);
 }
 
@@ -397,19 +397,19 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                     QStringLiteral("No se pudo resolver el vídeo: %1").arg(reason));
             });
 
-    // HLS primario (master de YouTube, sin throttle), edge como respaldo:
-    // handlePlayer emite formatsReady y hlsReady en el mismo instante, pero el
-    // flujo HLS necesita un round-trip (fetchMaster) antes de emitir streamReady.
-    // El edge (URL adaptiva directa) es ~32x más lento (throttle de YouTube)
-    // pero no requiere ese round-trip. Para no perder la velocidad del HLS, lo
-    // dejamos ganar: formatsReady solo GUARDA el combo edge como respaldo
-    // (m_edgeFallback) sin emitirlo; masterReady gana si el master queda
-    // filtrable, y si no, se emite el edge guardado.
+    // Primary HLS (YouTube master, no throttle), edge as fallback:
+    // handlePlayer emits formatsReady and hlsReady at the same instant, but the
+    // HLS flow needs a round-trip (fetchMaster) before emitting streamReady.
+    // The edge (direct adaptive URL) is ~32x slower (YouTube throttle)
+    // but does not require that round-trip. So as not to lose the speed of HLS, we
+    // let it win: formatsReady only STORES the edge combo as a fallback
+    // (m_edgeFallback) without emitting it; masterReady wins if the master is
+    // filterable, and if not, the stored edge is emitted.
     QSharedPointer<QString> edgeUrl(new QString),
                                      edgeAudioUrl(new QString);
     QSharedPointer<int> edgeH(new int(0));
-    // HLS sintético de AV1 (si el perfil lo prefiere): se construye en
-    // formatsReady y gana en hlsReady, antes de pedir el master de YouTube.
+    // Synthetic AV1 HLS (if the profile prefers it): it is built in
+    // formatsReady and wins in hlsReady, before requesting YouTube's master.
     QSharedPointer<QString> av1Hls(new QString);
     QSharedPointer<int> av1H(new int(0));
     connect(innTube, &Innertube::formatsReady, guard,
@@ -432,7 +432,7 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                     buildEdgeMaster(videoId, formats, maxHeight, m_audioLang,
                                     dur, &audioUrl);
                 if (videoUrl.isEmpty())
-                    return; // sin combo: solo el flujo HLS lo cubre
+                    return; // no combo: only the HLS flow covers it
                 *edgeUrl = videoUrl;
                 *edgeAudioUrl = audioUrl;
                 *edgeH = edgeHeight(formats, maxHeight);
@@ -440,8 +440,8 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                          videoUrl.toUtf8().constData());
             });
 
-    // Emite el HLS de AV1 si formatsReady lo construyó (siempre antes que
-    // hlsReady) y hay audio. Devuelve true si ya se emitió streamReady.
+    // Emits the AV1 HLS if formatsReady built it (always before
+    // hlsReady) and there is audio. Returns true if streamReady was already emitted.
     const auto emitAv1 = [this, innTube, videoId, av1Hls, av1H,
                           edgeAudioUrl]() -> bool {
         if (av1Hls->isEmpty() || edgeAudioUrl->isEmpty())
@@ -455,8 +455,8 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
         s.label = QString::number(*av1H) + QLatin1Char('p');
         s.height = *av1H;
         s.multipleUrls = false;
-        // Construido desde un fMP4 finito (VOD+ENDLIST): NO es un directo nunca,
-        // aunque mpv reporte duraciones inestables mientras carga los rangos.
+        // Built from a finite fMP4 (VOD+ENDLIST): it is NEVER a live stream,
+        // even though mpv reports unstable durations while it loads the ranges.
         s.canBeLive = false;
         m_winningClient[videoId] = innTube->lastWinClient();
         NT_DEBUG("E2E av1-hls emit %dp url=%s\n", *av1H,
@@ -472,18 +472,18 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                 const QVector<int> &heights) {
                 if (vid != videoId || gen != m_resolveGen)
                     return;
-                // AV1 por HLS primero: el master de YouTube no trae AV1 (solo
-                // VP9/h264), así que si hay AV1 sintético se emite ya y se
-                // evita el round-trip de fetchMaster.
+                // AV1 over HLS first: YouTube's master does not carry AV1 (only
+                // VP9/h264), so if there is synthetic AV1 it is emitted right away and
+                // the fetchMaster round-trip is avoided.
                 if (emitAv1()) {
                     guard->deleteLater();
                     return;
                 }
-                // HLS primario: el edge solo se emite como respaldo si el master
-                // no es filtrable (en masterReady) o si innertube falla.
+                // Primary HLS: the edge is only emitted as fallback if the master
+                // is not filterable (in masterReady) or if innertube fails.
                 if (heights.isEmpty()) {
-                    // Sin tabla de alturas: entregar el master sin filtrar
-                    // (comportamiento previo).
+                    // No height table: deliver the master unfiltered
+                    // (previous behavior).
                     guard->deleteLater();
                     m_winningClient[videoId] = innTube->lastWinClient();
                     StreamInfo s;
@@ -496,11 +496,11 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                     return;
                 }
                 const int wanted = closestHeight(maxHeight, heights);
-                // A partir de aquí el fallo lo gestiona filterGuard; el
-                // guard inicial queda liberado para evitar doble fallback.
+                // From here on the failure is handled by filterGuard; the
+                // initial guard is released to avoid a double fallback.
                 disconnect(guardFail);
                 guard->deleteLater();
-                // Un segundo guard para la fase de filtrado del master.
+                // A second guard for the master's filtering phase.
                 auto *filterGuard = new QObject(this);
                 QMetaObject::Connection masterConn;
                 masterConn = connect(
@@ -513,8 +513,8 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                         const QString abs = buildFilteredMaster(
                             videoId, masterBody, wanted);
                         if (abs.isEmpty()) {
-                            // Master no filtrable: si hay edge guardado,
-                            // entregarlo; si no, no hay stream.
+                            // Master not filterable: if there is a stored edge,
+                            // deliver it; if not, there is no stream.
                             filterGuard->deleteLater();
                             if (edgeUrl->isEmpty()) {
                                 qWarning("yt: master sin variantes filtrables para %s",
@@ -553,8 +553,8 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                         filterGuard->deleteLater();
                         emit streamReady(s);
                     });
-                // Fracaso en la fase de master: si hay edge guardado,
-                // entregarlo; si no, no hay stream.
+                // Failure in the master phase: if there is a stored edge,
+                // deliver it; if not, there is no stream.
                 QMetaObject::Connection masterFail;
                 masterFail = connect(
                     innTube, &Innertube::failed, filterGuard,
@@ -607,9 +607,9 @@ QString Yt::qualityName(int height)
     return QStringLiteral("1080");
 }
 
-// Elige la altura a pedir: exactamente la solicitada si existe; si no, la
-// inmediatamente inferior disponible; nunca sube de forma automática salvo
-// que no exista ninguna inferior (último recurso).
+// Picks the height to request: exactly the requested one if it exists; if not,
+// the immediately lower available one; it never goes up automatically unless
+// no lower one exists (last resort).
 int Yt::closestHeight(int requested, const QVector<int> &heights)
 {
     if (heights.isEmpty())
@@ -631,16 +631,16 @@ int Yt::closestHeight(int requested, const QVector<int> &heights)
     return upper == std::numeric_limits<int>::max() ? requested : upper;
 }
 
-// Puntuación de un formato de vídeo: preferencia de códec (×100000) + altura.
-// Reno: AV1 > VP9 > h264. La preferencia pesa más que la altura, de modo que el
-// códec que la GPU decodifica por hardware gana aunque su variante sea más baja
-// (p.ej. Legacy elige h264 1080 antes que VP9 2160, que iría a software).
+// Score of a video format: codec preference (×100000) + height.
+// Reno: AV1 > VP9 > h264. The preference weighs more than the height, so the
+// codec the GPU decodes in hardware wins even if its variant is lower
+// (e.g. Legacy picks h264 1080 before VP9 2160, which would go to software).
 int Yt::codecRankedScore(int height, const QString &mimeOrCodecs) const
 {
     const bool isH264 = mimeOrCodecs.contains(QLatin1String("avc1"))
                         || mimeOrCodecs.contains(QLatin1String("avc3"));
     const bool isAV1 = mimeOrCodecs.contains(QLatin1String("av01"));
-    // webm VP9 puede venir como codecs="vp9" o codecs="vp09.00.10.08".
+    // webm VP9 may come as codecs="vp9" or codecs="vp09.00.10.08".
     const bool isVP9 = mimeOrCodecs.contains(QLatin1String("vp09"))
                        || mimeOrCodecs.contains(QLatin1String("\"vp9\""));
     int rank = 0;
@@ -651,28 +651,28 @@ int Yt::codecRankedScore(int height, const QString &mimeOrCodecs) const
         break;
     case CodecProfile::Vp9:
         if (isVP9) rank = 2;
-        else if (isAV1) rank = -1; // AV1 sin hwdec = software caro, evitarlo
+        else if (isAV1) rank = -1; // AV1 without hwdec = expensive software, avoid it
         break;
     case CodecProfile::Legacy:
     default:
         rank = isH264 ? 2 : 0;
         break;
     }
-    // Build x86 sin mpv (NEVERTUBE_NO_MPV): AV1 no decodifica ni por HW ni por
-    // SW en el paquete i686 — el decoder nativo de FFmpeg 9 no soporta decode
-    // nativo ('the av1 decoder doesn't support native decode'; el paquete no
-    // trae libdav1d/libaom). Nunca elegirlo aunque sea la mayor altura: VP9
-    // (software) y h264 siempre son mejores que un formato que falla siempre.
-    // El flag lo fija MainWindow solo en ese build (Linux sin mpv, VAAPI puede
-    // dar AV1 HW, así que ahí no se activa).
+    // x86 build without mpv (NEVERTUBE_NO_MPV): AV1 decodes neither by HW nor by
+    // SW in the i686 package — FFmpeg 9's native decoder does not support native
+    // decode ('the av1 decoder doesn't support native decode'; the package does
+    // not ship libdav1d/libaom). Never pick it even if it is the highest height:
+    // VP9 (software) and h264 are always better than a format that always fails.
+    // The flag is set by MainWindow only in that build (Linux without mpv; VAAPI can
+    // give AV1 HW there, so it is not enabled there).
     if (m_noAv1 && isAV1)
         rank = -1;
     return rank * 100000 + height;
 }
 
-// La mayor altura <= maxHeight de los adaptiveFormats con url directa,
-// según el perfil de códec preferido (misma regla que buildEdgeMaster).
-// -1 si no hay vídeo.
+// The highest height <= maxHeight among the adaptiveFormats with a direct URL,
+// according to the preferred codec profile (same rule as buildEdgeMaster).
+// -1 if there is no video.
 int Yt::edgeHeight(const QJsonArray &formats, int maxHeight)
 {
     int best = -1;
@@ -695,15 +695,15 @@ int Yt::edgeHeight(const QJsonArray &formats, int maxHeight)
     }
     return best;
 }
-// Elige un único vídeo (la mayor altura <= maxHeight, prefiriendo h264 por
-// decodificación ligera en equipos modestos) y un único audio (el que mejor
-// coincide con audioLang; audioLang vacío == original). Devuelve la URL
-// directa del vídeo y escribe audioUrlOut con la del audio (mpv los fusiona
-// vía --audio-file). mp4/fMP4 y webm/VP9 funcionan por URL directa (webm no
-// soporta HLS de segmento único). Reproducir por URL directa da a mpv
-// duración exacta y seek fiable: el HLS de segmento único perdía ambos y
-// hacía saltar la barra de progreso. Devuelve vacío si no hay combinación
-// aprovechable (sin url en los formats, o sin audio/vídeo).
+// Picks a single video (the highest height <= maxHeight, preferring h264 for
+// light decoding on modest machines) and a single audio (the one that best
+// matches audioLang; empty audioLang == original). Returns the direct video
+// URL and writes the audio one to audioUrlOut (mpv merges them
+// via --audio-file). mp4/fMP4 and webm/VP9 work by direct URL (webm does not
+// support single-segment HLS). Playing by direct URL gives mpv
+// exact duration and reliable seek: single-segment HLS lost both and
+// made the progress bar jump. Returns empty if there is no usable
+// combination (no URL in the formats, or no audio/video).
 QString Yt::buildEdgeMaster(const QString &videoId,
                             const QJsonArray &adaptiveFormats, int maxHeight,
                             const QString &audioLang, int durationSeconds,
@@ -726,7 +726,7 @@ QString Yt::buildEdgeMaster(const QString &videoId,
     for (const QJsonValue &val : adaptiveFormats) {
         const QJsonObject f = val.toObject();
         if (f.value(QStringLiteral("url")).toString().isEmpty())
-            continue; // entradas firmadas (signatureCipher) sin descifrar
+            continue; // signed entries (signatureCipher) without decrypting
         const QString mime = f.value(QStringLiteral("mimeType")).toString();
         const int h = f.value(QStringLiteral("height")).toInt();
         if (mime.startsWith(QLatin1String("video/")) && h > 0) {
@@ -749,25 +749,25 @@ QString Yt::buildEdgeMaster(const QString &videoId,
                 track.value(QStringLiteral("displayName")).toString();
             const bool isDefault =
                 track.value(QStringLiteral("audioIsDefault")).toBool();
-            // El prefijo del id es el idioma ("en.4" → "en", "zh-Hant.3").
+            // The id prefix is the language ("en.4" → "en", "zh-Hant.3").
             QString idLang = trackId;
             const int dot = idLang.indexOf(QLatin1Char('.'));
             if (dot > 0)
                 idLang.truncate(dot);
             bool match = false;
             if (wantOriginal) {
-                // "original": el displayName lo marca ("Inglés original"),
-                // y acont=original distingue la pista base del doblaje.
+                // "original": the displayName marks it ("Inglés original"),
+                // and acont=original distinguishes the base track from the dub.
                 if (displayName.contains(QLatin1String("original"),
                                          Qt::CaseInsensitive))
                     match = true;
                 else if (isDefault && lang.isEmpty()
                          && !displayName.isEmpty())
-                    match = true; // única pista real de audio del vídeo
+                    match = true; // single real audio track of the video
                 else if (lang.isEmpty() && trackId.isEmpty()
                          && displayName.isEmpty()) {
-                    // Sin audioTrack (player sin multiaudio): asumir original
-                    // solo si es la única pista de audio del grupo.
+                    // Without audioTrack (player without multiaudio): assume original
+                    // only if it is the only audio track in the group.
                     match = true;
                 }
             } else {
@@ -783,7 +783,7 @@ QString Yt::buildEdgeMaster(const QString &videoId,
             if (wantOriginal && displayName.contains(
                                     QLatin1String("original"),
                                     Qt::CaseInsensitive))
-                score += 10; // el original explícito manda sobre el default
+                score += 10; // the explicit original takes precedence over the default
             const int abr = f.value(QStringLiteral("bitrate")).toInt();
             if (abr > 0)
                 score += qMin(abr / 1000, 200);
@@ -794,13 +794,13 @@ QString Yt::buildEdgeMaster(const QString &videoId,
         }
     }
 
-    // Fallback por si el combo principal no dio audio: el idioma pedido no
-    // existe en este vídeo (audioLang con audioTrack distinto) o el original
-    // no está marcado. Contrato del settings: "si no existe el idioma, se usa
-    // el audio original" — NUNCA un doblaje cualquiera. Orden: pista marcada
-    // "original" > pista isDefault > pista sin audioTrack (vídeo mono-pista)
-    // > primera pista de audio (último recurso, p. ej. doblaje regional sin
-    // marcador). Sin este paso el vídeo quedaría mudo.
+    // Fallback in case the main combo gave no audio: the requested language does not
+    // exist in this video (audioLang with a different audioTrack) or the original
+    // is not marked. Contract of the settings: "if the language does not exist, the
+    // original audio is used" — NEVER any dub. Order: track marked
+    // "original" > track isDefault > track without audioTrack (single-track video)
+    // > first audio track (last resort, e.g. a regional dub without a
+    // marker). Without this step the video would be muted.
     if (bestAudio.isEmpty()) {
         for (int pass = 0; pass < 4 && bestAudio.isEmpty(); ++pass) {
             for (const QJsonValue &val : adaptiveFormats) {
@@ -849,12 +849,12 @@ QString Yt::buildEdgeMaster(const QString &videoId,
     return videoUrl;
 }
 
-// Filtra el master HLS de YouTube dejando únicamente las variantes con
-// RESOLUTION= altura <= maxHeight. El abreviado se sirve desde el HlsServer
-// local para que el reproductor solo vea las calidades permitidas.
-// Las pistas de audio se eligen con selectAudioTracks: con m_audioLang vacío
-// (por defecto) solo la original; el orden de publicación define cuál elige
-// mpv (elige la primera de cada grupo).
+// Filters YouTube's HLS master leaving only the variants with
+// RESOLUTION= height <= maxHeight. The abbreviated one is served from the local
+// HlsServer so the player only sees the allowed qualities.
+// The audio tracks are chosen with selectAudioTracks: with empty m_audioLang
+// (by default) only the original; the publishing order defines which one mpv
+// picks (it picks the first of each group).
 QString Yt::buildFilteredMaster(const QString &videoId,
                                 const QByteArray &masterBody, int maxHeight)
 {
@@ -888,9 +888,9 @@ QString Yt::buildFilteredMaster(const QString &videoId,
                 if (x >= 0)
                     height = dim.mid(x + 1).toInt();
             }
-            // Conservar solo UNA variante: la mejor por códec preferido y
-            // altura (<= maxHeight). Reduce mpv de 22 sub-playlists (~20s) a 1
-            // (~2-4s) y respeta el códec que la GPU decodifica por hardware.
+            // Keep only ONE variant: the best by preferred codec and
+            // height (<= maxHeight). Reduces mpv from 22 sub-playlists (~20s) to 1
+            // (~2-4s) and respects the codec the GPU decodes in hardware.
             const int score = codecRankedScore(height, line);
             if (height > 0 && height <= maxHeight && score > bestScore) {
                 bestInf.clear();
@@ -915,7 +915,7 @@ QString Yt::buildFilteredMaster(const QString &videoId,
     if (!sawHeader || bestInf.isEmpty() || bestUrl.isEmpty())
         return QString();
 
-    // Reconstruir salida: cabecera + audio + la variante elegida.
+    // Rebuild the output: header + audio + the chosen variant.
     QStringList out;
     out.append(QStringLiteral("#EXTM3U"));
     const QStringList selected = selectAudioTracks(audioLines, m_audioLang);
@@ -940,18 +940,18 @@ QString Yt::buildFilteredMaster(const QString &videoId,
     return filePath;
 }
 
-// HLS sintético de AV1: YouTube no incluye AV1 en su master HLS (solo
-// VP9/h264), y su URL adaptativa directa se estrangula (~150 KB/s). En cambio,
-// cada petición Range corta (~2 MB) no está estrangulada: una petición por
-// segmento evita el throttle. Se genera una media playlist fMP4 con
-// #EXT-X-MAP (initRange) y segmentos #EXT-X-BYTERANGE de ~2 MB. La URL de cada
-// segmento inserta un sufijo /seg.mp4 tras /videoplayback (extensión que el
-// demuxer HLS acepta; YouTube ignora ese sufijo) y un &nt=<n> distinto por
-// segmento: sin ese distintivo ffmpeg fusiona los rangos contiguos del mismo
-// recurso en una única petición y el throttle vuelve. El audio va aparte
-// (PlayerWidget::setAudioFile), como en el modo edge.
-// Baja un rango de bytes de la URL firmada (bloqueante, con timeout). Solo se
-// usa para el indexRange (unos pocos KB) antes de construir la playlist AV1.
+// Synthetic AV1 HLS: YouTube does not include AV1 in its HLS master (only
+// VP9/h264), and its direct adaptive URL gets throttled (~150 KB/s). Instead,
+// each short Range request (~2 MB) is not throttled: one request per
+// segment avoids the throttle. A fMP4 media playlist is generated with
+// #EXT-X-MAP (initRange) and #EXT-X-BYTERANGE segments of ~2 MB. The URL of each
+// segment inserts a /seg.mp4 suffix after /videoplayback (an extension the
+// HLS demuxer accepts; YouTube ignores that suffix) and a different &nt=<n> per
+// segment: without that marker ffmpeg merges the contiguous ranges of the same
+// resource into a single request and the throttle returns. The audio goes
+// separately (PlayerWidget::setAudioFile), as in edge mode.
+// Downloads a byte range of the signed URL (blocking, with timeout). It is only
+// used for the indexRange (a few KB) before building the AV1 playlist.
 static QByteArray fetchRangeBlocking(const QString &url, qint64 start, qint64 end)
 {
     if (url.isEmpty() || end < start)
@@ -982,9 +982,9 @@ static QByteArray fetchRangeBlocking(const QString &url, qint64 start, qint64 en
     return data;
 }
 
-// Caja sidx (ISO/IEC 14496-12) del indexRange: lista de subsegmentos con su
-// tamaño exacto y duración. Necesaria para que #EXT-X-BYTERANGE caiga en las
-// fronteras reales del fMP4 y el seek funcione.
+// sidx box (ISO/IEC 14496-12) of the indexRange: list of subsegments with their
+// exact size and duration. Needed so #EXT-X-BYTERANGE falls on the real
+// fMP4 boundaries and seek works.
 QVector<Yt::Av1Fragment> Yt::av1ParseSidx(const QByteArray &indexBox,
                                           qint64 *firstOffsetOut)
 {
@@ -1078,7 +1078,7 @@ QString Yt::av1HlsPlaylist(const QJsonArray &adaptiveFormats, int maxHeight,
     if (initEnd <= initStart)
         return QString();
 
-    // Tamaño y duración del recurso: la propia URL firmada los trae (clen/dur).
+    // Size and duration of the resource: the signed URL itself carries them (clen/dur).
     qint64 contentLength = 0;
     double durationSec = 0.0;
     const QStringList params =
@@ -1092,8 +1092,8 @@ QString Yt::av1HlsPlaylist(const QJsonArray &adaptiveFormats, int maxHeight,
     if (contentLength <= initEnd + 1)
         return QString();
 
-    // Sufijo de ruta ignorado por YouTube pero con extensión que el demuxer
-    // HLS acepta (evita exigir protocol_whitelist/extension_picky).
+    // Path suffix ignored by YouTube but with an extension the HLS demuxer
+    // accepts (avoids requiring protocol_whitelist/extension_picky).
     QString segUrl = url;
     const int vp = segUrl.indexOf(QLatin1String("/videoplayback"));
     if (vp >= 0) {
@@ -1113,8 +1113,8 @@ QString Yt::av1HlsPlaylist(const QJsonArray &adaptiveFormats, int maxHeight,
                + QString::number(initStart) + QLatin1Char('"'));
     int index = 0;
     if (!fragments.isEmpty()) {
-        // Un segmento HLS = un fragmento real del fMP4: el demuxer puede
-        // aterrizar en cualquier frontera (seek fiable).
+        // One HLS segment = one real fMP4 fragment: the demuxer can
+        // land on any boundary (reliable seek).
         qint64 pos = fragmentsStart > 0 ? fragmentsStart : (initEnd + 1);
         for (const Av1Fragment &f : fragments) {
             if (pos >= contentLength)
@@ -1130,8 +1130,8 @@ QString Yt::av1HlsPlaylist(const QJsonArray &adaptiveFormats, int maxHeight,
             ++index;
         }
     } else {
-        // Respaldo (sin sidx): trozos fijos de ~2 MB. Sirve para reproducción
-        // secuencial, pero el seek puede caer a mitad de fragmento y fallar.
+        // Fallback (without sidx): fixed chunks of ~2 MB. It works for sequential
+        // playback, but seek may land in the middle of a fragment and fail.
         qint64 pos = initEnd + 1;
         while (pos < contentLength) {
             const qint64 len = qMin(kChunk, contentLength - pos);
@@ -1157,14 +1157,14 @@ QString Yt::av1HlsPlaylist(const QJsonArray &adaptiveFormats, int maxHeight,
     return out.join(QLatin1Char('\n')) + QLatin1Char('\n');
 }
 
-// Escribe en disco la playlist de av1HlsPlaylist() para servida por HlsServer.
+// Writes av1HlsPlaylist() to disk to be served by HlsServer.
 QString Yt::buildAv1Hls(const QString &videoId,
                         const QJsonArray &adaptiveFormats, int maxHeight,
                         int *heightOut)
 {
-    // Selecciona el mismo AV1 <= maxHeight que av1HlsPlaylist para bajar su
-    // indexRange (sidx) y alinear cada segmento a un fragmento real del fMP4
-    // (sin esto, el seek cae a mitad de fragmento y mpv no carga vídeo).
+    // Selects the same AV1 <= maxHeight as av1HlsPlaylist to download its
+    // indexRange (sidx) and align each segment to a real fMP4 fragment
+    // (without this, seek lands in the middle of a fragment and mpv does not load video).
     QJsonObject best;
     int bestH = 0;
     for (const QJsonValue &val : adaptiveFormats) {
@@ -1215,9 +1215,9 @@ QString Yt::buildAv1Hls(const QString &videoId,
     const QString dir = HlsServer::masterDirPath();
     const QString filePath =
         dir + QLatin1Char('/') + videoId + QLatin1String(".m3u8");
-    // Escritura atómica (tmp + rename): la recuperación reescribe la misma
-    // ruta mientras mpv puede estar leyéndola; sin esto leería una playlist
-    // truncada.
+    // Atomic write (tmp + rename): recovery rewrites the same
+    // path while mpv may be reading it; without this it would read a truncated
+    // playlist.
     const QString tmpPath = filePath + QLatin1String(".tmp");
     {
         QFile file(tmpPath);
@@ -1257,7 +1257,7 @@ bool feedsChainSelfTest()
     int channelVideos = 0;
     int trendVideos = 0;
 
-    // Watchdog global: las peticiones de red pueden tardar; no colgar el selftest.
+    // Global watchdog: network requests can be slow; do not hang the selftest.
     QTimer watchdog;
     watchdog.setSingleShot(true);
     QObject::connect(&watchdog, &QTimer::timeout, []() {
@@ -1314,15 +1314,15 @@ bool feedsChainSelfTest()
     return channelDone && trendDone;
 }
 
-// Selftest de la BÚSQUEDA por Innertube (usada por search): lanza Yt::search
-// con 3 resultados y exige vídeos con id real y sin duplicados. Falla si el
-// endpoint /search no responde o devuelve renderers sin id.
+// Selftest of the SEARCH via Innertube (used by search): it launches Yt::search
+// with 3 results and requires videos with a real id and no duplicates. It fails if the
+// /search endpoint does not respond or returns renderers without an id.
 bool searchSelfTest()
 {
     std::fprintf(stderr, "SEARCH SELFTEST start\n");
     Yt yt;
     bool done = false;
-    // Watchdog global: la búsqueda hace red real; no colgar el selftest.
+    // Global watchdog: the search does real network; do not hang the selftest.
     QTimer watchdog;
     watchdog.setSingleShot(true);
     QObject::connect(&watchdog, &QTimer::timeout, []() {
@@ -1343,8 +1343,8 @@ bool searchSelfTest()
                              if (v.channelId.isEmpty())
                                  ++emptyChannels;
                          }
-                         // channelId no vacío: la página de search construye
-                         // la sección "Canales" a partir de él.
+                         // non-empty channelId: the search page builds
+                         // the "Canales" section from it.
                          const bool ok = !videos.isEmpty() && emptyIds == 0
                                          && emptyChannels == 0;
                          std::fprintf(stderr,
@@ -1440,7 +1440,7 @@ bool av1HlsSelfTest()
     check(Yt::av1HlsPlaylist(formats, 480, &h).isEmpty(),
           "maxHeight sin AV1 disponible devuelve vacío");
 
-    // --- sidx: un segmento HLS por fragmento real (seek fiable) ---
+    // --- sidx: one HLS segment per real fragment (reliable seek) ---
     const auto be32 = [](QByteArray &b, quint32 v) {
         b.append(char((v >> 24) & 0xff));
         b.append(char((v >> 16) & 0xff));
@@ -1454,7 +1454,7 @@ bool av1HlsSelfTest()
     const QVector<quint32> fsz{1000, 2500, 1750};
     const QVector<double> fsec{2.5, 2.5, 1.0};
     QByteArray box;
-    be32(box, 0);                                   // box size (abajo)
+    be32(box, 0);                                   // box size (below)
     box.append("sidx");
     be32(box, 0);                                   // version 0 + flags
     be32(box, 1);                                   // reference_ID

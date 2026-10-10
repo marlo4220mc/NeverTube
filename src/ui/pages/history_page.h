@@ -44,12 +44,12 @@ private:
     PlaylistsRepo *m_playlists;
     QLabel *m_title = nullptr;
     QLabel *m_meta = nullptr;
-    // Se esconde con la lista vacía (ver reload()).
+    // Hidden when the list is empty (see reload()).
     QPushButton *m_clearBtn = nullptr;
     VideoListView *m_list = nullptr;
     QLabel *m_empty = nullptr;
-    // Contenedor con stretch que comparten la lista y la caja de estado vacío
-    // (ver el comentario del constructor).
+    // Stretch container shared by the list and the empty-state box
+    // (see the constructor comment).
     QWidget *m_area = nullptr;
     QVector<VideoInfo> m_videos;
 };

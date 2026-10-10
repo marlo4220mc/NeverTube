@@ -40,7 +40,7 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
     root->setContentsMargins(16, 16, 16, 16);
     root->setSpacing(10);
 
-    // "Volver" con el token #backLink, igual que Canal, Playlist y el Player.
+    // "Volver" with the #backLink token, same as Channel, Playlist and the Player.
     auto *top = new QHBoxLayout;
     auto *back = new QPushButton(QStringLiteral("Volver"), this);
     back->setObjectName(QStringLiteral("backLink"));
@@ -51,12 +51,12 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
     top->addStretch(1);
     root->addLayout(top);
 
-    // Título y acción en la misma fila, con la acción a la derecha. Es la misma
-    // cabecera que se puso en la página Buscar ("Borrar historial de
-    // búsquedas"), y por los mismos dos motivos que se documentan allí: al pie
-    // de la lista la cápsula se leía como un control suelto de la página (las
-    // filas no tienen caja) y como enlace suelto se perdía, porque es el
-    // elemento más apagado de la página y la acción además es destructiva.
+    // Title and action in the same row, with the action on the right. It is the
+    // same header used on the Search page ("Borrar historial de
+    // búsquedas"), and for the same two reasons documented there: at the foot of
+    // the list the capsule read as a loose control of the page (the rows have no
+    // box) and as a loose link it got lost, because it is the dimmest element of
+    // the page and the action is destructive on top of that.
     auto *titleRow = new QHBoxLayout;
     titleRow->setContentsMargins(0, 0, 0, 0);
     titleRow->setSpacing(8);
@@ -70,19 +70,19 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
                               this);
     m_clearBtn->setObjectName(QStringLiteral("ghost"));
     m_clearBtn->setCursor(Qt::PointingHandCursor);
-    // 30 y no 34: es un control de cabecera, no el botón grande de la página. El
-    // padding global (7px 14px) más 13 px de línea entran justos sin recortar.
+    // 30 and not 34: it is a header control, not the big button of the page. The
+    // global padding (7px 14px) plus the 13 px line fit exactly without clipping.
     m_clearBtn->setFixedHeight(30);
-    // Sin icono, como el de la página Buscar: el de "Clear" (una X) con una
-    // etiqueta que ya dice "borrar" era redundante, y con el texto largo
-    // empujaba el ancho.
+    // No icon, like the one on the Search page: the "Clear" one (an X) with a
+    // label that already says "borrar" was redundant, and with the long text it
+    // pushed the width.
     //
-    // Etiqueta larga a propósito ("Borrar historial de vídeos", no "Borrar
-    // todo"): la app tiene dos historiales, este de vídeos vistos y el de
-    // consultas en la página Buscar. A solas, "Borrar todo" no decía cuál.
-    // Confirmación antes de tirar el historial entero: son hasta kMaxHistory
-    // (200) vídeos y no hay vuelta atrás. El diálogo de la app (nt::confirm) y no
-    // QMessageBox, por el mismo motivo que el de la página Buscar.
+    // Long label on purpose ("Borrar historial de vídeos", not "Borrar
+    // todo"): the app has two histories, this one of watched videos and the one
+    // of queries on the Search page. On its own, "Borrar todo" did not say which
+    // one. Confirmation before wiping the whole history: it is up to kMaxHistory
+    // (200) videos and there is no way back. The app's dialog (nt::confirm) and not
+    // QMessageBox, for the same reason as the one on the Search page.
     connect(m_clearBtn, &QPushButton::clicked, this, [this]() {
         if (m_videos.isEmpty())
             return;
@@ -96,10 +96,10 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
                         reload();
                     });
     });
-    // Miembro, no local, porque reload() lo esconde con la lista vacía: un
-    // "borrar historial" junto a la caja de "no has visto ningún vídeo" se
-    // contradice (y el diálogo ya no tenía nada que confirmar). Con vídeos sale
-    // igual que hasta ahora.
+    // Member, not local, because reload() hides it along with the empty list: a
+    // "borrar historial" next to the "no has visto ningún vídeo" box
+    // contradicts itself (and the dialog had nothing left to confirm). With
+    // videos it shows up just like before.
     titleRow->addWidget(m_clearBtn, 0, Qt::AlignVCenter);
     root->addLayout(titleRow);
 
@@ -127,9 +127,9 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
                     return;
                 showMoreMenu(v, pos);
             });
-    // Estado vacío: el historial sin ningún vídeo no dejaba más que la lista en
-    // negro pelado y una línea de texto arriba. Es la misma caja punteada
-    // #emptyState de la Biblioteca, de las pestañas del Canal y de la Playlist.
+    // Empty state: a history with no videos left nothing but the bare black list
+    // and a line of text at the top. It is the same dotted #emptyState box used
+    // by the Library, the Channel tabs and the Playlist.
     m_empty = new QLabel(
         nt::emptyStateHtml(QStringLiteral(
             "Todavía no has visto ningún vídeo. Los que abras aparecerán aquí.")),
@@ -140,15 +140,15 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
     m_empty->setFixedHeight(116);
     m_empty->hide();
 
-    // Lista y caja vacía en un contenedor con stretch 1, por el mismo motivo que
-    // en PlaylistPage: sueltas en el layout de la página, al ocultar la lista el
-    // sobrante vertical se reparte como separación EXTRA y la cabecera se hunde
-    // (medido: el título bajaba de y=59 a y=195). Con el contenedor la cabecera
-    // no se mueve. La caja vacía va con stretch 1 y sin alineación, para que
-    // ocupe todo el ancho (con Qt::AlignHCenter el layout le da solo su
-    // sizeHint y sale estrecha, medido 174 px con el texto cortado); con el alto
-    // fijo de 96 queda centrada en el área (medido: 909x96 en y=493 de un área
-    // de y=124..956).
+    // List and empty box in a container with stretch 1, for the same reason as
+    // in PlaylistPage: loose in the page layout, hiding the list leaves the
+    // vertical leftover distributed as EXTRA spacing and the header sinks
+    // (measured: the title dropped from y=59 to y=195). With the container the
+    // header does not move. The empty box goes with stretch 1 and no alignment,
+    // so it takes the full width (with Qt::AlignHCenter the layout only gives it
+    // its sizeHint and it comes out narrow, measured 174 px with the text cut
+    // off); with the fixed height of 96 it stays centered in the area (measured:
+    // 909x96 at y=493 of an area spanning y=124..956).
     m_area = new QWidget(this);
     auto *areaLay = new QVBoxLayout(m_area);
     areaLay->setContentsMargins(0, 0, 0, 0);
@@ -162,13 +162,13 @@ void HistoryPage::showMoreMenu(const VideoInfo &v, const QPoint &globalPos)
 {
     QMenu menu(this);
 
-    // Acción propia de esta página: el resto del menú es el compartido por
-    // todas las superficies con fila (nt::addRowMenuActions), con sus mismos
-    // textos y en el mismo orden.
+    // Own action of this page: the rest of the menu is the one shared by every
+    // surface with rows (nt::addRowMenuActions), with the same texts and in the
+    // same order.
     QAction *rem = menu.addAction(QStringLiteral("Quitar del historial"));
     connect(rem, &QAction::triggered, this, [this, v]() {
-        // En el bucle siguiente, con el menú ya cerrado: quitar el vídeo borra
-        // la fila de la lista de la que nació el popup.
+        // In the next loop, with the menu already closed: removing the video
+        // erases the row of the list the popup was born in.
         QTimer::singleShot(0, this, [this, v]() {
             m_history->remove(v.id);
             emit historyChanged();
@@ -204,11 +204,11 @@ void HistoryPage::reload()
     m_list->showVideos(m_videos, VideoListView::ListMode);
     m_list->setCurrentRow(-1);
     m_meta->setText(QStringLiteral("%1 vídeos").arg(m_videos.size()));
-    // Lista o caja vacía, nunca las dos (ver el comentario del constructor).
+    // List or empty box, never both (see the constructor's comment).
     m_empty->setVisible(m_videos.isEmpty());
     m_list->setVisible(!m_videos.isEmpty());
-    // "Borrar historial de vídeos" tampoco sale sin vídeos: no hay nada que
-    // borrar y la caja de estado vacío ya lo dice.
+    // "Borrar historial de vídeos" does not show up without videos either: there
+    // is nothing to clear and the empty-state box already says so.
     m_clearBtn->setVisible(!m_videos.isEmpty());
     applyProgress();
 }

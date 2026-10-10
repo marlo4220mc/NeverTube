@@ -12,15 +12,15 @@ struct VideoInfo;
 
 namespace nt {
 
-// Acciones estándar del botón de opciones "⋯" de una fila de vídeo. Las usan
-// TODAS las superficies con fila (Búsqueda, Canal, Playlist, Historial,
-// Biblioteca y "A continuación"), para que el mismo vídeo ofrezca las mismas
-// opciones en todas partes y el menú no se escriba una vez por página.
+// Standard actions of the "⋯" options button on a video row. Used by EVERY
+// surface with rows (Search, Channel, Playlist, History, Library and
+// "A continuación"), so the same video offers the same options everywhere and
+// the menu is not written once per page.
 //
-// Lo que la superficie aporta son las tres piezas que son SUyas: el popup de
-// "Nueva playlist" (cada uno tiene el suyo), la navegación al canal (la resuelve
-// la ventana) y el refresco tras escribir en la BD (Biblioteca recarga su
-// sección). Vacía = la acción no aparece.
+// What the surface supplies are the three pieces that are ITS OWN: the "New
+// playlist" popup (each one has its own), channel navigation (resolved by the
+// window) and the refresh after writing to the DB (Library reloads its
+// section). Empty = the action does not appear.
 struct RowMenuHooks {
     std::function<void(const QString &videoId)> onNewPlaylist;
     std::function<void(const QString &channelId,
@@ -28,14 +28,14 @@ struct RowMenuHooks {
     std::function<void()> onChanged;
 };
 
-// Añade al menú las acciones estándar del vídeo: ver más tarde, añadir a
-// playlist (con "+ Nueva playlist"), compartir y ver canal. No mete separador
-// inicial ni final: cada superficie antepone su acción propia ("Quitar del
-// historial", "Quitar de la cola"…) y decide dónde cortar.
+// Adds the standard video actions to the menu: watch later, add to playlist
+// (with "+ New playlist"), share and view channel. It does not insert a leading
+// or trailing separator: each surface prepends its own action ("Remove from
+// history", "Remove from queue"…) and decides where to cut.
 //
-// withWatchLater=false omite la acción de ver más tarde, para la superficie que
-// ya ofrece su propia versión de ella (la sección "Ver más tarde" de Biblioteca,
-// que la pone como "Quitar de Ver más tarde").
+// withWatchLater=false skips the watch-later action, for the surface that
+// already offers its own version of it (the "Watch later" section of Library,
+// which labels it "Remove from Watch later").
 void addRowMenuActions(QMenu *menu, const VideoInfo &video,
                        WatchLaterRepo *watchLater, PlaylistsRepo *playlists,
                        const RowMenuHooks &hooks = {},

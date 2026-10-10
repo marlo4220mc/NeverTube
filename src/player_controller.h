@@ -27,47 +27,49 @@ public:
     void setMaxHeight(int height);
     int maxHeight() const;
 
-    // startPositionMs>0 reanuda el primer vídeo desde esa posición.
+    // startPositionMs>0 resumes the first video from that position.
     void playQueue(const QVector<VideoInfo> &videos, int startIndex,
                    qlonglong startPositionMs = 0);
-    // Añade vídeos al final de la cola, omitiendo ids ya presentes (evita
-    // repetir relacionados que ya estaban en la lista). Emite queueChanged()
-    // si algo fue añadido. No toca el ítem en reproducción.
+    // Appends videos at the end of the queue, skipping ids already present
+    // (avoids repeating related videos already in the list). Emits
+    // queueChanged() if anything was added. Does not touch the playing item.
     void appendVideos(const QVector<VideoInfo> &videos);
-    // Quita un vídeo de la cola (el botón de opciones "⋯" de "A continuación").
-    // NO admite el índice del vídeo en reproducción: quitarlo dejaría la cola
-    // apuntando al siguiente con el estado de reproducción del que se fue.
-    // Si el quitado estaba antes, el índice actual y las posiciones de
-    // reanudación se desplazan con él. Emite queueChanged() si lo quita.
-    // Devuelve false si no se quitó nada.
+    // Removes a video from the queue (the "⋯" options button of "A
+    // continuación"). Does NOT accept the index of the playing video:
+    // removing it would leave the queue pointing at the next one with the
+    // playback state of the one that left. If the removed one was before, the
+    // current index and the resume positions shift along with it. Emits
+    // queueChanged() if it removes something. Returns false if nothing was
+    // removed.
     bool removeFromQueue(int index);
     void playIndex(int index);
     void next();
-    // "Anterior" con el comportamiento de YouTube: si el vídeo actual ya está
-    // avanzado (más de kPrevRestartThreshold), vuelve al inicio; solo si está
-    // al principio salta al vídeo previo de la cola. Lo usa el botón del
-    // overlay del Player.
+    // "Anterior" with YouTube's behavior: if the current video is already
+    // advanced (more than kPrevRestartThreshold), it goes back to the start;
+    // only if it is at the beginning does it jump to the previous video of
+    // the queue. Used by the Player overlay's button.
     void previous();
-    // Salto DIRECTO al vídeo anterior de la cola, sin reiniciar el actual: lo
-    // usa el atajo de teclado "P", cuyo papel es navegar la cola (no reiniciar).
+    // DIRECT jump to the previous video of the queue, without restarting the
+    // current one: used by the "P" keyboard shortcut, whose role is to
+    // navigate the queue (not to restart).
     void previousTrack();
-    // Modos del reproductor (botones de la fila de controles). Barajar
-    // reordena al azar SOLO la cola por delante del vídeo en reproducción (el
-    // actual no se mueve, como YouTube). Repetir vuelve al primer vídeo al
-    // terminar el último (con cola de uno, "repetir uno"). No se persisten: son
-    // estado de sesión, y la UI los lee al refrescar los iconos.
+    // Player modes (control-row buttons). Shuffle randomly reorders ONLY the
+    // queue ahead of the playing video (the current one does not move, like
+    // YouTube). Repeat goes back to the first video after finishing the last
+    // (with a one-video queue, "repeat one"). They are not persisted: they
+    // are session state, and the UI reads them when refreshing the icons.
     void setShuffle(bool on);
     bool shuffle() const { return m_shuffle; }
     void setRepeat(bool on);
     bool repeat() const { return m_repeat; }
     void playPause();
     void toggleMute();
-    // Fija el estado de silencio sin alternarlo (para restaurar el volumen del
-    // usuario al arrancar). muted==true pone el volumen a 0, false lo recuerda.
+    // Sets the mute state without toggling it (to restore the user's volume
+    // on startup). muted==true sets volume to 0, false remembers it.
     void setMuted(bool muted);
     void setVolume(double volume);
-    // Tope superior del slider (mpv volume-max). Default 100; ajustes puede
-    // subirlo a 150/175/200. El slider se clamp aquí, NO en el widget.
+    // Slider's upper cap (mpv volume-max). Default 100; settings may raise it
+    // to 150/175/200. The slider clamps HERE, NOT in the widget.
     void setVolumeMax(double maxPercent);
     int volumeMax() const { return m_volumeMax; }
     void seek(double seconds);
@@ -77,24 +79,27 @@ public:
     QVector<VideoInfo> queue() const { return m_queue; }
     int index() const { return m_index; }
     VideoInfo current() const;
-    // Aplica los metadatos (título, canal, miniatura…) del detalle al ítem
-    // actual si el id coincide. Emite metadataChanged() si algo fue actualizado.
+    // Applies the detail's metadata (title, channel, thumbnail…) to the
+    // current item if the id matches. Emits metadataChanged() if anything was
+    // updated.
     void applyCurrentDetail(const VideoInfo &detail);
-    // Sobrescribe el título del ítem actual (si el id coincide) con el
-    // traducido del /next. Emite metadataChanged() para refrescar la UI.
+    // Overwrites the current item's title (if the id matches) with the one
+    // translated from /next. Emits metadataChanged() to refresh the UI.
     void renameCurrent(const QString &videoId, const QString &title);
     bool hasNext() const { return m_index >= 0 && m_index < m_queue.size() - 1; }
     bool hasPrevious() const { return m_index > 0; }
-    // El botón "Anterior" está operativo si hay vídeo previo O si el actual ya
-    // está avanzado (entonces el botón reinicia el vídeo actual, como YouTube).
+    // The "Anterior" button is operational if there is a previous video OR if
+    // the current one is already advanced (then the button restarts the
+    // current video, like YouTube).
     bool previousAvailable() const
     {
         return m_index >= 0
                && (hasPrevious() || m_position > kPrevRestartThreshold);
     }
-    // Umbral de "Anterior" (segundos): con más avance que este, el botón vuelve
-    // al inicio del vídeo actual en vez de saltar al vídeo previo de la cola.
-    // Mismo orden de magnitud que el paso de búsqueda del teclado (±5 s).
+    // "Anterior" threshold (seconds): past this much advance, the button goes
+    // back to the start of the current video instead of jumping to the
+    // previous video of the queue. Same order of magnitude as the keyboard's
+    // seek step (±5 s).
     static constexpr double kPrevRestartThreshold = 5.0;
     bool isActive() const { return m_index >= 0; }
     QString phase() const { return m_phase; }
@@ -104,54 +109,56 @@ public:
     bool isPaused() const { return m_phase == QLatin1String("paused"); }
     double position() const { return m_position; }
     double duration() const { return m_duration; }
-    // El stream actual lo construyó la app desde un medio finito (HLS sintético
-    // de AV1: fMP4 + playlist VOD+ENDLIST) -> por construcción NO puede ser un
-    // directo. La UI de directo (EN VIVO, playhead al borde) se desactiva para
-    // él aunque el backend reporte duraciones inestables (las reporta mientras
-    // carga los rangos BYTERANGE). true en el resto de flujos (un master de
-    // YouTube, filtrado o edge SÍ pueden ser un directo).
+    // The current stream was built by the app from a finite medium (synthetic
+    // AV1 HLS: fMP4 + VOD+ENDLIST playlist) -> by construction it CANNOT be a
+    // live stream. The live UI (EN VIVO, playhead at the edge) is disabled for
+    // it even if the backend reports unstable durations (it reports them while
+    // loading the BYTERANGE ranges). true on the rest of the flows (a YouTube
+    // master, filtered or edge CAN be a live stream).
     bool currentCanBeLive() const { return m_streamCanBeLive; }
-    // El player response de YouTube declaró el stream actual como DIRECTO
-    // (videoDetails.isLive): señal autoritativa que permite entrar en modo
-    // EN VIVO al instante, sin esperar a que la duración "hasta ahora" crezca
-    // (y cubre los directos puros con dur=0). false en VODs y en el sintético.
+    // YouTube's player response declared the current stream as LIVE
+    // (videoDetails.isLive): authoritative signal that lets us enter EN VIVO
+    // mode instantly, without waiting for the "so far" duration to grow (and
+    // it covers pure live streams with dur=0). false on VODs and on the
+    // synthetic one.
     bool currentIsLive() const { return m_streamIsLive; }
-    // Fuerza el guardado de la posición actual en el historial (no hace nada
-    // si no hay vídeo en fase playing/paused). Lo llama MainWindow al entrar al
-    // Home con algo reproduciéndose en el mini player: la fila "Continuar
-    // viendo" se pinta en ese momento y debe salir con el progreso real, no con
-    // el del último flush (o con pos=0, que el filtro descarta en silencio).
+    // Forces saving the current position to the history (does nothing if
+    // there is no video in phase playing/paused). MainWindow calls it when
+    // entering Home with something playing in the mini player: the "Continuar
+    // viendo" row is painted at that moment and must show the real progress,
+    // not the one from the last flush (or pos=0, which the filter silently
+    // discards).
     void savePositionNow() { savePosition(); }
 
 signals:
     void phaseChanged(const QString &phase);
     void positionChanged(double position, double duration);
-    // La duración real del medio la reporta el backend al cargar (mpv o el
-    // reloj de audio del FfmpegBackend). Es el dato autoritativo: el /next y los
-    // renderizadores de origen (search/home/canal) a veces no la traen y
-    // dejan durationSeconds=0, y "Continuar viendo" descarta los vídeos sin
-    // duración en la caché. Se emite solo cuando CAMBIA (no por tick de
-    // posición, que llega ~1/s) para no escribir en la BD sin motivo.
+    // The medium's real duration is reported by the backend on load (mpv or
+    // the FfmpegBackend's audio clock). It is the authoritative datum: /next
+    // and the origin renderers (search/home/channel) sometimes do not bring it
+    // and leave durationSeconds=0, and "Continuar viendo" discards videos
+    // without duration in the cache. It is emitted only when it CHANGES (not
+    // per position tick, which arrives ~1/s) so as not to write to the DB
+    // without reason.
     void durationChanged(double duration);
     void currentChanged();
     void queueChanged();
     void metadataChanged();
-    // Recuperación de la sesión gateada AGOTADA (≥3 intentos): el stream no se
-    // pudo recuperar en la misma sesión. MainWindow la escucha para reiniciar
-    // la app con el último vídeo (reiniciar SÍ sale del gate: estado del
-    // proceso nuevo). Se emite SOLO al agotar esta recuperación, no en otro
-    // fallo.
+    // Gated-session recovery EXHAUSTED (≥3 attempts): the stream could not be
+    // recovered within the same session. MainWindow listens to it to restart
+    // the app with the last video (restarting DOES escape the gate: new
+    // process state). Emitted ONLY when this recovery is exhausted, not on
+    // any other failure.
     void recoveryExhausted();
-    // Reproducción estable ≥5 min: el episodio de recuperación terminó.
-    // MainWindow la escucha para desarmar el reinicio automático (que no debe
-    // repetirse sin agotar antes otra recuperación).
+    // Stable playback for ≥5 min: the recovery episode is over. MainWindow
+    // listens to it to disarm the automatic restart (which must not repeat
+    // without another recovery having been exhausted first).
     void recoveryHealthy();
-    // El volumen o el silencio cambió (teclado de MainWindow, botón de
-    // silencio, slider del overlay, ajuste). Las UIs la escuchan para
-    // sincronizar en caliente. ANTES no existía ninguna notificación: el
-    // slider del overlay solo se refrescaba al volver a mostrar la barra
-    // (updateOverlayIcons), por eso subir/bajar con las flechas no se veía
-    // hasta que el overlay se re-mostraba.
+    // Volume or mute changed (MainWindow's keyboard, mute button, overlay
+    // slider, setting). The UIs listen to it to sync on the fly. BEFORE there
+    // was no such notification: the overlay slider only refreshed when the bar
+    // was shown again (updateOverlayIcons), so raising/lowering with the
+    // arrows was not visible until the overlay re-appeared.
     void volumeChanged();
 
 private slots:
@@ -159,12 +166,12 @@ private slots:
     void onPlayerPosition();
     void onPlayerDuration();
     void onPlayerError(const QString &message);
-    // Atasco de reproducción (sin avance de posición) durante la reproducción:
-    // re-resuelve con URLs firmadas frescas y reanuda en la posición actual.
+    // Playback stall (position not advancing) during playback: re-resolves
+    // with fresh signed URLs and resumes at the current position.
     void onStreamStalled();
-    // Interrupción: EOF prematuro o audio externo que nunca abrió (sesión de
-    // URLs gateada por YouTube, 403). Re-resuelve con URLs frescas, acotado
-    // por el mismo presupuesto de intentos que el atasco.
+    // Interruption: premature EOF or external audio that never opened
+    // (YouTube-gated URL session, 403). Re-resolves with fresh URLs, capped
+    // by the same attempt budget as the stall.
     void onStreamInterrupted();
 
 private:
@@ -185,40 +192,43 @@ private:
     QString m_errorMessage;
     double m_position = 0.0;
     double m_duration = 0.0;
-    // Última posición ya escrita en el historial (y su vídeo), para no
-    // reescribir la fila cuando el flush de kPositionFlushMs cae con el vídeo
-    // parado. playIndex los actualiza al crear la fila del vídeo nuevo.
+    // Last position already written to the history (and its video), so the
+    // row is not rewritten when the kPositionFlushMs flush fires with the
+    // video stopped. playIndex updates them when creating the new video's row.
     QString m_lastSavedId;
     qlonglong m_lastSavedMs = -1;
-    // Última duración ya notificada con durationChanged (-1 = ninguna). Se
-    // reinicia en cada playIndex para que el aviso salga siempre una vez por
-    // vídeo, aunque los ticks de posición hayan actualizado m_duration antes.
+    // Last duration already notified with durationChanged (-1 = none). It is
+    // reset on every playIndex so the notice always fires once per video,
+    // even if the position ticks updated m_duration earlier.
     double m_reportedDuration = -1.0;
     bool m_muted = false;
-    // canBeLive del stream actual (StreamInfo). true hasta que llega el stream
-    // resuelto; el HLS sintético de AV1 lo trae a false (nunca es un directo).
+    // canBeLive of the current stream (StreamInfo). true until the resolved
+    // stream arrives; the synthetic AV1 HLS brings it as false (it is never a
+    // live stream).
     bool m_streamCanBeLive = true;
-    // videoDetails.isLive del stream actual (StreamInfo), señal autoritativa
-    // de directo del player response. false hasta que llega el stream resuelto.
+    // videoDetails.isLive of the current stream (StreamInfo), the
+    // authoritative live signal of the player response. false until the
+    // resolved stream arrives.
     bool m_streamIsLive = false;
     double m_volume = 100.0;
     int m_volumeMax = 100;
-    // Modos de reproducción (barajar/repetir). De memoria de sesión, sin señal
-    // propia: la UI los lee en updateOverlayIcons(), que es cuando cambian.
+    // Playback modes (shuffle/repeat). Session memory, with no signal of
+    // their own: the UI reads them in updateOverlayIcons(), which is when
+    // they change.
     bool m_shuffle = false;
     bool m_repeat = false;
     int m_maxHeight = 720;
     int m_resolveGen = 0;
     double m_seekBack = 0.0;
-    // Posición de reanudación asociada a UN índice concreto de la cola (el
-    // vídeo con el que se abrió con reanudación). Solo se aplica a ese índice
-    // y se consume una sola vez: al avanzar en la cola (fin de vídeo / next)
-    // los siguientes arrancan SIEMPRE desde el principio.
+    // Resume position associated with ONE specific queue index (the video the
+    // app was opened with, resuming). It only applies to that index and is
+    // consumed a single time: when advancing in the queue (end of video /
+    // next) the following ones ALWAYS start from the beginning.
     QHash<int, qlonglong> m_indexStartMs;
     qlonglong m_pendingStartMs = 0;
     QTimer *m_flushTimer = nullptr;
-    // Recuperación por atasco: evita bucles (pocos intentos, espaciados) y se
-    // reinicia cuando la reproducción se mantiene estable un rato.
+    // Stall recovery: avoids loops (few, spaced attempts) and resets when
+    // playback stays stable for a while.
     int m_recoverAttempts = 0;
     qint64 m_lastRecoverMs = 0;
     QElapsedTimer m_stableSince;

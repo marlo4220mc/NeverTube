@@ -17,11 +17,11 @@
 
 namespace nt {
 
-// Fuente única de la paleta de acentos (labels de Ajustes, hex persistido y
-// sufijo de los PNG pre-pintados de la navegación). El defecto es el rojo del
-// icono (#FA011B, el play del icono de la app; ver kAccent en theme.h).
-// Mantener en sync con tools/gen_nav_accent.cpp solo en el sentido de que
-// regenerar los PNG tras cambiar AQUÍ es obligatorio.
+// Single source of the accent palette (Settings labels, persisted hex and
+// suffix of the pre-painted navigation PNGs). The default is the icon's red
+// (#FA011B, the play of the app icon; see kAccent in theme.h).
+// Keep in sync with tools/gen_nav_accent.cpp only in the sense that
+// regenerating the PNGs after changing HERE is mandatory.
 QVector<AccentOption> accentOptions()
 {
     return {
@@ -44,7 +44,7 @@ QVector<AccentOption> accentOptions()
 
 QString accentSuffix()
 {
-    const QString cur = kAccent.name(); // "#rrggbb" minúscula
+    const QString cur = kAccent.name(); // lowercase "#rrggbb"
     const auto opts = accentOptions();
     for (const AccentOption &o : opts)
         if (QColor(o.hex).name() == cur)
@@ -54,13 +54,13 @@ QString accentSuffix()
 
 QString styleSheet()
 {
-    // El QSS es un bloque de ~30 KB. MSVC NO admite un literal de cadena de
-    // mas de 16380 bytes (error C2026, "string too big, trailing characters
-    // truncated"), asi que el literal entero no compila en Windows aunque en
-    // Linux/GCC no haya ese limite. Va partido en trozos en un array y se une
-    // aqui. Cada trozo esta muy por debajo del limite y el resultado es el
-    // MISMO qss de siempre, byte a byte, asi que --selftest-theme sigue viendo
-    // la hoja completa. NO volver a levantar este bloque en un solo literal.
+    // The QSS is a ~30 KB block. MSVC does NOT accept a string literal of
+    // more than 16380 bytes (error C2026, "string too big, trailing characters
+    // truncated"), so the whole literal does not compile on Windows even though on
+    // Linux/GCC there is no such limit. It goes split into chunks in an array and is joined
+    // here. Each chunk is well under the limit and the result is the
+    // SAME qss as always, byte for byte, so --selftest-theme still sees
+    // the whole sheet. Do NOT put this block back into a single literal.
     static const char *const kTrozos[] = {
         R"QSS(QWidget {
     background-color: transparent;
@@ -69,11 +69,11 @@ QString styleSheet()
 }
 QMainWindow { background-color: #0F0F0F; }
 
-/* Tooltips: son ventanas del framework y por defecto se pintan con la paleta
-   del TEMA DEL SISTEMA (fuera del control de la app), así que el texto podía
-   salir ilegible según el escritorio. Estilo de la app: fondo de popover,
-   texto kText y borde, como el resto de superficies. QToolTip es una clase,
-   no un id: Qt se la aplica al tooltip automáticamente. */
+/* Tooltips: they are framework windows and by default are painted with the
+   SYSTEM THEME palette (outside the app's control), so the text could come out
+   unreadable depending on the desktop. App style: popover background,
+   kText text and border, like the rest of the surfaces. QToolTip is a class,
+   not an id: Qt applies it to the tooltip automatically. */
 QToolTip {
     background-color: @POPOVER@;
     color: @TEXT@;
@@ -82,64 +82,64 @@ QToolTip {
     font-size: 12px;
 }
 
-/* (Sin reglas para shellPanel/contentHost: ningún setObjectName del código las
-   usaba, eran restos del layout split revertido. Verificado por grep.) */
+/* (No rules for shellPanel/contentHost: no setObjectName in the code used
+   them, they were leftovers of the reverted split layout. Verified by grep.) */
 
 QWidget#navBottom {
     background-color: #101010;
-    /* Hairline superior: separa la barra del contenido (y del mini player, que
-       ya tiene la suya) sin añadir un widget. */
+    /* Top hairline: separates the bar from the content (and from the mini
+       player, which already has its own) without adding a widget. */
     border-top: 1px solid @BORDER@;
 }
 
-/* Botones de la barra de navegación inferior. Los iconos (PNG) los gestiona
-   NavButton por estado; aquí solo se colorean texto y fondo. El acento
-   (rojo NeverTube por defecto) aparece únicamente en estados activos o de
-   interacción. */
+/* Bottom navigation bar buttons. The icons (PNG) are handled by NavButton
+   per state; here only text and background are colored. The accent
+   (NeverTube red by default) appears only in active or interaction
+   states. */
 QToolButton#navBtn {
     background: transparent;
     border: none;
     border-radius: 12px;
-    /* Cada botón es una cápsula de 104x52 (mainwindow.cpp setupNav) y el
-       contenido icono 26 + hueco + línea de texto 11px necesita ~46: con 3px
-       por arriba y por abajo caben 52. Bajar el alto recorta el texto o el
-       icono, no los encoge. */
+    /* Each button is a 104x52 capsule (mainwindow.cpp setupNav) and the
+       content icon 26 + gap + 11px text line needs ~46: with 3px
+       above and below 52 fits. Lowering the height clips the text or the
+       icon, it does not shrink them. */
     padding: 3px 0;
     color: #8F8F8F;
     font-size: 11px;
 }
 QToolButton#navBtn:hover { background: @HOVER@; color: #ECECEC; }
-/* ORDEN IMPORTANTE: :checked va DESPUÉS de :focus. Tienen la misma
-   especificidad y gana la última regla; con :focus al final, el foco pisaba el
-   relleno de acento y la pestaña recién clicada salía gris con el texto del
-   acento sobre #242424 = 3,92:1 (por debajo del mínimo AA de 4,5:1). */
+/* IMPORTANT ORDER: :checked comes AFTER :focus. They have the same
+   specificity and the last rule wins; with :focus last, focus overrode the
+   accent fill and the freshly clicked tab came out gray with the accent
+   text over #242424 = 3.92:1 (below the AA minimum of 4.5:1). */
 QToolButton#navBtn:focus { background: @HOVER@; color: #ECECEC; }
-/* El CUADRO que indica posición (la pestaña activa) es una VARIACIÓN DE TONO
-   del rojo del icono, no un relleno sólido: el fondo mezcla el acento con la
-   barra al 25% (@ACCENT_A25@ = #4A0C13 sobre #101010, del #FA011B). El texto
-   sube a la variante hover (#FF1B35) porque sobre el tinte el acento pleno cae
-   a 3,76:1 y el hover da 4,04:1; el icono (PNG pre-pintado en acento) se queda
-   con SU color — el cuadro es "acorde" al icono, no lo sustituye. Más relleno
-   (A30 = #560C13) se nota más rojo pero deja el texto en 3,49:1, así que A30
-   solo en hover, que es transitorio. */
+/* The BOX that indicates position (the active tab) is a SHADE VARIATION
+   of the icon's red, not a solid fill: the background mixes the accent with
+   the bar at 25% (@ACCENT_A25@ = #4A0C13 over #101010, from #FA011B). The text
+   goes up to the hover variant (#FF1B35) because over the tint the full accent
+   falls to 3.76:1 and hover gives 4.04:1; the icon (PNG pre-painted in accent)
+   keeps ITS color — the box is "in tune" with the icon, it does not replace it.
+   More fill (A30 = #560C13) shows more red but leaves the text at 3.49:1, so A30
+   only on hover, which is transient. */
 QToolButton#navBtn:checked { background: @ACCENT_A25@; color: @ACCENT_HOVER@; }
-/* Activo en hover/foco: el relleno sube un peldaño (A30) y el texto queda en
-   la variante hover; es el mismo gesto que el estado checked:hover viejo. */
+/* Active on hover/focus: the fill goes up one step (A30) and the text stays
+   in the hover variant; it is the same gesture as the old checked:hover state. */
 QToolButton#navBtn:checked:hover { background: @ACCENT_A30@; color: @ACCENT_HOVER@; }
 QToolButton#navBtn:checked:focus { background: @ACCENT_A25@; color: @ACCENT_HOVER@; }
-/* Al pulsar (cualquier pestaña) el relleno vuelve al tinte sutil del 10%:
-   es transitorio y así el icono pressed (rojo) se lee sobre el fondo. */
+/* When pressed (any tab) the fill returns to the subtle 10% tint:
+   it is transient and so the pressed icon (red) reads over the background. */
 QToolButton#navBtn:pressed { background: @ACCENT_A10@; color: @ACCENT_HOVER@; }
 QToolButton#navBtn:disabled { color: @DISABLED@; }
 
 QLabel { background: transparent; }
 QLabel#sectionTitle { font-size: 16px; font-weight: 600; color: #ECECEC; }
-/* Titulo del video en la pagina Player: un punto mas grande que los titulos de
-   seccion (es el H1 de la pagina). */
+/* Video title on the Player page: one point larger than the section
+   titles (it is the page's H1). */
 QLabel#watchTitle { font-size: 17px; font-weight: 600; color: @TEXT@; }
 QLabel#sectionSub { font-size: 12px; color: #8F8F8F; }
-/* Estado vacio de una seccion de la Biblioteca: caja con borde punteado y el
-   texto centrado, en vez de una linea suelta de texto gris. */
+/* Empty state of a Library section: box with a dashed border and the
+   text centered, instead of a lone line of gray text. */
 QLabel#emptyState {
     color: @METATEXT@; font-size: 13px;
     background: #181818; border: 1px dashed @BORDER@; border-radius: 10px;
@@ -155,21 +155,21 @@ QPushButton {
 }
 QPushButton:hover { background-color: @HOVER@; }
 QPushButton:pressed { background-color: @SELECTION@; }
-/* Foco por COLOR de borde, no por grosor: el botón ya reserva 1px, así que
-   añadir un anillo de 2 px desplazaría el contenido en cada cambio de estado. */
+/* Focus by border COLOR, not by thickness: the button already reserves 1px, so
+   adding a 2 px ring would shift the content on every state change. */
 QPushButton:focus { border-color: @ACCENT@; }
-/* El botón deshabilitado solo perdía el color: conservaba fondo y borde, así
-   que seguía leyéndose como pulsable. Aquí baja emphasis en los tres canales. */
+/* The disabled button only lost its color: it kept background and border, so
+   it still read as clickable. Here it lowers emphasis in the three channels. */
 QPushButton:disabled {
     color: @DISABLED@;
     background-color: @BORDER@;
     border-color: @BORDER@;
 }
-/* CTA DE MARCA (botones de acento): relleno PLANO del acento — sin el gloss 3D
-   anterior — con un hairline de 1 px blanco al ~15 % para que el botón lea
-   sobre el fondo oscuro (patrón de los sistemas de diseño actuales: un botón
-   de acento plano se funde con el fondo sin ese filo). Estados nítidos: hover
-   más claro, pressed más oscuro. */
+/* BRAND CTA (accent buttons): FLAT accent fill — without the previous 3D
+   gloss — with a 1 px white hairline at ~15 % so the button reads
+   over the dark background (pattern of current design systems: a flat
+   accent button blends into the background without that edge). Crisp states:
+   hover lighter, pressed darker. */
 QPushButton#primary {
     background: @ACCENT@; border: 1px solid rgba(255,255,255,38);
     color: #FFFFFF; font-weight: 600;
@@ -184,15 +184,15 @@ QPushButton#ghost { background: transparent; border: 1px solid @BORDER@; border-
 QPushButton#ghost:hover { background: #1F1F1F; }
 QPushButton#ghost:pressed { background: @HOVER@; }
 QPushButton#ghost:focus { border-color: @ACCENT@; }
-/* Ghost SOLO con icono (el X de limpiar del buscador). El padding global
-   (7px 14px) deja 2x2 px de contenido dentro de los 28 px del boton, asi que
-   sin esto el icono se sale. Es un selector de propiedad para que el boton
-   siga heredando el resto de #ghost. */
+/* Ghost with icon ONLY (the search clear X). The global padding
+   (7px 14px) leaves 2x2 px of content inside the button's 28 px, so
+   without this the icon overflows. It is a property selector so the button
+   keeps inheriting the rest of #ghost. */
 QPushButton#ghost[iconOnly="true"] { padding: 0; }
 QPushButton#iconBtn { background: transparent; border: none; border-radius: 6px; padding: 6px; }
 QPushButton#iconBtn:hover { background: @HOVER@; }
 QPushButton#iconBtn:pressed { background: @SELECTION@; }
-/* iconBtn no tiene borde, así que el foco va por fondo (igual que navBtn). */
+/* iconBtn has no border, so focus goes by background (same as navBtn). */
 QPushButton#iconBtn:focus { background: @HOVER@; color: @ACCENT@; }
 QPushButton#iconBtn:disabled { color: @DISABLED@; }
 
@@ -201,10 +201,10 @@ QLineEdit, QComboBox {
     border: 1px solid @BORDER@;
     border-radius: 10px;
     padding: 8px 12px;
-    /* Seleccionar texto en el buscador va en el gris de la app, como el resto de
-       la app, no en el acento: en rojo parecía un error. Es el mismo token que
-       los menús (kSelection) y el texto seleccionado se queda en kText para que
-       siga leyéndose (11:1). */
+    /* Selecting text in the search field goes in the app's gray, like the rest
+       of the app, not in the accent: in red it looked like an error. It is the
+       same token as the menus (kSelection) and the selected text stays in kText
+       so that it remains readable (11:1). */
     selection-background-color: @SELECTION@;
     selection-color: @TEXT@;
     color: #ECECEC;
@@ -212,18 +212,18 @@ QLineEdit, QComboBox {
 QLineEdit:focus, QComboBox:focus { border-color: @ACCENT@; }
 QLineEdit:disabled, QComboBox:disabled { color: @DISABLED@; background-color: @BORDER@; }
 
-/* Popover no modal (p. ej. crear playlist): panel flotante que no bloquea
-   el resto de la página. */
+/* Non-modal popover (e.g. create playlist): floating panel that does not
+   block the rest of the page. */
 QFrame#popupDialog {
     background-color: @POPOVER@;
     border: 1px solid @BORDER@;
     border-radius: 12px;
 }
-/* El diálogo de confirmación (nt::confirm) NO es un QDialog: es un QWidget hijo
-   de la ventana (una ventana propia es un toplevel y le roba el foco y el
-   puntero al usuario). Por eso ya no hace falta la regla QDialog { background:
-   transparent } que existed solo para que su marco se vieran con las esquinas
-   redondeadas. */
+/* The confirmation dialog (nt::confirm) is NOT a QDialog: it is a QWidget child
+   of the window (a window of its own is a toplevel and steals focus and the
+   pointer from the user). That is why the QDialog { background: transparent }
+   rule is no longer needed, it existed only so that its frame showed with
+   rounded corners. */
 QLabel#popupTitle { font-size: 15px; font-weight: 600; color: #ECECEC; }
 QComboBox::drop-down { border: none; width: 24px; }
 QComboBox::down-arrow {
@@ -265,12 +265,12 @@ QSlider:disabled::handle:horizontal { background: @DISABLED@; }
 
 QProgressBar { border: none; background: @BORDER@; border-radius: 3px; text-align: center; color: transparent; }
 QProgressBar::chunk { background: @ACCENT@; border-radius: 3px; }
-/* Barra de progreso del mini player: 2 px (mas fina que la global), con radio 1
-   para que el chunk no asome por las esquinas. */
+/* Mini player progress bar: 2 px (thinner than the global one), with radius 1
+   so the chunk does not peek through the corners. */
 QProgressBar#miniProgress { background: @HANDLE@; border: none; border-radius: 2px; }
-/* Relleno del mini en el ACENTO: sigue el color del ajuste (el QSS se regenera
-   al cambiarlo, como el resto del tema). Pista en gris. La altura (4 px) se fija
-   en MiniPlayerBar/setupMiniBar. */
+/* Mini fill in the ACCENT: follows the color from settings (the QSS is
+   regenerated when it changes, like the rest of the theme). Gray track. The
+   height (4 px) is set in MiniPlayerBar/setupMiniBar. */
 QProgressBar#miniProgress::chunk { background: @ACCENT@; border-radius: 2px; }
 
 QToolButton { background: transparent; border: none; border-radius: 6px; padding: 5px; }
@@ -278,14 +278,14 @@ QToolButton:hover { background: @HOVER@; }
 QToolButton:pressed { background: @SELECTION@; }
 QToolButton:focus { background: @HOVER@; }
 
-/* El objeto #cards lo pone VideoListView, que deriva de QListView (no de
-   QListWidget): con el selector "QListWidget#cards" la regla NO se aplicaba
-   (verificado) y la vista conservaba el marco por defecto de
-   QAbstractScrollArea. Ese marco dejaba el viewport 2 px mas bajo que el
-   contenido de las secciones del Home (altura fija = filas * alto de celda),
-   o sea un rango de scroll INTERNO de 2 px: al pasar la rueda por encima, la
-   seccion daba un "pequeno scroll vertical". Con el selector correcto el rango
-   es 0 en cualquier tamano y ajuste. */
+/* The #cards object is set by VideoListView, which derives from QListView (not
+   from QListWidget): with the selector "QListWidget#cards" the rule did NOT
+   apply (verified) and the view kept the default frame of
+   QAbstractScrollArea. That frame left the viewport 2 px shorter than the
+   content of the Home sections (fixed height = rows * cell height),
+   i.e. an INTERNAL scroll range of 2 px: rolling the wheel over it, the
+   section gave a "small vertical scroll". With the correct selector the range
+   is 0 at any size and setting. */
 QListView#cards {
     background: transparent;
     border: none;
@@ -301,46 +301,46 @@ QMenu::item:disabled { color: @DISABLED@; }
 
 QStatusBar { background: #101010; color: #8F8F8F; border-top: 1px solid #1F1F1F; }
 
-/* El mini player usaba kPanel (#181818), el mismo que la nav inferior, así que
-   las dos barras se fundían en una sola línea. kElevated los separa. */
-/* El mini player comparte el tono de la barra inferior (kTop #101010), no el
-   kElevated de antes: las dos barras se leen como una sola pieza. */
+/* The mini player used kPanel (#181818), the same as the bottom nav, so
+   the two bars merged into a single line. kElevated separates them. */
+/* The mini player shares the tone of the bottom bar (kTop #101010), not the
+   kElevated of before: the two bars read as a single piece. */
 QWidget#miniBar { background-color: #101010; border-top: 1px solid @BORDER@; }
-/* Hover de toda la barra: aclara el fondo para senalar que es clicable
-   (expande al Player). La propiedad la pone MiniPlayerBar. #181818 (el tono
-   anterior) se veia palido frente al #101010: se bajo a #141414, una subida
-   sutil que sigue señalando el hover sin romper la pieza unica con la nav. */
+/* Hover of the whole bar: lightens the background to signal that it is clickable
+   (expands to the Player). The property is set by MiniPlayerBar. #181818 (the
+   previous tone) looked pale next to #101010: it was lowered to #141414, a subtle
+   lift that still signals hover without breaking the single piece with the nav. */
 QWidget#miniBar[hover="true"] { background-color: #141414; }
-/* Botones de la mini bar: mas densos que los de la fila del reproductor
-   (padding 4 en vez de 6), porque el mini es una superficie compacta. */
+/* Mini bar buttons: denser than those of the player row
+   (padding 4 instead of 6), because the mini is a compact surface. */
 QWidget#miniBar QPushButton#iconBtn { padding: 4px; }
 QWidget#watchBody { background-color: #0F0F0F; }
 QWidget#cardPanel { background-color: #181818; border: 1px solid @BORDER@; border-radius: 10px; }
 
-/* Caja de controles del reproductor. El separador de 12 px que la hace
-   flotante no es de QSS sino del layout (gl1 en watch_page.cpp); aqui van solo
-   los bordes. El de arriba va en blanco al 28 % y el resto en el gris de
-   borde: por separado ninguno lee contra todo video (1,33:1 el gris en oscuro,
-   1,04:1 el blanco en claro), juntos siempre hay un canto que la delimita. */
+/* Player controls box. The 12 px separator that makes it float is not from
+   QSS but from the layout (gl1 in watch_page.cpp); here only the borders go.
+   The top one is white at 28 % and the rest in the border gray:
+   separately none reads against every video (1.33:1 the gray on dark,
+   1.04:1 the white on light), together there is always an edge that delimits it. */
 QWidget#playerOverlay {
     background-color: @OVERLAY_BG@;
     border: 1px solid @BORDER@;
     border-top: 1px solid @OVERLAY_EDGE@;
     border-radius: 12px;
 }
-/* Reloj partido de la fila: transcurrido a la izquierda del slider y duracion a
-   la derecha (ver WatchPage). Texto secundario, por debajo de los iconos. */
+/* Split clock of the row: elapsed to the left of the slider and duration to
+   the right (see WatchPage). Secondary text, below the icons. */
 QLabel#ovPos, QLabel#ovDur { color: @TEXTSOFT@; font-size: 12px; }
-/* En un directo (propiedad dinámica live): la marca "EN VIVO" del reloj va en
-   el acento y el temporizador negativo escribe lo que indique WatchPage. */
+/* In a live stream (dynamic property live): the "EN VIVO" mark of the clock goes
+   in the accent and the negative timer writes whatever WatchPage indicates. */
 QLabel#ovPos[live="true"] { color: @ACCENT@; }
-/* Separador vertical sutil entre los subgrupos de la fila (transporte / volumen
-   / acciones): 1x20 px, con el mismo canto claro que el borde del panel. */
+/* Subtle vertical separator between the subgroups of the row (transport / volume
+   / actions): 1x20 px, with the same light edge as the panel border. */
 QFrame#ovSep { background: @OVERLAY_EDGE@; border: none; }
 
-/* --- Pagina Player ------------------------------------------------------
-   Los dos overlays (spinner y error) viven dentro de m_overlay, sobre el
-   video, asi que los dos son transparentes: cualquier fondo taparia el frame. */
+/* --- Player Page --------------------------------------------------------
+   The two overlays (spinner and error) live inside m_overlay, over the
+   video, so both are transparent: any background would cover the frame. */
 QLabel#ovSpinner {
     background: transparent; color: @MUTED@; font-size: 13px;
 }
@@ -348,22 +348,22 @@ QLabel#ovError {
     background: transparent; color: @TEXTSOFT@;
     font-size: 14px; padding: 16px;
 }
-/* Columna de informacion: metadatos y descripcion. */
+/* Info column: metadata and description. */
 QLabel#watchMeta { color: @METATEXT@; font-size: 12px; }
 QLabel#watchDesc { color: @METATEXT@; font-size: 12px; background: transparent; }
-/* Tarjeta de la descripcion del Player: agrupa el texto, que se muestra
-   COMPLETO (sin colapso ni "…mas"). */
+/* Player description card: groups the text, which is shown
+   COMPLETE (no collapse and no "…more"). */
 QFrame#watchDescCard {
     background: #181818; border: 1px solid @BORDER@; border-radius: 10px;
 }
-/* Degradado inferior de la descripcion colapsada. Lo usa la pagina Canal (su
-   descripcion SI se recorta a 3 lineas con "…mas"); el Player ya no lo usa. */
+/* Bottom gradient of the collapsed description. The Channel page uses it (its
+   description IS trimmed to 3 lines with "…more"); the Player no longer uses it. */
 QFrame#descFade {
     border: none;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                 stop:0 rgba(24,24,24,0), stop:1 #181818);
 }
-/* Titulo del bloque "A continuacion" y contador a su derecha. */
+/* Title of the "A continuacion" block and counter to its right. */
 QLabel#queueTitle { font-weight: 600; font-size: 13px; color: @TEXT@; }
 QLabel#queueCount {
     color: @METATEXT@; font-size: 11px;
@@ -371,56 +371,56 @@ QLabel#queueCount {
     padding: 1px 8px;
 }
 
-/* Boton "…mas"/"…menos" de la descripcion colapsada (pagina Canal: su
-   descripcion SI se recorta). Enlace discreto, no una capsula. */
+/* "…more"/"…less" button of the collapsed description (Channel page: its
+   description IS trimmed). Discreet link, not a capsule. */
 QPushButton#descToggle {
     background: transparent; border: none; padding: 0;
     color: @MUTED@; font-size: 12px; font-weight: 600; text-align: left;
 }
 QPushButton#descToggle:hover { color: @TEXT@; }
-/* Accion terciaria al final de una cabecera de seccion (Biblioteca: "Ver
-   todo", "Administrar"): enlace discreto, no la capsula #ghost con marco. Eran
-   cinco capsulas con borde alineadas a la derecha de cada titulo, que competian
-   con el contenido de la seccion. Sin borde en la base, asi que el :focus global
-   solo se ve si el boton llega a tener foco (igual que #descToggle). */
+/* Tertiary action at the end of a section header (Library: "Ver
+   todo", "Administrar"): discreet link, not the #ghost capsule with a frame. They
+   were five bordered capsules aligned to the right of each title, which competed
+   with the section content. Without a border in the base, so the global :focus
+   is only seen if the button actually gets focus (same as #descToggle). */
 QPushButton#sectionLink {
     background: transparent; border: none; padding: 4px 8px;
     color: @MUTED@; font-size: 12px; font-weight: 600;
 }
 QPushButton#sectionLink:hover { color: @TEXT@; }
-/* Sin borde no hay donde dibujar el anillo de foco, asi que con el teclado el
-   enlace se marca con el texto mas claro. Es lo que hace el hover, para que
-   "tabular" por la Biblioteca se vea igual que pasar el raton. */
+/* Without a border there is nowhere to draw the focus ring, so with the keyboard
+   the link is marked with lighter text. That is what hover does, so that
+   "tabbing" through the Library looks the same as moving the mouse. */
 QPushButton#sectionLink:focus { color: @TEXT@; }
-/* "Volver" de las cuatro superficies con vuelta atrás (Canal, Historial,
-   Playlist y el Player). Es un ENLACE, no una cápsula: mismo criterio que
-   #sectionLink, porque "volver" es una acción de navegación, no un control de
-   la página. Antes era #ghost (una cápsula con borde) en las tres páginas y un
-   botón flotante sobre el vídeo en el Player, que además tapaba la imagen.
-   El icono lo dibuja nt::icon (QPainter), no un glifo del texto: el "◀" del
-   "Volver" era un carácter que no existe en la fuente de la app. */
+/* "Volver" of the four surfaces with back navigation (Channel, History,
+   Playlist and the Player). It is a LINK, not a capsule: same criteria as
+   #sectionLink, because "back" is a navigation action, not a control of
+   the page. Before it was #ghost (a bordered capsule) in the three pages and a
+   floating button over the video in the Player, which also covered the image.
+   The icon is drawn by nt::icon (QPainter), not a glyph of the text: the "◀" of
+   "Volver" was a character that does not exist in the app's font. */
 QPushButton#backLink {
     background: transparent; border: none; padding: 4px 8px;
     color: @MUTED@; font-size: 13px; font-weight: 600; text-align: left;
 }
 QPushButton#backLink:hover { color: @TEXT@; }
-/* Sin borde no hay donde dibujar el anillo de foco (como #sectionLink): el
-   teclado se marca con el texto más claro, igual que el hover. */
+/* Without a border there is nowhere to draw the focus ring (like #sectionLink):
+   the keyboard is marked with the lighter text, same as hover. */
 QPushButton#backLink:focus { color: @TEXT@; }
-/* Boton del canal bajo el titulo: icono a la izquierda y texto a la derecha.
-   No es #ghost porque necesita padding de 8px en vez de 6px. */
+/* Channel button below the title: icon on the left and text on the right.
+   It is not #ghost because it needs 8px padding instead of 6px. */
 QPushButton#channelBtn {
     background: transparent; border: none; border-radius: 8px;
     text-align: left; padding: 8px;
     color: @TEXT@; font-weight: 600; font-size: 13px;
 }
 QPushButton#channelBtn:hover { background: #1F1F1F; }
-/* Botones de accion del player: icono solo, en pastilla circular. El estado lo
-   decide la propiedad booleana `active`, igual que #subscribe con la suya; el
-   color del icono lo pinta updateActionButtons (el QSS no tinta QIcons).
-   SIN MARCO (regla del usuario, igual que Me gusta / No me gusta): el borde va
-   transparente y el :focus se lo queda transparente, porque el
-   QPushButton:focus global lo pinta en el acento y al pulsar salia un aro rojo. */
+/* Player action buttons: icon only, in a circular pill. The state is
+   decided by the boolean property `active`, like #subscribe with its own; the
+   icon color is painted by updateActionButtons (the QSS does not tint QIcons).
+   WITHOUT FRAME (user rule, same as Me gusta / No me gusta): the border goes
+   transparent and the :focus stays transparent, because the
+   global QPushButton:focus paints it in the accent and pressing showed a red ring. */
 QPushButton#actionChip {
     background: #1F1F1F; border: 1px solid transparent; border-radius: 22px;
     padding: 0;
@@ -431,8 +431,8 @@ QPushButton#actionChip[active="true"] { background: @BORDER@; }
 QPushButton#actionChip[active="true"]:hover { background: @SELECTION@; }
 
 )QSS",
-        R"QSS(/* Grupo segmentado Me gusta / No me gusta: las esquinas exteriores redondeadas
-   y un hairline entre los dos. El fondo del grupo es el del chip. */
+        R"QSS(/* Me gusta / No me gusta segmented group: the outer corners
+   rounded and a hairline between the two. The group background is the chip's. */
 QWidget#actionSeg { background: #1F1F1F; border-radius: 22px; }
 QPushButton#actionSegL, QPushButton#actionSegR {
     background: transparent; border: none; padding: 0;
@@ -451,10 +451,10 @@ QPushButton#actionSegL[active="true"], QPushButton#actionSegR[active="true"] {
 QPushButton#actionSegL[active="true"]:hover,
 QPushButton#actionSegR[active="true"]:hover { background: @SELECTION@; }
 
-/* Menu de calidad: MISMO lenguaje de borde que la caja del reproductor
-   (#playerOverlay) — fondo translucido de overlay, borde @BORDER@ y canto
-   superior claro (@OVERLAY_EDGE@), radio 12. Antes era #1F1F1F con borde
-   @SELECTION@ y radio 6, y desentonaba con el player. */
+/* Quality menu: SAME border language as the player box
+   (#playerOverlay) — translucent overlay background, @BORDER@ border and light
+   top edge (@OVERLAY_EDGE@), radius 12. Before it was #1F1F1F with a @SELECTION@
+   border and radius 6, and it clashed with the player. */
 QFrame#qualityMenu {
     background-color: @OVERLAY_BG@;
     border: 1px solid @BORDER@;
@@ -467,72 +467,72 @@ QFrame#qualityMenu QPushButton {
 }
 QFrame#qualityMenu QPushButton:hover { background: @SELECTION@; }
 
-/* Fila de una consulta buscada antes (pestaña Historial del buscador).
-   Es un QPushButton plano porque necesita text-align:left con icono a la
-   izquierda, cosa que la regla base de QPushButton no da. */
+/* Row of a previously searched query (History tab of the search page).
+   It is a flat QPushButton because it needs text-align:left with an icon on the
+   left, which the base QPushButton rule does not give. */
 QPushButton#historyRow {
     text-align: left; background: transparent; border: none;
     color: @TEXTSOFT@; padding: 7px 4px;
 }
 QPushButton#historyRow:hover { background: #1F1F1F; border-radius: 6px; }
 
-/* Desplegable de sugerencias del buscador. Reaprovecha las variables de color
-   del popover (#202020) y el hover de historyRow para que no introduce tonos
-   nuevos. suggestRow es la fila pulsable; suggestDivider separa los dos
-   grupos (lo que sugiere YouTube arriba, lo que ya buscaste abajo). */
+/* Search suggestions dropdown. It reuses the color variables
+   of the popover (#202020) and the historyRow hover so that it does not introduce
+   new tones. suggestRow is the clickable row; suggestDivider separates the two
+   groups (what YouTube suggests on top, what you already searched below). */
 QFrame#suggestPanel {
     background-color: @POPOVER@; border: 1px solid @BORDER@; border-radius: 10px;
 }
-/* Rotulo del segundo grupo, en mayusculas con la linea al lado (CSS ::after
-   no existe en QSS, asi que la linea es un QFrame hermano: suggestDividerRule).
-   El texto se pone en mayusculas en codigo, no aqui. */
+/* Label of the second group, in uppercase with the line beside it (CSS ::after
+   does not exist in QSS, so the line is a sibling QFrame: suggestDividerRule).
+   The text is set to uppercase in code, not here. */
 QWidget#suggestDivider { background: transparent; }
 QLabel#suggestGroupTitle {
     color: @MUTED@; font-size: 9px; font-weight: 600;
 }
 QFrame#suggestDividerRule { color: @BORDER@; background: @BORDER@; border: none; }
-/* Fila del desplegable. Es un QWidget (no un boton) porque necesita negrita
-   parcial, que Qt no dibuja en un boton. El hover es del raton y el
-   resaltado [highlight] es del teclado: son estados distintos y el segundo
-   tiene que poder moverse con las flechas sin que el raton lo pise.
-   El borde IZQUIERDO se reserva siempre (3 px, transparente si no esta
-   resaltada) para que la barra de acento no empuje el texto al aparecer. */
+/* Dropdown row. It is a QWidget (not a button) because it needs partial
+   bold, which Qt does not draw in a button. The hover is from the mouse and the
+   [highlight] highlight is from the keyboard: they are different states and the
+   second has to be able to move with the arrows without the mouse overriding it.
+   The LEFT border is always reserved (3 px, transparent if not
+   highlighted) so that the accent bar does not push the text when it appears. */
 QWidget#suggestRow {
     background: transparent; border: none; border-left: 3px solid transparent;
     border-radius: 6px; color: @TEXTSOFT@;
 }
 QWidget#suggestRow:hover { background: @SELECTION@; }
-/* Resaltado del teclado: barra de acento a la izquierda + fondo con un velo del
-   acento. Antes era #1F1F1F, mas oscuro que el popover (#202020): no se veia
-   nada. El texto se queda en kTextSoft/kMuted, que sobre el velo siguen dando
-   8:1 y 4:1, asi que no hay que tocar los colores de las etiquetas hijas. */
+/* Keyboard highlight: accent bar on the left + background with an accent
+   veil. Before it was #1F1F1F, darker than the popover (#202020): nothing was
+   visible. The text stays in kTextSoft/kMuted, which over the veil still give
+   8:1 and 4:1, so the child labels' colors do not need touching. */
 QWidget#suggestRow[highlight="true"] {
     background: @ACCENT_A16@; border-left: 3px solid @ACCENT@;
 }
-/* Detalle de entidad ("Cantante y compositor peruano") a la derecha, en
-   tenue, para que la consulta mande. */
+/* Entity detail ("Cantante y compositor peruano") on the right, in
+   faint, so that the query leads. */
 QLabel#suggestDetail { color: @MUTED@; font-size: 12px; }
-/* Insignia "Tab" de las filas del historial: es la tecla con la que se toman.
-   Con caja, como el <kbd> del mockup. */
+/* "Tab" badge of the history rows: it is the key with which they are taken.
+   With a box, like the <kbd> of the mockup. */
 QLabel#suggestBadge {
     color: @MUTED@; font-size: 11px; border: 1px solid @BORDER@; border-radius: 4px;
 }
-/* El desplegable lleva barra cuando las filas pasan del tope de altura. La
-   superficie va transparente para que se vea el fondo del panel, no el gris
-   por defecto del viewport. */
+/* The dropdown gets a scrollbar when the rows exceed the height cap. The
+   surface goes transparent so the panel background shows, not the default
+   gray of the viewport. */
 QScrollArea#suggestScroll { background: transparent; border: none; }
 QWidget#suggestRows { background: transparent; }
 
 )QSS",
-        R"QSS(/* --- Ajustes ------------------------------------------------------------
-   Tres niveles de encabezado, y a proposito NO se reutilizan entre si:
-     pageHeading           18 px, titulo de la pagina entera
-     sectionTitle          16 px, titulo de seccion (compartido con las demas
-                           paginas, que ya lo usaban)
-     settingsSectionTitle  11 px en versalitas con tracking, encabezado de
-                           seccion de Ajustes ("INTERFAZ", "DATOS"...)
-   Y las filas de ajuste: etiqueta a la izquierda con ancho minimo para que
-   todos los menus encajen, valor a la derecha. */
+        R"QSS(/* --- Settings --------------------------------------------------
+   Three header levels, and on purpose they are NOT reused among themselves:
+     pageHeading           18 px, title of the whole page
+     sectionTitle          16 px, section title (shared with the other
+                           pages, which already used it)
+     settingsSectionTitle  11 px in small caps with tracking, header of a
+                           Settings section ("INTERFAZ", "DATOS"...)
+   And the settings rows: label on the left with a minimum width so that
+   all the menus fit, value on the right. */
 QLabel#pageHeading { font-size: 18px; font-weight: 700; }
 QLabel#settingsSectionTitle {
     font-size: 11px; font-weight: 600; color: @MUTED@;
@@ -542,44 +542,44 @@ QLabel#settingsRowLabel { color: @TEXT@; min-width: 200px; }
 QLabel#settingsRowValue { color: @MUTED@; }
 QLabel#settingsNote { font-size: 10px; color: @MUTED@; }
 QLabel#settingsVersion { font-size: 12px; color: @TEXT@; }
-/* Tarjeta que agrupa las filas de una seccion de Ajustes: sustituye a la lista
-   plana de filas sueltas separadas por hairlines. */
+/* Card that groups the rows of a Settings section: it replaces the flat
+   list of separate rows split by hairlines. */
 QFrame#settingsCard {
     background: #181818; border: 1px solid @BORDER@; border-radius: 10px;
 }
 QLabel#popupText { color: @MUTED@; }
-/* El area de scroll de Ajustes no pinta fondo: la pagina ya tiene el suyo. */
+/* The Settings scroll area paints no background: the page already has its own. */
 QScrollArea#settingsScroll { background: transparent; }
 
-/* Botones de accion de Ajustes. #actionBtn y #dataActionBtn son el mismo
-   aspecto con padding algo mayor (filas de 150 px de ancho minimo frente a las
-   de la seccion DATOS); se mantienen separados para no cambiar la caja. */
+/* Settings action buttons. #actionBtn and #dataActionBtn are the same
+   aspect with a slightly larger padding (150 px minimum-width rows versus those
+   of the DATA section); they are kept separate so as not to change the box. */
 QPushButton#actionBtn {
     font-size: 12px; padding: 7px 14px; background-color: #1F1F1F;
     border: 1px solid @BORDER@; border-radius: 8px; color: @TEXT@;
-    /* Ancho minimo comun: alinea la columna de controles dentro de la tarjeta. */
+    /* Common minimum width: aligns the controls column inside the card. */
     min-width: 150px;
 }
 QPushButton#dataActionBtn {
     font-size: 12px; padding: 8px 16px; background-color: #1F1F1F;
     border: 1px solid @BORDER@; border-radius: 8px; color: @TEXT@;
 }
-/* "Restablecer aplicacion": mismo fondo que los anteriores y solo el borde y
-   el texto en acento, para que se lea como destructivo sin ser un boton
-   primario. El acento sale de @ACCENT@, asi que se repinta solo. */
+/* "Restablecer aplicacion": same background as the previous ones and only the
+   border and the text in accent, so that it reads as destructive without being a
+   primary button. The accent comes from @ACCENT@, so it repaints itself. */
 QPushButton#accentOutline {
     font-size: 12px; padding: 8px 16px; background-color: #1F1F1F;
     border: 1px solid @ACCENT@; border-radius: 8px;
     color: @ACCENT@; font-weight: 600;
 }
 
-/* Boton Suscribirse de la ficha de canal: los dos estados en el QSS global, con
-   la propiedad booleana `subscribed` como selector. El acento sale de
-   @ACCENT@, asi que un cambio de color lo repinta sin tocar el C++.
-   NO se pone `border: none`: los setStyleSheet que sustituye no tocaban el
-   borde, asi que el boton conservaba el 1px @BORDER@ de la regla base. En el
-   estado suscrito no se nota (borde y fondo son el mismo gris), pero en el de
-   acento es visible. */
+/* Subscribe button of the channel card: both states in the global QSS, with
+   the boolean property `subscribed` as selector. The accent comes from
+   @ACCENT@, so a color change repaints it without touching the C++.
+   It does NOT set `border: none`: the setStyleSheet calls it replaces did not
+   touch the border, so the button kept the 1px @BORDER@ of the base rule. In
+   the subscribed state it is not noticeable (border and background are the same
+   gray), but in the accent one it is visible. */
 QPushButton#subscribe {
     background: @ACCENT@; border: 1px solid rgba(255,255,255,38);
     border-radius: 18px; padding: 0 18px;
@@ -591,56 +591,56 @@ QPushButton#subscribe[subscribed="true"] {
 }
 QPushButton#subscribe[subscribed="true"]:hover { background: @SELECTION@; }
 
-/* Filas compactas de canales (channel_row) */
+/* Compact channel rows (channel_row) */
 QLabel#channelRowTitle { color: @TEXT@; background: transparent; }
 QLabel#channelRowMeta  { color: @MUTED@; background: transparent; }
 
-/* Placeholder y títulos de página */
+/* Placeholder and page titles */
 QLabel#pageTitle { font-size: 18px; font-weight: 700; }
 QLabel#placeholderHint { color: @MUTED@; font-size: 14px; padding: 40px; }
-/* OJO: aqui NO va un QLabel#sectionTitle. Estuvo (22px/700, parte de la
-   migracion a QSS global) y como va DESPUES de la regla de la linea 93 GANABA
-   por orden, subiendo los titulos de seccion de TODAS las paginas de 16 a 22 px
-   (Home, Descubre, Buscar, canal, historial, biblioteca, playlist). El diseno
-   son 16 px: lo dice el comentario de settings_page.cpp ("A proposito NO es
-   #sectionTitle (16 px)"). Con un selector duplicado el QSS no avisa de nada y
-   el override es mudo, asi que la regla de #sectionTitle vive en un solo sitio. */
+/* NOTE: a QLabel#sectionTitle does NOT go here. It was here (22px/700, part of
+   the migration to global QSS) and since it comes AFTER the line 93 rule it WON
+   by order, raising the section titles of ALL pages from 16 to 22 px
+   (Home, Discover, Search, channel, history, library, playlist). The design
+   is 16 px: the comment in settings_page.cpp says so ("A proposito NO es
+   #sectionTitle (16 px)"). With a duplicated selector the QSS warns of nothing
+   and the override is silent, so the #sectionTitle rule lives in a single place. */
 
-/* --- Pagina Canal ---------------------------------------------------------
-   Antes era lo UNICO de la app sin estilo: las tres pestanas eran un
-   QTabWidget y no hay ninguna regla QTabWidget/QTabBar en este QSS, asi que
-   salian con el aspecto del tema del escritorio y el "pane" pintaba una columna
-   casi negra (medido #020303) por debajo de la lista, mas oscura que el fondo de
-   la pagina. Ahora las pestanas son botones dentro de una capsula con estilo
-   propio, como la navegacion inferior.
-   La ficha agrupa avatar, nombre, suscriptores, acciones y descripcion en una
-   caja (#181818), igual que #settingsCard y #watchDescCard. */
+/* --- Channel Page ---------------------------------------------------------
+   Before it was the ONLY thing in the app without style: the three tabs were a
+   QTabWidget and there is no QTabWidget/QTabBar rule in this QSS, so they came
+   out with the look of the desktop theme and the "pane" painted a nearly black
+   column (measured #020303) below the list, darker than the page
+   background. Now the tabs are buttons inside a capsule with their own
+   style, like the bottom navigation.
+   The card groups avatar, name, subscribers, actions and description in a
+   box (#181818), like #settingsCard and #watchDescCard. */
 QFrame#channelCard {
     background: #181818; border: 1px solid @BORDER@; border-radius: 12px;
 }
-/* Nombre del canal: es el H1 de la pagina, un punto por encima de los 18 px de
-   #pageHeading porque es el dato al que se entra. */
+/* Channel name: it is the H1 of the page, one point above the 18 px of
+   #pageHeading because it is the datum you enter into. */
 QLabel#channelName { font-size: 19px; font-weight: 700; color: @TEXT@; background: transparent; }
 QLabel#channelMeta { color: @METATEXT@; font-size: 12px; background: transparent; }
 QLabel#channelDesc { color: @METATEXT@; font-size: 12px; background: transparent; }
-/* Avatar de la ficha (80x80, radio 40). El circulo real lo hace
-   nt::circularAvatar (recorta el pixmap): este radio solo redondea el fondo. */
+/* Card avatar (80x80, radius 40). The real circle is made by
+   nt::circularAvatar (crops the pixmap): this radius only rounds the background. */
 QLabel#channelAvatar { border-radius: 40px; background: transparent; }
-/* Capsula de las pestanas: el fondo es el de la ficha, con un pelo de borde
-   igual que el resto de superficies. */
+/* Tabs capsule: the background is the card's, with a hairline border
+   like the rest of the surfaces. */
 QWidget#channelTabs { background: #181818; border: 1px solid @BORDER@; border-radius: 9px; }
 QPushButton#tabBtn {
     background: transparent; border: none; border-radius: 6px;
     padding: 6px 16px; color: @MUTED@; font-size: 12px; font-weight: 600;
 }
-/* El foco NO se marca: son pestanas, no botones de accion, y el aro del acento
-   al pulsarlas se leeria como un error (mismo criterio que #iconBtn). */
+/* Focus is NOT marked: they are tabs, not action buttons, and the accent ring
+   when pressing them would read as an error (same criteria as #iconBtn). */
 QPushButton#tabBtn:focus { border-color: transparent; }
 QPushButton#tabBtn:hover { background: #1F1F1F; color: @TEXT@; }
-/* La seleccionada lleva el acento en el texto, como la nav inferior. El fondo no
-   puede distinguirse de la capsula: los dos son #181818. */
+/* The selected one carries the accent in the text, like the bottom nav. The
+   background cannot be distinguished from the capsule: both are #181818. */
 QPushButton#tabBtn[selected="true"] { color: @ACCENT_HOVER@; }
-/* Contador de videos de la pestana activa: misma pastilla que #queueCount. */
+/* Video counter of the active tab: same pill as #queueCount. */
 QLabel#tabCount {
     color: @METATEXT@; font-size: 11px;
     background: #1F1F1F; border: 1px solid @BORDER@; border-radius: 9px;
@@ -648,8 +648,8 @@ QLabel#tabCount {
 }
 
 )QSS",
-        R"QSS(/* Chip de acento ("Ir a Buscar" del estado vacio del Home): mismo CTA
-   de marca que #primary — relleno plano + hairline + estados nítidos. */
+        R"QSS(/* Accent chip ("Ir a Buscar" of the Home empty state): same brand
+   CTA as #primary — flat fill + hairline + crisp states. */
 QPushButton#accentChip {
     background: @ACCENT@; border: 1px solid rgba(255,255,255,38);
     border-radius: 8px;
@@ -658,7 +658,7 @@ QPushButton#accentChip {
 QPushButton#accentChip:hover { background: @ACCENT_HOVER@; }
 QPushButton#accentChip:pressed { background: @ACCENT_PRESSED@; }
 
-/* Estado vacio del Home (va sobre un popupDialog) */
+/* Home empty state (goes over a popupDialog) */
 QLabel#emptyStateTitle {
     color: @TEXT@; font-size: 15px; font-weight: 700;
     border: none; background: transparent;
@@ -668,7 +668,7 @@ QLabel#emptyStateBody {
     border: none; background: transparent;
 }
 
-/* Filas de la Biblioteca (playlists, historial: mismo item card) */
+/* Library rows (playlists, history: same item card) */
 QLabel#libraryItemTitle {
     color: @TEXT@; font-weight: 600; font-size: 14px;
     background: transparent;
@@ -677,10 +677,10 @@ QLabel#libraryItemMeta {
     color: @MUTED@; font-size: 12px; background: transparent;
 }
 
-/* Cartelón "Detectando hardware" (hwProbePopup). Estaba entero en un
-   setStyleSheet inline con rgba(18,18,18,0.96) y #3a3a3a, que son valores que
-   el QSS global no tenía: por eso era otra superficie que el cambio de acento
-   no cubría. */
+/* "Detectando hardware" banner (hwProbePopup). It was entirely in an
+   inline setStyleSheet with rgba(18,18,18,0.96) and #3a3a3a, which are values
+   that the global QSS did not have: that is why it was another surface that the
+   accent change did not cover. */
 QWidget#hwProbePopup {
     background-color: @POPOVER@;
     border: 1px solid @HANDLE@;
@@ -689,9 +689,9 @@ QWidget#hwProbePopup {
 QLabel#hwPopupTitle { color: #FFFFFF; font-size: 16px; font-weight: 600; }
 QLabel#hwPopupBody { color: @TEXTSOFT@; font-size: 12px; }
 
-/* Mini player. El hueco en sí (miniVideoHost) no necesita regla: hereda el
-   fondo transparente del QWidget global, que es lo correcto, porque por debajo
-   va el PlayerWidget en vivo reparentado. */
+/* Mini player. The slot itself (miniVideoHost) needs no rule: it inherits the
+   transparent background of the global QWidget, which is correct, because
+   underneath goes the reparented live PlayerWidget. */
 QLabel#miniThumb {
     background-color: @BORDER@; border-radius: 6px;
     color: @MUTED@; font-size: 10px;
@@ -702,9 +702,9 @@ QLabel#miniTitle {
     background: transparent; border: none;
 }
 
-/* Área de vídeo. Negro puro, NO kBg (#0F0F0F): es el fondo de las bandas
-   letterbox cuando el vídeo no llena la caja, y tiene que ser negro de verdad
-   para que no se note el marco. Estaba en un setStyleSheet inline. */
+/* Video area. Pure black, NOT kBg (#0F0F0F): it is the background of the
+   letterbox bands when the video does not fill the box, and it has to be truly
+   black so that the frame is not noticeable. It was in an inline setStyleSheet. */
 QWidget#playerArea { background-color: #000000; }
 )QSS",
     };
@@ -714,12 +714,12 @@ QWidget#playerArea { background-color: #000000; }
     for (const char *t : kTrozos)
         qss += QString::fromUtf8(t);
 
-    // Los placeholders se sustituyen en CADA llamada: un cambio de acento en
-    // caliente (Ajustes → Color de acento) regenera el stylesheet al momento.
-    // Los neutros también son placeholders: antes el QSS escribía #2A2A2A para
-    // bordes y #232323 para hover mientras theme.h tenía kBorder #262626 y
-    // kHover #242424, así que un mismo rol tenía dos valores según por dónde se
-    // pintara. Ahora hay una sola fuente.
+    // The placeholders are substituted on EVERY call: a hot accent change
+    // (Settings → Color de acento) regenerates the stylesheet right away.
+    // The neutral ones are placeholders too: the QSS used to write #2A2A2A for
+    // borders and #232323 for hover while theme.h had kBorder #262626 and
+    // kHover #242424, so the same role had two values depending on where it was
+    // painted from. Now there is a single source.
     return qss.replace(QStringLiteral("@ACCENT@"), accentHex())
               .replace(QStringLiteral("@ACCENT_PRESSED@"), accentPressedHex())
               .replace(QStringLiteral("@ACCENT_HOVER@"), accentHoverHex())
@@ -747,10 +747,10 @@ QWidget#playerArea { background-color: #000000; }
 }
 
 namespace {
-// Definidas mas abajo, con glyphSelfTest que es su usuario principal. Se
-// adelantan aqui porque themeSelfTest las necesita tambien: los dos tests
-// tienen que quitar comentarios ANTES de mirar literales, si no basta con citar
-// un nombre en un "// este boton se llama X" para que cuente como vivo.
+// Defined further below, next to glyphSelfTest which is their main user. They
+// are forward-declared here because themeSelfTest needs them too: both tests
+// have to strip comments BEFORE looking at literals, otherwise citing
+// a name in a "// this button is called X" is enough for it to count as alive.
 QString sinComentarios(const QString &linea, bool &enBloque);
 QStringList literalesDe(const QString &linea);
 } // namespace
@@ -765,8 +765,8 @@ bool themeSelfTest()
     };
 
     QString qss = styleSheet();
-    // Fuera comentarios: un /* ... */ puede contener llaves o nombres de
-    // selector y ensuciaria el recuento.
+    // Comments stripped: a /* ... */ can contain braces or selector
+    // names and would pollute the count.
     while (true) {
         const int a = qss.indexOf(QStringLiteral("/*"));
         if (a < 0)
@@ -780,8 +780,8 @@ bool themeSelfTest()
     }
 
     QHash<QString, int> veces;
-    // selector -> cuerpo, para poder comprobar el contenido de una regla concreta
-    // (no solo que el selector exista).
+    // selector -> body, to be able to check the content of a concrete rule
+    // (not only that the selector exists).
     QVector<QPair<QString, QString>> cuerpos;
     int reglas = 0;
     int i = 0;
@@ -801,8 +801,8 @@ bool themeSelfTest()
         i = cierra + 1;
     }
 
-    // Si el parser se rompe (p. ej. por un cambio de formato del QSS) el numero
-    // de reglas se hunde y las dos comprobaciones de abajo pasarian por vacio.
+    // If the parser breaks (e.g. because of a QSS formatting change) the number
+    // of rules collapses and the two checks below would pass on empty.
     chk(reglas > 100 && veces.size() > 50,
         "el QSS se ha parseado (mas de 100 reglas y 50 selectores)");
 
@@ -817,26 +817,26 @@ bool themeSelfTest()
     chk(repetidos.isEmpty(),
         "ningun selector se declara dos veces (el ultimo gana y no avisa)");
 
-    // Guarda de la regresion concreta: #sectionTitle son 16 px por diseno (lo
-    // dice el comentario de settings_page.cpp) y solo puede declararse una vez.
-    // Estuvo duplicado a 22 px y subio los titulos de seccion de TODAS las
-    // paginas (Home, Descubre, Buscar, canal, historial, biblioteca, playlist).
+    // Guard for the concrete regression: #sectionTitle is 16 px by design (the
+    // comment in settings_page.cpp says so) and may only be declared once.
+    // It was duplicated at 22 px and raised the section titles of ALL the
+    // pages (Home, Descubre, Buscar, canal, historial, biblioteca, playlist).
     chk(veces.value(QStringLiteral("QLabel#sectionTitle")) == 1,
         "QLabel#sectionTitle se declara exactamente una vez");
 
-    // --- Selectores #nombre que ningun widget llega a usar --------------------
-    // Una regla cuyo #nombre no aparece como literal en NINGUN sitio de src/
-    // no puede pintar nada: nadie le pone ese objectName al widget. Asi que se
-    // pintaba y no se notaba. Esto es lo que habria cazado QPushButton#danger.
+    // --- #name selectors no widget ever reaches -------------------------------
+    // A rule whose #name does not appear as a literal ANYWHERE in src/
+    // cannot paint anything: nobody gives the widget that objectName. So it
+    // painted and went unnoticed. That is what would have caught QPushButton#danger.
     //
-    // Se miran los literales de TODO src/ y no solo los argumentos de
-    // setObjectName: hay helpers que reciben el nombre como parametro y lo
-    // aplican por dentro, y con el criterio estricto #actionSegL y #actionSegR
-    // salian como muertos sin serlo (los pone makeSeg en watch_page.cpp). Con
-    // un criterio laxo se puede dar el caso inverso (que el mismo nombre se
-    // cite de verdad en otro sitio y tape un selector muerto), pero eso es un
-    // falso negativo: avisa el CI y se mira. Un falso positivo en cambio
-    // enseña a ignorar el test, que es peor.
+    // Literals of ALL of src/ are looked at, not only the arguments of
+    // setObjectName: there are helpers that receive the name as a parameter and apply
+    // it internally, and with the strict criterion #actionSegL and #actionSegR
+    // came out as dead without being so (makeSeg sets them in watch_page.cpp). With
+    // a lax criterion the opposite case can happen (the same name really being cited
+    // elsewhere and covering up a dead selector), but that is a false
+    // negative: it warns in CI and someone looks. A false positive instead
+    // teaches you to ignore the test, which is worse.
     QStringList nombresQss;
     for (const QString &sel : veces.keys()) {
         for (int i = 0; i < sel.size(); ++i) {
@@ -849,7 +849,7 @@ bool themeSelfTest()
                 n += sel.at(j);
                 ++j;
             }
-            // Los ids de Qt empiezan por letra; "#1" no es un selector de objeto.
+            // Qt ids start with a letter; "#1" is not an object selector.
             if (!n.isEmpty() && n.at(0).isLetter() && !nombresQss.contains(n))
                 nombresQss << n;
             i = j - 1;
@@ -859,7 +859,7 @@ bool themeSelfTest()
     chk(nombresQss.size() > 40, "se han extraido los ids del QSS (mas de 40)");
 
     {
-        // Raiz del arbol: este fichero es <raiz>/src/ui/theme.cpp.
+        // Source tree root: this file is <root>/src/ui/theme.cpp.
         QDir root = QFileInfo(QString::fromUtf8(__FILE__)).absolutePath();
         root.cdUp();
         root.cdUp();
@@ -888,10 +888,10 @@ bool themeSelfTest()
                     if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
                         continue;
                     ++ficheros;
-                    // El estado de bloque NO cruza de un fichero a otro: un "/*"
-                    // sin cerrar dejaria el siguiente entero marcado como
-                    // comentario y sus literales no se verian (agujero
-                    // silencioso, que es justo lo que este test evita).
+                    // The block state does NOT cross from one file to the next: an unclosed
+                    // "/*" would leave the whole next file marked as
+                    // comment and its literals unseen (a silent
+                    // hole, which is exactly what this test avoids).
                     bool enBloque = false;
                     const QStringList lineas =
                         QString::fromUtf8(f.readAll()).split(QLatin1Char('\n'));
@@ -914,10 +914,10 @@ bool themeSelfTest()
         }
     }
 
-    // Regresion de las dos cosas que perdio el usuario de vista. La paleta no la
-    // cubre el QSS (la descripcion del Player es un QLabel seleccionable y pinta
-    // con QPalette::Highlight), asi que sin esto el texto seleccionado salia con
-    // el color del tema del escritorio.
+    // Regression of the two things the user stopped noticing. The QSS does not
+    // cover it (the Player description is a selectable QLabel and paints with
+    // QPalette::Highlight), so without this the selected text came out in the
+    // desktop theme's color.
     QPalette pal;
     applyTextSelectionPalette(pal);
     chk(pal.color(QPalette::Highlight) == textSelectionBg(),
@@ -931,8 +931,8 @@ bool themeSelfTest()
                       + accentHex()),
         "ningun texto seleccionado se pinta en el acento (parecia un error)");
 
-    // La fila de sugerencia resaltada por el teclado tiene que LLEVAR el acento:
-    // se perdia porque era #1F1F1F, mas oscuro que el popover #202020.
+    // The suggestion row highlighted by the keyboard has to CARRY the accent:
+    // it was lost because it was #1F1F1F, darker than the #202020 popover.
     const int hl = qss.indexOf(QStringLiteral("QWidget#suggestRow[highlight=\"true\"]"));
     chk(hl > 0, "existe la regla de la sugerencia resaltada");
     if (hl > 0) {
@@ -943,26 +943,26 @@ bool themeSelfTest()
             "la sugerencia resaltada lleva el acento (barra y velo)");
     }
 
-    // REGLA del usuario: los botones multimedia NO llevan marco visible (los
-    // #iconBtn de la fila del reproductor y de la mini bar, los #actionChip y
-    // los items del menu de resoluciones). Se admite "none" o "transparent":
-    // este ultimo conserva los 2 px para que el foco, que en esta app se senala
-    // pintando el color del borde, no desplace el contenido.
+    // USER RULE: media buttons carry no visible frame (the
+    // #iconBtn of the player row and of the mini bar, the #actionChip and
+    // the resolution menu items). "none" or "transparent" is accepted:
+    // the latter keeps the 2 px so that focus, which this app signals by
+    // painting the border color, does not displace the content.
     const QStringList multimedia{
         QStringLiteral("QPushButton#iconBtn"),
         QStringLiteral("QPushButton#actionChip"),
         QStringLiteral("QFrame#qualityMenu QPushButton")};
     for (const QString &sel : multimedia) {
-        // TODOS los estados del boton, no solo la regla base: el marco al
-        // pulsarlo venia de :focus (que ademas hereda la global
-        // QPushButton:focus), y un check solo sobre la base lo dejaba pasar.
+        // ALL states of the button, not just the base rule: the frame when
+        // pressing came from :focus (which also inherits the global
+        // QPushButton:focus), and a check only on the base let it through.
         int estados = 0;
         QString culpable;
         for (const auto &par : cuerpos) {
             if (!par.first.startsWith(sel))
                 continue;
-            // Lo que venga detras del nombre tiene que ser un pseudo-estado o
-            // una propiedad, nunca otro nombre: "#iconBtn" no es "#iconBtnFoo".
+            // Whatever comes after the name must be a pseudo-state or
+            // a property, never another name: "#iconBtn" is not "#iconBtnFoo".
             const QChar sig = par.first.size() > sel.size()
                                   ? par.first.at(sel.size())
                                   : QChar();
@@ -987,9 +987,9 @@ bool themeSelfTest()
                                 culpable.isEmpty() ? QStringLiteral("-") : culpable)));
     }
 
-    // Las pestanas del canal: no pueden quedarse sin marcar la seleccionada (el
-    // QTabWidget no tenia ninguna regla y se veia como el escritorio), y el foco
-    // no debe encender un aro de acento al pulsarlas.
+    // The Channel tabs: they cannot leave the selected one unmarked (the
+    // QTabWidget had no rule at all and looked like the desktop), and focus
+    // must not light up an accent ring when pressing them.
     {
         const QString sel = QStringLiteral("QPushButton#tabBtn");
         chk(veces.value(sel) == 1, "QPushButton#tabBtn se declara exactamente una vez");
@@ -1019,11 +1019,11 @@ bool themeSelfTest()
 
 namespace {
 
-// Quita los comentarios de una linea (respetando el estado de bloque) y
-// devuelve solo el codigo. Sin esto se leen los comentarios como si fueran
-// literales y cada glifo citado en un "// asi se evita el X" sale como falso
-// positivo. Un "http://" dentro de un literal trunca el literal (queda sin
-// comilla de cierre y se descarta): para este test da igual.
+// Strips comments from a line (respecting block state) and
+// returns only the code. Without this, comments are read as if they were
+// literals and every glyph cited in a "// this is how the X is avoided" shows up as a false
+// positive. An "http://" inside a literal truncates the literal (leaving it
+// without closing quote, so it is discarded): for this test it does not matter.
 QString sinComentarios(const QString &linea, bool &enBloque)
 {
     QString out;
@@ -1039,7 +1039,7 @@ QString sinComentarios(const QString &linea, bool &enBloque)
         const QChar c = linea.at(i);
         if (c == QLatin1Char('/') && i + 1 < linea.size()
             && linea.at(i + 1) == QLatin1Char('/'))
-            break; // resto de la linea es comentario
+            break; // the rest of the line is a comment
         if (c == QLatin1Char('/') && i + 1 < linea.size()
             && linea.at(i + 1) == QLatin1Char('*')) {
             enBloque = true;
@@ -1052,9 +1052,9 @@ QString sinComentarios(const QString &linea, bool &enBloque)
     return out;
 }
 
-// Literales de comillas dobles de una linea, con los escapes \", \\, \n, etc.
-// ya resueltos. Los que llevan \u o \x los filtra el llamante: ahi el
-// codepoint es explicito a proposito.
+// Double-quoted literals of a line, with the escapes \", \\, \n, etc.
+// already resolved. Those carrying \u or \x are filtered by the caller: there the
+// codepoint is explicit on purpose.
 QStringList literalesDe(const QString &linea)
 {
     QStringList out;
@@ -1080,7 +1080,7 @@ QStringList literalesDe(const QString &linea)
         }
         if (cerrado) {
             out << lit;
-            i = j; // seguir despues de la comilla de cierre
+            i = j; // continue after the closing quote
         }
     }
     return out;
@@ -1088,17 +1088,17 @@ QStringList literalesDe(const QString &linea)
 
 } // namespace
 
-// Selftest OFFLINE de GLIFOS. La UI pinta su texto con la fuente por defecto
-// del sistema, y esa fuente no tiene todos los caracteres: "✕" (U+2715),
-// "◀" (U+25C0), "▾" (U+25BE) y "✔" (U+2714) NO estan en Liberation Sans, la
-// que resuelve el sistema. Qt los sustituye por el marcador de glifo ausente,
-// que medido en pantalla son 2x5 px: el boton de limpiar del buscador era un
-// marco vacio con un punto, y los desplegables de Ajustes likewise.
+// OFFLINE GLYPHS selftest. The UI paints its text with the system default
+// font, and that font does not have all characters: "✕" (U+2715),
+// "◀" (U+25C0), "▾" (U+25BE) and "✔" (U+2714) are NOT in Liberation Sans, the
+// one the system resolves. Qt replaces them with the missing-glyph marker,
+// which measured on screen is 2x5 px: the search clear button was an
+// empty frame with a dot, and the Settings dropdowns likewise.
 //
-// Para que no dependa de una lista que se desincroniza al anadir texto, se
-// recorren los literales del propio ARBOL DE FUENTES y se comprueba cada
-// caracter no ASCII contra la fuente real de la app: un glifo que no exista
-// sale en el CI en vez de en la pantalla del usuario. Offline y determinista.
+// So that it does not depend on a list that goes stale when text is added, the
+// literals of the SOURCE TREE itself are walked and every non-ASCII
+// character is checked against the app's real font: a glyph that does not exist
+// shows up in CI instead of on the user's screen. Offline and deterministic.
 bool glyphSelfTest()
 {
     int fail = 0;
@@ -1113,13 +1113,13 @@ bool glyphSelfTest()
     std::fprintf(stderr, "GLYFTS fuente de la app: %s (%d px)\n",
                  qPrintable(appFont.family()), appFont.pixelSize());
 
-    // OJO: QFontMetrics::inFont() NO sirve, consulta el FALLBACK del sistema y
-    // devuelve true si CUALQUIER fuente instalada tiene el caracter (aqui hay 25
-    // que cubren U+2715), mientras que la app segun pintando el marcador de
-    // glifo ausente. Lo que decide es si lo tiene EL FICHERO de la fuente de la
-    // app, y eso lo responde QRawFont. Si la fuente no se puede abrir (una
-    // fuente compuesta del sistema, p. ej.), se cae a inFont y se avisa: es
-    // mas permisivo, pero mejor que no comprobar nada.
+    // WARNING: QFontMetrics::inFont() is NOT good for this, it consults the system
+    // FALLBACK and returns true if ANY installed font has the character (here there are 25
+    // covering U+2715), while the app kept painting the missing-glyph
+    // marker. What decides is whether the FONT FILE of the app
+    // font has it, and that is answered by QRawFont. If the font cannot be opened (a
+    // composite system font, for instance), it falls back to inFont and warns: it is
+    // more permissive, but better than checking nothing.
     const QRawFont raw = QRawFont::fromFont(appFont);
     const bool usarRaw = raw.isValid();
     if (!usarRaw)
@@ -1130,7 +1130,7 @@ bool glyphSelfTest()
         return usarRaw ? raw.supportsCharacter(c.unicode()) : fm.inFont(c);
     };
 
-    // Raiz del arbol: este fichero es <raiz>/src/ui/theme.cpp.
+    // Root of the tree: this file is <root>/src/ui/theme.cpp.
     QDir root = QFileInfo(QString::fromUtf8(__FILE__)).absolutePath();
     root.cdUp();
     root.cdUp();
@@ -1141,7 +1141,7 @@ bool glyphSelfTest()
         return true;
     }
 
-    // char -> primer uso ("fichero:linea"), para el diagnostico.
+    // char -> first use ("file:line"), for diagnostics.
     QHash<uint, QString> usos;
     int ficheros = 0;
     int literales = 0;
@@ -1164,10 +1164,10 @@ bool glyphSelfTest()
             if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
                 continue;
             ++ficheros;
-            // El estado de comentario en bloque NO puede pasar de un fichero a
-            // otro: un "/*" sin cerrar al final dejaria el siguiente entero
-            // "en bloque" y sus literales no se comprobarian (agujero
-            // silencioso, que es justo lo que este test evita).
+            // The block-comment state must NOT carry from one file to
+            // the next: an unclosed "/*" at the end would leave the following one entirely
+            // "in block" and its literals would not be checked (a silent
+            // hole, which is exactly what this test avoids).
             enBloque = false;
             const QStringList lineas =
                 QString::fromUtf8(f.readAll()).split(QLatin1Char('\n'));
@@ -1178,7 +1178,7 @@ bool glyphSelfTest()
                 for (const QString &lit : lits) {
                     if (lit.contains(QLatin1String("\\u"))
                         || lit.contains(QLatin1String("\\x")))
-                        continue; // codepoint explicito: no se puede comprobar
+                        continue; // explicit codepoint: cannot be checked
                     for (const QChar &c : lit) {
                         if (c.unicode() < 128)
                             continue;

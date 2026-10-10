@@ -17,8 +17,8 @@
 
 namespace {
 
-// El recorte circular del avatar vive en nt::circularAvatar (src/ui/icons.*):
-// la ficha de canal y esta tarjeta lo comparten, así que son el mismo código.
+// The avatar's circular crop lives in nt::circularAvatar (src/ui/icons.*):
+// the channel card and this row share it, so they are the same code.
 
 QPixmap placeholderAvatar(int size)
 {

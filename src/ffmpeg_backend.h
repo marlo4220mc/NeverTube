@@ -6,31 +6,32 @@
 #include <QSize>
 #include <QString>
 
-// FfmpegBackend: reproductor propio con FFmpeg/libav (SIN libmpv) para la
-// Win7 x86. Demux (local/HLS) + decode (Fase 2: software; Fase 4:
-// DXVA2 h264 con copy-back) + swscale → RGB + render GL frame-driven +
-// audio pulse-simple (Linux) / QAudioOutput (Windows).
+// FfmpegBackend: own player built with FFmpeg/libav (NO libmpv) for Win7 x86.
+// Demux (local/HLS) + decode (Phase 2: software; Phase 4: DXVA2 h264 with
+// copy-back) + swscale → RGB + frame-driven GL render + pulse-simple (Linux) /
+// QAudioOutput (Windows) audio.
 //
-// Modelo de hilos: el trabajo pesado (demux/decode/convert/audio) corre en un
-// hilo propio; este objeto QObject vive en el hilo GUI. El hilo NO emite
-// señales directamente (rompería las conexiones directas del widget): publica
-// estado en un snapshot (consultas thread-safe) y entrega frames/eventos al
-// hilo GUI con invocaciones diferidas (deliverFrame / onEngineEvent), que son
-// las que emiten las señales neutras. pollEvents() es no-op: no hay cola de
-// eventos que drenar, el backend empuja.
+// Thread model: the heavy work (demux/decode/convert/audio) runs in its own
+// thread; this QObject lives in the GUI thread. The thread does NOT emit
+// signals directly (it would break the widget's direct connections): it
+// publishes state in a snapshot (thread-safe queries) and delivers
+// frames/events to the GUI thread with deferred invocations (deliverFrame /
+// onEngineEvent), which are the ones that emit the neutral signals.
+// pollEvents() is a no-op: there is no event queue to drain, the backend
+// pushes.
 //
-// Fase 4: al abrir se solicita HW (VAAPI/DXVA2, copy-back antes de swscale);
-// hwdecCurrent() reporta el device HW real tras el primer frame ("no" en SW,
-// vacío hasta entonces). El render es por frame entregado (sin timer fijo); el
-// timer de 33 ms del widget queda como red de seguridad y es inofensivo aquí.
+// Phase 4: HW is requested on open (VAAPI/DXVA2, copy-back before swscale);
+// hwdecCurrent() reports the real HW device after the first frame ("no" on
+// SW, empty until then). The render is per delivered frame (no fixed timer);
+// the widget's 33 ms timer remains as a safety net and is harmless here.
 //
-// x86: el widget detecta con un timer de 250 ms si otra ventana cubre el vídeo
-// (Win7/DWM no avisa de oclusión). Mientras está cubierto, el hilo de decode NO
-// transfiere (copy-back) ni convierte (swscale) frames y renderGL no pinta:
-// ahorro real de CPU/GPU bajo una ventana flotante (el drop de FPS de la GMA
-// 950 con CPU/RAM de la app bajos es el compositor DWM compitiendo). Además,
-// frameToImage escala SOLO hacia abajo hasta el tamaño del surface de render
-// (menos píxeles en swscale y en la subida de textura; el upscale lo hace GL).
+// x86: the widget uses a 250 ms timer to detect whether another window covers
+// the video (Win7/DWM does not report occlusion). While covered, the decode
+// thread does NOT transfer (copy-back) nor convert (swscale) frames and
+// renderGL does not paint: real CPU/GPU saving under a floating window (the
+// GMA 950 FPS drop with low app CPU/RAM is the DWM compositor competing).
+// Also, frameToImage scales ONLY down to the render surface size (fewer
+// pixels in swscale and in the texture upload; GL does the upscale).
 
 class FfmpegBackend : public PlaybackBackend
 {
@@ -40,18 +41,18 @@ public:
     explicit FfmpegBackend(QObject *parent = nullptr);
     ~FfmpegBackend() override;
 
-    // Estado interno del backend (definición completa en el .cpp). Se declara
-    // aquí en sección pública para que las funciones libres del hilo de
-    // decode (runLoop, renderGLCore, openFormat) puedan nombrarlo; no es parte
-    // del API y sus campos no deben usarse fuera del .cpp.
+    // Backend internal state (full definition in the .cpp). It is declared
+    // here in the public section so the decode thread's free functions
+    // (runLoop, renderGLCore, openFormat) can name it; it is not part of the
+    // API and its fields must not be used outside the .cpp.
     struct Impl;
 
     // --- PlaybackBackend ---
     bool initGL() override;
     void destroyRenderContext() override;
-    // x86: el widget detecta cobertura de ventanas (timer de 250 ms + z-order
-    // de Windows) y pausa el pipeline mientras esté cubierto (ver
-    // playback_backend.h occlusionSkipSupported). mpv NO lo soporta.
+    // x86: the widget detects window coverage (250 ms timer + Windows z-order)
+    // and pauses the pipeline while covered (see playback_backend.h
+    // occlusionSkipSupported). mpv does NOT support it.
     bool occlusionSkipSupported() const override { return true; }
     void setVideoOccluded(bool occluded) override;
     void shutdown() override;
@@ -81,19 +82,19 @@ public:
     bool cacheIdle() const override;
     void pollEvents() override;
 
-    // --- diagnóstico / selftest ---
-    // Modo banco: decodifica y convierte SIN sink de audio y SIN entregar
-    // frames al render (solo cuenta framesDecoded()). Para selftest offline;
-    // no afecta a la reproducción normal.
+    // --- diagnostics / selftest ---
+    // Bench mode: decodes and converts WITHOUT an audio sink and WITHOUT
+    // delivering frames to the render (it only counts framesDecoded()). For
+    // offline selftests; does not affect normal playback.
     void setBenchMode(bool on);
-    // Frames de vídeo decodificados desde la última playUrl (modo banco y
-    // normal; el selftest los verifica).
+    // Video frames decoded since the last playUrl (bench and normal mode;
+    // the selftest verifies them).
     int framesDecoded() const;
-    // Tamaño del vídeo actual (0x0 si aún no hay frame).
+    // Current video size (0x0 if there is no frame yet).
     QSize videoSize() const;
 
 private slots:
-    // Corren en el hilo GUI (invocaciones diferidas desde el hilo de decode).
+    // They run on the GUI thread (deferred invocations from the decode thread).
     void deliverFrame(const QImage &img);
     void onEngineEvent(int kind, double a, double b, int c,
                        const QString &s);

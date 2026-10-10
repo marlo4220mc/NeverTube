@@ -7,22 +7,22 @@ on:
 
 jobs:
   windows:
-    # windows-2022 (VS2022 17.x + toolset v142/14.29): la máquina de pruebas es Win7 y su
-    # CRT ha de ser el de VS2015-2019. windows-latest ya es VS2026 (14.5x) y su
-    # runtime NO es Win7-compatible (imports W8+); además el binario 14.5x no
-    # enlaza contra el redist vs/16. Por eso se fija imagen Y toolset (-T v142).
+    # windows-2022 (VS2022 17.x + toolset v142/14.29): the test machine is Win7 and its
+    # CRT must be the one from VS2015-2019. windows-latest is already VS2026 (14.5x) and its
+    # runtime is NOT Win7-compatible (W8+ imports); also the 14.5x binary does not
+    # link against the vs/16 redist. That is why both the image AND the toolset (-T v142) are pinned.
     runs-on: windows-2022
     env:
       NEVERTUBE_DEBUG: 1
     steps:
       - uses: actions/checkout@v4
 
-      # Qt 5.15.2 MSVC2019 x86 — la máquina de pruebas es de 32 bits (Windows x86 no
-      # ejecuta exe/x64). La misma config de BUILD_WINDOWS.md.
-      # cache: true → aqtinstall descarga Qt desde un mirror que el redirector
-      # de download.qt.io elige al azar: a veces el CDN oficial (35-55 s) y a
-      # veces un mirror lento (hasta ~13 min, p.ej. mirror.ossplanet.net). Con
-      # la caché, tras la primera vez no se vuelve a descargar.
+      # Qt 5.15.2 MSVC2019 x86 — the test machine is 32-bit (Windows x86 does not
+      # run x64 exe). Same config as BUILD_WINDOWS.md.
+      # cache: true → aqtinstall downloads Qt from a mirror that the download.qt.io
+      # redirector picks at random: sometimes the official CDN (35-55 s) and
+      # sometimes a slow mirror (up to ~13 min, e.g. mirror.ossplanet.net). With
+      # the cache, after the first time it is not downloaded again.
       - uses: jurplel/install-qt-action@v4
         with:
           version: '5.15.2'
@@ -31,27 +31,27 @@ jobs:
           arch: 'win32_msvc2019'
           cache: true
 
-      # Fase 5: el build x86 (Win7) NO usa libmpv. Su único motor es el
-      # FfmpegBackend, enlazado contra el paquete FFmpeg i686 VENDORIZADO en
-      # third_party/ffmpeg-win32/ (headers + import-libs MSVC + DLLs). No existe
-      # build público de FFmpeg para Windows de 32 bits (gyan.dev y
-      # BtbN/FFmpeg-Builds son solo win64; MSYS2 retiró el target i686), así que
-      # se cross-compiló una vez con tools/build_ffmpeg_i686.sh: FFmpeg 9.0.2
-      # LGPL v2.1+ (--disable-gpl), TLS por schannel (sin DLLs de OpenSSL para
+      # Phase 5: the x86 build (Win7) does NOT use libmpv. Its only engine is
+      # FfmpegBackend, linked against the VENDORED i686 FFmpeg package in
+      # third_party/ffmpeg-win32/ (headers + MSVC import-libs + DLLs). There is no
+      # public FFmpeg build for 32-bit Windows (gyan.dev and
+      # BtbN/FFmpeg-Builds are win64 only; MSYS2 dropped the i686 target), so it
+      # was cross-compiled once with tools/build_ffmpeg_i686.sh: FFmpeg 9.0.2
+      # LGPL v2.1+ (--disable-gpl), TLS via schannel (no OpenSSL DLLs for
       # FFmpeg), DXVA2 h264 (--enable-hwaccel=h264_dxva2), --enable-w32threads
-      # (sin libwinpthread) y runtime estático (sin libgcc/libunwind). Imports
-      # Win7-limpios (lo re-verifica el gate de abajo) y verificado bajo Wine
-      # (decodifica h264/vp9/av1 + HLS fMP4 y hace handshake TLS). Ver
-      # third_party/ffmpeg-win32/README.md. El CI NO descarga ni compila FFmpeg.
+      # (no libwinpthread) and static runtime (no libgcc/libunwind). Win7-clean
+      # imports (re-verified by the gate below) and verified under Wine
+      # (decodes h264/vp9/av1 + HLS fMP4 and does a TLS handshake). See
+      # third_party/ffmpeg-win32/README.md. The CI does NOT download or compile FFmpeg.
 
-      # Qt 5.15.2 (msvc2019 x86) carga su backend TLS por LoadLibrary de las DLLs
-      # de OpenSSL 1.1 (libssl-1_1.dll / libcrypto-1_1.dll) DESDE la
-      # carpeta del exe. windeployqt NO las despliega: sin ellas, cualquier
-      # HTTPS falla en la máquina objetivo con "qt.network.ssl ... TLS
-      # initialization failed" (innertube/YouTube no cargan). Se extraen los
-      # binarios oficiales de OpenSSL 1.1.1w (Shining Light Productions) del
-      # instalador Inno SIN ejecutarlo (innoextract): no hay elevación/UAC en
-      # el runner ni toca C:\ ni el registro.
+      # Qt 5.15.2 (msvc2019 x86) loads its TLS backend via LoadLibrary of the OpenSSL
+      # 1.1 DLLs (libssl-1_1.dll / libcrypto-1_1.dll) FROM the
+      # exe folder. windeployqt does NOT deploy them: without them, any
+      # HTTPS fails on the target machine with "qt.network.ssl ... TLS
+      # initialization failed" (innertube/YouTube do not load). The official
+      # OpenSSL 1.1.1w binaries (Shining Light Productions) are extracted from the
+      # Inno installer WITHOUT running it (innoextract): there is no elevation/UAC on
+      # the runner and it does not touch C:\ or the registry.
       - name: extraer OpenSSL 1.1.1w (DLLs TLS que carga Qt5Network, build Win32)
         shell: pwsh
         run: |
@@ -70,12 +70,12 @@ jobs:
           Get-Item 'app\bin\libssl-1_1.dll', `
             'app\bin\libcrypto-1_1.dll' | Select-Object Name, Length
 
-      # ── CONFIGURE: FFmpeg i686 vendorizado (import-libs MSVC ya incluidos) ──
-      # third_party/ffmpeg-win32/ trae los .lib de importación MSVC generados
-      # por el propio FFmpeg (dlltool -m i386), así que NO hace falta el paso
-      # dumpbin→def→lib que sí necesitaba mpv (su dev-package solo traía el
-      # libmpv.dll.a de MinGW, no enlazable por MSVC). FFMPEG_DEV_DIR ya es el
-      # valor por defecto en CMake; se pasa explícito para que quede en el log.
+      # ── CONFIGURE: vendored i686 FFmpeg (MSVC import-libs already included) ──
+      # third_party/ffmpeg-win32/ brings the MSVC import .lib files generated
+      # by FFmpeg itself (dlltool -m i386), so the
+      # dumpbin→def→lib step that mpv did need is NOT necessary (its dev-package only brought the
+      # MinGW libmpv.dll.a, not linkable by MSVC). FFMPEG_DEV_DIR is already the
+      # default value in CMake; it is passed explicitly so it shows up in the log.
       - name: configure (WIN32 x86 + FFmpeg vendorizado)
         shell: pwsh
         run: |
@@ -108,68 +108,68 @@ jobs:
           if (-not (Test-Path $exe)) { Write-Host "no está $exe"; exit 1 }
           Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
           $qtroot = Split-Path (Split-Path $env:Qt5_DIR)
-          # --compiler-runtime: intenta copiar el runtime MSVC
-          # (msvcp140.dll, vcruntime140.dll, ...) junto al exe. En el
-          # runner de CI NO los deja (viene del VS del host, no de la
-          # máquina de pruebas), así que hay que proveerlos de otra forma o confiar
-          # en el VC_redist.x86.exe instalado por el setup (que pone la
-          # UCRT + CRT de Microsoft en System32, la versión Win7-compatible).
+          # --compiler-runtime: tries to copy the MSVC runtime
+          # (msvcp140.dll, vcruntime140.dll, ...) next to the exe. On the CI
+          # runner it does NOT leave them (it comes from the host's VS, not from the
+          # test machine), so they must be provided some other way or rely
+          # on the VC_redist.x86.exe installed by the setup (which puts the
+          # UCRT + Microsoft CRT in System32, the Win7-compatible version).
           & "$qtroot\bin\windeployqt.exe" --release --no-translations `
             --compiler-runtime $exe -dir dist
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          # windeployqt no dejó los CRT del sistema en dist\ (no es
-          # necesario: el setup instala VC_redist.x86.exe, Visual C++
-          # 2015-2019, que provee msvcp140/vcruntime140/UCRT en la máquina de pruebas).
+          # windeployqt did not leave the system CRTs in dist\ (it is not
+          # necessary: the setup installs VC_redist.x86.exe, Visual C++
+          # 2015-2019, which provides msvcp140/vcruntime140/UCRT on the test machine).
           Remove-Item dist\vc_redist -Recurse -Force -ErrorAction SilentlyContinue
 
-          # PURGA del plugin de audio WASAPI (qtaudio_wasapi.dll): Qt5
-          # Multimedia lo despliega junto a qtaudio_windows.dll, pero importa
-          # RoGetActivationFactory (W8+) — el loader de Win7 ni siquiera carga
-          # la DLL, y el gate de abajo (correctamente) aborta. En la máquina de pruebas el
-          # audio de QAudioOutput va por qtaudio_windows.dll (WaveOut), plugin
-          # de la era Win7. Misma filosofía que la purga de UCRT: no empaquetar
-          # nada con imports W8+.
+          # PURGE of the WASAPI audio plugin (qtaudio_wasapi.dll): Qt5
+          # Multimedia deploys it alongside qtaudio_windows.dll, but it imports
+          # RoGetActivationFactory (W8+) — the Win7 loader does not even load
+          # the DLL, and the gate below (correctly) aborts. On the test machine the
+          # QAudioOutput audio goes through qtaudio_windows.dll (WaveOut), a Win7-era
+          # plugin. Same philosophy as the UCRT purge: do not package
+          # anything with W8+ imports.
           Remove-Item dist\audio\qtaudio_wasapi.dll -Force -ErrorAction SilentlyContinue
 
-          # PURGA de la UCRT app-local: windeployqt --compiler-runtime copia
-          # junto al exe la UCRT del SDK (ucrtbase.dll + api-ms-win-crt-*.dll)
-          # que importa GetSystemTimePreciseAsFileTime (W8+) y muere en Win7 con
+          # PURGE of the app-local UCRT: windeployqt --compiler-runtime copies
+          # next to the exe the UCRT from the SDK (ucrtbase.dll + api-ms-win-crt-*.dll)
+          # which imports GetSystemTimePreciseAsFileTime (W8+) and dies on Win7 with
           # "The procedure entry point GetSystemTimePreciseAsFileTime could not
-          # be located in the dynamic link library KERNEL32.dll". La ÚNICA UCRT
-          # válida para Win7 es la del VC_redist.x86.exe que instala dist.iss
-          # (incluye la UCRT vía KB2999226). Sin la purga, la máquina de pruebas de 32-bit
-          # no arranca ni el instalador ni la app.
+          # be located in the dynamic link library KERNEL32.dll". The ONLY UCRT
+          # valid for Win7 is the one from VC_redist.x86.exe that dist.iss installs
+          # (it includes the UCRT via KB2999226). Without the purge, the 32-bit test machine
+          # does not start either the installer or the app.
           Get-ChildItem dist -Recurse -File |
             Where-Object { $_.Name -eq 'ucrtbase.dll' -or
               $_.Name -like 'api-ms-win-crt-*' } |
             Remove-Item -Force -ErrorAction SilentlyContinue
-          # UCRT (Universal C Runtime): NO se puede empaquetar la UCRT de la
-          # Windows SDK junto al exe para la máquina de pruebas (Win7 SP1): esa versión
-          # importa GetSystemTimePreciseAsFileTime (W8+) y ucrtbase muere al
-          # cargar con "punto de entrada ... en KERNEL32.dll". La única UCRT
-          # válida para Win7 es la del runtime de Microsoft (VC_redist.x86.exe),
-          # que detecta Win7 e instala la variante compatible. El redist de
-          # VS2015-2019 es el que cubre msvcp140/vcruntime140 y la UCRT sin
-          # traer imports W8+; el de VS2022+ los trae (rompe Win7). Se descarga,
-          # se empaqueta en el setup y se instala desde el AfterInstall de
+          # UCRT (Universal C Runtime): the UCRT from the Windows SDK cannot be
+          # packaged next to the exe for the test machine (Win7 SP1): that version
+          # imports GetSystemTimePreciseAsFileTime (W8+) and ucrtbase dies on
+          # load with "entry point ... in KERNEL32.dll". The only UCRT
+          # valid for Win7 is the one from the Microsoft runtime (VC_redist.x86.exe),
+          # which detects Win7 and installs the compatible variant. The
+          # VS2015-2019 redist is the one that covers msvcp140/vcruntime140 and the UCRT without
+          # bringing W8+ imports; the VS2022+ one brings them (breaks Win7). It is downloaded,
+          # packaged in the setup and installed from the AfterInstall of
           # dist.iss (/install /passive /norestart, PrivilegesRequired=admin,
-          # con comprobación del código de salida). /passive: muestra barra de
-          # progreso al usuario en lugar de instalar en silencio.
+          # with exit code checking). /passive: shows a progress
+          # bar to the user instead of installing silently.
           Invoke-WebRequest -Uri 'https://aka.ms/vs/16/release/vc_redist.x86.exe' `
             -OutFile 'dist\VC_redist.x86.exe'
           $vr = Get-Item 'dist\VC_redist.x86.exe' -ErrorAction SilentlyContinue
           if (-not $vr -or $vr.Length -lt 1000000) {
             Write-Host 'no se pudo descargar VC_redist.x86.exe'; exit 1 }
           Write-Host "VC_redist.x86.exe $($vr.Length) bytes"
-          # DLLs de runtime de FFmpeg (avcodec/avformat/avutil/swscale/
-          # swresample, versión i686 vendorizada). Son las únicas DLL de
-          # terceros del motor; sin dependencias externas (sin
-          # libwinpthread/libgcc/libunwind), así que no hay nada más que copiar.
+          # FFmpeg runtime DLLs (avcodec/avformat/avutil/swscale/
+          # swresample, vendored i686 version). They are the only third-party
+          # DLLs of the engine; with no external dependencies (no
+          # libwinpthread/libgcc/libunwind), so there is nothing else to copy.
           Copy-Item third_party\ffmpeg-win32\bin\*.dll dist\
           Copy-Item $exe dist\nevertube_qt2.exe
-          # OpenSSL 1.1.1 = backend TLS de Qt5Network. windeployqt NO la despliega:
-          # sin estas DLLs al lado del exe, todo HTTPS falla en la máquina de pruebas con
-          # "TLS initialization failed" (no cargan innertube/YouTube).
+          # OpenSSL 1.1.1 = Qt5Network TLS backend. windeployqt does NOT deploy it:
+          # without these DLLs next to the exe, all HTTPS fails on the test machine with
+          # "TLS initialization failed" (innertube/YouTube do not load).
           Copy-Item app\bin\libssl-1_1.dll dist\
           Copy-Item app\bin\libcrypto-1_1.dll dist\
           $missing = @('avcodec-63.dll','avformat-63.dll','avutil-61.dll',
@@ -179,34 +179,34 @@ jobs:
           if ($missing) {
             Write-Host "dist incompleto: faltan $missing"
             exit 1 }
-          # Gate Win7 (imports): ninguna DLL del paquete puede importar
-          # ESTÁTICAMENTE símbolos que no existen en Win7 SP1. Lista cubierta:
-          #  - GetSystemTimePreciseAsFileTime (W8+): la ucrtbase de la Windows
-          #    SDK lo importa así y por eso el loader muere en Win7 con "punto de
-          #    entrada ... en KERNEL32.dll" (la ucrtbase del redist KB2999226 NO
-          #    lo importa, por eso el bug de 840e16c necesita este scan: el CI
-          #    corre en W10/W11 donde la ucrtbase de SDK carga igual, así que un
-          #    CI verde NO demuestra Win7).
-          #  - AdjustWindowRectExForDpi / GetSystemMetricsForDpi (USER32, W10) y
-          #    GetDpiForMonitor (SHCORE, W8.1): los importó ESTÁTICAMENTE el pin
-          #    previo de libmpv (media-kit 20241021) y en Win7 el loader moría
-          #    con "The procedure entry point AdjustWindowRectExForDpi could not
-          #    be located in the dynamic link library USER32.dll". El FFmpeg
-          #    i686 vendorizado es limpio (verificado en su construcción);
-          #    este gate lo fija para que ningún cambio de paquete reintroduzca
-          #    imports W8+.
-          #  - api-ms-win-core-winrt|-winrt-error|-path|-synch (W8) y las APIs de
-          #    espera por dirección (WaitOnAddress/WakeByAddress*): presentes en
-          #    builds de mpv nuevos, no en Win7.
-          #  - AddDllDirectory / SetDefaultDllDirectories (KB2533623 en Win7):
-          #    el instalador YA NO instala el KB (era para yt-dlp/Python, ya
-          #    fuera). Si alguna DLL del paquete lo importara, la app no
-          #    arrancaría en la máquina de pruebas sin esa update; este gate lo detecta.
-          #    (GetFileInformationByHandleEx y GetFinalPathNameByHandle* son
-          #    Vista+, no hacen falta aquí.)
-          # dumpbin /imports lista todos los entry points que importa cada DLL
-          # del paquete (versión x86, carga en la máquina de pruebas; dumpbin Hostx64/x64
-          # analiza igual DLLs i686, como ya hace el step de configure).
+          # Gate Win7 (imports): no DLL in the package may import STATICALLY
+          # symbols that do not exist on Win7 SP1. Covered list:
+          #  - GetSystemTimePreciseAsFileTime (W8+): the ucrtbase from the Windows
+          #    SDK imports it and that is why the loader dies on Win7 with "entry
+          #    point ... in KERNEL32.dll" (the ucrtbase from the KB2999226 redist does NOT
+          #    import it, which is why bug 840e16c needs this scan: the CI
+          #    runs on W10/W11 where the SDK ucrtbase loads the same, so a
+          #    green CI does NOT prove Win7).
+          #  - AdjustWindowRectExForDpi / GetSystemMetricsForDpi (USER32, W10) and
+          #    GetDpiForMonitor (SHCORE, W8.1): they were imported STATICALLY by the
+          #    previous libmpv pin (media-kit 20241021) and on Win7 the loader died
+          #    with "The procedure entry point AdjustWindowRectExForDpi could not
+          #    be located in the dynamic link library USER32.dll". The vendored
+          #    i686 FFmpeg is clean (verified in its build);
+          #    this gate pins it so that no package change reintroduces
+          #    W8+ imports.
+          #  - api-ms-win-core-winrt|-winrt-error|-path|-synch (W8) and the
+          #    address-wait APIs (WaitOnAddress/WakeByAddress*): present in
+          #    new mpv builds, not on Win7.
+          #  - AddDllDirectory / SetDefaultDllDirectories (KB2533623 on Win7):
+          #    the installer NO LONGER installs the KB (it was for yt-dlp/Python, now
+          #    gone). If any DLL in the package imported it, the app would not
+          #    start on the test machine without that update; this gate detects it.
+          #    (GetFileInformationByHandleEx and GetFinalPathNameByHandle* are
+          #    Vista+, not needed here.)
+          # dumpbin /imports lists all the entry points each DLL in the package
+          # imports (x86 version, loads on the test machine; dumpbin Hostx64/x64
+          # analyzes i686 DLLs the same, as the configure step already does).
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vspath = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           $msvc = Get-ChildItem (Join-Path $vspath 'VC\Tools\MSVC') -Directory |
@@ -230,7 +230,7 @@ jobs:
             }
           }
           Write-Host "gate Win7 OK: ninguna DLL de dist importa símbolos W8+ ($($win7poison -join ', '))"
-          # choco instala Inno en ProgramFiles(x86); localizar ISCC.exe en cualquiera de las dos
+          # choco installs Inno in ProgramFiles(x86); locate ISCC.exe in either of the two
           $iscc = Get-ChildItem "$env:ProgramFiles\Inno Setup*\ISCC.exe",
             "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
             Select-Object -First 1
@@ -241,37 +241,37 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem setup-out | Select-Object Name, Length
 
-      # Smoke test: arrancar el binario DESDE dist\ (con todo su maquillaje de
-      # DLLs) y ejecutar selftests headless. Detecta en CI el bug de "DLL
-      # faltante al arrancar" y el de backend TLS sin cargar
-      # (OpenSSL ausente → "TLS initialization failed"). --selftest-tls va un
-      # paso más allá que --selftest-ssl (que solo comprueba supportsSsl():
-      # carga de DLLs): hace un HANDSHAKE TLS real contra hosts públicos. Sin
-      # él, un OpenSSL que carga pero aborta en el primer SSL_CTX/handshake
-      # ("OpenSSL internal error, assertion failed: lock != NULL", visto en
-      # Windows de 32 bits) pasaba de verde en CI y reventaba solo en la
-      # máquina de pruebas al arrancar (primera petición HTTPS del feed).
-      # --selftest-ffmpeg (gate del FfmpegBackend/hw) NO se corre en CI: la VM
-      # de GitHub no tiene GPU y el clip AV1 del banco es imposible con el
-      # paquete i686 (el decoder nativo av1 de FFmpeg 9 exige un hwaccel y el
-      # paquete no trae libdav1d/libaom). Ese gate se corre en la máquina de pruebas; la
-      # compatibilidad Win7 la fija el gate de imports W8+ de arriba (y la
-      # presencia/carga de las DLL de FFmpeg la valida la tabla de imports del
-      # propio exe: si falta avcodec-63.dll, ningún selftest arranca).
-      # --selftest-hwprobe tampoco aplica en x86 (sondea con mpv, que no está
-      # en este build; su tabla offline sigue en Linux/x64).
+      # Smoke test: launch the binary FROM dist\ (with all its DLL
+      # makeup) and run headless selftests. Detects in CI the "missing DLL
+      # on startup" bug and the one of the TLS backend not loading
+      # (OpenSSL absent → "TLS initialization failed"). --selftest-tls goes one
+      # step further than --selftest-ssl (which only checks supportsSsl():
+      # DLL loading): it performs a real TLS HANDSHAKE against public hosts. Without
+      # it, an OpenSSL that loads but aborts on the first SSL_CTX/handshake
+      # ("OpenSSL internal error, assertion failed: lock != NULL", seen on
+      # 32-bit Windows) passed green in CI and blew up only on the
+      # test machine at startup (first HTTPS request of the feed).
+      # --selftest-ffmpeg (FfmpegBackend/hw gate) is NOT run in CI: the GitHub
+      # VM has no GPU and the AV1 clip of the bench is impossible with the
+      # i686 package (FFmpeg 9's native av1 decoder requires a hwaccel and the
+      # package does not bring libdav1d/libaom). That gate is run on the test machine; the
+      # Win7 compatibility is pinned by the W8+ imports gate above (and the
+      # presence/loading of the FFmpeg DLLs is validated by the import table of the
+      # exe itself: if avcodec-63.dll is missing, no selftest starts).
+      # --selftest-hwprobe does not apply on x86 either (it probes with mpv, which is not
+      # in this build; its offline table stays on Linux/x64).
       #
-      # ¡OJO con el exit code! nevertube_qt2.exe es de SUBSISTEMA GUI: al
-      # lanzarlo con `&` PowerShell NO espera a que termine NI fija
-      # $LASTEXITCODE (queda vacío). El patrón `& exe; $rc=$LASTEXITCODE`
-      # producía `if ($null -ne 0) { exit $null }` → código 0 y el step se
-      # daba por verde tras el PRIMER selftest, saltándose los demás. Por eso
-      # cada selftest va con Start-Process -Wait -PassThru y se lee .ExitCode.
+      # WATCH OUT for the exit code! nevertube_qt2.exe is a GUI SUBSYSTEM: when
+      # launching it with `&` PowerShell does NOT wait for it to finish NOR set
+      # $LASTEXITCODE (it stays empty). The pattern `& exe; $rc=$LASTEXITCODE`
+      # produced `if ($null -ne 0) { exit $null }` → code 0 and the step was
+      # considered green after the FIRST selftest, skipping the rest. That is why
+      # each selftest goes with Start-Process -Wait -PassThru and .ExitCode is read.
       - name: smoke test del paquete dist (DLLs ok + TLS real + feeds + busca)
         shell: pwsh
         run: |
-          # windeployqt solo despliega qwindows.dll; el offscreen se inyecta
-          # solo para el smoke y se quita al final (no va al instalador).
+          # windeployqt only deploys qwindows.dll; the offscreen one is injected
+          # only for the smoke and removed at the end (it does not go into the installer).
           $qtsrc = Split-Path (Split-Path $env:Qt5_DIR)
           Copy-Item "$qtsrc\plugins\platforms\qoffscreen.dll" dist\platforms\ -Force
           $env:QT_QPA_PLATFORM = 'offscreen'
@@ -281,8 +281,8 @@ jobs:
             Write-Host "smoke $flag exit=$code"
             return $code
           }
-          # TLS: handshake real. Si OpenSSL aborta (lock != NULL) el proceso
-          # muere con abort() y el step falla con el assert en el log.
+          # TLS: real handshake. If OpenSSL aborts (lock != NULL) the process
+          # dies with abort() and the step fails with the assert in the log.
           $rc = Invoke-Selftest '--selftest-tls'
           if ($rc -ne 0) {
             Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
@@ -291,50 +291,50 @@ jobs:
           if ($rc -ne 0) {
             Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
             exit $rc }
-          # Tope de columnas de las rejillas (función pura, sin red ni GPU): el
-          # ajuste "Tamaño de las miniaturas" pide 4/5/6 columnas fijas y hay
-          # que recortarlas si la celda baja de 130 px.
+          # Column cap of the grids (pure function, no network or GPU): the
+          # "Thumbnail size" setting asks for 4/5/6 fixed columns and they have
+          # to be trimmed if the cell drops below 130 px.
           $rc = Invoke-Selftest '--selftest-grid'
           if ($rc -ne 0) { exit $rc }
-          # QSS puro: ningún selector declarado dos veces. Un duplicado gana en
-          # silencio (el último), que es como un #sectionTitle de 22 px subió los
-          # títulos de sección de todas las páginas por detrás del de 16 px.
+          # Pure QSS: no selector declared twice. A duplicate wins
+          # silently (the last one), which is how a 22 px #sectionTitle raised the
+          # section titles of all pages behind the 16 px one.
           $rc = Invoke-Selftest '--selftest-theme'
           if ($rc -ne 0) { exit $rc }
-          # Glifos de la UI contra la fuente real de la app: la fuente por
-          # defecto no cubre todos los caracteres no ASCII y Qt pinta el
-          # marcador de glifo ausente (2x5 px medidos) en vez del caracter.
+          # UI glyphs against the real font of the app: the default
+          # font does not cover all non-ASCII characters and Qt paints the
+          # missing-glyph marker (2x5 px measured) instead of the character.
           $rc = Invoke-Selftest '--selftest-glyphs'
           if ($rc -ne 0) { exit $rc }
-          # Parser del autocompletado de youtube.com (función pura, sin red):
-          # fija el formato de los dos tipos de item que devuelve el endpoint.
+          # Parser of the youtube.com autocomplete (pure function, no network):
+          # pins the format of the two kinds of item the endpoint returns.
           $rc = Invoke-Selftest '--selftest-suggest-parse'
           if ($rc -ne 0) { exit $rc }
-          # Parser de fechas relativas (función pura, sin red ni GPU): fija la
-          # regresión de "hace N semanas" -> segundos -> "hoy".
+          # Relative dates parser (pure function, no network or GPU): pins the
+          # regression of "hace N semanas" -> seconds -> "hoy".
           $rc = Invoke-Selftest '--selftest-dates'
           if ($rc -ne 0) { exit $rc }
-          # Desplegable de sugerencias del buscador (offline, sin red): los
-          # dos grupos, el filtrado del historial, el descarte de respuestas
-          # tardías y el tope de altura del panel.
+          # Search suggestions dropdown (offline, no network): the
+          # two groups, the history filtering, the discarding of late
+          # responses and the panel height cap.
           $rc = Invoke-Selftest '--selftest-suggest-panel'
           if ($rc -ne 0) { exit $rc }
-          # Gestos del desplegable con la jerarquia real (página dentro de un
-          # QStackedWidget, con el QSS puesto) y entrega de eventos real: es el
-          # banco que caza el clic que no llega a la fila y el Tab que se come
-          # el QFrame del buscador.
+          # Dropdown gestures with the real hierarchy (page inside a
+          # QStackedWidget, with the QSS applied) and real event delivery: it is the
+          # bench that catches the click that does not reach the row and the Tab that gets eaten by
+          # the search box's QFrame.
           $rc = Invoke-Selftest '--selftest-suggest-gestures'
           if ($rc -ne 0) { exit $rc }
-          # qoffscreen se quita solo al final (todos los selftests lo necesitan).
-          # Búsqueda real por Innertube: vídeos con id (y canal) no vacíos.
+          # qoffscreen is removed only at the end (all selftests need it).
+          # Real search through Innertube: videos with a non-empty id (and channel).
           $rc = Invoke-Selftest '--selftest-search'
           if ($rc -ne 0) { exit $rc }
-          # Endpoints Innertube: canal + pestañas (videos/shorts/live), detalle
-          # de vídeo y playlist.
+          # Innertube endpoints: channel + tabs (videos/shorts/live), video
+          # detail and playlist.
           $rc = Invoke-Selftest '--selftest-browse'
           if ($rc -ne 0) { exit $rc }
-          # Cadena de feeds real (canal por Innertube + trending): valida que la
-          # apertura de canal termina una sola vez, sin colgarse ni crashear.
+          # Real feed chain (channel via Innertube + trending): validates that the
+          # channel opening finishes only once, without hanging or crashing.
           $rc = Invoke-Selftest '--selftest-feeds'
           Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
           if ($rc -ne 0) { exit $rc }

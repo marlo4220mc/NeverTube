@@ -27,20 +27,20 @@ public:
                          QWidget *parent = nullptr);
 
     void openChannel(const QString &channelId);
-    // Re-aplica el botón Suscribirse con el acento vigente (MainWindow lo
-    // llama al cambiar el color de acento en Ajustes, sin reconstruir).
+    // Re-applies the "Subscribe" button with the current accent (MainWindow
+    // calls it when the accent color changes in Settings, without rebuilding).
     void applyAccent();
 
 protected:
-    // Re-evalúa el tope de la descripción al cambiar el ancho de la página
-    // (el re-wrap puede hacer que el texto quepa o deje de caber).
+    // Re-evaluates the description cap when the page width changes
+    // (the re-wrap may make the text fit or no longer fit).
     void resizeEvent(QResizeEvent *event) override;
 
 signals:
     void backRequested();
     void openRequested(const QVector<VideoInfo> &videos, int startIndex);
-    // Click en el "⋯" de una fila de vídeo: la página no tiene los repos, así
-    // que MainWindow muestra el menú compartido.
+    // Click on the "⋯" of a video row: the page does not have the repos, so
+    // MainWindow builds the shared menu.
     void rowMenuRequested(const VideoInfo &video, const QPoint &globalPos);
 
 private slots:
@@ -51,13 +51,13 @@ private slots:
 
 private:
     void updateSubscribeButton(bool subscribed);
-    // Pide la pestaña index si aún no se ha pedido (lazy): al abrir el canal
-    // solo se piden los vídeos; shorts/directos al entrar en su pestaña (cada
-    // respuesta pesa ~400-500 KB).
+    // Requests the index tab if it has not been requested yet (lazy): when the
+    // channel is opened only the videos are requested; shorts/live on entering
+    // their tab (each response weighs ~400-500 KB).
     void loadTab(int index);
-    // Muestra el contenido de la pestaña index y marca su botón como
-    // seleccionado (con re-polish, obligatorio al cambiar la propiedad que
-    // elige el QSS).
+    // Shows the content of the index tab and marks its button as
+    // selected (with re-polish, mandatory when changing the property the QSS
+    // picks).
     void showTab(int index);
     void updateTabCount();
     void applyDescriptionCap();
@@ -69,14 +69,14 @@ private:
     ThumbnailCache *m_thumbs = nullptr;
     SubscriptionsRepo *m_subs = nullptr;
 
-    // Ficha del canal: avatar + nombre + suscriptores + acciones, con la
-    // descripción debajo dentro de la misma caja.
+    // Channel card: avatar + name + subscribers + actions, with the
+    // description below inside the same box.
     QFrame *m_card = nullptr;
     QLabel *m_avatar = nullptr;
     QLabel *m_title = nullptr;
     QLabel *m_meta = nullptr;
     QLabel *m_description = nullptr;
-    QString m_descText;  // texto plano de la descripción (el QLabel lleva HTML)
+    QString m_descText;  // plain text of the description (the QLabel carries HTML)
     QFrame *m_descFade = nullptr;
     QPushButton *m_descToggle = nullptr;
     QPushButton *m_subscribeBtn = nullptr;
@@ -88,12 +88,12 @@ private:
     bool m_descExpanded = false;
     bool m_descCollapsible = false;
 
-    // Pestañas. Antes eran un QTabWidget, que es lo ÚNICO de la app sin estilo
-    // propio (no hay ninguna regla QTabWidget/QTabBar en el QSS): salía con el
-    // aspecto del tema del escritorio y el "pane" pintaba una columna casi negra
-    // (2,3,3 medido) por debajo de la lista, más oscuro que el fondo de la
-    // página. Ahora son botones dentro de una cápsula con el QSS global, y el
-    // contenido son tres widgets que se muestran a mano.
+    // Tabs. They used to be a QTabWidget, the ONLY thing in the app without
+    // styling (there is no QTabWidget/QTabBar rule in the QSS): it came out with
+    // the desktop theme's look and the "pane" painted a nearly black column
+    // (2,3,3 measured) under the list, darker than the page
+    // background. Now they are buttons inside a capsule with the global QSS, and
+    // the content is three widgets shown by hand.
     QWidget *m_tabsBox = nullptr;
     QLabel *m_tabCount = nullptr;
     QVector<QPushButton *> m_tabButtons;

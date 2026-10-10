@@ -1,15 +1,15 @@
 #include "playback_backend.h"
 
-// Fábrica del motor de reproducción. Un único punto que decide qué
-// PlaybackBackend se instancia, sin tocar el resto de la app:
-//   - build x86 de Windows sin mpv (NEVERTUBE_NO_MPV, Win7, Fase 5):
-//     FfmpegBackend SIEMPRE (no hay libmpv enlazado);
-//   - resto (Linux y Windows x64): MpvBackend SIEMPRE (pieza protegida);
-//   - NEVERTUBE_BACKEND=mpv|ffmpeg fuerza el motor (desarrollo/verificación:
-//     probar el FfmpegBackend en esta máquina Linux con DISPLAY=:0).
+// Playback engine factory. The single point that decides which
+// PlaybackBackend gets instantiated, without touching the rest of the app:
+//   - Windows x86 build without mpv (NEVERTUBE_NO_MPV, Win7, Phase 5):
+//     FfmpegBackend ALWAYS (no libmpv linked);
+//   - everything else (Linux and Windows x64): MpvBackend ALWAYS (protected piece);
+//   - NEVERTUBE_BACKEND=mpv|ffmpeg forces the engine (development/verification:
+//     try the FfmpegBackend on this Linux machine with DISPLAY=:0).
 //
-// La x64 con NEVERTUBE_BACKEND=ffmpeg es SOLO para desarrollo: el runtime
-// por defecto de la x64 nunca pierde el mpv.
+// x64 with NEVERTUBE_BACKEND=ffmpeg is FOR development only: the default
+// x64 runtime never loses mpv.
 
 #ifndef NEVERTUBE_NO_MPV
 #include "mpv_backend.h"
@@ -22,7 +22,7 @@
 PlaybackBackend *createPlaybackBackend(QObject *parent)
 {
 #ifdef NEVERTUBE_NO_MPV
-    // Build x86 sin mpv: el único motor es el FfmpegBackend.
+    // x86 build without mpv: the only engine is the FfmpegBackend.
     return new FfmpegBackend(parent);
 #else
     const QByteArray forced = qgetenv("NEVERTUBE_BACKEND");

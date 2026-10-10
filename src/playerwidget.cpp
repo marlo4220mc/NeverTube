@@ -14,18 +14,18 @@
 #include "debug.h"
 #include "playback_backend.h"
 
-// Tiempo de reproducción sin pista de audio activa que declara el stream
-// gateado (audio 403 de YouTube) y dispara la re-resolución temprana
-// (checkStall). ~10 s por intento en lugar de esperar el EOF prematuro de los
-// ~60 s del HLS maestro. Ver PlayerWidget::checkStall.
+// Playback time with no active audio track that declares the stream gated
+// (YouTube audio 403) and fires the early re-resolution (checkStall). ~10 s
+// per attempt instead of waiting for the premature EOF of the ~60 s master
+// HLS. See PlayerWidget::checkStall.
 static constexpr qint64 kAudioDetectMs = 10000;
 
 PlayerWidget::PlayerWidget(QWidget *parent)
     : QOpenGLWidget(parent)
 {
-    // La fábrica elige el motor por plataforma: mpv en x64 (pieza protegida,
-    // Fase 1: toda la integración mpv vive en MpvBackend) o FfmpegBackend en
-    // la x86 (sin libmpv). El resto del widget solo conoce la interfaz.
+    // The factory picks the engine per platform: mpv on x64 (protected piece,
+    // Phase 1: all mpv integration lives in MpvBackend) or FfmpegBackend on
+    // the x86 (no libmpv). The rest of the widget only knows the interface.
     m_backend = createPlaybackBackend(this);
 
     connect(m_backend, &PlaybackBackend::fileLoaded, this,
@@ -48,22 +48,23 @@ PlayerWidget::PlayerWidget(QWidget *parent)
             &PlayerWidget::onCacheTime);
     connect(m_backend, &PlaybackBackend::logMessage, this,
             &PlayerWidget::onLogMessage);
-    // El motor pide repintar: drenar eventos y forzar update().
+    // The engine asks for a repaint: drain events and force update().
     connect(m_backend, &PlaybackBackend::frameReady, this,
             &PlayerWidget::onFrameReady);
 
-    // Vigila que la posición avance durante la reproducción: si se congela
-    // > 5 s emite streamStalled para que el controlador re-resuelva.
+    // Watches that the position advances during playback: if it freezes for
+    // > 5 s it emits streamStalled so the controller re-resolves.
     m_stallTimer = new QTimer(this);
     m_stallTimer->setInterval(1000);
     connect(m_stallTimer, &QTimer::timeout, this, &PlayerWidget::checkStall);
     m_stallTimer->start();
 
-    // x86 (FfmpegBackend): si otra ventana cubre el vídeo, el motor deja de
-    // convertir y de pintar mientras dure (ahorro real de CPU/GPU; Win7/DWM no
-    // avisa de oclusión, así que lo detecta este timer lento con un recorrido
-    // del z-order). En mpv no aplica (occlusionSkipSupported()==false): parar
-    // el render ahí acumularía frames (ver AGENTS.md "Mini player").
+    // x86 (FfmpegBackend): if another window covers the video, the engine
+    // stops converting and painting while it lasts (real CPU/GPU saving;
+    // Win7/DWM does not report occlusion, so this slow timer detects it with
+    // a z-order walk). Does not apply to mpv (occlusionSkipSupported()==false):
+    // stopping the render there would accumulate frames (see AGENTS.md "Mini
+    // player").
     if (m_backend->occlusionSkipSupported()) {
         m_occlusionTimer = new QTimer(this);
         m_occlusionTimer->setInterval(250);
@@ -111,12 +112,12 @@ void PlayerWidget::initializeGL()
         qWarning("player: fallo mpv_render_context_create");
         return;
     }
-    // Redibujado dirigido por eventos (AGENTS.md): el motor notifica cuando
-    // hay un frame nuevo que pintar (update callback de mpv instalado en
-    // MpvBackend::initGL / frameReady por frame del FfmpegBackend) y
-    // onFrameReady() fuerza QWidget::update(). Sin poll de repintado: en
-    // reposo (pausa, buffering, cubierto) no se repinta nada. Sustituye al
-    // antiguo timer de 33 ms, redundante desde que existe la ruta de eventos.
+    // Event-driven redraw (AGENTS.md): the engine notifies when there is a
+    // new frame to paint (mpv's update callback installed in
+    // MpvBackend::initGL / per-frame frameReady of the FfmpegBackend) and
+    // onFrameReady() forces QWidget::update(). No repaint poll: at rest
+    // (pause, buffering, covered) nothing repaints. Replaces the old 33 ms
+    // timer, redundant since the event path exists.
 }
 
 void PlayerWidget::paintGL()
@@ -125,22 +126,22 @@ void PlayerWidget::paintGL()
         NT_DEBUG("E2E paintGL no-rctx\n");
         return;
     }
-    // x86 (FfmpegBackend): si otra ventana cubre por completo el vídeo, no
-    // renderizar — el motor ya descartó los frames (evita subir texturas y
-    // pintar debajo de la ventana; al destaparse se muestra el frame más
-    // reciente, sin ráfaga). En mpv NO aplica (occlusionSkipSupported=false):
-    // su render debe seguir para no acumular frames (ver AGENTS.md mini
-    // player).
+    // x86 (FfmpegBackend): if another window fully covers the video, do not
+    // render — the engine already dropped the frames (avoids uploading
+    // textures and painting under the window; on uncovering the most recent
+    // frame is shown, no burst). Does NOT apply to mpv
+    // (occlusionSkipSupported=false): its render must keep going so as not to
+    // accumulate frames (see AGENTS.md mini player).
     if (m_backend->occlusionSkipSupported() && m_videoOccluded)
         return;
     QOpenGLFunctions *gl = QOpenGLContext::currentContext()->functions();
     GLint fbo = 0;
     gl->glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
     const int dpr = devicePixelRatio();
-    // PROTEGIDO (AGENTS.md): render directo al FBO en paintGL (contexto GL
-    // actual). El backend ejecuta mpv_render_context_render con estos mismos
-    // parámetros de forma síncrona en este paint; el FBO y el contexto son los
-    // del widget.
+    // PROTECTED (AGENTS.md): direct render to the FBO in paintGL (current GL
+    // context). The backend runs mpv_render_context_render with these same
+    // parameters synchronously in this paint; the FBO and the context are the
+    // widget's.
     m_backend->renderGL(fbo, width() * dpr, height() * dpr);
 }
 
@@ -150,9 +151,9 @@ void PlayerWidget::playUrl(const QString &url, double startAt)
         return;
     m_position = 0.0;
     m_duration = 0.0;
-    // Si el backend consumió el audio externo en la carga (audio-files), la
-    // URL pendiente ya no hace falta; si no, se conserva para el respaldo de
-    // attachAudio en fileLoaded.
+    // If the backend consumed the external audio at load (audio-files), the
+    // pending URL is no longer needed; otherwise it is kept for the
+    // attachAudio fallback at fileLoaded.
     if (m_backend->playUrl(url, startAt, m_pendingAudioFile)
         && !m_pendingAudioFile.isEmpty())
         m_pendingAudioFile.clear();
@@ -195,8 +196,8 @@ void PlayerWidget::seek(double seconds)
 {
     if (!m_backend->isValid())
         return;
-    // Gracia para el nuevo seek: la posición no avanza hasta que llega el
-    // nuevo fragmento; no debe contar como atasco.
+    // Grace for the new seek: the position does not advance until the new
+    // fragment arrives; it must not count as a stall.
     m_lastProgressMs = QDateTime::currentMSecsSinceEpoch();
     m_backend->seek(seconds);
 }
@@ -227,16 +228,16 @@ void PlayerWidget::setAudioFile(const QString &url)
     m_pendingAudioFile = url;
     if (!m_backend->isValid())
         return;
-    // Flujo clásico: nada que añadir; además limpia la pista externa
-    // de un vídeo anterior con audio-file merodeando en el motor.
+    // Classic flow: nothing to add; it also clears the external track
+    // of a previous video with an audio-file lingering in the engine.
     if (url.isEmpty())
         m_backend->dropExternalAudio();
-    // El audio externo se adjunta EN el próximo playUrl (loadfile con la opción
-    // per-file "audio-files"), no con un audio-add suelto aquí: añadirlo antes
-    // del loadfile engancharía la pista al stream ANTERIOR aún cargado y en el
-    // restablecimiento (re-resolver) podía acabar mudo. El respaldo de
-    // attachAudio en onFileLoaded() sigue para cuando playUrl no consumió la
-    // URL.
+    // The external audio is attached IN the next playUrl (loadfile with the
+    // per-file "audio-files" option), not with a loose audio-add here: adding
+    // it before the loadfile would hook the track to the still-loaded
+    // PREVIOUS stream and on re-resolution it could end up muted. The
+    // attachAudio fallback in onFileLoaded() remains for when playUrl did not
+    // consume the URL.
 }
 
 void PlayerWidget::setAudioLanguage(const QString &lang)
@@ -247,10 +248,11 @@ void PlayerWidget::setAudioLanguage(const QString &lang)
 void PlayerWidget::setInitialBufferSecs(double secs)
 {
     m_initialBufferSecs = secs;
-    // NO destruir un timer de buffer ACTIVO: el sondeo de perfil puede ajustar
-    // la espera mientras el primer vídeo ya arranca, y destruir el timer dejaría
-    // el vídeo pausado (setPaused(true)) sin nadie que lo reanude. Si está
-    // activo se deja terminar; la nueva espera aplica al siguiente arranque.
+    // Do NOT destroy an ACTIVE buffer timer: the profile probe may adjust the
+    // wait while the first video is already starting, and destroying the
+    // timer would leave the video paused (setPaused(true)) with nobody to
+    // resume it. If active, let it finish; the new wait applies to the next
+    // start.
     if (m_bufferTimer && !m_bufferTimer->isActive()) {
         m_bufferTimer->stop();
         m_bufferTimer->deleteLater();
@@ -266,15 +268,15 @@ void PlayerWidget::onFrameReady()
 
 void PlayerWidget::onFileLoaded()
 {
-    // Respaldo de audio externo: si playUrl no lo consumió (mpv viejo sin la
-    // opción "audio-files"), se adjunta ahora que el archivo principal cargó
-    // ("no file loaded" ya no aplica).
+    // External audio fallback: if playUrl did not consume it (old mpv without
+    // the "audio-files" option), attach it now that the main file loaded
+    // ("no file loaded" no longer applies).
     if (!m_pendingAudioFile.isEmpty() && m_backend->isValid())
         m_backend->attachAudio(m_pendingAudioFile);
-    // También es el primer momento en que track-list tiene las pistas reales.
-    // Lo consultamos una vez para que WatchPage filtre el menú de
-    // resoluciones: si el vídeo solo llega a 720p, no se ofrecen 1080p+ (que
-    // el motor no podría seleccionar y quedarían como "clicks inertes").
+    // It is also the first moment when track-list has the real tracks. We
+    // query it once so WatchPage can filter the resolution menu: if the video
+    // only reaches 720p, 1080p+ are not offered (the engine could not select
+    // them and they would remain "inert clicks").
     m_videoMaxH = m_backend->probeMaxVideoHeight();
     NT_DEBUG("E2E qualityLimits max=%d\n", m_videoMaxH);
     emit qualityLimitsChanged(m_videoMaxH);
@@ -282,8 +284,8 @@ void PlayerWidget::onFileLoaded()
 
 void PlayerWidget::onStreamStart()
 {
-    // Cada stream nuevo vuelve a dar oportunidad de reportar códec/hwdec
-    // (para la red de seguridad del perfil de códec).
+    // Every new stream gives another chance to report codec/hwdec (for the
+    // codec profile's safety net).
     m_hwdecProbed = false;
     m_hwdecLogSoftware = false;
     if (m_hwdecRetry)
@@ -302,9 +304,9 @@ void PlayerWidget::onEndFile(PlaybackBackend::EndReason reason,
     case PlaybackBackend::EndReason::Quit:
         return;
     case PlaybackBackend::EndReason::Stop:
-        // Parada intencional (stop()/loadfile de reemplazo). No es fin de
-        // reproducción: NO debe auto-avanzar. Se resetea m_state para que
-        // el próximo START_FILE reemita "playing" al controlador.
+        // Intentional stop (stop()/replacement loadfile). Not end of
+        // playback: it must NOT auto-advance. m_state is reset so that the
+        // next START_FILE re-emits "playing" to the controller.
         m_state.clear();
         break;
     case PlaybackBackend::EndReason::Error:
@@ -315,17 +317,17 @@ void PlayerWidget::onEndFile(PlaybackBackend::EndReason reason,
         emit mediaError(errorText);
         return;
     default: {
-        // EOF. Distinguir final natural (position ~ duration) de una
-        // interrupción de red a mitad del vídeo.
+        // EOF. Distinguish a natural end (position ~ duration) from a network
+        // interruption mid-video.
         const bool naturalEnd =
             m_duration > 0.0 && m_position >= m_duration - 3.0;
         if (!naturalEnd) {
             if (m_duration > 0.0) {
-                // EOF prematuro con duración conocida: YouTube gateó la
-                // sesión (403 en audio y/o segmentos) y el demuxer se
-                // quedó sin datos. El controlador re-resuelve con URLs
-                // frescas y retoma en la posición (streamInterrupted).
-                // Sin duración fiable (live) se mantiene el error clásico.
+                // Premature EOF with known duration: YouTube gated the
+                // session (403 on audio and/or segments) and the demuxer ran
+                // out of data. The controller re-resolves with fresh URLs and
+                // resumes at the position (streamInterrupted). Without a
+                // reliable duration (live), the classic error is kept.
                 if (m_state != QLatin1String("error")) {
                     m_state = QStringLiteral("error");
                     emit stateChanged();
@@ -385,12 +387,12 @@ void PlayerWidget::onVideoHeight(qint64 height)
         emit videoSizeChanged(int(m_videoW), int(m_videoH));
     if (!m_hwdecProbed && m_videoW > 0) {
         m_hwdecProbed = true;
-        // El log del motor manda: si ya dijo "Using software decoding", el
-        // perfil es software aunque hwdec-current reporte un backend
-        // (dispositivos de software en GPUs antiguas). Si no habló,
-        // hwdec-current llega "vacío" hasta que el motor activa el
-        // decodificador, y "no" cuando es software; un backend real confirma
-        // HW. Si viene vacío, reintentar con un QTimer.
+        // The engine's log rules: if it already said "Using software
+        // decoding", the profile is software even if hwdec-current reports a
+        // backend (software devices on old GPUs). If it did not speak,
+        // hwdec-current arrives "empty" until the engine activates the
+        // decoder, and "no" when it is software; a real backend confirms HW.
+        // If it comes empty, retry with a QTimer.
         if (m_hwdecLogSoftware) {
             emit streamDecodeInfoReady(videoCodec(), QStringLiteral("no"));
         } else if (hwdecCurrent().isEmpty()) {
@@ -406,11 +408,10 @@ void PlayerWidget::onVideoHeight(qint64 height)
             emit streamDecodeInfoReady(videoCodec(), hwdecCurrent());
         }
     }
-    // Espera inicial de buffer en alta resolución (>=1080p): aquí ya
-    // conocemos la altura real del stream (en FILE_LOADED aún es 0).
-    // Arrancar con unos segundos de contenido cacheado elimina las
-    // micro-pausas de los primeros segundos (cierre del fast-start de
-    // YouTube tras el ramp de http_multiple).
+    // Initial buffer wait at high resolution (>=1080p): here we already know
+    // the stream's real height (at FILE_LOADED it is still 0). Starting with
+    // a few seconds of cached content removes the micro-pauses of the first
+    // seconds (closing of YouTube's fast-start after the http_multiple ramp).
     if (m_initialBufferSecs > 0.0 && m_videoH >= 1000
         && !(m_bufferTimer && m_bufferTimer->isActive())) {
         if (!m_bufferTimer) {
@@ -430,8 +431,8 @@ void PlayerWidget::onVideoHeight(qint64 height)
 
 void PlayerWidget::onPauseUpdated(bool paused)
 {
-    // Se sigue para saber si el usuario pausó: en pausa la posición no
-    // avanza y no debe interpretarse como atasco.
+    // Tracked to know whether the user paused: on pause the position does not
+    // advance and must not be interpreted as a stall.
     if (!paused && m_paused)
         m_lastProgressMs = QDateTime::currentMSecsSinceEpoch();
     m_paused = paused;
@@ -440,7 +441,7 @@ void PlayerWidget::onPauseUpdated(bool paused)
 void PlayerWidget::onCacheTime(double seconds)
 {
     if (seconds > 0.2)
-        m_cacheOk = true; // hay datos: la pista de vídeo sí carga
+        m_cacheOk = true; // there is data: the video track does load
 }
 
 void PlayerWidget::onLogMessage(const QString &prefix, const QString &text)
@@ -448,9 +449,9 @@ void PlayerWidget::onLogMessage(const QString &prefix, const QString &text)
     Q_UNUSED(prefix);
     if (text.contains(QLatin1String("Using software decoding"))) {
         m_hwdecLogSoftware = true;
-        // Corrección tardía: el veredicto HW pudo emitirse antes de que
-        // llegara esta línea (hwdec-current reportaba un backend falso).
-        // Reemitir "no" para que la red de seguridad degrade el perfil.
+        // Late correction: the HW verdict may have been emitted before this
+        // line arrived (hwdec-current reported a bogus backend). Re-emit "no"
+        // so the safety net downgrades the profile.
         if (m_hwdecProbed) {
             if (m_hwdecRetry)
                 m_hwdecRetry->stop();
@@ -464,15 +465,15 @@ void PlayerWidget::onLogMessage(const QString &prefix, const QString &text)
 
 void PlayerWidget::retryHwdec()
 {
-    // El log del motor ya dictó software: no hay backend que esperar.
+    // The engine's log already ruled software: no backend to wait for.
     if (m_hwdecLogSoftware) {
         if (m_hwdecRetry)
             m_hwdecRetry->stop();
         emit streamDecodeInfoReady(videoCodec(), QStringLiteral("no"));
         return;
     }
-    // hwdec-current quedó vacío en el primer video-params: reintentar hasta
-    // que el motor lo resuelva (o un tope de seguridad de ~6 s).
+    // hwdec-current was empty at the first video-params: retry until the
+    // engine resolves it (or a safety cap of ~6 s).
     if (++m_hwdecRetryAttempts >= 40) {
         if (m_hwdecRetry)
             m_hwdecRetry->stop();
@@ -488,21 +489,21 @@ void PlayerWidget::retryHwdec()
     emit streamDecodeInfoReady(videoCodec(), hwd);
 }
 
-// x86: drop de FPS al abrir una ventana flotante encima del vídeo en Win7. El
-// DWM no le avisa a la app de que la tapan (sigue recibiendo paint events y
-// pintando frames que nadie ve, quemando la GMA 950 justo cuando el compositor
-// compite — por eso el drop con CPU/RAM de la app bajos: el cuello de botella
-// es la presentación, no el cómputo). Este recorrido del z-order
-// (GetWindow hasta nuestra top-level) detecta si una ventana visible, no
-// transparente y distinta de la nuestra cubre el rect del vídeo por completo.
+// x86: FPS drop when opening a floating window above the video on Win7. DWM
+// does not tell the app it is covered (it keeps receiving paint events and
+// painting frames nobody sees, burning the GMA 950 right when the compositor
+// competes — hence the drop with low app CPU/RAM: the bottleneck is the
+// presentation, not the computation). This z-order walk (GetWindow up to our
+// top-level) detects whether a visible, non-transparent window other than
+// ours fully covers the video rect.
 #ifdef Q_OS_WIN
 bool PlayerWidget::occludedByTopWindow()
 {
     QWidget *top = window();
     if (!top)
         return false;
-    // WId en Qt5 Windows es quintptr, no HWND: el cast correcto es
-    // reinterpret_cast (MSVC rechaza static_cast entre entero y puntero).
+    // WId on Qt5 Windows is quintptr, not HWND: the right cast is
+    // reinterpret_cast (MSVC rejects static_cast between integer and pointer).
     const HWND topHwnd = reinterpret_cast<HWND>(top->winId());
     const HWND vidHwnd = reinterpret_cast<HWND>(winId());
     if (!topHwnd || !vidHwnd)
@@ -510,17 +511,17 @@ bool PlayerWidget::occludedByTopWindow()
     RECT vr;
     if (!GetWindowRect(vidHwnd, &vr))
         return false;
-    // La cadena de GetWindow solo lista top-level windows (los child widgets,
-    // como este QOpenGLWidget, no aparecen). Las ventanas por ENCIMA de la
-    // nuestra en el z-order son las que llegan antes de topHwnd.
-    // GetWindow(GW_HWNDFIRST) no existe con un argumento: la primera
-    // top-level del z-order se obtiene con GetTopWindow(NULL).
+    // The GetWindow chain only lists top-level windows (child widgets, like
+    // this QOpenGLWidget, do not appear). The windows ABOVE ours in the
+    // z-order are the ones that come before topHwnd.
+    // GetWindow(GW_HWNDFIRST) does not exist with an argument: the first
+    // top-level of the z-order is obtained with GetTopWindow(NULL).
     HWND h = GetTopWindow(nullptr);
     for (; h && h != topHwnd; h = GetWindow(h, GW_HWNDNEXT)) {
         if (!IsWindowVisible(h) || IsIconic(h))
             continue;
-        // Ventanas transparentes/layered (tooltips, decorativas): no cubren
-        // contenido real.
+        // Transparent/layered windows (tooltips, decorative): they do not
+        // cover real content.
         const LONG_PTR ex = GetWindowLongPtr(h, GWL_EXSTYLE);
         if (ex & WS_EX_LAYERED)
             continue;
@@ -561,8 +562,8 @@ void PlayerWidget::checkInitialBuffer()
             m_bufferTimer->stop();
         return;
     }
-    // Tope de espera razonable: no dejar al usuario mirando un spinner eterno
-    // si la red no da para llenar el objetivo. 25 s de espera máxima.
+    // Reasonable wait cap: do not leave the user staring at an endless spinner
+    // if the network cannot fill the target. 25 s maximum wait.
     if (m_bufferStart.elapsed() > 25000) {
         NT_DEBUG("E2E buffer wait timeout (secs=%.1f)\n", m_initialBufferSecs);
         setPaused(false);
@@ -570,16 +571,16 @@ void PlayerWidget::checkInitialBuffer()
         return;
     }
     const double cacheDur = m_backend->cacheDuration();
-    // cache-idle: el download ya terminó (todo lo descargable lo está): se
-    // puede empezar ya aunque cacheDur sea bajo (desde URL local, p.ej.).
+    // cache-idle: the download already finished (everything downloadable is):
+    // we can start already even if cacheDur is low (from a local URL, e.g.).
     const bool cacheIdle = m_backend->cacheIdle();
     if (m_initialBufferSecs <= 0.0) {
         setPaused(false);
         m_bufferTimer->stop();
         return;
     }
-    // Más resolución = más margen necesario: 1080p pide `secs`, las alturas
-    // superiores escalan proporcionalmente (p.ej. 2160p pide el doble).
+    // More resolution = more headroom needed: 1080p asks for `secs`, higher
+    // heights scale proportionally (e.g. 2160p asks for double).
     const double target = m_initialBufferSecs
                           * qMax(1.0, double(m_videoH) / 1080.0);
     NT_DEBUG("E2E buffer wait cache=%.1f target=%.1f idle=%d\n", cacheDur,
@@ -599,40 +600,41 @@ void PlayerWidget::checkStall()
     if (m_paused)
         return;
     if (m_bufferTimer && m_bufferTimer->isActive())
-        return; // espera inicial de buffer en curso: no es un atasco
+        return; // initial buffer wait in progress: not a stall
     if (m_duration <= 0.0 || m_position >= m_duration - 2.0)
-        return; // sin duración fiable o casi en el final (EOF inminente)
+        return; // no reliable duration or near the end (imminent EOF)
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    // (a) La pista de vídeo no carga: el demuxer no cachea nada. Como el audio
-    // va por archivo externo, la posición avanza igual y la vigilancia por
-    // posición no lo ve; el usuario ve congelado el último frame anterior.
+    // (a) The video track does not load: the demuxer caches nothing. Since
+    // the audio goes through an external file, the position advances anyway
+    // and the position watchdog does not see it; the user sees the last
+    // previous frame frozen.
     if (!m_cacheOk && m_videoLoadMs > 0 && now - m_videoLoadMs > 8000) {
-        m_videoLoadMs = now; // no disparar en bucle mientras el controlador recupera
+        m_videoLoadMs = now; // do not fire in a loop while the controller recovers
         NT_DEBUG("E2E streamStalled sin-video pos=%.2f dur=%.2f\n", m_position,
                  m_duration);
         emit streamStalled();
         return;
     }
-    // (a.2) Ninguna pista de audio activa tras ~10 s de reproducción: YouTube
-    // rechazó el audio (403 de una sesión gateada) y el vídeo va mudo. No
-    // depende del modo (audio externo o muxed): con HLS muxed el gate también
-    // deja al motor sin audio (audio=eof) y antes solo el audio EXTERNO se
-    // vigilaba aquí, así que el HLS agotaba ~60 s mudos por intento hasta el
-    // EOF prematuro. Re-resolver temprano (con URLs frescas) en vez de esperar
-    // un minuto; con duración >0 (todas arriba) los streams sin audio real
-    // (silencio) no existen en la práctica.
+    // (a.2) No active audio track after ~10 s of playback: YouTube rejected
+    // the audio (403 of a gated session) and the video goes mute. It does not
+    // depend on the mode (external or muxed audio): with muxed HLS the gate
+    // also leaves the engine without audio (audio=eof) and before, only the
+    // EXTERNAL audio was watched here, so HLS exhausted ~60 s muted per
+    // attempt until the premature EOF. Re-resolve early (with fresh URLs)
+    // instead of waiting a minute; with duration >0 (all of the above),
+    // streams without real audio (silence) do not exist in practice.
     if (!m_backend->hasActiveAudio() && now - m_videoLoadMs > kAudioDetectMs
         && m_position > 2.0) {
-        m_videoLoadMs = now; // no disparar en bucle mientras se recupera
+        m_videoLoadMs = now; // do not fire in a loop while it recovers
         NT_DEBUG("E2E streamInterrupted sin-audio pos=%.2f dur=%.2f\n",
                  m_position, m_duration);
         emit streamInterrupted();
         return;
     }
-    // (b) Posición congelada reproduciendo.
+    // (b) Position frozen while playing.
     if (m_lastProgressMs <= 0 || now - m_lastProgressMs < 5000)
         return;
-    // Refresca para no disparar en bucle mientras el controlador re-resuelve.
+    // Refresh so as not to fire in a loop while the controller re-resolves.
     m_lastProgressMs = now;
     NT_DEBUG("E2E streamStalled pos=%.2f dur=%.2f\n", m_position, m_duration);
     emit streamStalled();
