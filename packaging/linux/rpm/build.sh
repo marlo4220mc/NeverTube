@@ -57,8 +57,9 @@ rpmbuild --define "_topdir $rpmtop" \
 mkdir -p dist
 rpm="dist/nevertube-qt2-${ver}-1.x86_64.rpm"
 cp "$rpmtop"/RPMS/x86_64/nevertube-qt2-*.rpm "$rpm"
-rpm -qpl "$rpm" | grep -qx /usr/bin/nevertube_qt2
-rpm -qpl "$rpm" | grep -q 'hicolor/256x256/apps/nevertube_qt2.png'
+# NOTE: grep without -q on purpose (see arch/build.sh): -q + pipefail = SIGPIPE.
+rpm -qpl "$rpm" | grep -x /usr/bin/nevertube_qt2 >/dev/null
+rpm -qpl "$rpm" | grep 'hicolor/256x256/apps/nevertube_qt2.png' >/dev/null
 rpm -qp --requires "$rpm" | tee "$rpmtop/requires.txt"
 grep -q '^mpv-libs' "$rpmtop/requires.txt"
 grep -q '^qt5-qtbase' "$rpmtop/requires.txt"

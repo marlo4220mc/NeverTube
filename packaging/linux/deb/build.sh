@@ -16,6 +16,10 @@ here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
 cd "$repo"
 
+# git refuses to read a repo owned by another user (root inside a test
+# container reading the runner's checkout); harmless on the runner itself.
+git config --global --add safe.directory "$repo" 2>/dev/null || true
+
 # On the GitHub runner this is a normal user with passwordless sudo; inside a
 # root container (local testing) there is no sudo. Support both.
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; elif command -v sudo >/dev/null 2>&1; then SUDO="sudo"; else SUDO=""; fi
@@ -23,7 +27,7 @@ if [ "$(id -u)" -eq 0 ]; then SUDO=""; elif command -v sudo >/dev/null 2>&1; the
 echo "== installing Debian/Ubuntu build dependencies =="
 $SUDO apt-get update
 $SUDO apt-get install -y --no-install-recommends \
-  build-essential cmake pkg-config \
+  build-essential cmake pkg-config git \
   qtbase5-dev libqt5sql5-sqlite \
   libgl1-mesa-dev \
   libmpv-dev \
@@ -82,10 +86,12 @@ for needle in libmpv libqt5 libqt5sql5; do
 done
 
 mkdir -p "$root/DEBIAN"
-sed -e "s|__VERSION__|$pkgver|g" \
-    -e "s|__ARCH__|$arch|g" \
-    -e "s|__INSTALLED_SIZE__|$(du -sk "$root" | cut -f1)|g" \
-    -e "s|__DEPENDS__|$depends|g" \
+# The delimiter is '#' and not '|': dpkg-shlibdeps emits alternatives
+# ("libqt5gui5 | libqt5gui5-gles") and '|' would break the expression.
+sed -e "s#__VERSION__#$pkgver#g" \
+    -e "s#__ARCH__#$arch#g" \
+    -e "s#__INSTALLED_SIZE__#$(du -sk "$root" | cut -f1)#g" \
+    -e "s#__DEPENDS__#$depends#g" \
     packaging/linux/deb/control > "$root/DEBIAN/control"
 cat "$root/DEBIAN/control"
 

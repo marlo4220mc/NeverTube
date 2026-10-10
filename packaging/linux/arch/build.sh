@@ -43,8 +43,10 @@ su builder -c "cd '$repo/archbuild' && makepkg -f --noconfirm"
 mkdir -p dist
 pkg="dist/nevertube-qt2-${ver}-x86_64.pkg.tar.zst"
 cp archbuild/*.pkg.tar.zst "$pkg"
-tar -tvf "$pkg" | grep -q 'usr/bin/nevertube_qt2'
-tar -tvf "$pkg" | grep -q 'usr/share/applications/nevertube_qt2.desktop'
+# NOTE: grep without -q on purpose: with pipefail, -q closes the pipe early,
+# tar gets SIGPIPE and the script exits 141 even though the package is fine.
+tar -tvf "$pkg" | grep 'usr/bin/nevertube_qt2' >/dev/null
+tar -tvf "$pkg" | grep 'usr/share/applications/nevertube_qt2.desktop' >/dev/null
 tar -xOf "$pkg" .PKGINFO > "$repo/archbuild/PKGINFO"
 for dep in qt5-base mpv ffmpeg libpulse; do
   grep -qx "depend = $dep" "$repo/archbuild/PKGINFO"

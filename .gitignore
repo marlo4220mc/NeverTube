@@ -7,3 +7,9 @@ history.png
 biblioteca.png
 busqueda.png
 historial.png
+
+# Local packaging artifacts (packaging/linux/*/build.sh)
+build-*/
+archbuild/
+rpmbuild/
+dist/

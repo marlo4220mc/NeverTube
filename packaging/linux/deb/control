@@ -1,7 +1,7 @@
 Package: nevertube-qt2
 Version: __VERSION__
 Architecture: __ARCH__
-Maintainer: marlo4220mc <https://github.com/marlo4220mc>
+Maintainer: marlo4220mc <marlo4220mc@users.noreply.github.com>
 Section: video
 Priority: optional
 Installed-Size: __INSTALLED_SIZE__
