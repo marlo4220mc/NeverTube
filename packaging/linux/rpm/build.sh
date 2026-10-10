@@ -54,6 +54,9 @@ mkdir -p "$rpmtop"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 # --strip: strips the symbol table of the Release binary (same as the .deb and
 # the pacman package, where makepkg strips by itself).
 DESTDIR="$rpmtop/BUILD/nevertube_qt2" cmake --install build-rpm --prefix /usr --strip
+# %license in the spec ships the GPL-3.0 text under /usr/share/licenses/<name>.
+mkdir -p "$rpmtop/BUILD/nevertube_qt2/usr/share/licenses/nevertube-qt2"
+cp LICENSE "$rpmtop/BUILD/nevertube_qt2/usr/share/licenses/nevertube-qt2/LICENSE"
 sed "s|__VERSION__|$ver|g" packaging/linux/rpm/nevertube_qt2.spec > "$rpmtop/SPECS/nevertube_qt2.spec"
 rpmbuild --define "_topdir $rpmtop" \
          --define "stage $rpmtop/BUILD/nevertube_qt2" \
@@ -65,6 +68,8 @@ cp "$rpmtop"/RPMS/x86_64/nevertube-qt2-*.rpm "$rpm"
 # NOTE: grep without -q on purpose (see arch/build.sh): -q + pipefail = SIGPIPE.
 rpm -qpl "$rpm" | grep -x /usr/bin/nevertube_qt2 >/dev/null
 rpm -qpl "$rpm" | grep 'hicolor/256x256/apps/nevertube_qt2.png' >/dev/null
+# The license must be inside the package (%license in the spec).
+rpm -qpl "$rpm" | grep -x /usr/share/licenses/nevertube-qt2/LICENSE >/dev/null
 rpm -qp --requires "$rpm" | tee "$rpmtop/requires.txt"
 grep -q '^mpv-libs' "$rpmtop/requires.txt"
 grep -q '^qt5-qtbase' "$rpmtop/requires.txt"

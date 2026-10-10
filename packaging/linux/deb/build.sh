@@ -70,6 +70,12 @@ test -f "$root/usr/share/applications/nevertube_qt2.desktop"
 test -f "$root/usr/share/icons/hicolor/256x256/apps/nevertube_qt2.png"
 desktop-file-validate "$root/usr/share/applications/nevertube_qt2.desktop"
 
+# Debian policy: the copyright file goes in /usr/share/doc/<pkg>/copyright. It
+# references /usr/share/common-licenses/GPL-3 instead of embedding the text.
+mkdir -p "$root/usr/share/doc/nevertube-qt2"
+cp packaging/linux/deb/copyright "$root/usr/share/doc/nevertube-qt2/copyright"
+test -f "$root/usr/share/doc/nevertube-qt2/copyright"
+
 # NEEDED -> packages. dpkg-shlibdeps reads the package name from a
 # debian/control in the working directory, so it runs from a throwaway one.
 mkdir -p "$tmp/debian"
@@ -103,7 +109,7 @@ mkdir -p dist
 deb="dist/nevertube-qt2_${pkgver}_${arch}.deb"
 dpkg-deb --build --root-owner-group "$root" "$deb"
 dpkg-deb -f "$deb" Package Version Architecture Depends
-dpkg-deb -c "$deb" | grep -E 'usr/bin/nevertube_qt2$|applications/nevertube_qt2.desktop$|hicolor/48x48/apps/nevertube_qt2.png$'
+dpkg-deb -c "$deb" | grep -E 'usr/bin/nevertube_qt2$|applications/nevertube_qt2.desktop$|hicolor/48x48/apps/nevertube_qt2.png$|doc/nevertube-qt2/copyright$'
 
 chk="$tmp/chk"
 dpkg-deb -x "$deb" "$chk"

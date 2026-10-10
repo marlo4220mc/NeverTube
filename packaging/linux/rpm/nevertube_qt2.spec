@@ -47,6 +47,7 @@ mkdir -p %{buildroot}
 cp -a %{stage}/. %{buildroot}/
 
 %files
+%license %{_datadir}/licenses/nevertube-qt2/LICENSE
 %{_bindir}/nevertube_qt2
 %{_datadir}/applications/nevertube_qt2.desktop
 %{_datadir}/icons/hicolor/16x16/apps/nevertube_qt2.png
