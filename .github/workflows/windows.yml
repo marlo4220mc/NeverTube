@@ -306,6 +306,10 @@ jobs:
           # missing-glyph marker (2x5 px measured) instead of the character.
           $rc = Invoke-Selftest '--selftest-glyphs'
           if ($rc -ne 0) { exit $rc }
+          # Catalogs: every language has the same key set as the base (Spanish)
+          # and every key the source mentions inside nt::tr()/nt::bind* exists.
+          $rc = Invoke-Selftest '--selftest-i18n'
+          if ($rc -ne 0) { exit $rc }
           # Parser of the youtube.com autocomplete (pure function, no network):
           # pins the format of the two kinds of item the endpoint returns.
           $rc = Invoke-Selftest '--selftest-suggest-parse'

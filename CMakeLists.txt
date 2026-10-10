@@ -86,6 +86,9 @@ add_executable(nevertube_qt2
   src/yt_innertube.h
   src/mainwindow.cpp
   src/mainwindow.h
+  src/i18n.cpp
+  src/i18n.h
+  src/ui/scan.h
   src/ui/theme.cpp
   src/ui/theme.h
   src/ui/format.cpp
@@ -126,6 +129,7 @@ add_executable(nevertube_qt2
   src/ui/pages/placeholder_page.cpp
   src/ui/pages/placeholder_page.h
   resources/resources.qrc
+  localization/localization.qrc
 )
 
 # mpv_backend is only compiled where mpv links (Linux and Windows x64); the

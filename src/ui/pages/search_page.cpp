@@ -30,6 +30,7 @@
 #include "../../debug.h"
 #include "../../db/app_database.h"
 #include "../../db/repositories.h"
+#include "../../i18n.h"
 #include "../../models.h"
 #include "../../yt.h"
 #include "../channel_row.h"
@@ -178,7 +179,7 @@ SuggestRow::SuggestRow(const QString &query, const QString &detail,
         auto *b = pasiva(new QLabel(badge, this));
         b->setObjectName(QStringLiteral("suggestBadge"));
         b->setAlignment(Qt::AlignCenter);
-        b->setToolTip(QStringLiteral("Toma esta búsqueda con Tab"));
+        nt::bindTooltip(b, "search.tabHint");
         b->setFixedWidth(30);
         lay->addWidget(b, 0, Qt::AlignVCenter);
     }
@@ -284,8 +285,9 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     outer->setContentsMargins(16, 16, 16, 16);
     outer->setSpacing(6);
 
-    auto *title = new QLabel(QStringLiteral("Buscar"), this);
+    auto *title = new QLabel(this);
     title->setObjectName(QStringLiteral("sectionTitle"));
+    nt::bindText(title, "search.title");
     title->setFixedHeight(20);
     outer->addWidget(title);
 
@@ -298,7 +300,7 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     auto *searchIcon = new QLabel(searchCard);
     searchIcon->setPixmap(nt::icon(nt::Icon::Search, nt::kMuted, 18).pixmap(20, 20));
     m_field = new QLineEdit(searchCard);
-    m_field->setPlaceholderText(QStringLiteral("Buscar en YouTube…"));
+    nt::bindPlaceholder(m_field, "search.placeholder");
     // 36 px, not 32: the global QSS applies padding 8px 12px, so with 32 the
     // vertical padding ate the text (8+8+line_height > 32). 36 leaves the 8+8
     // and a 13 px line comfortable.
@@ -318,8 +320,9 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     m_clearBtn->setFixedSize(28, 28);
     m_clearBtn->setFocusPolicy(Qt::NoFocus);
     m_clearBtn->hide();
-    auto *searchBtn = new QPushButton(QStringLiteral("Buscar"), searchCard);
+    auto *searchBtn = new QPushButton(searchCard);
     searchBtn->setObjectName(QStringLiteral("primary"));
+    nt::bindText(searchBtn, "search.button");
     searchBtn->setCursor(Qt::PointingHandCursor);
     searchBtn->setFixedHeight(36);
     searchRow->addWidget(searchIcon);
@@ -402,13 +405,15 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     auto *rBox = new QVBoxLayout(m_resultBox);
     rBox->setContentsMargins(0, 0, 0, 0);
     rBox->setSpacing(8);
-    auto *spinner = new QLabel(QStringLiteral("Buscando…"), this);
+    auto *spinner = new QLabel(this);
     spinner->setObjectName(QStringLiteral("sectionSub"));
+    nt::bindText(spinner, "search.busy");
     spinner->setAlignment(Qt::AlignCenter);
     spinner->setContentsMargins(0, 40, 0, 0);
     spinner->hide();
-    auto *empty = new QLabel(QStringLiteral("Sin resultados."), this);
+    auto *empty = new QLabel(this);
     empty->setObjectName(QStringLiteral("sectionSub"));
+    nt::bindText(empty, "search.noResults");
     empty->setAlignment(Qt::AlignCenter);
     empty->setContentsMargins(0, 40, 0, 0);
     empty->hide();
@@ -427,11 +432,12 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
             [this](int, const VideoInfo &v, const QPoint &pos) {
                 emit rowMenuRequested(v, pos);
             });
-    m_moreButton = new QPushButton(QStringLiteral("Mostrar más"), this);
+    m_moreButton = new QPushButton(this);
     // Centered ghost, like the Channel page's "Cargar más vídeos": it used to
     // be #primary (red) with 180 px fixed, a wide bar under the list for an
     // action that only extended what was already visible.
     m_moreButton->setObjectName(QStringLiteral("ghost"));
+    nt::bindText(m_moreButton, "search.more");
     m_moreButton->setCursor(Qt::PointingHandCursor);
     m_moreButton->hide();
     m_moreButton->setFixedHeight(34);
@@ -634,7 +640,7 @@ void SearchPage::buildChannelButtons()
         m_channelBox->hide();
         return;
     }
-    auto *title = new QLabel(QStringLiteral("Canales"), this);
+    auto *title = new QLabel(nt::tr("search.channels"), this);
     title->setObjectName(QStringLiteral("sectionTitle"));
     m_channelBox->layout()->addWidget(title);
     auto *scroll = new QScrollArea(m_channelBox);
@@ -693,7 +699,7 @@ void SearchPage::onChannelInfo(const ChannelInfo &channel)
         card->setAvatarUrl(channel.avatarUrl);
     QString meta = channelHandleFor(channel.name);
     if (channel.subscriberCount > 0)
-        meta = QStringLiteral("%1\n%2 suscriptores")
+        meta = nt::tr("search.subscribers")
                    .arg(meta, compactCount(channel.subscriberCount));
     card->setMeta(meta);
     card->applyContentWidth();
@@ -741,7 +747,7 @@ void SearchPage::showHistory()
     auto *headLay = new QHBoxLayout(head);
     headLay->setContentsMargins(0, 0, 0, 0);
     headLay->setSpacing(8);
-    auto *hTitle = new QLabel(QStringLiteral("Búsquedas recientes"), head);
+    auto *hTitle = new QLabel(nt::tr("search.recent"), head);
     hTitle->setObjectName(QStringLiteral("sectionSub"));
     // "Borrar historial de búsquedas", not "Borrar historial": the app has two
     // histories (this one, of queries, and the one of watched videos in
@@ -749,8 +755,7 @@ void SearchPage::showHistory()
     // dialog already said it in the body; now the button says it too. Still
     // shorter than the "historial de búsqueda" that nt::metaLine composes for
     // the rows.
-    auto *clear = new QPushButton(QStringLiteral("Borrar historial de búsquedas"),
-                                  head);
+    auto *clear = new QPushButton(nt::tr("search.clearHistory"), head);
     clear->setObjectName(QStringLiteral("ghost"));
     clear->setCursor(Qt::PointingHandCursor);
     // 30 and not 34: it is a header control, not the page's big button. The
@@ -775,7 +780,7 @@ void SearchPage::showHistory()
         auto *del = new QPushButton(row);
         del->setObjectName(QStringLiteral("iconBtn"));
         del->setIcon(nt::icon(nt::Icon::Clear, nt::kMuted, 14));
-        del->setToolTip(QStringLiteral("Borrar esta búsqueda"));
+        del->setToolTip(nt::tr("search.removeOne"));
         del->setFixedSize(28, 28);
         del->setCursor(Qt::PointingHandCursor);
         connect(del, &QPushButton::clicked, this,
@@ -794,10 +799,9 @@ void SearchPage::onHistoryClear()
     // message came out with the desktop theme, the last remaining trace of a
     // foreign look. Cancel comes focused and there is no default button, so a
     // stray Enter does not wipe the history.
-    nt::confirm(this, QStringLiteral("Borrar historial de búsquedas"),
-                QStringLiteral("Se borrarán las consultas guardadas. Esta "
-                               "acción no se puede deshacer."),
-                QStringLiteral("Borrar"), [this]() {
+    nt::confirm(this, nt::tr("search.clearHistory"),
+                nt::tr("search.clearBody"),
+                nt::tr("common.erase"), [this]() {
                     setHistory(QStringList());
                     showHistory();
                 });
@@ -1130,7 +1134,7 @@ void SearchPage::populateSuggestPanel()
     // Group 2: what the user has already searched, with the "Tab" badge that
     // distinguishes it and which is the key that takes it.
     if (!m_historyRows.isEmpty()) {
-        addDivider(QStringLiteral("Tus búsquedas"));
+        addDivider(nt::tr("search.suggestHistory"));
         for (const QString &q : m_historyRows)
             addRow(q, QString(), QStringLiteral("Tab"));
     }

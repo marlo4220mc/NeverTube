@@ -585,6 +585,7 @@ all inside `m_ctrlBar` (`#playerOverlay`):
 ./build/nevertube_qt2 --selftest-theme     # pure QSS: duplicate selector, selector without widget, selection palette and button borders: runs in CI
 ./build/nevertube_qt2 --selftest-glyphs    # every non-ASCII glyph of the UI exists in the app's real font: runs in CI
 ./build/nevertube_qt2 --selftest-dates     # relative-date parser ("hace 2 semanas" is NOT 2 s → not "hoy"): runs in CI
+./build/nevertube_qt2 --selftest-i18n      # catalogs: same key set + every key used in the source exists in the base language: runs in CI
 ```
 
 The player selftest verifies invariants of the protected core without
@@ -682,6 +683,52 @@ subsystem) does not open any terminal window. Launched from a shell, it always
 inherits the console of the parent process.
 
 Use `NT_DEBUG(...)` (src/debug.h) for debug traces.
+
+## Multilanguage (i18n)
+
+The UI is translated with a small engine of its own (`src/i18n.h` /
+`src/i18n.cpp`), NOT with Qt's `.ts`/`.qm`. The reason: adding a language must be
+dropping ONE file, with no translation toolchain and no build step, and the app ships
+the catalogs inside the binary.
+
+- **One JSON per language** in `localization/` (`es.json`, `en.json`, ...), embedded
+  through `localization/localization.qrc` (prefix `/localization`). The file name is
+  the language code. Adding a language = dropping `<code>.json` next to the others and
+  listing it in the `.qrc`; the Settings selector picks it up by itself
+  (`nt::availableLanguages()`).
+- **Spanish is the base (source) language** and the fallback: a key missing from the
+  active language is resolved in `es`, and a key missing everywhere is returned as-is,
+  so it shows up in the UI instead of blank. Each file carries its own native name
+  (`"language": { "code": "en", "name": "English" }`).
+- **Keys are semantic** (`nav.home`, `settings.quality`), never the Spanish text, so
+  the wording can change without touching the code. Every language file MUST have the
+  SAME key set as `es.json` (the selftest fails otherwise).
+- **API**: `nt::tr("key")` returns the text in the active language; it is the one used
+  when a text is composed at set time (a counter, a video title, a menu built on the
+  fly). For the static chrome there are live bindings — `nt::bindText`,
+  `nt::bindTooltip`, `nt::bindPlaceholder`, `nt::bindAction` — that apply the text now
+  and re-apply it when the language changes (`nt::retranslate()` runs them all). Only
+  static labels may be bound.
+- **Live switching, no restart**: the Settings option calls `nt::setLanguage()` and
+  `MainWindow::applyLanguage` re-applies the bindings, the Settings page and the
+  Library section titles (which compose "Title · N" and cannot be bound, hence their
+  own `retranslate()`). The on-screen text changes in place.
+- **The identity of an option is a stable code, not its text** — that is what makes
+  rebuilding the Settings page (or switching language) lossless. Quality
+  (`auto`/`720`...), `next_mode`, `mini_video`, `audio_language`, `volume_max`,
+  `thumb_size`, the accent (hex) and the language itself (`ui_lang`, the code) are all
+  stored as codes; the visible text is `nt::tr(...)` of the code.
+- **Error messages are translated too**: the player/network layer
+  (`player_controller`, `playerwidget`, `ffmpeg_backend`, `yt`, `yt_innertube`) emits
+  `error.*` keys instead of literal Spanish, because that text is what the Player
+  overlay shows.
+- `--selftest-i18n` (in the smoke of both CIs): parses every catalog, requires the
+  same key set, and scans the source tree for the keys that appear INSIDE
+  `nt::tr(...)` / `nt::bind*` calls, HARD-FAILING when a key used in the code is
+  missing from the base language (a typo that would show the raw key on screen stops
+  CI). `i18n.cpp` is excluded from the scan (its own prefix table would produce
+  garbage keys). The key must be a string LITERAL in the call line; `nt::tr(variable)`
+  is not scanned.
 
 ## "A continuación" mode (queue seeding)
 
@@ -946,7 +993,7 @@ in the x86 build, which goes out via `NEVERTUBE_NO_MPV`):
   `--selftest-innertube` / `--selftest-discover` / `--selftest-home` /
   `--selftest-feeds` / `--selftest-av1hls` / `--selftest-hwprobe` / `--selftest-search` /
   `--selftest-grid` / `--selftest-theme` / `--selftest-glyphs` /
-  `--selftest-dates` → tests
+  `--selftest-dates` / `--selftest-i18n` → tests
 
 ## Configurable accent color
 

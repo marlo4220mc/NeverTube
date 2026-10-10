@@ -12,6 +12,7 @@
 #include <cmath>
 
 #include "debug.h"
+#include "i18n.h"
 #include "playback_backend.h"
 
 // Playback time with no active audio track that declares the stream gated
@@ -342,7 +343,7 @@ void PlayerWidget::onEndFile(PlaybackBackend::EndReason reason,
                 emit stateChanged();
             }
             emit mediaError(
-                QStringLiteral("La reproducción se interrumpió (red)."));
+                nt::tr("error.network"));
             return;
         }
         if (m_state != QLatin1String("ended")) {

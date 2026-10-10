@@ -27,6 +27,8 @@
 
 #include "debug.h"
 
+#include "i18n.h"
+
 namespace {
 
 const char kYoutubeHost[] = "https://www.youtube.com";
@@ -882,12 +884,12 @@ void Innertube::fetchMaster(const QString &videoId, const QString &masterUrl)
     }
     if (videoId != m_videoId) {
         // Not the videoId of the hls request in flight: it cannot be served.
-        fail(QStringLiteral("fetchMaster para id distinto del actual"));
+        fail(nt::tr("error.masterStale"));
         return;
     }
     const QUrl url(masterUrl);
     if (!url.isValid() || url.scheme() != QLatin1String("https")) {
-        fail(QStringLiteral("master URL inválida"));
+        fail(nt::tr("error.masterUrl"));
         return;
     }
     m_flightVideoId = videoId;
@@ -3700,7 +3702,7 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
     if (!jsonOk) {
         NT_DEBUG("E2E innertube player json fail size=%d prefix=%s\n",
                  body.size(), body.left(120).constData());
-        fail(QStringLiteral("respuesta player no es JSON válido"));
+        fail(nt::tr("error.playerJson"));
         return;
     }
     const QJsonObject root = jsonRoot;
@@ -3756,7 +3758,7 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
             requestPlayer();
             return;
         }
-        fail(QStringLiteral("respuesta player no válida (videoId distinto)"));
+        fail(nt::tr("error.playerInvalid"));
         return;
     }
 
@@ -3775,7 +3777,7 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
             requestPlayer();
             return;
         }
-        fail(QStringLiteral("player OK pero sin hlsManifestUrl"));
+        fail(nt::tr("error.hlsMissing"));
         return;
     }
     const QVector<int> heights = videoHeights(streamingData);
@@ -3852,7 +3854,7 @@ void Innertube::handleMaster(bool ok, const QString &error,
     }
     if (body.isEmpty()) {
         mMasterInFlight = false;
-        fail(QStringLiteral("master vacío"));
+        fail(nt::tr("error.masterEmpty"));
         return;
     }
     NT_DEBUG("E2E innertube master ok len=%d (%lldms)\n", body.size(),

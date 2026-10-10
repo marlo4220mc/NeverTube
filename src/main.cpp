@@ -12,6 +12,7 @@
 
 #include "db/repositories.h"
 #include "hwprobe.h"
+#include "i18n.h"
 #include "player_selftest.h"
 #include "ffmpeg_selftest.h"
 #include "ui/video_list_view.h"
@@ -588,6 +589,17 @@ int main(int argc, char *argv[])
         // pages. Offline and deterministic: it works in the CI.
         const bool ok = nt::themeSelfTest();
         std::fprintf(stderr, "SELFTEST theme -> %s\n", ok ? "OK" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-i18n"))) {
+        // Offline catalogs: one JSON per language under localization/. It
+        // checks the key parity between languages (a missing translation is
+        // the silent failure of this kind of system), that no used key is
+        // misspelled, and the live-binding mechanism. Deterministic: it works
+        // in the CI.
+        const bool ok = nt::i18nSelfTest();
+        std::fprintf(stderr, "SELFTEST i18n -> %s\n", ok ? "OK" : "FAIL");
         return ok ? 0 : 1;
     }
 

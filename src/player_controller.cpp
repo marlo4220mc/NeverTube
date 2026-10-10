@@ -7,6 +7,7 @@
 
 #include "db/repositories.h"
 #include "debug.h"
+#include "i18n.h"
 #include "playerwidget.h"
 #include "yt.h"
 
@@ -227,7 +228,7 @@ void PlayerController::onStreamResolved(const StreamInfo &stream)
         return;
     if (stream.url.isEmpty()) {
         setPhase(QStringLiteral("error"));
-        m_errorMessage = QStringLiteral("No se obtuvo URL de streaming.");
+        m_errorMessage = nt::tr("error.noStreamUrl");
         return;
     }
     // The AV1 synthetic (built from a finite fMP4) is never a live
@@ -578,8 +579,7 @@ void PlayerController::onStreamStalled()
             // video (MainWindow listens for it) because restarting gets out of
             // the gated session.
             setPhase(QStringLiteral("error"));
-            m_errorMessage = QStringLiteral(
-                "La reproducción se interrumpió y no se pudo recuperar.");
+            m_errorMessage = nt::tr("error.recoveryFailed");
             emit recoveryExhausted();
             return;
         }
@@ -632,8 +632,7 @@ void PlayerController::onStreamInterrupted()
     if (m_recoverAttempts >= 3 || (m_lastRecoverMs > 0
                                    && now - m_lastRecoverMs < 8000)) {
         setPhase(QStringLiteral("error"));
-        m_errorMessage = QStringLiteral(
-            "La reproducción se interrumpió y no se pudo recuperar.");
+        m_errorMessage = nt::tr("error.recoveryFailed");
         emit recoveryExhausted();
         return;
     }

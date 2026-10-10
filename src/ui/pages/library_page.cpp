@@ -29,6 +29,7 @@
 #include <functional>
 
 #include "../../db/repositories.h"
+#include "../../i18n.h"
 #include "../../yt.h"
 #include "../channel_row.h"
 #include "../confirm_dialog.h"
@@ -207,7 +208,7 @@ protected:
         // Time/live badge (outside the thumbnail's clip, same
         // as the delegate).
         if (m_live)
-            drawThumbBadge(&p, size(), QStringLiteral("En directo"),
+            drawThumbBadge(&p, size(), nt::tr("video.liveBadge"),
                            nt::kAccent);
         else if (m_seconds > 0)
             drawThumbBadge(&p, size(), durationLabel(m_seconds),
@@ -353,7 +354,7 @@ public:
     {
         setFixedSize(26, 26);
         setCursor(Qt::PointingHandCursor);
-        setToolTip(QStringLiteral("Opciones"));
+        setToolTip(nt::tr("common.options"));
     }
 
 protected:
@@ -467,9 +468,10 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     lay->setContentsMargins(20, 18, 20, 32);
     lay->setSpacing(8);
 
-    auto *title = new QLabel(QStringLiteral("Biblioteca"), m_body);
-    title->setObjectName(QStringLiteral("sectionTitle"));
-    lay->addWidget(title);
+    m_pageTitle = new QLabel(m_body);
+    m_pageTitle->setObjectName(QStringLiteral("sectionTitle"));
+    nt::bindText(m_pageTitle, "library.title");
+    lay->addWidget(m_pageTitle);
     lay->addSpacing(12);
 
     const auto addSectionHeader = [this, lay](const QString &t, QPushButton **btn,
@@ -478,6 +480,8 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
         auto *header = new QHBoxLayout;
         auto *l = new QLabel(t, m_body);
         l->setObjectName(QStringLiteral("sectionTitle"));
+        // Dynamic (the count is appended by setSectionCount): NOT bound, it is
+        // re-applied by LibraryPage::retranslate() on a language change.
         l->setProperty("baseTitle", t);
         header->addWidget(l);
         header->addStretch(1);
@@ -496,15 +500,12 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     };
 
     // ---- Subscriptions -------------------------------------------------
-    QPushButton *manageBtn = nullptr;
-    addSectionHeader(QStringLiteral("Suscripciones"), &manageBtn,
-                     QStringLiteral("Administrar"), &m_subsTitle);
-    connect(manageBtn, &QPushButton::clicked, this, &LibraryPage::openManageSubs);
+    addSectionHeader(nt::tr("library.subscriptions"), &m_manageBtn,
+                     nt::tr("library.manage"), &m_subsTitle);
+    connect(m_manageBtn, &QPushButton::clicked, this, &LibraryPage::openManageSubs);
 
     m_channelHint = new QLabel(
-        nt::emptyStateHtml(QStringLiteral(
-            "Aún no te has suscrito a ningún canal. Abre un vídeo "
-            "o un canal y pulsa «Suscribirse».")),
+        nt::emptyStateHtml(nt::tr("library.noSubs")),
         m_body);
     m_channelHint->setObjectName(QStringLiteral("emptyState"));
     m_channelHint->setWordWrap(true);
@@ -533,8 +534,8 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     lay->addSpacing(16);
 
     // ---- Videos I like ------------------------------------------
-    addSectionHeader(QStringLiteral("Videos que me gustan"), &m_fav.allBtn,
-                     QStringLiteral("Ver todo"), &m_fav.title);
+    addSectionHeader(nt::tr("library.liked"), &m_fav.allBtn,
+                     nt::tr("common.showAll"), &m_fav.title);
     connect(m_fav.allBtn, &QPushButton::clicked, this, [this]() {
         m_fav.showAll = !m_fav.showAll;
         rebuildFavorites();
@@ -545,8 +546,7 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     m_fav.lay->setSpacing(2);
     lay->addWidget(m_fav.host);
     m_fav.empty = new QLabel(
-        nt::emptyStateHtml(
-            QStringLiteral("Pulsa «Me gusta» en un vídeo y aparecerá aquí.")),
+        nt::emptyStateHtml(nt::tr("library.favEmpty")),
         m_body);
     m_fav.empty->setObjectName(QStringLiteral("emptyState"));
     m_fav.empty->setWordWrap(true);
@@ -556,8 +556,8 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     lay->addSpacing(16);
 
     // ---- Watch later -------------------------------------------------
-    addSectionHeader(QStringLiteral("Ver más tarde"), &m_later.allBtn,
-                     QStringLiteral("Ver todo"), &m_later.title);
+    addSectionHeader(nt::tr("library.watchLater"), &m_later.allBtn,
+                     nt::tr("common.showAll"), &m_later.title);
     connect(m_later.allBtn, &QPushButton::clicked, this, [this]() {
         m_later.showAll = !m_later.showAll;
         rebuildWatchLater();
@@ -568,8 +568,7 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     m_later.lay->setSpacing(2);
     lay->addWidget(m_later.host);
     m_later.empty = new QLabel(
-        nt::emptyStateHtml(
-            QStringLiteral("Pulsa el reloj en un vídeo para guardarlo aquí.")),
+        nt::emptyStateHtml(nt::tr("library.watchLaterEmpty")),
         m_body);
     m_later.empty->setObjectName(QStringLiteral("emptyState"));
     m_later.empty->setWordWrap(true);
@@ -579,8 +578,8 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     lay->addSpacing(16);
 
     // ---- History -----------------------------------------------------
-    addSectionHeader(QStringLiteral("Historial"), &m_historySec.allBtn,
-                     QStringLiteral("Ver todo"), &m_historySec.title);
+    addSectionHeader(nt::tr("history.title"), &m_historySec.allBtn,
+                     nt::tr("common.showAll"), &m_historySec.title);
     connect(m_historySec.allBtn, &QPushButton::clicked, this,
             &LibraryPage::historyAllRequested);
     m_historySec.host = new QWidget(m_body);
@@ -589,8 +588,7 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     m_historySec.lay->setSpacing(2);
     lay->addWidget(m_historySec.host);
     m_historySec.empty = new QLabel(
-        nt::emptyStateHtml(
-            QStringLiteral("Los vídeos que veas aparecerán aquí.")),
+        nt::emptyStateHtml(nt::tr("library.historyEmpty")),
         m_body);
     m_historySec.empty->setObjectName(QStringLiteral("emptyState"));
     m_historySec.empty->setWordWrap(true);
@@ -600,10 +598,9 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     lay->addSpacing(16);
 
     // ---- Playlists -----------------------------------------------------
-    QPushButton *newBtn = nullptr;
-    addSectionHeader(QStringLiteral("Playlists"), &newBtn,
-                     QStringLiteral("+ Nueva"), &m_playlistsTitle);
-    connect(newBtn, &QPushButton::clicked, this, &LibraryPage::createPlaylist);
+    addSectionHeader(nt::tr("library.playlists"), &m_newBtn,
+                     nt::tr("library.new"), &m_playlistsTitle);
+    connect(m_newBtn, &QPushButton::clicked, this, &LibraryPage::createPlaylist);
 
     auto *playlistHost = new QWidget(m_body);
     m_playlistGrid = new QGridLayout(playlistHost);
@@ -612,8 +609,7 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     m_playlistGrid->setVerticalSpacing(6);
     lay->addWidget(playlistHost);
     m_playlistEmpty = new QLabel(
-        nt::emptyStateHtml(
-            QStringLiteral("Crea tu primera playlist con «+ Nueva».")),
+        nt::emptyStateHtml(nt::tr("library.playlistEmpty")),
         m_body);
     m_playlistEmpty->setObjectName(QStringLiteral("emptyState"));
     m_playlistEmpty->setWordWrap(true);
@@ -663,15 +659,62 @@ void LibraryPage::applyAccent()
         t->update();
 }
 
+// Called by MainWindow when the language changes (the rest of the page is
+// live-bound). This page composes its section titles as "Title · N" and toggles
+// "Ver todo / Ver menos", so neither can be nt::bindText: they are re-applied
+// here, over the count stored by setSectionCount.
+void LibraryPage::retranslate()
+{
+    const auto retitle = [](QLabel *l, const QString &base) {
+        if (!l)
+            return;
+        l->setProperty("baseTitle", base);
+        const int n = l->property("count").toInt();
+        l->setText(n > 0 ? QStringLiteral("%1 · %2").arg(base).arg(n) : base);
+    };
+    retitle(m_subsTitle, nt::tr("library.subscriptions"));
+    retitle(m_fav.title, nt::tr("library.liked"));
+    retitle(m_later.title, nt::tr("library.watchLater"));
+    retitle(m_historySec.title, nt::tr("history.title"));
+    retitle(m_playlistsTitle, nt::tr("library.playlists"));
+
+    if (m_manageBtn)
+        m_manageBtn->setText(nt::tr("library.manage"));
+    if (m_newBtn)
+        m_newBtn->setText(nt::tr("library.new"));
+
+    // Empty states: the text is wrapped by emptyStateHtml (the logo), so it is
+    // not a plain bindable label.
+    if (m_channelHint)
+        m_channelHint->setText(nt::emptyStateHtml(nt::tr("library.noSubs")));
+    if (m_fav.empty)
+        m_fav.empty->setText(nt::emptyStateHtml(nt::tr("library.favEmpty")));
+    if (m_later.empty)
+        m_later.empty->setText(nt::emptyStateHtml(nt::tr("library.watchLaterEmpty")));
+    if (m_historySec.empty)
+        m_historySec.empty->setText(nt::emptyStateHtml(nt::tr("library.historyEmpty")));
+    if (m_playlistEmpty)
+        m_playlistEmpty->setText(nt::emptyStateHtml(nt::tr("library.playlistEmpty")));
+
+    // The section counts and the "Ver todo / Ver menos" toggles are refreshed by
+    // the rebuilds (the same is done from reload()).
+    reload();
+
+    // The thumbnail's "En directo" badge is painted with nt::tr at paint time.
+    applyAccent();
+}
+
 // --------------------------------------------------------------------------
 // Subscriptions
 // --------------------------------------------------------------------------
 // Section counter: the base title goes in the QLabel's baseTitle property and
-// here "Title · N" is composed (no suffix if N is 0).
+// here "Title · N" is composed (no suffix if N is 0). The count is stored as a
+// property so retranslate() can re-compose it in another language.
 static void setSectionCount(QLabel *l, int n)
 {
     if (!l)
         return;
+    l->setProperty("count", n);
     const QString base = l->property("baseTitle").toString();
     if (base.isEmpty())
         return;
@@ -698,7 +741,7 @@ void LibraryPage::rebuildSubscriptions()
         row->setMeta(subMetaFor(s.id));
         m_subMeta.insert(s.id, row);
 
-        auto *x = makeIconBtn(QStringLiteral("Dejar de seguir"), false, row);
+        auto *x = makeIconBtn(nt::tr("library.unfollow"), false, row);
         connect(x, &QPushButton::clicked, this, [this, s]() {
             m_subs->remove(s.id);
             reload();
@@ -730,8 +773,7 @@ QString LibraryPage::subMetaFor(const QString &channelId) const
     const auto it = m_subCounts.constFind(channelId);
     if (it == m_subCounts.constEnd() || it.value() <= 0)
         return handle;
-    return QStringLiteral("%1\n%2 suscriptores")
-        .arg(handle, compactCount(it.value()));
+    return nt::tr("channel.subscribers").arg(handle, compactCount(it.value()));
 }
 
 void LibraryPage::onChannelInfo(const ChannelInfo &channel)
@@ -803,8 +845,8 @@ void LibraryPage::rebuildFavorites()
     m_fav.host->setVisible(has);
     m_fav.empty->setVisible(!has);
     m_fav.allBtn->setVisible(has && m_fav.videos.size() > kVisibleRows);
-    m_fav.allBtn->setText(m_fav.showAll ? QStringLiteral("Ver menos")
-                                        : QStringLiteral("Ver todo"));
+    m_fav.allBtn->setText(m_fav.showAll ? nt::tr("common.showLess")
+                                        : nt::tr("common.showAll"));
     setSectionCount(m_fav.title, m_fav.videos.size());
     if (!has)
         return;
@@ -812,7 +854,7 @@ void LibraryPage::rebuildFavorites()
     buildRows(m_fav.lay, m_fav.videos, visible,
               [this](int index) { emit openRequested(m_fav.videos, index); },
               [this](QMenu *menu, const VideoInfo &v) {
-                  addMenuAction(menu, QStringLiteral("Quitar de Me gusta"),
+                  addMenuAction(menu, nt::tr("library.removeLike"),
                                 [this, id = v.id]() {
                                     m_favs->toggle(id);
                                     reload();
@@ -829,8 +871,8 @@ void LibraryPage::rebuildWatchLater()
     m_later.host->setVisible(has);
     m_later.empty->setVisible(!has);
     m_later.allBtn->setVisible(has && m_later.videos.size() > kVisibleRows);
-    m_later.allBtn->setText(m_later.showAll ? QStringLiteral("Ver menos")
-                                            : QStringLiteral("Ver todo"));
+    m_later.allBtn->setText(m_later.showAll ? nt::tr("common.showLess")
+                                            : nt::tr("common.showAll"));
     setSectionCount(m_later.title, m_later.videos.size());
     if (!has)
         return;
@@ -839,7 +881,7 @@ void LibraryPage::rebuildWatchLater()
               [this](int index) { emit openRequested(m_later.videos, index); },
               [this](QMenu *menu, const VideoInfo &v) {
                   addMenuAction(menu,
-                                QStringLiteral("Quitar de Ver más tarde"),
+                                nt::tr("row.watchLater.remove"),
                                 [this, id = v.id]() {
                                     m_watchLater->remove(id);
                                     reload();
@@ -886,7 +928,7 @@ void LibraryPage::rebuildHistory()
                                        HistoryRepo::resumeStartMs(v, pos));
               },
               [this](QMenu *menu, const VideoInfo &v) {
-                  addMenuAction(menu, QStringLiteral("Quitar del historial"),
+                  addMenuAction(menu, nt::tr("history.remove"),
                                 [this, id = v.id]() {
                                     m_history->remove(id);
                                     reload();
@@ -978,26 +1020,25 @@ void LibraryPage::rebuildPlaylists()
                                      kThumbW, kThumbH, 8, false, row);
         row->setLeading(thumb);
         row->setTitle(p.title);
-        row->setMeta(QStringLiteral("%1 vídeos").arg(videos.size()));
+        row->setMeta(nt::tr("common.videos").arg(videos.size()));
 
         auto *menu = new QMenu(row);
-        addMenuAction(menu, QStringLiteral("Renombrar"),
+        addMenuAction(menu, nt::tr("playlist.rename"),
                       [this, p]() { promptRenamePlaylist(p); });
         // Same confirmation as the "Eliminar" button of the Playlist page, and the
         // reason is the same: the playlist disappears entirely and there is no going back.
         // No QTimer::singleShot(0) is needed here: addMenuAction already does it,
         // so that the list the menu was born from does not end up without the row with
         // the dialog open.
-        addMenuAction(menu, QStringLiteral("Eliminar"),
+        addMenuAction(menu, nt::tr("common.delete"),
                       [this, p, n = videos.size()]() {
             const QString where = p.title.trimmed().isEmpty()
-                ? QStringLiteral("esta playlist")
+                ? nt::tr("playlist.this")
                 : QStringLiteral("«%1»").arg(p.title.trimmed());
-            nt::confirm(this, QStringLiteral("Eliminar playlist"),
-                        QStringLiteral("Se eliminará %1 con sus %2 vídeos. Esta "
-                                       "acción no se puede deshacer.")
+            nt::confirm(this, nt::tr("playlist.deleteTitle"),
+                        nt::tr("playlist.deleteBody")
                             .arg(where, QStringLiteral("%1").arg(n)),
-                        QStringLiteral("Eliminar"), [this, p]() {
+                        nt::tr("common.delete"), [this, p]() {
                             m_playlists->deletePlaylist(p.id);
                             rebuildPlaylists();
                         });
@@ -1042,9 +1083,9 @@ void LibraryPage::layoutCards(QGridLayout *grid, const QVector<QWidget *> &cards
 void LibraryPage::promptNewPlaylist(const QString &videoId)
 {
     QString name;
-    if (!nt::inputText(this, QStringLiteral("Nueva playlist"),
-                       QStringLiteral("Nombre:"), QString(),
-                       QStringLiteral("Crear"), &name))
+    if (!nt::inputText(this, nt::tr("playlist.newName"),
+                       nt::tr("playlist.nameField"), QString(),
+                       nt::tr("playlist.create"), &name))
         return;
     if (name.isEmpty())
         return;
@@ -1061,9 +1102,9 @@ void LibraryPage::promptRenamePlaylist(const PlaylistItem &playlist)
     if (playlist.id.isEmpty())
         return;
     QString name;
-    if (!nt::inputText(this, QStringLiteral("Renombrar playlist"),
-                       QStringLiteral("Nuevo nombre:"), playlist.title,
-                       QStringLiteral("Guardar"), &name))
+    if (!nt::inputText(this, nt::tr("playlist.renameTitle"),
+                       nt::tr("playlist.renameField"), playlist.title,
+                       nt::tr("playlist.save"), &name))
         return;
     if (name.isEmpty())
         return;
@@ -1107,9 +1148,9 @@ void LibraryPage::setupManageSubsPopup()
     v->setContentsMargins(18, 16, 18, 14);
     v->setSpacing(10);
 
-    auto *title = new QLabel(QStringLiteral("Gestionar suscripciones"),
-                             m_managePopup);
+    auto *title = new QLabel(m_managePopup);
     title->setObjectName(QStringLiteral("popupTitle"));
+    nt::bindText(title, "library.manageSubs");
     v->addWidget(title);
 
     auto *scroll = new QScrollArea(m_managePopup);
@@ -1124,8 +1165,9 @@ void LibraryPage::setupManageSubsPopup()
 
     auto *row = new QHBoxLayout;
     row->addStretch(1);
-    auto *close = new QPushButton(QStringLiteral("Cerrar"), m_managePopup);
+    auto *close = new QPushButton(m_managePopup);
     close->setObjectName(QStringLiteral("ghost"));
+    nt::bindText(close, "common.close");
     close->setCursor(Qt::PointingHandCursor);
     connect(close, &QPushButton::clicked, this, &LibraryPage::closeManageSubs);
     row->addWidget(close);
@@ -1159,7 +1201,7 @@ void LibraryPage::rebuildManageSubs()
         row->setLeading(avatar);
         row->setTitle(s.title);
         row->setMeta(channelHandleFor(s.title));
-        auto *x = makeIconBtn(QStringLiteral("Dejar de seguir"), false, row);
+        auto *x = makeIconBtn(nt::tr("library.unfollow"), false, row);
         connect(x, &QPushButton::clicked, this, [this, s]() {
             m_subs->remove(s.id);
             reload();

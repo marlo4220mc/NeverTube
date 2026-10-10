@@ -6,6 +6,7 @@
 #include <QStandardItemModel>
 #include <QStyledItemDelegate>
 
+#include "../i18n.h"
 #include "../models.h"
 
 Q_DECLARE_METATYPE(VideoInfo)
@@ -229,7 +230,7 @@ public:
     // badge replaces it.
     static void drawLiveBadge(QPainter *p, const QRectF &r)
     {
-        drawBadgeCore(p, r, QStringLiteral("En directo"), nt::kAccent);
+        drawBadgeCore(p, r, nt::tr("video.liveBadge"), nt::kAccent);
     }
 
     // Thumbnail scaling cached by target size. `m_thumbs->pixmap()` returns

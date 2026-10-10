@@ -45,6 +45,11 @@ public:
 
     void reload();
 
+    // Re-applies the texts that are NOT live-bound: a section title with its
+    // count and the "Ver todo / Ver menos" toggles are composed dynamically, so
+    // they cannot be nt::bindText and are refreshed here on a language change.
+    void retranslate();
+
     // The thumbnails' progress bar is painted by hand with nt::kAccent (the
     // QSS does not reach it), so rows must be repainted when the accent
     // changes. MainWindow calls it along with the other pages' applyAccent().
@@ -125,6 +130,9 @@ private:
 
     QScrollArea *m_scroll = nullptr;
     QWidget *m_body = nullptr;
+    QLabel *m_pageTitle = nullptr;
+    QPushButton *m_manageBtn = nullptr;
+    QPushButton *m_newBtn = nullptr;
 
     // Subscriptions
     QLabel *m_channelHint = nullptr;

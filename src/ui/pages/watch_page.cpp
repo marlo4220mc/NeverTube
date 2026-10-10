@@ -31,6 +31,7 @@
 
 #include "../../db/repositories.h"
 #include "../../debug.h"
+#include "../../i18n.h"
 #include "../../models.h"
 #include "../../player_controller.h"
 #include "../../playerwidget.h"
@@ -546,13 +547,13 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     };
 
     m_ovPlayBtn = makeIconBtn(m_ctrlBar);
-    m_ovPlayBtn->setToolTip(QStringLiteral("Reproducir/Pausa\nK"));
+    nt::bindTooltip(m_ovPlayBtn, "player.playPause");
     connect(m_ovPlayBtn, &QPushButton::clicked, this,
             &WatchPage::onPlayPause);
     btnRow->addWidget(m_ovPlayBtn);
 
     m_ovPrevBtn = makeIconBtn(m_ctrlBar);
-    m_ovPrevBtn->setToolTip(QStringLiteral("Anterior\nP"));
+    nt::bindTooltip(m_ovPrevBtn, "player.prev");
     // YouTube's behavior lives in PlayerController::previous() (and the
     // button's enabled state in previousAvailable()): the logic is not the UI's.
     connect(m_ovPrevBtn, &QPushButton::clicked, this, [this]() {
@@ -561,7 +562,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     btnRow->addWidget(m_ovPrevBtn);
 
     m_ovNextBtn = makeIconBtn(m_ctrlBar);
-    m_ovNextBtn->setToolTip(QStringLiteral("Siguiente\nN"));
+    nt::bindTooltip(m_ovNextBtn, "player.next");
     connect(m_ovNextBtn, &QPushButton::clicked, this, [this]() {
         if (m_player->hasNext())
             m_player->next();
@@ -569,7 +570,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     btnRow->addWidget(m_ovNextBtn);
 
     m_ovShuffleBtn = makeIconBtn(m_ctrlBar);
-    m_ovShuffleBtn->setToolTip(QStringLiteral("Barajar cola"));
+    nt::bindTooltip(m_ovShuffleBtn, "player.shuffle");
     connect(m_ovShuffleBtn, &QPushButton::clicked, this, [this]() {
         m_player->setShuffle(!m_player->shuffle());
         updateOverlayIcons();
@@ -577,7 +578,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     btnRow->addWidget(m_ovShuffleBtn);
 
     m_ovRepeatBtn = makeIconBtn(m_ctrlBar);
-    m_ovRepeatBtn->setToolTip(QStringLiteral("Repetir cola"));
+    nt::bindTooltip(m_ovRepeatBtn, "player.repeat");
     connect(m_ovRepeatBtn, &QPushButton::clicked, this, [this]() {
         m_player->setRepeat(!m_player->repeat());
         updateOverlayIcons();
@@ -612,7 +613,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     btnRow->addWidget(makeSep(m_ctrlBar));
 
     m_ovMuteBtn = makeIconBtn(m_ctrlBar);
-    m_ovMuteBtn->setToolTip(QStringLiteral("Silencio\nM"));
+    nt::bindTooltip(m_ovMuteBtn, "player.mute");
     connect(m_ovMuteBtn, &QPushButton::clicked, this,
             &WatchPage::onToggleMute);
     btnRow->addWidget(m_ovMuteBtn);
@@ -636,7 +637,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     btnRow->addWidget(makeSep(m_ctrlBar));
 
     m_ovSubsBtn = makeIconBtn(m_ctrlBar);
-    m_ovSubsBtn->setToolTip(QStringLiteral("Subtítulos (CC)"));
+    nt::bindTooltip(m_ovSubsBtn, "player.subtitles");
     connect(m_ovSubsBtn, &QPushButton::clicked, this, [this]() {
         m_subsVisible = !m_subsVisible;
         if (m_playerWidget)
@@ -646,7 +647,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     btnRow->addWidget(m_ovSubsBtn);
 
     m_ovPlaylistBtn = makeIconBtn(m_ctrlBar);
-    m_ovPlaylistBtn->setToolTip(QStringLiteral("Añadir a playlist"));
+    nt::bindTooltip(m_ovPlaylistBtn, "player.addToPlaylist");
     connect(m_ovPlaylistBtn, &QPushButton::clicked, this,
             &WatchPage::showPlaylistMenu);
     btnRow->addWidget(m_ovPlaylistBtn);
@@ -655,13 +656,15 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // chip "720p" to be the settings icon of the row. The active resolution
     // now lives in the tooltip (see onVideoSizeChanged/setQualityIndex).
     m_quality = makeIconBtn(m_ctrlBar);
-    m_quality->setToolTip(QStringLiteral("Calidad de vídeo"));
+    // NOT bound: onVideoSizeChanged overwrites the tooltip with the active
+    // resolution. The initial text is in the active language.
+    m_quality->setToolTip(nt::tr("player.quality"));
     connect(m_quality, &QPushButton::clicked, this,
             &WatchPage::toggleQualityMenu);
     btnRow->addWidget(m_quality);
 
     m_ovFsBtn = makeIconBtn(m_ctrlBar);
-    m_ovFsBtn->setToolTip(QStringLiteral("Pantalla completa\nF"));
+    nt::bindTooltip(m_ovFsBtn, "player.fullscreen");
     connect(m_ovFsBtn, &QPushButton::clicked, this,
             &WatchPage::toggleFullscreen);
     btnRow->addWidget(m_ovFsBtn);
@@ -759,7 +762,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_qualityMenuAnchor = gl;
 
     m_overlay->addWidget(gl);
-    auto *spinner = new QLabel(QStringLiteral("Cargando…"), this);
+    auto *spinner = new QLabel(nt::tr("common.loading"), this);
     spinner->setAlignment(Qt::AlignCenter);
     spinner->setObjectName(QStringLiteral("ovSpinner"));
     m_overlay->addWidget(spinner);
@@ -843,7 +846,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_meta->setObjectName(QStringLiteral("watchMeta"));
     infoLay->addWidget(m_meta);
 
-    m_channelBtn = new QPushButton(QStringLiteral("Canal"), this);
+    m_channelBtn = new QPushButton(nt::tr("channel.title"), this);
     m_channelBtn->setObjectName(QStringLiteral("channelBtn"));
     m_channelBtn->setCursor(Qt::PointingHandCursor);
     m_channelBtn->setIconSize(QSize(43, 40));
@@ -854,7 +857,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_channelBtn->setMinimumHeight(56);
     m_channelBtn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
 
-    m_subscribeBtn = new QPushButton(QStringLiteral("Suscribirse"), this);
+    m_subscribeBtn = new QPushButton(nt::tr("channel.subscribe"), this);
     m_subscribeBtn->setObjectName(QStringLiteral("subscribe"));
     m_subscribeBtn->setCursor(Qt::PointingHandCursor);
     m_subscribeBtn->setMinimumHeight(36);
@@ -897,9 +900,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         *iconOut = icon;
     };
     makeSeg(QStringLiteral("actionSegL"), nt::Icon::Thumb,
-            QStringLiteral("Me gusta"), &m_likeBtn, &m_likeIcon);
+            nt::tr("watch.like"), &m_likeBtn, &m_likeIcon);
     makeSeg(QStringLiteral("actionSegR"), nt::Icon::ThumbDown,
-            QStringLiteral("No me gusta"), &m_dislikeBtn, &m_dislikeIcon);
+            nt::tr("watch.dislike"), &m_dislikeBtn, &m_dislikeIcon);
     segLay->addWidget(m_likeBtn);
     segLay->addWidget(m_dislikeBtn);
     actionsRow->addWidget(seg);
@@ -921,13 +924,13 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         *out = b;
         *iconOut = icon;
     };
-    makeAction(nt::Icon::Share, QStringLiteral("Compartir"),
+    makeAction(nt::Icon::Share, nt::tr("row.share"),
                &m_shareBtn, &m_shareIcon);
-    makeAction(nt::Icon::Star, QStringLiteral("Favorito"),
+    makeAction(nt::Icon::Star, nt::tr("watch.favorite"),
                &m_starBtn, &m_starIcon);
-    makeAction(nt::Icon::WatchLater, QStringLiteral("Ver más tarde"),
+    makeAction(nt::Icon::WatchLater, nt::tr("library.watchLater"),
                &m_watchLaterBtn, &m_watchLaterIcon);
-    makeAction(nt::Icon::ListAdd, QStringLiteral("Agregar a playlist"),
+    makeAction(nt::Icon::ListAdd, nt::tr("watch.addToPlaylist"),
                &m_playlistBtn, &m_playlistIcon);
     connect(m_playlistBtn, &QPushButton::clicked, this,
             &WatchPage::showPlaylistMenu);
@@ -960,7 +963,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     auto *quRow = new QHBoxLayout;
     quRow->setContentsMargins(0, 0, 0, 0);
     quRow->setSpacing(8);
-    auto *quTitle = new QLabel(QStringLiteral("A continuación"), this);
+    auto *quTitle = new QLabel(nt::tr("watch.upNext"), this);
     quTitle->setObjectName(QStringLiteral("queueTitle"));
     m_queueCount = new QLabel(this);
     m_queueCount->setObjectName(QStringLiteral("queueCount"));
@@ -1006,8 +1009,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // The token is #backLink, the same discreet link as Channel, History and
     // Playlist; inside the overlay its top edge sits against the edge of the
     // video (gl1 does not manage this child, only m_ctrlBar and the stretch).
-    m_back = new QPushButton(QStringLiteral("Volver"), gl);
+    m_back = new QPushButton(gl);
     m_back->setObjectName(QStringLiteral("backLink"));
+    nt::bindText(m_back, "common.back");
     // The Back icon (below) is already the arrow: the "◀" in the text was a glyph
     // that does not exist in the default font and came out as a dot, and it also
     // duplicated the same affordance.
@@ -1077,7 +1081,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             "https://www.youtube.com/watch?v=%1").arg(v.id);
         QGuiApplication::clipboard()->setText(url);
         QToolTip::showText(m_shareBtn->mapToGlobal(QPoint(0, 0)),
-                           QStringLiteral("Enlace copiado"), m_shareBtn);
+                           nt::tr("row.linkCopied"), m_shareBtn);
     });
     connect(m_player, &PlayerController::currentChanged, this,
             &WatchPage::onCurrentChanged);
@@ -1124,9 +1128,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
 
     m_nextUpList->showVideos(QVector<VideoInfo>(), VideoListView::ListMode);
     bottomWidget->hide();
-    m_title->setText(QStringLiteral("Reproduciendo…"));
+    m_title->setText(nt::tr("watch.playing"));
     m_meta->clear();
-    m_channelBtn->setText(QStringLiteral("Canal"));
+    m_channelBtn->setText(nt::tr("channel.title"));
     m_descLabel->hide();
     updateActionButtons();
 }
@@ -1190,7 +1194,7 @@ void WatchPage::onCurrentChanged()
         m_ovPos->update();
     }
     if (!m_player->isActive()) {
-        m_title->setText(QStringLiteral("Reproduciendo…"));
+        m_title->setText(nt::tr("watch.playing"));
         return;
     }
     // Page with a single scroll (YouTube style): on changing video it
@@ -1225,7 +1229,7 @@ void WatchPage::onCurrentChanged()
     }
     m_fetchingDetail = true;
     m_description.clear();
-    m_meta->setText(QStringLiteral("Cargando detalles…"));
+    m_meta->setText(nt::tr("watch.loadingDetails"));
 }
 
 void WatchPage::onQueueChanged()
@@ -1266,7 +1270,7 @@ void WatchPage::updateQueue()
     if (m_queueCount)
         m_queueCount->setText(m_queue.isEmpty()
             ? QString()
-            : QStringLiteral("%1 vídeos").arg(m_queue.size()));
+            : nt::tr("common.videos").arg(m_queue.size()));
     // The queue lives INSIDE the page scroll: its height is adjusted to the
     // real content (rows × row height) so that the page scroll
     // moves the whole queue, with no duplicated internal scroll.
@@ -1326,7 +1330,7 @@ void WatchPage::updateInfo()
         if (!p.isEmpty())
             meta << p;
     }
-    m_meta->setText(meta.join(QStringLiteral("  •  ")));
+    m_meta->setText(meta.join(nt::tr("fmt.metaSep")));
     updateChannelRow();
 }
 
@@ -1335,7 +1339,7 @@ void WatchPage::updateChannelRow()
     if (!m_player->isActive())
         return;
     const VideoInfo v = m_player->current();
-    m_channelBtn->setText(v.channel.isEmpty() ? QStringLiteral("Canal")
+    m_channelBtn->setText(v.channel.isEmpty() ? nt::tr("channel.title")
                                               : v.channel);
     m_channelAvatarKey.clear();
     m_channelAvatarUrl.clear();
@@ -1358,8 +1362,8 @@ void WatchPage::updateChannelRow()
 
 void WatchPage::updateSubscribeButton(bool subscribed)
 {
-    m_subscribeBtn->setText(subscribed ? QStringLiteral("Suscrito")
-                                       : QStringLiteral("Suscribirse"));
+    m_subscribeBtn->setText(subscribed ? nt::tr("channel.subscribed")
+                                       : nt::tr("channel.subscribe"));
     m_subscribeBtn->setIcon(QIcon());
     // Same #subscribe rule as the channel sheet button: both
     // states are decided by the `subscribed` property and the accent comes from
@@ -1417,7 +1421,7 @@ void WatchPage::showQueueRowMenu(int index, const VideoInfo &video,
     // queue (see PlayerController::removeFromQueue), so in its row the
     // action does not appear instead of appearing without doing anything.
     if (index != m_player->index()) {
-        QAction *rem = menu.addAction(QStringLiteral("Quitar de la cola"));
+        QAction *rem = menu.addAction(nt::tr("watch.removeFromQueue"));
         connect(rem, &QAction::triggered, this, [this, index]() {
             // On the next loop iteration, with the menu closed: removing it deletes the row
             // from the list the popup was born from.
@@ -1457,7 +1461,7 @@ void WatchPage::showPlaylistMenu()
         // No check glyph: "✔" (U+2714) is not in the default font and
         // came out as a dot. The "(ya está)" already says the same.
         const QString label = contains
-            ? QStringLiteral("%1 (ya está)").arg(p.title)
+            ? nt::tr("row.already").arg(p.title)
             : p.title;
         QAction *act = menu.addAction(label);
         act->setEnabled(!contains);
@@ -1465,12 +1469,12 @@ void WatchPage::showPlaylistMenu()
                 [this, p, v]() { m_playlists->addVideo(p.id, v.id); });
     }
     menu.addSeparator();
-    QAction *newAct = menu.addAction(QStringLiteral("+ Nueva playlist"));
+    QAction *newAct = menu.addAction(nt::tr("row.newPlaylist"));
     connect(newAct, &QAction::triggered, this, [this, v]() {
         promptNewPlaylist(v.id);
     });
     if (playlists.isEmpty() && !anyAdded)
-        menu.addAction(QStringLiteral("Sin playlists todavía"))->setEnabled(false);
+        menu.addAction(nt::tr("watch.noPlaylists"))->setEnabled(false);
     menu.exec(m_playlistBtn
                   ? m_playlistBtn->mapToGlobal(QPoint(0, m_playlistBtn->height()))
                   : QCursor::pos());
@@ -1485,9 +1489,9 @@ void WatchPage::showPlaylistMenu()
 void WatchPage::promptNewPlaylist(const QString &videoId)
 {
     QString name;
-    if (!nt::inputText(this, QStringLiteral("Nueva playlist"),
-                       QStringLiteral("Nombre:"), QString(),
-                       QStringLiteral("Crear"), &name))
+    if (!nt::inputText(this, nt::tr("playlist.newName"),
+                       nt::tr("playlist.nameField"), QString(),
+                       nt::tr("playlist.create"), &name))
         return;
     if (name.isEmpty())
         return;
@@ -1608,8 +1612,8 @@ void WatchPage::onDetailReady(const VideoInfo &video, const QString &desc,
         if (!p.isEmpty())
             meta << p;
     }
-    meta << QStringLiteral("%1 me gusta").arg(likes);
-    m_meta->setText(meta.join(QStringLiteral("  •  ")));
+    meta << nt::tr("watch.likes").arg(likes);
+    m_meta->setText(meta.join(nt::tr("fmt.metaSep")));
     // The detail just filled in what was missing in the queue item (channel,
     // id, views, date) via applyCurrentDetail: the list is repainted so that
     // the playing video's row already shows the three fields.
@@ -1776,7 +1780,7 @@ void WatchPage::onPositionChanged(double position, double duration)
         // known duration only the mark remains.
         m_ovSeek->setRange(0, 1);
         m_ovSeek->setValue(1);
-        m_ovPos->setText(QStringLiteral("EN VIVO"));
+        m_ovPos->setText(nt::tr("watch.live"));
         m_liveDurPeak = qMax(m_liveDurPeak, duration);
         m_ovDur->setText(m_liveDurPeak > 0
                              ? QStringLiteral("-%1").arg(fmtTime(m_liveDurPeak))
@@ -1893,7 +1897,7 @@ void WatchPage::onVideoSizeChanged(int width, int height)
     // The quality button is the settings icon: the active resolution lives in
     // the tooltip (the text chip left with the new row).
     m_quality->setToolTip(
-        QStringLiteral("Calidad de vídeo: %1p").arg(visible));
+        nt::tr("watch.qualityTip").arg(visible));
     // The menu is anchored with m_quality->mapTo(anchor, ...) when it opens
     // (toggleQualityMenu), so it follows the button without readjusting anything here.
     NT_DEBUG("E2E combo sync %dx%d requested=%d button=%d\n",
@@ -1912,7 +1916,7 @@ void WatchPage::setQualityIndex(int index)
     m_qualityIndex = index;
     onQualityChanged(index);
     m_quality->setToolTip(
-        QStringLiteral("Calidad de vídeo: %1p").arg(idxToQuality(index)));
+        nt::tr("watch.qualityTip").arg(idxToQuality(index)));
 }
 
 void WatchPage::toggleQualityMenu()

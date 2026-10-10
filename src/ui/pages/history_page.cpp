@@ -13,6 +13,7 @@
 #include <QVBoxLayout>
 
 #include "../../db/repositories.h"
+#include "../../i18n.h"
 #include "../confirm_dialog.h"
 #include "../row_menu.h"
 #include "../icons.h"
@@ -42,8 +43,9 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
 
     // "Volver" with the #backLink token, same as Channel, Playlist and the Player.
     auto *top = new QHBoxLayout;
-    auto *back = new QPushButton(QStringLiteral("Volver"), this);
+    auto *back = new QPushButton(this);
     back->setObjectName(QStringLiteral("backLink"));
+    nt::bindText(back, "common.back");
     back->setIcon(nt::icon(nt::Icon::Back, nt::kMuted, 13));
     connect(back, &QPushButton::clicked, this, &HistoryPage::backRequested);
     top->addWidget(back);
@@ -61,14 +63,15 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
     titleRow->setContentsMargins(0, 0, 0, 0);
     titleRow->setSpacing(8);
 
-    m_title = new QLabel(QStringLiteral("Historial"), this);
+    m_title = new QLabel(this);
     m_title->setObjectName(QStringLiteral("sectionTitle"));
+    nt::bindText(m_title, "history.title");
     titleRow->addWidget(m_title, 0, Qt::AlignVCenter);
     titleRow->addStretch(1);
 
-    m_clearBtn = new QPushButton(QStringLiteral("Borrar historial de vídeos"),
-                              this);
+    m_clearBtn = new QPushButton(this);
     m_clearBtn->setObjectName(QStringLiteral("ghost"));
+    nt::bindText(m_clearBtn, "history.clear");
     m_clearBtn->setCursor(Qt::PointingHandCursor);
     // 30 and not 34: it is a header control, not the big button of the page. The
     // global padding (7px 14px) plus the 13 px line fit exactly without clipping.
@@ -86,11 +89,9 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
     connect(m_clearBtn, &QPushButton::clicked, this, [this]() {
         if (m_videos.isEmpty())
             return;
-        nt::confirm(this, QStringLiteral("Borrar historial de vídeos"),
-                    QStringLiteral("Se borrarán los %1 vídeos de tu historial. "
-                                   "Esta acción no se puede deshacer.")
-                        .arg(m_videos.size()),
-                    QStringLiteral("Borrar"), [this]() {
+        nt::confirm(this, nt::tr("history.clear"),
+                    nt::tr("history.clearBody").arg(m_videos.size()),
+                    nt::tr("common.erase"), [this]() {
                         m_history->clear();
                         emit historyChanged();
                         reload();
@@ -131,9 +132,7 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
     // and a line of text at the top. It is the same dotted #emptyState box used
     // by the Library, the Channel tabs and the Playlist.
     m_empty = new QLabel(
-        nt::emptyStateHtml(QStringLiteral(
-            "Todavía no has visto ningún vídeo. Los que abras aparecerán aquí.")),
-        this);
+        nt::emptyStateHtml(nt::tr("history.empty")), this);
     m_empty->setObjectName(QStringLiteral("emptyState"));
     m_empty->setAlignment(Qt::AlignCenter);
     m_empty->setWordWrap(true);
@@ -165,7 +164,7 @@ void HistoryPage::showMoreMenu(const VideoInfo &v, const QPoint &globalPos)
     // Own action of this page: the rest of the menu is the one shared by every
     // surface with rows (nt::addRowMenuActions), with the same texts and in the
     // same order.
-    QAction *rem = menu.addAction(QStringLiteral("Quitar del historial"));
+    QAction *rem = menu.addAction(nt::tr("history.remove"));
     connect(rem, &QAction::triggered, this, [this, v]() {
         // In the next loop, with the menu already closed: removing the video
         // erases the row of the list the popup was born in.
@@ -179,9 +178,9 @@ void HistoryPage::showMoreMenu(const VideoInfo &v, const QPoint &globalPos)
     nt::RowMenuHooks hooks;
     hooks.onNewPlaylist = [this](const QString &videoId) {
         QString title;
-        if (nt::inputText(this, QStringLiteral("Nueva playlist"),
-                          QStringLiteral("Nombre:"),
-                          QString(), QStringLiteral("Crear"), &title)) {
+        if (nt::inputText(this, nt::tr("playlist.newName"),
+                          nt::tr("playlist.nameField"),
+                          QString(), nt::tr("playlist.create"), &title)) {
             if (title.isEmpty())
                 return;
             const QString id = m_playlists->create(title);
@@ -203,7 +202,7 @@ void HistoryPage::reload()
     m_videos = m_cache->getMany(ids);
     m_list->showVideos(m_videos, VideoListView::ListMode);
     m_list->setCurrentRow(-1);
-    m_meta->setText(QStringLiteral("%1 vídeos").arg(m_videos.size()));
+    m_meta->setText(nt::tr("common.videos").arg(m_videos.size()));
     // List or empty box, never both (see the constructor's comment).
     m_empty->setVisible(m_videos.isEmpty());
     m_list->setVisible(!m_videos.isEmpty());

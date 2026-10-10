@@ -63,6 +63,7 @@ extern "C" {
 #endif
 
 #include "debug.h"
+#include "i18n.h"
 
 // ---------------------------------------------------------------------------
 // Constantes
@@ -649,11 +650,11 @@ static void runLoop(FfmpegBackend::Impl *m)
     };
 
     if (!openFormat(&vFmt, m->url, m)) {
-        fail(QStringLiteral("No se pudo abrir la URL de vídeo"));
+        fail(nt::tr("error.openUrl"));
         return;
     }
     if (avformat_find_stream_info(vFmt, nullptr) < 0) {
-        fail(QStringLiteral("No se pudo leer la información del stream"));
+        fail(nt::tr("error.streamInfo"));
         return;
     }
 
@@ -664,7 +665,7 @@ static void runLoop(FfmpegBackend::Impl *m)
     const int vs =
         av_find_best_stream(vFmt, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
     if (vs < 0) {
-        fail(QStringLiteral("No se encontró pista de vídeo en el stream"));
+        fail(nt::tr("error.noVideoTrack"));
         return;
     }
 
@@ -712,7 +713,7 @@ static void runLoop(FfmpegBackend::Impl *m)
                          AV_HWDEVICE_TYPE_NONE);
     }
     if (!vc) {
-        fail(QStringLiteral("Sin decodificador de vídeo para el códec %1")
+        fail(nt::tr("error.noDecoder")
                  .arg(QString::fromUtf8(
                      avcodec_get_name(vFmt->streams[vs]->codecpar->codec_id))));
         return;
@@ -1060,7 +1061,7 @@ static void runLoop(FfmpegBackend::Impl *m)
                         break;
                     char err[AV_ERROR_MAX_STRING_SIZE] = { 0 };
                     av_strerror(r, err, sizeof err);
-                    fail(QStringLiteral("Error de red/stream: %1")
+                    fail(nt::tr("error.networkStream")
                              .arg(QString::fromUtf8(err)));
                     break;
                 }
@@ -1100,7 +1101,7 @@ static void runLoop(FfmpegBackend::Impl *m)
                         break;
                     char err[AV_ERROR_MAX_STRING_SIZE] = { 0 };
                     av_strerror(r, err, sizeof err);
-                    fail(QStringLiteral("Error de audio externo: %1")
+                    fail(nt::tr("error.externalAudio")
                              .arg(QString::fromUtf8(err)));
                     break;
                 }

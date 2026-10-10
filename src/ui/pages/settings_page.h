@@ -22,6 +22,14 @@ public:
     // (MainWindow calls it when the accent color changes in Settings).
     void applyAccent();
 
+    // Rebuilds the page after a language change. The option IDENTITY is a
+    // stable code and the visible text is a translation, so recreating the UI
+    // from the settings is exact and leaves every menu in the new language
+    // (the menus and checks are ephemeral and would otherwise keep the old
+    // wording). MainWindow calls it deferred (QTimer::singleShot(0)) so the
+    // menu that emitted languageChanged is not destroyed while open.
+    void retranslate();
+
     // "Tamaño de las miniaturas" (Settings → Interface): persisted value
     // ("small" | "normal" | "large"), already migrated from the old setting
     // "Densidad de cuadrícula". MainWindow reads it at startup to draw with
@@ -45,6 +53,7 @@ signals:
     void volumeMaxChanged(const QString &value);
     void thumbSizeChanged(const QString &value);
     void accentChanged(const QString &hex);
+    void languageChanged(const QString &code);
     void clearThumbsRequested();
     void resetRequested();
     void redetectHwRequested();
@@ -62,13 +71,16 @@ private:
     QPushButton *makeValueButton(const QString &text);
     void setupValueMenu(QPushButton *btn, const QStringList &options,
                         const QString &current,
+                        const std::function<QString(const QString &)> &display,
                         const std::function<void(const QString &)> &onPick);
     // Variant with asynchronous (modal) confirmation. `confirm(opt, applyVisual)`
     // decides per option: applies directly or shows the modal; on Accept it calls
     // applyVisual (which records the option and updates button + checks), on
-    // Cancel it does NOT call it. `current` is the exact text of a QAction.
+    // Cancel it does NOT call it. `current` is an option CODE, and `display`
+    // turns a code into the text to show (menu entries and button).
     void setupValueMenuWithConfirm(
         QPushButton *btn, const QStringList &options, const QString &current,
+        const std::function<QString(const QString &)> &display,
         const std::function<void(const QString &,
                                   const std::function<void(const QString &)> &)>
             &confirm);

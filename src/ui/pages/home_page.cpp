@@ -12,6 +12,7 @@
 
 #include "../../debug.h"
 #include "../../db/repositories.h"
+#include "../../i18n.h"
 #include "../../models.h"
 #include "../../yt.h"
 #include "../icons.h"
@@ -114,25 +115,29 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     bodyLayout->setSpacing(6);
 
     auto *topRow = new QHBoxLayout;
-    auto *title = new QLabel(QStringLiteral("Inicio"), this);
+    auto *title = new QLabel(this);
     title->setObjectName(QStringLiteral("sectionTitle"));
-    auto *refresh = new QPushButton(QStringLiteral("  Actualizar"), this);
+    nt::bindText(title, "home.title");
+    auto *refresh = new QPushButton(this);
     refresh->setObjectName(QStringLiteral("ghost"));
+    nt::bindText(refresh, "home.refresh");
     refresh->setIcon(nt::icon(nt::Icon::Refresh, nt::kText, 15));
     topRow->addWidget(title);
     topRow->addStretch(1);
     topRow->addWidget(refresh);
     bodyLayout->addLayout(topRow);
 
-    m_busy = new QLabel(QStringLiteral("Cargando…"), this);
+    m_busy = new QLabel(this);
     m_busy->setObjectName(QStringLiteral("sectionSub"));
+    nt::bindText(m_busy, "common.loading");
     m_busy->setAlignment(Qt::AlignCenter);
     m_busy->setContentsMargins(0, 20, 0, 20);
     bodyLayout->addWidget(m_busy);
 
     // ▶ Continue watching
-    m_contTitle = new QLabel(QStringLiteral("Continuar viendo"), this);
+    m_contTitle = new QLabel(this);
     m_contTitle->setObjectName(QStringLiteral("sectionTitle"));
+    nt::bindText(m_contTitle, "home.continue");
     m_contGrid = new VideoListView(m_thumbs, this);
     m_contGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_contGrid->setFixedHeight(0);
@@ -142,12 +147,14 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     // 🎲 Discover
     auto *discRow = new QHBoxLayout;
     discRow->setSpacing(4);
-    m_discTitle = new QLabel(QStringLiteral("Descubre"), this);
+    m_discTitle = new QLabel(this);
     m_discTitle->setObjectName(QStringLiteral("sectionTitle"));
+    nt::bindText(m_discTitle, "home.discover");
     discRow->addWidget(m_discTitle);
     discRow->addStretch(1);
-    m_discMoreBtn = new QPushButton(QStringLiteral("Otro"), this);
+    m_discMoreBtn = new QPushButton(this);
     m_discMoreBtn->setObjectName(QStringLiteral("ghost"));
+    nt::bindText(m_discMoreBtn, "home.another");
     discRow->addWidget(m_discMoreBtn);
     bodyLayout->addLayout(discRow);
     m_discGrid = new VideoListView(m_thumbs, this);
@@ -156,9 +163,9 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     bodyLayout->addWidget(m_discGrid);
 
     // 🔔 New from your subscriptions
-    m_feedTitle = new QLabel(
-        QStringLiteral("Nuevos de tus suscripciones"), this);
+    m_feedTitle = new QLabel(this);
     m_feedTitle->setObjectName(QStringLiteral("sectionTitle"));
+    nt::bindText(m_feedTitle, "home.feed");
     m_feedGrid = new VideoListView(m_thumbs, this);
     m_feedGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_feedGrid->setFixedHeight(0);
@@ -166,9 +173,9 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     bodyLayout->addWidget(m_feedGrid);
 
     // ✨ Recommended by YouTube
-    m_homeTitle = new QLabel(
-        QStringLiteral("Recomendado por YouTube"), this);
+    m_homeTitle = new QLabel(this);
     m_homeTitle->setObjectName(QStringLiteral("sectionTitle"));
+    nt::bindText(m_homeTitle, "home.recommended");
     m_homeGrid = new VideoListView(m_thumbs, this);
     m_homeGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_homeGrid->setFixedHeight(0);
@@ -176,8 +183,9 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     bodyLayout->addWidget(m_homeGrid);
 
     // 🔥 Trending
-    m_trendTitle = new QLabel(QStringLiteral("Tendencias"), this);
+    m_trendTitle = new QLabel(this);
     m_trendTitle->setObjectName(QStringLiteral("sectionTitle"));
+    nt::bindText(m_trendTitle, "home.trending");
     m_trendGrid = new VideoListView(m_thumbs, this);
     m_trendGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_trendGrid->setFixedHeight(0);
@@ -306,16 +314,12 @@ void HomePage::buildEmptyState()
         logoLabel->setAlignment(Qt::AlignCenter);
         emptyLay->addWidget(logoLabel);
     }
-    auto *emptyTitle = new QLabel(
-        QStringLiteral("Aún no hay contenido personalizado"), emptyBox);
+    auto *emptyTitle = new QLabel(emptyBox);
     emptyTitle->setObjectName(QStringLiteral("emptyStateTitle"));
     emptyTitle->setAlignment(Qt::AlignCenter);
-    auto *emptyBody = new QLabel(
-        QStringLiteral("Reproducí un vídeo o suscribite a un canal desde el "
-                       "buscador para llenar tu Continuar viendo, Descubre y "
-                       "Nuevos de tus suscripciones. Mientras tanto, arriba "
-                       "tenés Recomendado y Tendencias."),
-        emptyBox);
+    nt::bindText(emptyTitle, "home.emptyTitle");
+    auto *emptyBody = new QLabel(emptyBox);
+    nt::bindText(emptyBody, "home.emptyBody");
     emptyBody->setObjectName(QStringLiteral("emptyStateBody"));
     emptyBody->setWordWrap(true);
     emptyBody->setAlignment(Qt::AlignCenter);
@@ -324,7 +328,8 @@ void HomePage::buildEmptyState()
     auto *emptyRow = new QHBoxLayout;
     emptyRow->setSpacing(8);
     emptyRow->addStretch(1);
-    auto *goSearch = new QPushButton(QStringLiteral("Ir a Buscar"), emptyBox);
+    auto *goSearch = new QPushButton(emptyBox);
+    nt::bindText(goSearch, "home.goSearch");
     goSearch->setCursor(Qt::PointingHandCursor);
     goSearch->setObjectName(QStringLiteral("accentChip"));
     connect(goSearch, &QPushButton::clicked, this,

@@ -1,5 +1,7 @@
 #include "placeholder_page.h"
 
+#include "../../i18n.h"
+
 #include <QLabel>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -19,7 +21,7 @@ PlaceholderPage::PlaceholderPage(const QString &title, QWidget *parent)
     row->addStretch(1);
     lay->addLayout(row);
 
-    auto *hint = new QLabel(QStringLiteral("Próximamente."), this);
+    auto *hint = new QLabel(nt::tr("placeholder.soon"), this);
     hint->setObjectName(QStringLiteral("placeholderHint"));
     hint->setAlignment(Qt::AlignCenter);
     lay->addWidget(hint, 1);

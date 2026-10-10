@@ -23,6 +23,7 @@
 
 #include "debug.h"
 #include "db/repositories.h"
+#include "i18n.h"
 
 namespace {
 
@@ -394,7 +395,7 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                 qWarning("yt: innertube falló para %s (%s)",
                          vid.toUtf8().constData(), reason.toUtf8().constData());
                 emit resolveError(
-                    QStringLiteral("No se pudo resolver el vídeo: %1").arg(reason));
+                    nt::tr("error.resolve").arg(reason));
             });
 
     // Primary HLS (YouTube master, no throttle), edge as fallback:

@@ -15,6 +15,10 @@
 
 #include <cstdio>
 
+#include "scan.h"
+
+#include "../i18n.h"
+
 namespace nt {
 
 // Single source of the accent palette (Settings labels, persisted hex and
@@ -25,19 +29,19 @@ namespace nt {
 QVector<AccentOption> accentOptions()
 {
     return {
-        {QStringLiteral("Rojo (por defecto)"), QStringLiteral("#FA011B"),
+        {nt::tr("accent.red"), QStringLiteral("#FA011B"),
          QStringLiteral("rojo")},
-        {QStringLiteral("Azul"), QStringLiteral("#1E88E5"),
+        {nt::tr("accent.blue"), QStringLiteral("#1E88E5"),
          QStringLiteral("azul")},
-        {QStringLiteral("Verde"), QStringLiteral("#22C55E"),
+        {nt::tr("accent.green"), QStringLiteral("#22C55E"),
          QStringLiteral("verde")},
-        {QStringLiteral("Naranja"), QStringLiteral("#F97316"),
+        {nt::tr("accent.orange"), QStringLiteral("#F97316"),
          QStringLiteral("naranja")},
-        {QStringLiteral("Púrpura"), QStringLiteral("#A855F7"),
+        {nt::tr("accent.purple"), QStringLiteral("#A855F7"),
          QStringLiteral("purpura")},
-        {QStringLiteral("Cian"), QStringLiteral("#22D3EE"),
+        {nt::tr("accent.cyan"), QStringLiteral("#22D3EE"),
          QStringLiteral("cian")},
-        {QStringLiteral("Rosa"), QStringLiteral("#EC4899"),
+        {nt::tr("accent.pink"), QStringLiteral("#EC4899"),
          QStringLiteral("rosa")},
     };
 }
@@ -746,15 +750,6 @@ QWidget#playerArea { background-color: #000000; }
               .replace(QStringLiteral("@OVERLAY_EDGE@"), overlayEdgeRgba());
 }
 
-namespace {
-// Defined further below, next to glyphSelfTest which is their main user. They
-// are forward-declared here because themeSelfTest needs them too: both tests
-// have to strip comments BEFORE looking at literals, otherwise citing
-// a name in a "// this button is called X" is enough for it to count as alive.
-QString sinComentarios(const QString &linea, bool &enBloque);
-QStringList literalesDe(const QString &linea);
-} // namespace
-
 bool themeSelfTest()
 {
     int fail = 0;
@@ -1016,77 +1011,6 @@ bool themeSelfTest()
                  fail == 0 ? "OK" : "FAIL", reglas, (int)veces.size());
     return fail == 0;
 }
-
-namespace {
-
-// Strips comments from a line (respecting block state) and
-// returns only the code. Without this, comments are read as if they were
-// literals and every glyph cited in a "// this is how the X is avoided" shows up as a false
-// positive. An "http://" inside a literal truncates the literal (leaving it
-// without closing quote, so it is discarded): for this test it does not matter.
-QString sinComentarios(const QString &linea, bool &enBloque)
-{
-    QString out;
-    for (int i = 0; i < linea.size();) {
-        if (enBloque) {
-            const int fin = linea.indexOf(QLatin1String("*/"), i);
-            if (fin < 0)
-                break;
-            enBloque = false;
-            i = fin + 2;
-            continue;
-        }
-        const QChar c = linea.at(i);
-        if (c == QLatin1Char('/') && i + 1 < linea.size()
-            && linea.at(i + 1) == QLatin1Char('/'))
-            break; // the rest of the line is a comment
-        if (c == QLatin1Char('/') && i + 1 < linea.size()
-            && linea.at(i + 1) == QLatin1Char('*')) {
-            enBloque = true;
-            i += 2;
-            continue;
-        }
-        out += c;
-        ++i;
-    }
-    return out;
-}
-
-// Double-quoted literals of a line, with the escapes \", \\, \n, etc.
-// already resolved. Those carrying \u or \x are filtered by the caller: there the
-// codepoint is explicit on purpose.
-QStringList literalesDe(const QString &linea)
-{
-    QStringList out;
-    for (int i = 0; i < linea.size(); ++i) {
-        if (linea.at(i) != QLatin1Char('"'))
-            continue;
-        QString lit;
-        int j = i + 1;
-        bool cerrado = false;
-        for (; j < linea.size(); ++j) {
-            const QChar c = linea.at(j);
-            if (c == QLatin1Char('\\') && j + 1 < linea.size()) {
-                lit += c;
-                lit += linea.at(j + 1);
-                ++j;
-                continue;
-            }
-            if (c == QLatin1Char('"')) {
-                cerrado = true;
-                break;
-            }
-            lit += c;
-        }
-        if (cerrado) {
-            out << lit;
-            i = j; // continue after the closing quote
-        }
-    }
-    return out;
-}
-
-} // namespace
 
 // OFFLINE GLYPHS selftest. The UI paints its text with the system default
 // font, and that font does not have all characters: "✕" (U+2715),

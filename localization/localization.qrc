@@ -1,0 +1,14 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <!-- Language catalogs of the app, ONE FILE PER LANGUAGE. This qrc is what
+       embeds them into the binary so the app does not need to find them on
+       disk. Adding a language = dropping <code>.json here (next to this file),
+       listing it below, and adding it to nothing else: the Settings selector
+       enumerates :/localization itself and shows the "language.name" of each
+       file. Keep the key set identical to es.json (the base): the i18n
+       selftest fails on a missing or extra key. -->
+  <qresource prefix="/localization">
+    <file>es.json</file>
+    <file>en.json</file>
+  </qresource>
+</RCC>

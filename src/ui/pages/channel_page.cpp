@@ -16,6 +16,7 @@
 
 #include "../../db/repositories.h"
 #include "../../debug.h"
+#include "../../i18n.h"
 #include "../../yt.h"
 #include "../format.h"
 #include "../icons.h"
@@ -44,10 +45,10 @@ const int kTabPage = 25;
 QString emptyTextFor(const QString &tab)
 {
     if (tab == QLatin1String("shorts"))
-        return QStringLiteral("Este canal no tiene Shorts.");
+        return nt::tr("channel.emptyShorts");
     if (tab == QLatin1String("live"))
-        return QStringLiteral("Este canal no tiene directos.");
-    return QStringLiteral("Este canal no tiene vídeos.");
+        return nt::tr("channel.emptyLive");
+    return nt::tr("channel.emptyVideos");
 }
 
 } // namespace
@@ -67,8 +68,9 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     // and the Player): the #backLink token, a discreet link rather than a
     // capsule. It is navigation, not a page control.
     auto *top = new QHBoxLayout;
-    auto *back = new QPushButton(QStringLiteral("Volver"), this);
+    auto *back = new QPushButton(this);
     back->setObjectName(QStringLiteral("backLink"));
+    nt::bindText(back, "common.back");
     back->setIcon(nt::icon(nt::Icon::Back, nt::kMuted, 13));
     back->setCursor(Qt::PointingHandCursor);
     connect(back, &QPushButton::clicked, this, &ChannelPage::backRequested);
@@ -101,7 +103,7 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     auto *titleCol = new QVBoxLayout;
     titleCol->setContentsMargins(0, 0, 0, 0);
     titleCol->setSpacing(3);
-    m_title = new QLabel(QStringLiteral("Canal"), m_card);
+    m_title = new QLabel(nt::tr("channel.title"), m_card);
     m_title->setObjectName(QStringLiteral("channelName"));
     m_title->setWordWrap(true);
     titleCol->addWidget(m_title);
@@ -122,8 +124,8 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     m_shareBtn->setIcon(nt::icon(nt::Icon::Share, nt::kText, 18));
     m_shareBtn->setCursor(Qt::PointingHandCursor);
     m_shareBtn->setFixedSize(38, 38);
-    m_shareBtn->setToolTip(QStringLiteral("Copiar el enlace del canal"));
-    m_shareBtn->setAccessibleName(QStringLiteral("Compartir el canal"));
+    nt::bindTooltip(m_shareBtn, "channel.copyTip");
+    m_shareBtn->setAccessibleName(nt::tr("channel.shareA11y"));
     head->addWidget(m_shareBtn, 0, Qt::AlignVCenter);
     cardLay->addLayout(head);
 
@@ -147,7 +149,7 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     m_descFade->setAttribute(Qt::WA_TransparentForMouseEvents);
     m_descFade->hide();
 
-    m_descToggle = new QPushButton(QStringLiteral("…más"), m_card);
+    m_descToggle = new QPushButton(nt::tr("channel.more"), m_card);
     m_descToggle->setObjectName(QStringLiteral("descToggle"));
     m_descToggle->setCursor(Qt::PointingHandCursor);
     m_descToggle->hide();
@@ -157,8 +159,6 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     root->addWidget(m_card);
 
     // --- Tabs -------------------------------------------------------------
-    const QStringList names{QStringLiteral("Videos"), QStringLiteral("Shorts"),
-                            QStringLiteral("Directos")};
     const QStringList keys{QStringLiteral("videos"), QStringLiteral("shorts"),
                            QStringLiteral("live")};
 
@@ -177,9 +177,15 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     tabRow->addStretch(1);
     root->addLayout(tabRow);
 
-    for (int i = 0; i < names.size(); ++i) {
-        auto *btn = new QPushButton(names.at(i), m_tabsBox);
+    for (int i = 0; i < keys.size(); ++i) {
+        auto *btn = new QPushButton(m_tabsBox);
         btn->setObjectName(QStringLiteral("tabBtn"));
+        if (i == 0)
+            nt::bindText(btn, "channel.tab.videos");
+        else if (i == 1)
+            nt::bindText(btn, "channel.tab.shorts");
+        else
+            nt::bindText(btn, "channel.tab.live");
         btn->setCursor(Qt::PointingHandCursor);
         btn->setFocusPolicy(Qt::NoFocus);
         btn->setProperty("selected", i == 0);
@@ -217,8 +223,9 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
         // Pagination: a centered ghost. The button used to be #primary with
         // 180 px fixed (a wide red bar under the list); "load more" is not the
         // main action of the page, it is a help to go further down.
-        auto *more = new QPushButton(QStringLiteral("Cargar más vídeos"), page);
+        auto *more = new QPushButton(page);
         more->setObjectName(QStringLiteral("ghost"));
+        nt::bindText(more, "channel.loadMore");
         more->setCursor(Qt::PointingHandCursor);
         more->setFixedHeight(34);
         more->hide();
@@ -284,7 +291,7 @@ void ChannelPage::openChannel(const QString &channelId)
     m_channelName.clear();
     m_avatarKey.clear();
     m_avatarUrl.clear();
-    m_title->setText(QStringLiteral("Cargando canal…"));
+    m_title->setText(nt::tr("channel.loading"));
     m_meta->clear();
     m_descText.clear();
     m_description->hide();
@@ -361,8 +368,8 @@ void ChannelPage::updateTabCount()
     // (and the counter is computed on the fly, so only a real channel shows
     // "1 vídeo").
     m_tabCount->setVisible(n > 0);
-    m_tabCount->setText(n == 1 ? QStringLiteral("1 vídeo")
-                                : QStringLiteral("%1 vídeos").arg(n));
+    m_tabCount->setText(n == 1 ? nt::tr("channel.oneVideo")
+                                : nt::tr("common.videos").arg(n));
 }
 
 void ChannelPage::onChannelInfo(const ChannelInfo &channel)
@@ -374,7 +381,7 @@ void ChannelPage::onChannelInfo(const ChannelInfo &channel)
     // Subscribers with the same compact format the rest of the app uses
     // (compactCount): it used to print the raw number ("1234567 suscriptores").
     m_meta->setText(channel.subscriberCount > 0
-                        ? QStringLiteral("%1 suscriptores")
+                        ? nt::tr("channel.subscribers")
                               .arg(compactCount(channel.subscriberCount))
                         : QString());
     if (channel.description.isEmpty()) {
@@ -434,8 +441,8 @@ void ChannelPage::setAvatar(const QPixmap &pm)
 
 void ChannelPage::updateSubscribeButton(bool subscribed)
 {
-    m_subscribeBtn->setText(subscribed ? QStringLiteral("Suscrito")
-                                       : QStringLiteral("Suscribirse"));
+    m_subscribeBtn->setText(subscribed ? nt::tr("channel.subscribed")
+                                       : nt::tr("channel.subscribe"));
     // The look of the two states lives in the global QSS (QPushButton#subscribe
     // and #subscribed) and the boolean `subscribed` property tells them apart.
     // The accent is set by nt::styleSheet(), which is regenerated whole on every
@@ -516,8 +523,8 @@ void ChannelPage::applyDescriptionCap()
         if (m_descFade)
             m_descFade->hide();
     } else {
-        m_descToggle->setText(m_descExpanded ? QStringLiteral("…menos")
-                                             : QStringLiteral("…más"));
+        m_descToggle->setText(m_descExpanded ? nt::tr("channel.less")
+                                             : nt::tr("channel.more"));
         m_descToggle->show();
         if (!m_descExpanded)
             m_description->setMaximumHeight(maxH);

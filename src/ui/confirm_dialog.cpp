@@ -14,6 +14,8 @@
 
 #include "confirm_dialog.h"
 
+#include "../i18n.h"
+
 namespace {
 
 class ConfirmOverlay : public QWidget
@@ -66,7 +68,7 @@ private:
         auto *row = new QHBoxLayout;
         row->setSpacing(8);
         row->addStretch(1);
-        auto *cancel = new QPushButton(QStringLiteral("Cancelar"), frame);
+        auto *cancel = new QPushButton(nt::tr("common.cancel"), frame);
         cancel->setObjectName(QStringLiteral("ghost"));
         cancel->setCursor(Qt::PointingHandCursor);
         connect(cancel, &QPushButton::clicked, this,
@@ -219,12 +221,12 @@ private:
         auto *row = new QHBoxLayout;
         row->setSpacing(8);
         row->addStretch(1);
-        auto *cancel = new QPushButton(QStringLiteral("Cancelar"), frame);
+        auto *cancel = new QPushButton(nt::tr("common.cancel"), frame);
         cancel->setObjectName(QStringLiteral("ghost"));
         cancel->setCursor(Qt::PointingHandCursor);
         connect(cancel, &QPushButton::clicked, this, [this]() { finish(false); });
         row->addWidget(cancel);
-        auto *ok = new QPushButton(okText.isEmpty() ? QStringLiteral("Aceptar") : okText, frame);
+        auto *ok = new QPushButton(okText.isEmpty() ? nt::tr("common.accept") : okText, frame);
         ok->setObjectName(QStringLiteral("primary"));
         ok->setCursor(Qt::PointingHandCursor);
         connect(ok, &QPushButton::clicked, this, [this]() { finish(true); });

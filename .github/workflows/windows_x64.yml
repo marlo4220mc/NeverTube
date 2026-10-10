@@ -277,6 +277,7 @@ jobs:
           # --selftest-dates is also pure (relative dates parser).
           foreach ($t in @('--selftest-tls', '--selftest-db', '--selftest-grid',
                            '--selftest-theme', '--selftest-glyphs',
+                           '--selftest-i18n',
                            '--selftest-suggest-parse', '--selftest-suggest-panel',
                            '--selftest-suggest-gestures', '--selftest-dates',
                            '--selftest-search', '--selftest-browse', '--selftest-feeds')) {

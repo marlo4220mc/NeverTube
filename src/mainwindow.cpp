@@ -34,6 +34,7 @@
 
 #include "models.h"
 #include "hwprobe.h"
+#include "i18n.h"
 #include "playerwidget.h"
 #include "../src/debug.h"
 #include "ui/format.h"
@@ -514,6 +515,14 @@ MainWindow::MainWindow(QWidget *parent)
     else
         setNextMode(NextMode::Radio);
 
+    // UI language: read BEFORE building the pages so every nt::tr() they call
+    // already resolves in the chosen language (there is no second pass that
+    // retranslates the whole app). Adding a language is dropping its JSON into
+    // localization/ and listing it in the .qrc: the Settings selector picks it
+    // up by itself. An unknown saved code is ignored (base language stays).
+    nt::setLanguage(m_settings.getString(QStringLiteral("ui_lang"),
+                                         nt::language()));
+
     setWindowTitle(QStringLiteral("NeverTube"));
     resize(1280, 800);
     if (QScreen *screen = QGuiApplication::primaryScreen()) {
@@ -649,6 +658,11 @@ MainWindow::MainWindow(QWidget *parent)
     // accepted) until it finishes.
     connect(m_settingsPage, &SettingsPage::redetectHwRequested,
             this, [this]() { startHwProbe(); });
+    // Language change from Settings. nt::setLanguage applies the catalog and
+    // re-applies every live binding (bottom nav, mini tooltips) on its own;
+    // applyLanguage adds what is not a binding.
+    connect(m_settingsPage, &SettingsPage::languageChanged,
+            this, &MainWindow::applyLanguage);
 
     m_pages->addWidget(m_home);
     m_pages->addWidget(m_search);
@@ -1011,12 +1025,14 @@ void MainWindow::setupNav()
     auto *group = new QButtonGroup(m_nav);
     group->setExclusive(true);
 
-    auto addBtn = [&](const QString &key, const QString &text, int index) {
+    auto addBtn = [&](const QString &key, int index) {
         auto *b = new NavButton(m_nav);
         b->setObjectName(QStringLiteral("navBtn"));
         b->setCheckable(true);
         b->setProperty("navKey", key);
-        b->setText(text);
+        // The label is BOUND (not set): the bottom bar is static chrome, so on
+        // a language change the text follows without rebuilding the bar. The
+        // binding is applied at the call site so the key is a visible literal.
         b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
         // Compact capsule: fixed width, not 1/4 of the window. With Expanding
         // the active tab's fill measured 474 px in an 1896 window and read as
@@ -1027,13 +1043,20 @@ void MainWindow::setupNav()
         group->addButton(b, index);
         lay->addWidget(b);
         m_navButtons.append(b);
+        return b;
     };
     // The group goes CENTERED: a stretch on each side.
     lay->addStretch(1);
-    addBtn(QStringLiteral("home"), QStringLiteral("Inicio"), 0);
-    addBtn(QStringLiteral("search"), QStringLiteral("Buscar"), 1);
-    addBtn(QStringLiteral("library"), QStringLiteral("Biblioteca"), 2);
-    addBtn(QStringLiteral("settings"), QStringLiteral("Ajustes"), 3);
+    {
+        QToolButton *b0 = addBtn(QStringLiteral("home"), 0);
+        nt::bindText(b0, "nav.home");
+        QToolButton *b1 = addBtn(QStringLiteral("search"), 1);
+        nt::bindText(b1, "nav.search");
+        QToolButton *b2 = addBtn(QStringLiteral("library"), 2);
+        nt::bindText(b2, "nav.library");
+        QToolButton *b3 = addBtn(QStringLiteral("settings"), 3);
+        nt::bindText(b3, "nav.settings");
+    }
     lay->addStretch(1);
 
     connect(group, QOverload<int>::of(&QButtonGroup::idClicked), this,
@@ -1110,14 +1133,14 @@ void MainWindow::setupMiniBar()
     // not end up under the buttons).
     auto *textBox = new QVBoxLayout;
     textBox->setSpacing(2);
-    m_miniTitle = new QLabel(QStringLiteral("Nada en reproducción"), m_miniBar);
+    m_miniTitle = new QLabel(nt::tr("mini.nothing"), m_miniBar);
     m_miniTitle->setObjectName(QStringLiteral("miniTitle"));
     m_miniTitle->setTextInteractionFlags(Qt::NoTextInteraction);
     // Single line with ellipsis: updateMiniTitleElide() truncates to the real
     // width and the window's eventFilter recomputes it when the label is
     // resized.
     m_miniTitle->setWordWrap(false);
-    m_miniTitleFull = QStringLiteral("Nada en reproducción");
+    m_miniTitleFull = nt::tr("mini.nothing");
     m_miniTitle->installEventFilter(this);
     m_miniTime = new QLabel(QStringLiteral("0:00 / 0:00"), m_miniBar);
     m_miniTime->setObjectName(QStringLiteral("miniTime"));
@@ -1130,14 +1153,14 @@ void MainWindow::setupMiniBar()
     m_miniPlayBtn->setObjectName(QStringLiteral("iconBtn"));
     m_miniPlayBtn->setCursor(Qt::PointingHandCursor);
     m_miniPlayBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Play, nt::kText, 16));
-    m_miniPlayBtn->setToolTip(QStringLiteral("Reproducir / Pausar\nK"));
+    nt::bindTooltip(m_miniPlayBtn, "mini.playPause");
     row->addWidget(m_miniPlayBtn);
 
     m_miniNextBtn = new QPushButton(m_miniBar);
     m_miniNextBtn->setObjectName(QStringLiteral("iconBtn"));
     m_miniNextBtn->setCursor(Qt::PointingHandCursor);
     m_miniNextBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Next, nt::kText, 16));
-    m_miniNextBtn->setToolTip(QStringLiteral("Siguiente\nN"));
+    nt::bindTooltip(m_miniNextBtn, "mini.next");
     row->addWidget(m_miniNextBtn);
 
     m_miniMuteBtn = new QPushButton(m_miniBar);
@@ -1145,14 +1168,14 @@ void MainWindow::setupMiniBar()
     m_miniMuteBtn->setCursor(Qt::PointingHandCursor);
     m_miniMuteBtn->setIcon(
         nt::playerIcon(nt::PlayerIcon::Volume, nt::kText, 16));
-    m_miniMuteBtn->setToolTip(QStringLiteral("Silenciar\nM"));
+    nt::bindTooltip(m_miniMuteBtn, "mini.mute");
     row->addWidget(m_miniMuteBtn);
 
     m_miniCloseBtn = new QPushButton(m_miniBar);
     m_miniCloseBtn->setObjectName(QStringLiteral("iconBtn"));
     m_miniCloseBtn->setCursor(Qt::PointingHandCursor);
     m_miniCloseBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Close, nt::kText, 16));
-    m_miniCloseBtn->setToolTip(QStringLiteral("Cerrar y detener"));
+    nt::bindTooltip(m_miniCloseBtn, "mini.close");
     row->addWidget(m_miniCloseBtn);
 
     lay->addLayout(row);
@@ -1271,13 +1294,43 @@ void MainWindow::applyThumbSize(const QString &value)
         m_home->setCellColumns(SettingsPage::thumbGridColumns(value));
 }
 
+void MainWindow::applyLanguage(const QString &code)
+{
+    if (!nt::setLanguage(code)) {
+        NT_DEBUG("E2E ui_lang: %s no existe, se mantiene %s\n",
+                 code.toUtf8().constData(),
+                 nt::language().toUtf8().constData());
+        return;
+    }
+    // Settings: rebuild deferred. The signal is emitted from a QMenu born in
+    // that page; recreating its widgets synchronously would delete the menu
+    // while it is still inside its own delivery.
+    QTimer::singleShot(0, this, [this]() {
+        if (m_settingsPage)
+            m_settingsPage->retranslate();
+    });
+    // Library: the section titles are "Title · N" (not bindable) and the
+    // "Ver todo / Ver menos" toggles are dynamic; the page re-applies them.
+    if (m_library)
+        m_library->retranslate();
+    // Shell text that is NOT a binding because it depends on the playback
+    // state: the mini title fallback and the "no thumbnail" hint.
+    const VideoInfo cur = m_player.current();
+    m_miniTitleFull = (cur.id.isEmpty() || cur.title.isEmpty())
+                          ? nt::tr("mini.nothing")
+                          : cur.title;
+    updateMiniTitleElide();
+    if (m_miniBar && m_miniBar->isVisible())
+        updateMiniBar();
+}
+
 void MainWindow::updateMiniBar()
 {
     if (!m_miniBar || !m_miniBar->isVisible())
         return;
     const VideoInfo v = m_player.current();
     if (v.id.isEmpty()) {
-        m_miniTitleFull = QStringLiteral("Nada en reproducción");
+        m_miniTitleFull = nt::tr("mini.nothing");
         updateMiniTitleElide();
         m_miniThumb->setText(QString());
         m_miniProgress->setRange(0, 1);
@@ -1285,7 +1338,7 @@ void MainWindow::updateMiniBar()
         return;
     }
     m_miniChannel = v.channel;
-    m_miniTitleFull = v.title.isEmpty() ? QStringLiteral("Nada en reproducción")
+    m_miniTitleFull = v.title.isEmpty() ? nt::tr("mini.nothing")
                                         : v.title;
     updateMiniTitleElide();
     updateMiniTimeText();
@@ -1307,7 +1360,7 @@ void MainWindow::setMiniThumb()
     if (pm.isNull())
         pm = m_globalThumbs->pixmap(key);
     if (pm.isNull()) {
-        m_miniThumb->setText(QStringLiteral("sin miniatura"));
+        m_miniThumb->setText(nt::tr("mini.noThumb"));
         return;
     }
     m_miniThumb->setText(QString());
@@ -1375,7 +1428,7 @@ void MainWindow::updateMiniTimeText()
         return;
     QString t;
     if (m_miniLive)
-        t = QStringLiteral("EN VIVO");
+        t = nt::tr("mini.live");
     else if (m_miniDur <= 0)
         t = fmtTime(m_miniPos);
     else
@@ -1560,14 +1613,10 @@ void MainWindow::showHwPopup()
     auto *lay = new QVBoxLayout(m_hwPopup);
     lay->setContentsMargins(28, 22, 28, 22);
     lay->setSpacing(8);
-    auto *title = new QLabel(QStringLiteral("Detectando hardware de vídeo"),
-                             m_hwPopup);
+    auto *title = new QLabel(nt::tr("hw.detecting"), m_hwPopup);
     title->setObjectName(QStringLiteral("hwPopupTitle"));
     title->setAlignment(Qt::AlignCenter);
-    auto *text = new QLabel(
-        QStringLiteral("Comprobando la aceleración de vídeo de tu equipo.\n"
-                       "La reproducción comenzará al terminar."),
-        m_hwPopup);
+    auto *text = new QLabel(nt::tr("hw.note"), m_hwPopup);
     text->setObjectName(QStringLiteral("hwPopupBody"));
     text->setAlignment(Qt::AlignCenter);
     lay->addWidget(title);

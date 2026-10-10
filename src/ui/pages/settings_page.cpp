@@ -11,6 +11,7 @@
 #include <QWidget>
 
 #include "../../db/repositories.h"
+#include "../../i18n.h"
 #include "../confirm_dialog.h"
 #include "../theme.h"
 
@@ -26,101 +27,66 @@ static const char *kAccentKey = "ui_accent";
 static QStringList qualityOptions(bool noHw = false)
 {
     if (noHw)
-        return {QStringLiteral("Auto"), QStringLiteral("144p"),
-                QStringLiteral("240p"), QStringLiteral("360p"),
-                QStringLiteral("480p"), QStringLiteral("720p"),
-                QStringLiteral("1080p")};
-    return {QStringLiteral("Auto"), QStringLiteral("144p"),
-            QStringLiteral("240p"), QStringLiteral("360p"),
-            QStringLiteral("480p"), QStringLiteral("720p"),
-            QStringLiteral("1080p"), QStringLiteral("1440p"),
-            QStringLiteral("2160p")};
+        return {QStringLiteral("auto"), QStringLiteral("144"),
+                QStringLiteral("240"), QStringLiteral("360"),
+                QStringLiteral("480"), QStringLiteral("720"),
+                QStringLiteral("1080")};
+    return {QStringLiteral("auto"), QStringLiteral("144"),
+            QStringLiteral("240"), QStringLiteral("360"),
+            QStringLiteral("480"), QStringLiteral("720"),
+            QStringLiteral("1080"), QStringLiteral("1440"),
+            QStringLiteral("2160")};
 }
 
-static QString valueFromQuality(const QString &text)
+static QString qualityDisplay(const QString &code)
 {
-    if (text == QStringLiteral("Auto"))
-        return QStringLiteral("auto");
-    QString s = text;
-    return s.remove(QLatin1Char('p'));
-}
-
-static QString qualityFromValue(const QString &val)
-{
-    if (val == QStringLiteral("auto"))
-        return QStringLiteral("Auto");
-    return val + QStringLiteral("p");
+    if (code == QStringLiteral("auto"))
+        return nt::tr("settings.quality.auto");
+    return code + QLatin1Char('p');
 }
 
 static QStringList nextModeOptions()
 {
-    return {QStringLiteral("Radio"), QStringLiteral("Sugerencias"),
-            QStringLiteral("Desactivado")};
+    return {QStringLiteral("radio"), QStringLiteral("suggestions"),
+            QStringLiteral("none")};
 }
 
-static QString valueFromNextMode(const QString &text)
+static QString nextModeDisplay(const QString &code)
 {
-    if (text == QStringLiteral("Desactivado"))
-        return QStringLiteral("none");
-    if (text == QStringLiteral("Sugerencias"))
-        return QStringLiteral("suggestions");
-    return QStringLiteral("radio");
-}
-
-static QString nextModeFromValue(const QString &val)
-{
-    if (val == QStringLiteral("none"))
-        return QStringLiteral("Desactivado");
-    if (val == QStringLiteral("suggestions"))
-        return QStringLiteral("Sugerencias");
-    return QStringLiteral("Radio");
+    if (code == QStringLiteral("none"))
+        return nt::tr("settings.nextMode.none");
+    if (code == QStringLiteral("suggestions"))
+        return nt::tr("settings.nextMode.suggestions");
+    return nt::tr("settings.nextMode.radio");
 }
 
 static QStringList miniVideoOptions()
 {
-    return {QStringLiteral("Ver vídeo"), QStringLiteral("Solo miniatura")};
+    return {QStringLiteral("video"), QStringLiteral("thumb")};
 }
 
-static QString valueFromMiniVideo(const QString &text)
+static QString miniVideoDisplay(const QString &code)
 {
-    return text == QStringLiteral("Solo miniatura") ? QStringLiteral("thumb")
-                                                    : QStringLiteral("video");
-}
-
-static QString miniVideoFromValue(const QString &val)
-{
-    return val == QStringLiteral("thumb") ? QStringLiteral("Solo miniatura")
-                                          : QStringLiteral("Ver vídeo");
+    if (code == QStringLiteral("thumb"))
+        return nt::tr("settings.miniVideo.thumb");
+    return nt::tr("settings.miniVideo.video");
 }
 
 static QStringList audioLangOptions()
 {
-    return {QStringLiteral("Original"), QStringLiteral("Español"),
-            QStringLiteral("Inglés"), QStringLiteral("Portugués")};
+    return {QStringLiteral("original"), QStringLiteral("es"),
+            QStringLiteral("en"), QStringLiteral("pt")};
 }
 
-static QString valueFromAudioLang(const QString &text)
+static QString audioLangDisplay(const QString &code)
 {
-    if (text == QStringLiteral("Original"))
-        return QStringLiteral("original");
-    if (text == QStringLiteral("Español"))
-        return QStringLiteral("es");
-    if (text == QStringLiteral("Inglés"))
-        return QStringLiteral("en");
-    if (text == QStringLiteral("Portugués"))
-        return QStringLiteral("pt");
-    return QStringLiteral("original");
-}
-
-static QString audioLangFromValue(const QString &val)
-{
-    if (val == QLatin1String("es"))
-        return QStringLiteral("Español");
-    if (val == QLatin1String("en"))
-        return QStringLiteral("Inglés");
-    if (val == QLatin1String("pt"))
-        return QStringLiteral("Portugués");
-    return QStringLiteral("Original");
+    if (code == QLatin1String("es"))
+        return nt::tr("settings.audioLang.es");
+    if (code == QLatin1String("en"))
+        return nt::tr("settings.audioLang.en");
+    if (code == QLatin1String("pt"))
+        return nt::tr("settings.audioLang.pt");
+    return nt::tr("settings.audioLang.original");
 }
 
 // Maximum volume (mpv "volume-max"): 100% by default, 150/175/200 available
@@ -128,20 +94,13 @@ static QString audioLangFromValue(const QString &val)
 // for confirmation for hearing safety (risk of damage with headphones).
 static QStringList volumeMaxOptions()
 {
-    return {QStringLiteral("100%"), QStringLiteral("150%"),
-            QStringLiteral("175%"), QStringLiteral("200%")};
+    return {QStringLiteral("100"), QStringLiteral("150"),
+            QStringLiteral("175"), QStringLiteral("200")};
 }
 
-static QString valueFromVolumeMax(const QString &text)
+static QString volumeMaxDisplay(const QString &code)
 {
-    QString s = text;
-    s.remove(QLatin1Char('%'));
-    return s;
-}
-
-static QString volumeMaxFromValue(const QString &val)
-{
-    return val + QStringLiteral("%");
+    return code + QLatin1Char('%');
 }
 
 // "Tamaño de las miniaturas". Three levels that translate into TWO effects, because
@@ -152,26 +111,17 @@ static QString volumeMaxFromValue(const QString &val)
 // the factor. That is why the Home lever is the COLUMNS.
 static QStringList thumbSizeOptions()
 {
-    return {QStringLiteral("Pequeñas"), QStringLiteral("Normales"),
-            QStringLiteral("Grandes")};
+    return {QStringLiteral("small"), QStringLiteral("normal"),
+            QStringLiteral("large")};
 }
 
-static QString valueFromThumbSize(const QString &text)
+static QString thumbSizeDisplay(const QString &code)
 {
-    if (text == QStringLiteral("Pequeñas"))
-        return QStringLiteral("small");
-    if (text == QStringLiteral("Grandes"))
-        return QStringLiteral("large");
-    return QStringLiteral("normal");
-}
-
-static QString thumbSizeFromValue(const QString &val)
-{
-    if (val == QStringLiteral("small"))
-        return QStringLiteral("Pequeñas");
-    if (val == QStringLiteral("large"))
-        return QStringLiteral("Grandes");
-    return QStringLiteral("Normales");
+    if (code == QStringLiteral("small"))
+        return nt::tr("settings.thumbSize.small");
+    if (code == QStringLiteral("large"))
+        return nt::tr("settings.thumbSize.large");
+    return nt::tr("settings.thumbSize.normal");
 }
 
 double SettingsPage::thumbListScale(const QString &value)
@@ -193,29 +143,22 @@ int SettingsPage::thumbGridColumns(const QString &value)
 }
 
 // App accent color. The palette (labels + hex) lives in the SINGLE SOURCE
-// nt::accentOptions() (src/ui/theme.h); here only label<->hex is translated
-// against it and persisted with kAccentKey. The default is the historic NeverTube
-// red (first element of the palette).
+// nt::accentOptions() (src/ui/theme.h); here only hex<->label is bridged and
+// persisted with kAccentKey. The IDENTITY of an option is its HEX (stable
+// across languages); the shown text is the already-translated label. The
+// default is the first palette entry (the icon red).
 static QStringList accentOptions()
 {
     QStringList out;
     for (const nt::AccentOption &o : nt::accentOptions())
-        out << o.label;
+        out << o.hex;
     return out;
 }
 
-static QString valueFromAccent(const QString &text)
+static QString accentDisplay(const QString &hex)
 {
     for (const nt::AccentOption &o : nt::accentOptions())
-        if (o.label == text)
-            return o.hex;
-    return nt::accentOptions().value(0).hex;
-}
-
-static QString accentFromValue(const QString &val)
-{
-    for (const nt::AccentOption &o : nt::accentOptions())
-        if (o.hex == val)
+        if (o.hex.compare(hex, Qt::CaseInsensitive) == 0)
             return o.label;
     return nt::accentOptions().value(0).label;
 }
@@ -224,14 +167,14 @@ static QString accentFromValue(const QString &val)
 static QString codecProfileText(const QString &val)
 {
     if (val == QLatin1String("av1-hw"))
-        return QStringLiteral("AV1 por hardware (óptima)");
+        return nt::tr("codec.av1");
     if (val == QLatin1String("vp9-hw"))
-        return QStringLiteral("VP9 por hardware");
+        return nt::tr("codec.vp9");
     if (val == QLatin1String("h264-hw"))
-        return QStringLiteral("H.264 por hardware");
+        return nt::tr("codec.h264");
     if (val == QLatin1String("soft-all") || val == QLatin1String("nohw"))
-        return QStringLiteral("Sin aceleración (CPU)");
-    return QStringLiteral("Sin detectar");
+        return nt::tr("codec.soft");
+    return nt::tr("codec.unknown");
 }
 
 SettingsPage::SettingsPage(SettingsRepo *settings, QWidget *parent)
@@ -252,6 +195,22 @@ void SettingsPage::applyAccent()
     // comes from @ACCENT@: nt::styleSheet() is regenerated whole on every accent
     // change, so there is nothing left to re-apply here. The method is kept
     // because MainWindow calls it on the four pages alike.
+}
+
+void SettingsPage::retranslate()
+{
+    // Recreate the whole page: every row comes out of the settings again and
+    // the menus are rebuilt with the new language. The identity of an option
+    // is a stable code, so rebuilding loses no choice. The signal that led
+    // here comes from a menu born in this page, so MainWindow calls this
+    // deferred (QTimer::singleShot(0)) and the old widgets are deleted
+    // outside of their own event delivery.
+    const auto children =
+        findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly);
+    for (QWidget *w : children)
+        delete w;
+    delete layout();
+    buildUI();
 }
 
 QPushButton *SettingsPage::makeActionButton(const QString &text)
@@ -280,6 +239,7 @@ QPushButton *SettingsPage::makeValueButton(const QString &text)
 // setupValueMenuWithConfirm() instead.
 void SettingsPage::setupValueMenu(
     QPushButton *btn, const QStringList &options, const QString &current,
+    const std::function<QString(const QString &)> &display,
     const std::function<void(const QString &)> &onPick)
 {
     auto *menu = new QMenu(btn);
@@ -289,14 +249,15 @@ void SettingsPage::setupValueMenu(
     // action unchecks the rest atomically.
     auto *group = new QActionGroup(menu);
     group->setExclusive(true);
-    // currentOpt: current option (exact text of a QAction in the menu). Lives
-    // in a shared_ptr because the triggers run long after this
-    // function returns (the stack no longer exists).
+    // currentOpt: the OPTION CODE currently in effect (never the visible
+    // text: that one changes with the language). Lives in a shared_ptr
+    // because the triggers run long after this function returns (the stack
+    // no longer exists).
     auto currentOpt = std::make_shared<QString>(current);
-    auto syncMenu = [menu, btn](const QString &opt) {
+    auto syncMenu = [menu, btn, display](const QString &opt) {
         for (QAction *a : menu->actions())
-            a->setChecked(a->text() == opt);
-        btn->setText(opt);
+            a->setChecked(a->text() == display(opt));
+        btn->setText(display(opt));
     };
     // On opening, re-syncs checks and button text with the current
     // option; without this, Qt leaves the last action's check marked and the
@@ -307,7 +268,7 @@ void SettingsPage::setupValueMenu(
                 menu->popup(btn->mapToGlobal(QPoint(0, btn->height())));
             });
     for (const QString &opt : options) {
-        QAction *act = menu->addAction(opt);
+        QAction *act = menu->addAction(display(opt));
         act->setCheckable(true);
         group->addAction(act);
         connect(act, &QAction::triggered, btn,
@@ -331,6 +292,7 @@ void SettingsPage::setupValueMenu(
 // current one, so the next menu opening shows it checked.
 void SettingsPage::setupValueMenuWithConfirm(
     QPushButton *btn, const QStringList &options, const QString &current,
+    const std::function<QString(const QString &)> &display,
     const std::function<void(const QString &,
                               const std::function<void(const QString &)> &)>
         &confirm)
@@ -341,12 +303,13 @@ void SettingsPage::setupValueMenuWithConfirm(
     // unchecks the previous check atomically.
     auto *group = new QActionGroup(menu);
     group->setExclusive(true);
-    // currentOpt: visually current option (exact text of a QAction).
+    // currentOpt: option CODE in effect (the visible text changes with the
+    // language, so it must not be the identity).
     auto currentOpt = std::make_shared<QString>(current);
-    auto syncMenu = [menu, btn](const QString &opt) {
+    auto syncMenu = [menu, btn, display](const QString &opt) {
         for (QAction *a : menu->actions())
-            a->setChecked(a->text() == opt);
-        btn->setText(opt);
+            a->setChecked(a->text() == display(opt));
+        btn->setText(display(opt));
     };
     // applyVisual handed to the caller: records the accepted option and
     // reflects it. On modal cancel the caller does NOT invoke it, so currentOpt
@@ -363,7 +326,7 @@ void SettingsPage::setupValueMenuWithConfirm(
                 menu->popup(btn->mapToGlobal(QPoint(0, btn->height())));
             });
     for (const QString &opt : options) {
-        QAction *act = menu->addAction(opt);
+        QAction *act = menu->addAction(display(opt));
         act->setCheckable(true);
         group->addAction(act);
         connect(act, &QAction::triggered, btn,
@@ -380,7 +343,7 @@ void SettingsPage::buildUI()
     mainLay->setContentsMargins(20, 20, 20, 20);
     mainLay->setSpacing(20);
 
-    auto *title = new QLabel(QStringLiteral("Ajustes"), this);
+    auto *title = new QLabel(nt::tr("settings.title"), this);
     // Deliberately NOT #sectionTitle (16 px): this is the title of the whole
     // page, one notch above the section title.
     title->setObjectName(QStringLiteral("pageHeading"));
@@ -439,8 +402,7 @@ void SettingsPage::buildUI()
                             const QString &labelText,
                             const QStringList &options,
                             const QString &saved,
-                            const QString &defaultVal,
-                            const std::function<QString(const QString &)> &fromVal,
+                            const std::function<QString(const QString &)> &display,
                             const std::function<void(const QString &)> &onPick,
                             const QString &note = QString()) {
         // "Row + note" block: the note stays glued to its setting (spacing 4);
@@ -452,24 +414,23 @@ void SettingsPage::buildUI()
         auto *lbl = new QLabel(labelText);
         lbl->setObjectName(QStringLiteral("settingsRowLabel"));
         row->addWidget(lbl);
-        QPushButton *btn = makeValueButton(fromVal(saved));
+        QPushButton *btn = makeValueButton(display(saved));
         row->addWidget(btn, 1, Qt::AlignRight);
         block->addLayout(row);
         if (!note.isEmpty())
             block->addWidget(addNote(note));
         cardLay->addLayout(block);
-        setupValueMenu(btn, options, fromVal(saved), onPick);
-        Q_UNUSED(defaultVal);
+        setupValueMenu(btn, options, saved, display, onPick);
     };
 
     // --- PLAYBACK ---
-    addSectionTitle(QStringLiteral("REPRODUCCIÓN"));
+    addSectionTitle(nt::tr("settings.section.playback"));
 
     // Playback quality: resolution ceiling the app asks YouTube for.
     // Auto uses the last effective value saved (default 360p) and playback
     // itself re-memorizes it live without changing anything hot.
     addOptionRow(
-        QStringLiteral("Calidad de reproducción"),
+        nt::tr("settings.quality"),
         qualityOptions(m_settings->getString(
                            QStringLiteral("codec_profile"),
                            QStringLiteral("")) == QLatin1String("nohw")
@@ -478,12 +439,11 @@ void SettingsPage::buildUI()
                               QStringLiteral("")) == QLatin1String("soft-all")),
         m_settings->getString(QStringLiteral("quality"),
                               QStringLiteral("auto")),
-        QStringLiteral("auto"), qualityFromValue,
-        [this](const QString &text) {
-            const QString val = valueFromQuality(text);
-            m_settings->set(QStringLiteral("quality"), val);
-            emit qualityChanged(val);
-            if (val == QStringLiteral("auto")) {
+        qualityDisplay,
+        [this](const QString &code) {
+            m_settings->set(QStringLiteral("quality"), code);
+            emit qualityChanged(code);
+            if (code == QStringLiteral("auto")) {
                 int autoDef = m_settings->getInt(
                     QStringLiteral("quality_auto"), 360);
                 m_settings->set(QStringLiteral("quality_auto"),
@@ -495,14 +455,13 @@ void SettingsPage::buildUI()
     // Radio: app-style radio mix (RAMDV). Suggestions: list of
     // recommendations for the video. Disabled: the queue stays as it came.
     addOptionRow(
-        QStringLiteral("Modo \"A continuación\""), nextModeOptions(),
+        nt::tr("settings.nextMode"), nextModeOptions(),
         m_settings->getString(QStringLiteral("next_mode"),
                               QStringLiteral("radio")),
-        QStringLiteral("radio"), nextModeFromValue,
-        [this](const QString &text) {
-            const QString val = valueFromNextMode(text);
-            m_settings->set(QStringLiteral("next_mode"), val);
-            emit nextModeChanged(val);
+        nextModeDisplay,
+        [this](const QString &code) {
+            m_settings->set(QStringLiteral("next_mode"), code);
+            emit nextModeChanged(code);
         });
 
     // Video in the mini player: whether the live video fills the mini bar gap
@@ -510,14 +469,13 @@ void SettingsPage::buildUI()
     // static thumbnail is preferred (in both cases the video keeps rendering in the
     // background so there is no jump on return).
     addOptionRow(
-        QStringLiteral("Vídeo en mini player"), miniVideoOptions(),
+        nt::tr("settings.miniVideo"), miniVideoOptions(),
         m_settings->getString(QStringLiteral("mini_video"),
                               QStringLiteral("thumb")),
-        QStringLiteral("thumb"), miniVideoFromValue,
-        [this](const QString &text) {
-            const QString val = valueFromMiniVideo(text);
-            m_settings->set(QStringLiteral("mini_video"), val);
-            emit miniVideoModeChanged(val);
+        miniVideoDisplay,
+        [this](const QString &code) {
+            m_settings->set(QStringLiteral("mini_video"), code);
+            emit miniVideoModeChanged(code);
         });
 
     // Video acceleration: result of the offline probe (HwProbe). Informational
@@ -526,7 +484,7 @@ void SettingsPage::buildUI()
     {
         auto *row = new QHBoxLayout;
         row->setSpacing(8);
-        auto *lbl = new QLabel(QStringLiteral("Aceleración de vídeo"));
+        auto *lbl = new QLabel(nt::tr("settings.hwAccel"));
         lbl->setObjectName(QStringLiteral("settingsRowLabel"));
         row->addWidget(lbl);
         m_codecProfileLabel = new QLabel(codecProfileText(
@@ -536,7 +494,7 @@ void SettingsPage::buildUI()
         row->addWidget(m_codecProfileLabel);
         row->addStretch(1);
 #ifndef NEVERTUBE_NO_MPV
-        auto *btn = makeActionButton(QStringLiteral("Volver a detectar"));
+        auto *btn = makeActionButton(nt::tr("codec.redetect"));
         connect(btn, &QPushButton::clicked, this, [this]() {
             m_settings->set(QStringLiteral("codec_profile"), QString());
             updateCodecProfile(QString());
@@ -550,18 +508,15 @@ void SettingsPage::buildUI()
     // Audio language: preferred track when the video offers one (includes
     // automatic/AI dubs if they come with LANGUAGE).
     addOptionRow(
-        QStringLiteral("Idioma de audio"), audioLangOptions(),
+        nt::tr("settings.audioLang"), audioLangOptions(),
         m_settings->getString(QStringLiteral("audio_language"),
                               QStringLiteral("original")),
-        QStringLiteral("original"), audioLangFromValue,
-        [this](const QString &text) {
-            const QString val = valueFromAudioLang(text);
-            m_settings->set(QStringLiteral("audio_language"), val);
-            emit audioLanguageChanged(val);
+        audioLangDisplay,
+        [this](const QString &code) {
+            m_settings->set(QStringLiteral("audio_language"), code);
+            emit audioLanguageChanged(code);
         },
-        QStringLiteral(
-            "Nota: la preferencia se aplica solo cuando el vídeo tiene una "
-            "pista en ese idioma. Si no existe, se usará el audio original."));
+        nt::tr("settings.audioLangNote"));
 
     // Maximum volume (mpv "volume-max"): allows headroom above 100%.
     // Any option above 100% asks for confirmation before applying:
@@ -575,57 +530,47 @@ void SettingsPage::buildUI()
         block->setSpacing(4);
         auto *row = new QHBoxLayout;
         row->setSpacing(8);
-        auto *lbl = new QLabel(QStringLiteral("Volumen máximo"));
+        auto *lbl = new QLabel(nt::tr("settings.volumeMax"));
         lbl->setObjectName(QStringLiteral("settingsRowLabel"));
         row->addWidget(lbl);
         const QString saved = m_settings->getString(
             QStringLiteral("volume_max"), QStringLiteral("100"));
-        QPushButton *btn = makeValueButton(volumeMaxFromValue(saved));
+        QPushButton *btn = makeValueButton(volumeMaxDisplay(saved));
         row->addWidget(btn, 1, Qt::AlignRight);
         block->addLayout(row);
-        // `current` is the menu TEXT ("150%"), not the raw value ("150"):
-        // checks and the button text compare against the QAction
-        // text (which includes the %).
+        // `saved` is the raw value ("150"); the menu shows "150%".
         setupValueMenuWithConfirm(
-            btn, volumeMaxOptions(), volumeMaxFromValue(saved),
-            [this](const QString &text,
+            btn, volumeMaxOptions(), saved, volumeMaxDisplay,
+            [this](const QString &code,
                    const std::function<void(const QString &)> &applyVisual) {
-                const QString val = valueFromVolumeMax(text);
-                if (val == QStringLiteral("100")) {
+                if (code == QStringLiteral("100")) {
                     // No modal: applies directly.
-                    m_settings->set(QStringLiteral("volume_max"), val);
-                    emit volumeMaxChanged(val);
-                    applyVisual(text);
+                    m_settings->set(QStringLiteral("volume_max"), code);
+                    emit volumeMaxChanged(code);
+                    applyVisual(code);
                     return;
                 }
                 // With modal: we apply ONLY on OK.
-                const QString confirmText = QStringLiteral(
-                    "Subir el volumen máximo a %1 puede causar daño auditivo "
-                    "permanente. Úsalo solo con altavoces externos y a un "
-                    "nivel cómodo. Al cerrar la app el volumen volverá a 100% "
-                    "aunque lo subas más alto. ¿Continuar?").arg(val);
+                const QString confirmText =
+                    nt::tr("settings.volumeMaxBody").arg(code);
                 nt::confirm(
-                    this,
-                    QStringLiteral("Volumen por encima del 100%"),
-                    confirmText, QStringLiteral("Aceptar"),
-                    [this, val, text, applyVisual]() {
-                        m_settings->set(QStringLiteral("volume_max"), val);
-                        emit volumeMaxChanged(val);
-                        applyVisual(text);
+                    this, nt::tr("settings.volumeMaxTitle"), confirmText,
+                    nt::tr("common.accept"),
+                    [this, code, applyVisual]() {
+                        m_settings->set(QStringLiteral("volume_max"), code);
+                        emit volumeMaxChanged(code);
+                        applyVisual(code);
                     });
                 // On Cancel: applyVisual is not called, no DB write, no
                 // signal emitted. Button and menu keep the previous option.
             });
         // Note glued to the block (it used to hang loose with the 24 spacing).
-        block->addWidget(addNote(QStringLiteral(
-            "Por seguridad, el volumen solo se guarda hasta el 100%. Al "
-            "reiniciar la app, aunque el ajuste siga por encima, el "
-            "reproductor empezará al 100%.")));
+        block->addWidget(addNote(nt::tr("settings.volumeMaxNote")));
         cardLay->addLayout(block);
     }
 
     // --- INTERFACE ---
-    addSectionTitle(QStringLiteral("INTERFAZ"));
+    addSectionTitle(nt::tr("settings.section.interface"));
 
     // Accent color: tone of interactive elements (sliders, progress
     // bar, primary button, selection, active nav, active icons on the
@@ -633,26 +578,24 @@ void SettingsPage::buildUI()
     // global stylesheet and re-tints the nav icons when it receives
     // accentChanged).
     addOptionRow(
-        QStringLiteral("Color de acento"), accentOptions(),
+        nt::tr("settings.accent"), accentOptions(),
         m_settings->getString(QLatin1String(kAccentKey), nt::accentHex()),
-        nt::accentHex(), accentFromValue,
-        [this](const QString &text) {
-            const QString hex = valueFromAccent(text);
+        accentDisplay,
+        [this](const QString &hex) {
             m_settings->set(QLatin1String(kAccentKey), hex);
             emit accentChanged(hex);
         },
-        QStringLiteral("Se aplica al instante: sliders, progreso, botones "
-                       "resaltados, selección de texto e iconos activos."));
+        nt::tr("settings.accentNote"));
 
-    // Thumbnail size: "Pequeñas" (6 per row, short rows), "Normales"
-    // (5 per row) or "Grandes" (4 per row, tall rows). It is the setting the
+    // Thumbnail size: "Small" (6 per row, short rows), "Normal" (5 per row)
+    // or "Large" (4 per row, tall rows). It is the setting the
     // user really perceives, and the one that DOES move the Home grid.
     //
-    // Migration: the previous setting was called "Densidad de cuadrícula"
+    // Migration: the previous setting was called "grid density"
     // ("cozy"/"compact") and only scaled a factor, which on the Home
     // grids produced no visible change (the cell is 175 px with and without the
     // factor). Its value is read the first time so the choice is not lost:
-    // "compact" → "Pequeñas", "cozy" → "Normales". The old key is left in
+    // "compact" → "small", "cozy" → "normal". The old key is left in
     // the DB (harmless) and gets rewritten on its own when an option is picked.
     m_thumbSize = m_settings->getString(
         QString::fromLatin1(kThumbSizeKey), QString());
@@ -664,21 +607,41 @@ void SettingsPage::buildUI()
                                                         : QStringLiteral("normal");
     }
     addOptionRow(
-        QStringLiteral("Tamaño de las miniaturas"), thumbSizeOptions(),
-        thumbSizeFromValue(m_thumbSize), QStringLiteral("Normales"),
-        thumbSizeFromValue,
-        [this](const QString &text) {
-            const QString val = valueFromThumbSize(text);
-            m_thumbSize = val;
-            m_settings->set(QString::fromLatin1(kThumbSizeKey), val);
-            emit thumbSizeChanged(val);
+        nt::tr("settings.thumbSize"), thumbSizeOptions(),
+        m_thumbSize, thumbSizeDisplay,
+        [this](const QString &code) {
+            m_thumbSize = code;
+            m_settings->set(QString::fromLatin1(kThumbSizeKey), code);
+            emit thumbSizeChanged(code);
         },
-        QStringLiteral("Pequeñas: 6 vídeos por fila en el Inicio y filas "
-                       "cortas en búsqueda, historial y cola. Grandes: 4 por "
-                       "fila y miniatura más grande."));
+        nt::tr("settings.thumbSizeNote"));
+
+    // Language: one option per catalog in :/localization (localization.qrc).
+    // The identity is the code ("es", "en"); the shown text is the language's
+    // own name (never translated). Adding a language = dropping its JSON file
+    // and listing it in the .qrc: this row picks it up by itself.
+    {
+        const QList<nt::LanguageInfo> langs = nt::availableLanguages();
+        QStringList codes;
+        for (const nt::LanguageInfo &l : langs)
+            codes << l.code;
+        addOptionRow(
+            nt::tr("settings.language"), codes,
+            m_settings->getString(QStringLiteral("ui_lang"), nt::language()),
+            [langs](const QString &code) {
+                for (const nt::LanguageInfo &l : langs)
+                    if (l.code == code)
+                        return l.name;
+                return code;
+            },
+            [this](const QString &code) {
+                m_settings->set(QStringLiteral("ui_lang"), code);
+                emit languageChanged(code);
+            });
+    }
 
     // --- DATA ---
-    addSectionTitle(QStringLiteral("DATOS"));
+    addSectionTitle(nt::tr("settings.section.data"));
 
     // The buttons of the DATOS (Data) section. There are two: the normal one (#actionBtn) and the
     // reset one (#accentOutline, with border and accent color). The accent comes
@@ -696,46 +659,36 @@ void SettingsPage::buildUI()
     // Clear thumbnail cache: deletes only the images saved to disk
     // (they are re-downloaded on their own when videos are shown). Touches no data nor the DB.
     QPushButton *clearBtn = addActionButton(
-        QStringLiteral("Limpiar caché de miniaturas"), false);
+        nt::tr("settings.clearThumbs"), false);
     connect(clearBtn, &QPushButton::clicked, this, [this]() {
         nt::confirm(
-            this, QStringLiteral("Limpiar caché de miniaturas"),
-            QStringLiteral("¿Eliminar todas las miniaturas guardadas? "
-                           "Las imágenes se volverán a descargar."),
-            QStringLiteral("Eliminar"), [this]() { emit clearThumbsRequested(); });
+            this, nt::tr("settings.clearThumbs"),
+            nt::tr("settings.clearThumbsBody"),
+            nt::tr("settings.delete"), [this]() { emit clearThumbsRequested(); });
     });
 
     // Reset app: deletes the local DB (history, searches,
     // subscriptions and settings) and the cache, and restarts the app with defaults.
     // Never touches personal files or downloaded videos.
     QPushButton *resetBtn = addActionButton(
-        QStringLiteral("Restablecer aplicación"), true);
+        nt::tr("settings.resetApp"), true);
     connect(resetBtn, &QPushButton::clicked, this, [this]() {
         nt::confirm(
-            this, QStringLiteral("Restablecer aplicación"),
-            QStringLiteral("Esta acción borrará la base de datos local "
-                           "(historial, búsquedas, suscripciones y ajustes) "
-                           "y el caché de miniaturas. No se eliminarán "
-                           "archivos personales ni vídeos descargados. "
-                           "La aplicación se reiniciará con los valores por "
-                           "defecto. ¿Continuar?"),
-            QStringLiteral("Restablecer"), [this]() { emit resetRequested(); });
+            this, nt::tr("settings.resetApp"),
+            nt::tr("settings.resetBody"),
+            nt::tr("settings.reset"), [this]() { emit resetRequested(); });
     });
 
     // --- ABOUT ---
-    addSectionTitle(QStringLiteral("ACERCA DE"));
+    addSectionTitle(nt::tr("settings.section.about"));
 
-    auto *verLabel = new QLabel(QStringLiteral("Versión 1.0 (nevertube_qt2)"),
-                                content);
+    auto *verLabel = new QLabel(nt::tr("settings.version"), content);
     verLabel->setObjectName(QStringLiteral("settingsVersion"));
 
     auto *aboutBlock = new QVBoxLayout;
     aboutBlock->setSpacing(4);
     aboutBlock->addWidget(verLabel);
-    aboutBlock->addWidget(addNote(
-        QStringLiteral("Sin telemetría: esta aplicación no envía datos de "
-                       "uso, búsquedas ni historial a ningún servidor. "
-                       "Todo permanece local en tu dispositivo.")));
+    aboutBlock->addWidget(addNote(nt::tr("settings.aboutNote")));
     cardLay->addLayout(aboutBlock);
 
     // The vertical remainder goes at the END: sections stay glued to the top with

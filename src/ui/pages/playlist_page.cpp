@@ -9,6 +9,7 @@
 #include <QVBoxLayout>
 
 #include "../../db/repositories.h"
+#include "../../i18n.h"
 #include "../confirm_dialog.h"
 #include "../icons.h"
 #include "../theme.h"
@@ -28,8 +29,9 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
 
     // "Volver" (Back) with the #backLink token, same as Channel, History and Player.
     auto *top = new QHBoxLayout;
-    auto *back = new QPushButton(QStringLiteral("Volver"), this);
+    auto *back = new QPushButton(this);
     back->setObjectName(QStringLiteral("backLink"));
+    nt::bindText(back, "common.back");
     back->setIcon(nt::icon(nt::Icon::Back, nt::kMuted, 13));
     back->setCursor(Qt::PointingHandCursor);
     connect(back, &QPushButton::clicked, this,
@@ -59,7 +61,7 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
     auto *titleCol = new QVBoxLayout;
     titleCol->setContentsMargins(0, 0, 0, 0);
     titleCol->setSpacing(3);
-    m_title = new QLabel(QStringLiteral("Playlist"), m_card);
+    m_title = new QLabel(nt::tr("playlist.title"), m_card);
     m_title->setObjectName(QStringLiteral("channelName"));
     m_title->setWordWrap(true);
     titleCol->addWidget(m_title);
@@ -71,8 +73,9 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
     // Play is the page's main action (#primary) and the other three are
     // list management, not playback: that is why they go as ghosts
     // beside it and not as four buttons of equal weight.
-    auto *playBtn = new QPushButton(QStringLiteral("Reproducir"), m_card);
+    auto *playBtn = new QPushButton(m_card);
     playBtn->setObjectName(QStringLiteral("primary"));
+    nt::bindText(playBtn, "playlist.play");
     playBtn->setCursor(Qt::PointingHandCursor);
     playBtn->setFixedHeight(38);
     connect(playBtn, &QPushButton::clicked, this, [this]() {
@@ -87,25 +90,28 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
     // "selected" promised something that does not exist, so the label says what it
     // actually does. It still starts disabled: with no marked row there is nothing to
     // remove, and with the short label the button does not compete with "Reproducir".
-    m_removeBtn = new QPushButton(QStringLiteral("Quitar"), m_card);
+    m_removeBtn = new QPushButton(m_card);
     m_removeBtn->setObjectName(QStringLiteral("ghost"));
+    nt::bindText(m_removeBtn, "playlist.remove");
     m_removeBtn->setCursor(Qt::PointingHandCursor);
     m_removeBtn->setFixedHeight(38);
     m_removeBtn->setEnabled(false);
-    m_removeBtn->setToolTip(QStringLiteral("Quitar de la playlist el vídeo marcado"));
+    nt::bindTooltip(m_removeBtn, "playlist.removeTip");
     connect(m_removeBtn, &QPushButton::clicked, this,
             &PlaylistPage::onRemoveMarked);
     head->addWidget(m_removeBtn, 0, Qt::AlignVCenter);
 
-    m_renameBtn = new QPushButton(QStringLiteral("Renombrar"), m_card);
+    m_renameBtn = new QPushButton(m_card);
     m_renameBtn->setObjectName(QStringLiteral("ghost"));
+    nt::bindText(m_renameBtn, "playlist.rename");
     m_renameBtn->setCursor(Qt::PointingHandCursor);
     m_renameBtn->setFixedHeight(38);
     connect(m_renameBtn, &QPushButton::clicked, this, &PlaylistPage::onRename);
     head->addWidget(m_renameBtn, 0, Qt::AlignVCenter);
 
-    m_deleteBtn = new QPushButton(QStringLiteral("Eliminar"), m_card);
+    m_deleteBtn = new QPushButton(m_card);
     m_deleteBtn->setObjectName(QStringLiteral("ghost"));
+    nt::bindText(m_deleteBtn, "common.delete");
     m_deleteBtn->setCursor(Qt::PointingHandCursor);
     m_deleteBtn->setFixedHeight(38);
     connect(m_deleteBtn, &QPushButton::clicked, this,
@@ -137,8 +143,7 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
     // app's font and the missing-glyph marker would show up. Hence the text
     // says "el menú" (the menu) and not "el ⋮"; --selftest-glyphs warns about this.
     m_empty = new QLabel(
-        nt::emptyStateHtml(QStringLiteral(
-            "Esta playlist todavía no tiene vídeos. Añádelos desde el menú de cualquier vídeo.")),
+        nt::emptyStateHtml(nt::tr("playlist.empty")),
         this);
     m_empty->setObjectName(QStringLiteral("emptyState"));
     m_empty->setAlignment(Qt::AlignCenter);
@@ -184,7 +189,7 @@ void PlaylistPage::reload()
     m_list->showVideos(m_videos, VideoListView::ListMode);
     m_list->setCurrentRow(-1);
     m_removeBtn->setEnabled(false);
-    m_meta->setText(QStringLiteral("%1 vídeos").arg(m_videos.size()));
+    m_meta->setText(nt::tr("common.videos").arg(m_videos.size()));
     // List or empty box, never both (see the constructor's comment).
     m_empty->setVisible(m_videos.isEmpty());
     m_list->setVisible(!m_videos.isEmpty());
@@ -206,9 +211,9 @@ void PlaylistPage::onRemoveMarked()
 void PlaylistPage::onRename()
 {
     QString newTitle;
-    if (nt::inputText(this, QStringLiteral("Renombrar playlist"),
-                      QStringLiteral("Nuevo nombre:"),
-                      m_title->text(), QStringLiteral("Guardar"), &newTitle)) {
+    if (nt::inputText(this, nt::tr("playlist.renameTitle"),
+                      nt::tr("playlist.renameField"),
+                      m_title->text(), nt::tr("playlist.save"), &newTitle)) {
         if (newTitle.isEmpty())
             return;
         m_playlists->rename(m_playlistId, newTitle);
@@ -227,13 +232,12 @@ void PlaylistPage::onDelete()
         return;
     const QString name = m_title->text().trimmed();
     const QString where = name.isEmpty()
-        ? QStringLiteral("esta playlist")
+        ? nt::tr("playlist.this")
         : QStringLiteral("«%1»").arg(name);
-    nt::confirm(this, QStringLiteral("Eliminar playlist"),
-                QStringLiteral("Se eliminará %1 con sus %2 vídeos. Esta acción "
-                               "no se puede deshacer.")
+    nt::confirm(this, nt::tr("playlist.deleteTitle"),
+                nt::tr("playlist.deleteBody")
                     .arg(where, QStringLiteral("%1").arg(m_videos.size())),
-                QStringLiteral("Eliminar"), [this]() {
+                nt::tr("common.delete"), [this]() {
                     m_playlists->deletePlaylist(m_playlistId);
                     m_playlistId.clear();
                     reload();

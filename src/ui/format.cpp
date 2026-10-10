@@ -1,5 +1,6 @@
 #include "format.h"
 
+#include "../i18n.h"
 #include "../models.h"
 #include "theme.h"
 
@@ -51,7 +52,7 @@ QString compactCount(qint64 count)
 QString viewsLabel(qint64 count)
 {
     const QString c = compactCount(count);
-    return c.isEmpty() ? QString() : c + QStringLiteral(" vistas");
+    return c.isEmpty() ? QString() : nt::tr("fmt.views").arg(c);
 }
 
 QString publishedLabel(const QString &publishedAt)
@@ -63,14 +64,14 @@ QString publishedLabel(const QString &publishedAt)
         return QString();
     const qint64 days = date.daysTo(QDateTime::currentDateTime());
     if (days < 1)
-        return QStringLiteral("hoy");
+        return nt::tr("fmt.today");
     if (days < 7)
-        return QStringLiteral("hace %1 d").arg(days);
+        return nt::tr("fmt.days").arg(days);
     if (days < 30)
-        return QStringLiteral("hace %1 sem").arg(days / 7);
+        return nt::tr("fmt.weeks").arg(days / 7);
     if (days < 365)
-        return QStringLiteral("hace %1 mes").arg(days / 30);
-    return QStringLiteral("hace %1 año").arg(days / 365);
+        return nt::tr("fmt.months").arg(days / 30);
+    return nt::tr("fmt.years").arg(days / 365);
 }
 
 QString metaLine(const VideoInfo &v)
@@ -83,7 +84,7 @@ QString metaLine(const VideoInfo &v)
     const QString pub = publishedLabel(v.publishedAt);
     if (!pub.isEmpty())
         parts << pub;
-    return parts.join(QStringLiteral("  •  "));
+    return parts.join(nt::tr("fmt.metaSep"));
 }
 
 QString descriptionHtml(const QString &plain)

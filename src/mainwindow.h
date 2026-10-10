@@ -95,6 +95,11 @@ private:
     // width-sized with fixed columns) change their number of
     // columns. See SettingsPage::thumbListScale/thumbGridColumns.
     void applyThumbSize(const QString &value);
+    // UI language change from Settings: applies the catalog, refreshes the
+    // shell text that is not a binding (the mini player, which depends on the
+    // playback state) and rebuilds the Settings page deferred, so the menu
+    // that emitted the signal is not destroyed while delivering it.
+    void applyLanguage(const QString &code);
     void updateMiniBar();
     void updateMiniIcons();
     void setMiniThumb();
