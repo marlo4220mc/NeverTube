@@ -23,6 +23,11 @@ class QWidget;
 // from the current language falls back to it, and a key missing everywhere is
 // returned as-is (so it is visible in the UI instead of blank).
 //
+// The DEFAULT language (fresh install, no "ui_lang" saved) is English, except
+// when the system language is detected: see systemPreferredLanguage(). The base
+// stays Spanish because that is the wording of the source, not because it is the
+// default UI choice.
+//
 // The keys are semantic (nav.home, settings.quality...), never the Spanish text:
 // adding a language is a new file with the same key set and the Spanish wording
 // can change without breaking any translation. --selftest-i18n checks offline
@@ -36,11 +41,18 @@ struct LanguageInfo
     QString name; // native name shown in Settings ("Español", "English")
 };
 
-// Code of the active language (defaults to the base). The application selects it
-// at startup from the "ui_lang" setting; MainWindow applies it before building
+// Code of the active language (defaults to English). The application selects it
+// at startup from the "ui_lang" setting and, when there is none, from the system
+// language (systemPreferredLanguage()); MainWindow applies it before building
 // the pages.
 QString language();
 QString baseLanguage();
+
+// Preferred UI language for a fresh install: the system language if its catalog
+// exists (a Spanish system picks "es"), otherwise the default (English). It does
+// NOT read or write any setting; MainWindow calls it only when "ui_lang" is
+// unset, so the user's explicit choice always wins.
+QString systemPreferredLanguage();
 
 // Loads the language's file and re-applies every live binding. Returns false
 // (leaving the current language untouched) if that code has no file: an

@@ -700,6 +700,12 @@ the catalogs inside the binary.
   active language is resolved in `es`, and a key missing everywhere is returned as-is,
   so it shows up in the UI instead of blank. Each file carries its own native name
   (`"language": { "code": "en", "name": "English" }`).
+- **The default UI language is English, not the base.** On a fresh install (no
+  `ui_lang` saved) `MainWindow` calls `nt::systemPreferredLanguage()`: a system in
+  Spanish picks `es`, English or any other language keeps English; the user's explicit
+  choice in Settings always wins (it is saved as the code in `ui_lang`). The base stays
+  Spanish because that is the wording of the source and the fallback, not because it is
+  the default UI.
 - **Keys are semantic** (`nav.home`, `settings.quality`), never the Spanish text, so
   the wording can change without touching the code. Every language file MUST have the
   SAME key set as `es.json` (the selftest fails otherwise).

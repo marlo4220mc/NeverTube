@@ -11,6 +11,7 @@
 #include <QJsonParseError>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLocale>
 #include <QPointer>
 #include <QSet>
 #include <QStringList>
@@ -27,6 +28,10 @@ namespace {
 // Base (source) language of the app: the one with the complete key set and the
 // fallback for any missing translation.
 const char *const kBaseCode = "es";
+
+// Default UI language of a fresh install (no "ui_lang" saved and no match with
+// the system language): English. Kept apart from the base on purpose.
+const char *const kDefaultCode = "en";
 
 enum BindingKind { KText, KTooltip, KPlaceholder, KAction };
 
@@ -103,8 +108,14 @@ void bootstrap()
         return;
     g_inited = true;
     loadMap(QString::fromLatin1(kBaseCode), &g_base);
-    g_lang = QString::fromLatin1(kBaseCode);
-    g_cur = g_base;
+    // The default is applied from the first nt::tr() call, before MainWindow has
+    // had a chance to set anything (so a page built too early shows English, not
+    // the base). If the default catalog is missing, fall back to the base.
+    g_lang = QString::fromLatin1(kDefaultCode);
+    if (!loadMap(g_lang, &g_cur)) {
+        g_lang = QString::fromLatin1(kBaseCode);
+        g_cur = g_base;
+    }
 }
 
 void applyOne(const Binding &b)
@@ -257,6 +268,29 @@ QList<LanguageInfo> availableLanguages()
     return cache;
 }
 
+QString systemPreferredLanguage()
+{
+    bootstrap();
+    // QLocale::system().name() gives "es_ES", "en_US"... Try the full name and
+    // then the language part; the first catalog that matches wins. A Spanish
+    // system picks "es"; English or any other (French, "C", ...) leaves the
+    // default, English.
+    const QString sys = QLocale::system().name();
+    QStringList candidates;
+    if (!sys.isEmpty()) {
+        candidates << sys;
+        const int sep = sys.indexOf(QLatin1Char('_'));
+        if (sep > 0)
+            candidates << sys.left(sep);
+    }
+    const QList<LanguageInfo> langs = availableLanguages();
+    for (const QString &c : candidates)
+        for (const LanguageInfo &li : langs)
+            if (li.code.compare(c, Qt::CaseInsensitive) == 0)
+                return li.code;
+    return QString::fromLatin1(kDefaultCode);
+}
+
 void bindText(QLabel *w, const char *key)
 {
     if (w)
@@ -308,6 +342,11 @@ bool i18nSelfTest()
     };
 
     bootstrap();
+
+    // 0. The UI default is English; the base stays Spanish for the fallback.
+    //    Nothing has chosen a language yet in this process.
+    chk(language() == QLatin1String(kDefaultCode),
+        "el idioma predeterminado de la UI es ingles (en)");
 
     // 1. Base language present and non-empty.
     chk(!g_base.isEmpty(), "el idioma base (es) tiene cadenas");
@@ -443,20 +482,24 @@ bool i18nSelfTest()
     {
         QLabel probe;
         bindText(&probe, "nav.home");
-        const QString esText = probe.text();
         const bool hasOther = langs.size() >= 2;
         QString other;
         for (const LanguageInfo &li : langs)
             if (li.code != baseLanguage())
                 other = li.code;
+        // Start from the base explicitly: the initial language is the DEFAULT
+        // (English), not the base, so comparing against whatever it is now would
+        // make "other" (English) look like "no change".
+        setLanguage(baseLanguage());
+        const QString baseText = probe.text();
         if (hasOther) {
             setLanguage(other);
             const QString otherText = probe.text();
-            chk(!otherText.isEmpty() && otherText != esText,
+            chk(!otherText.isEmpty() && otherText != baseText,
                 "un texto enlazado cambia con el idioma");
         }
         setLanguage(baseLanguage());
-        chk(probe.text() == esText, "el texto enlazado vuelve al idioma base");
+        chk(probe.text() == baseText, "el texto enlazado vuelve al idioma base");
         chk(tr("no.such.key.xyz") == QLatin1String("no.such.key.xyz"),
             "una clave desconocida se muestra tal cual (no se queda en blanco)");
     }

@@ -519,9 +519,13 @@ MainWindow::MainWindow(QWidget *parent)
     // already resolves in the chosen language (there is no second pass that
     // retranslates the whole app). Adding a language is dropping its JSON into
     // localization/ and listing it in the .qrc: the Settings selector picks it
-    // up by itself. An unknown saved code is ignored (base language stays).
-    nt::setLanguage(m_settings.getString(QStringLiteral("ui_lang"),
-                                         nt::language()));
+    // up by itself. The default is English; on the very first launch (no saved
+    // ui_lang) a Spanish system switches to Spanish, any other language keeps
+    // English. An unknown saved code is ignored (setLanguage fails and the
+    // current language stays).
+    const QString savedLang = m_settings.getString(QStringLiteral("ui_lang"));
+    nt::setLanguage(savedLang.isEmpty() ? nt::systemPreferredLanguage()
+                                        : savedLang);
 
     setWindowTitle(QStringLiteral("NeverTube"));
     resize(1280, 800);
