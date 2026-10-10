@@ -1,8 +1,8 @@
 # nevertube_qt2
 
-Cliente ligero de YouTube en Qt5 (C++17 / CMake). Núcleo de reproducción
-basado en un POC probado. Philosophy: ligero antes que completo, reproducir
-antes que decorar, estabilidad y bajo consumo.
+Lightweight YouTube client in Qt5 (C++17 / CMake). Playback core
+based on a proven POC. Philosophy: lightweight before complete, play
+before decorate, stability and low consumption.
 
 ## Build
 
@@ -10,1479 +10,1393 @@ antes que decorar, estabilidad y bajo consumo.
 cmake -B build && cmake --build build
 ```
 
-Dependencias: Qt5 (Core Gui Widgets Network Sql), OpenGL, libmpv.
+Dependencies: Qt5 (Core Gui Widgets Network Sql), OpenGL, libmpv.
 
-### Build x86 de Windows (Win7 de 32 bits, doble motor)
+### Windows x86 build (32-bit Win7, dual engine)
 
-La app tiene **dos motores** (`src/playback_backend.h`): `MpvBackend` (mpv,
-Linux y Windows **x64**, pieza protegida intacta) y `FfmpegBackend`
-(FFmpeg/libav sin libmpv, el **único** motor del build **x86** de Windows —
-`NEVERTUBE_X86_FFMPEG_BUILD`). No existe build público de FFmpeg para Win32
-(gyan/BtbN solo win64, MSYS2 retiró i686): el dev-package i686 se cross-compila
-una vez y está **vendorizado** en `third_party/ffmpeg-win32/` (LGPL v2.1+,
-schannel, DXVA2 h264, imports Win7-limpios, sin libwinpthread/libgcc). Receta
-reproducible: `tools/build_ffmpeg_i686.sh`. El CMake resuelve `FFMPEG_DEV_DIR`
-por defecto al paquete vendorizado. En x86 la app usa `Qt5 Multimedia`
-(`QAudioOutput`) para el audio y el perfil de códec se fija a `h264-hw`
-(techo DXVA2) sin `HwProbe` (guards `NEVERTUBE_NO_MPV` en hwprobe/mainwindow/
-settings/factory). En x64/Linux todo queda como estaba (mpv). Detalles y
-verificación: `third_party/ffmpeg-win32/README.md` y `BUILD_WINDOWS.md`.
+The app has **two engines** (`src/playback_backend.h`): `MpvBackend` (mpv, Linux and Windows **x64**, protected piece untouched) and `FfmpegBackend` (FFmpeg/libav without libmpv, the **only** engine of the Windows **x86** build — `NEVERTUBE_X86_FFMPEG_BUILD`). There is no public FFmpeg build for Win32 (gyan/BtbN only win64, MSYS2 dropped i686): the i686 dev-package is cross-compiled once and is **vendored** in `third_party/ffmpeg-win32/` (LGPL v2.1+, schannel, DXVA2 h264, Win7-clean imports, no libwinpthread/libgcc). Reproducible recipe: `tools/build_ffmpeg_i686.sh`. CMake resolves `FFMPEG_DEV_DIR` by default to the vendored package. On x86 the app uses `Qt5 Multimedia` (`QAudioOutput`) for audio and the codec profile is pinned to `h264-hw` (DXVA2 ceiling) without `HwProbe` (guards `NEVERTUBE_NO_MPV` in hwprobe/mainwindow/settings/factory). On x64/Linux everything stays as it was (mpv). Details and verification: `third_party/ffmpeg-win32/README.md` and `BUILD_WINDOWS.md`.
 
-El `FfmpegBackend` decide si adjunta el `hw_device_ctx` a un decodificador con
-`codecSupportsHw` (`avcodec_get_hw_config`): SOLO si el códec tiene un hwaccel
-compilado para ese device (el paquete i686 solo trae `h264_dxva2`). Es
-obligatorio no adjuntarlo a AV1: con device adjunto, `ff_get_format` se invoca
-y, sin un hwaccel av1, el decoder nativo de FFmpeg 9 aborta el clip entero con
-`ENOSYS` ("Your platform doesn't support hardware accelerated AV1 decoding",
-av1dec.c). Aviso (regla dura): el decoder NATIVO `av1` de FFmpeg 9 **no
-decodifica AV1 por software en ningún caso** (el propio código dice "the av1
-decoder doesn't support native decode"; con o sin device). El software AV1 de
-FFmpeg lo dan `libdav1d`/`libaom`, que el paquete i686 NO trae → **en x86 AV1
-es imposible** (ni HW ni SW); el build x86 fija el perfil `h264-hw` y nunca pide
-AV1, así que no afecta a la reproducción. Por eso `--selftest-ffmpeg` salta el
-clip av1 cuando no hay decoder sw de AV1 (`av1SoftwareDecodable`): en x86 se
-salta; en Linux/x64 con libdav1d se sigue verificando (ahí `hw=no` es
-libdav1d en software, no el nativo).
+The `FfmpegBackend` decides whether to attach the `hw_device_ctx` to a decoder with `codecSupportsHw` (`avcodec_get_hw_config`): ONLY if the codec has a hwaccel compiled for that device (the i686 package only ships `h264_dxva2`). It is mandatory not to attach it to AV1: with a device attached, `ff_get_format` is invoked and, without an av1 hwaccel, FFmpeg 9's native decoder aborts the whole clip with `ENOSYS` ("Your platform doesn't support hardware accelerated AV1 decoding", av1dec.c). Warning (hard rule): FFmpeg 9's NATIVE `av1` decoder **does not decode AV1 in software under any circumstance** (the code itself says "the av1 decoder doesn't support native decode"; with or without a device). FFmpeg's software AV1 is provided by `libdav1d`/`libaom`, which the i686 package does NOT ship → **on x86 AV1 is impossible** (neither HW nor SW); the x86 build pins the `h264-hw` profile and never asks for AV1, so it doesn't affect playback. That is why `--selftest-ffmpeg` skips the av1 clip when there is no sw AV1 decoder (`av1SoftwareDecodable`): on x86 it skips; on Linux/x64 with libdav1d it is still verified (there `hw=no` is libdav1d in software, not the native one).
 
-**Fallback a software del open HW**: `codecSupportsHw` solo refleja lo
-COMPILADO (un hwaccel existe en el paquete), no lo que el hardware soporta.
-`av_hwdevice_ctx_create` (DXVA2 en Windows) suele funcionar aunque la GPU no
-decodifique h264 por hardware (el chequeo real ocurre al abrir el
-decodificador). Si `avcodec_open2` con device adjunto FALLA — p. ej. una
-plataforma sin h264 DXVA2 — `openDecoder` devuelve `nullptr` y `runLoop` lo
-reintenta en SOFTWARE PURO antes de reportar "Sin decodificador de vídeo"
-(error fatal). Sin ese retry, en esas máquinas cada clip h264 moriría con
-error en vez de caer a SW (visto en la máquina de pruebas x86). Con el retry, el primer
-frame sale en software → hwdec="no" → la escalera reactiva baja
-`h264-hw → soft-all` (efímero) y re-resuelve.
+**Open HW software fallback**: `codecSupportsHw` only reflects what is COMPILED (a hwaccel exists in the package), not what the hardware supports. `av_hwdevice_ctx_create` (DXVA2 on Windows) usually works even if the GPU doesn't decode h264 in hardware (the real check happens when opening the decoder). If `avcodec_open2` with a device attached FAILS — e.g. a platform without h264 DXVA2 — `openDecoder` returns `nullptr` and `runLoop` retries in PURE SOFTWARE before reporting "Sin decodificador de vídeo" (fatal error). Without that retry, on those machines every h264 clip would die with an error instead of falling back to SW (seen on the x86 test machine). With the retry, the first frame comes out in software → hwdec="no" → the reactive ladder lowers `h264-hw → soft-all` (ephemeral) and re-resolves.
 
-## Límite de literal de cadena de MSVC (C2026): el QSS va partido
+## MSVC string literal limit (C2026): the QSS is split
 
-**MSVC no admite un literal de cadena de más de 16380 bytes** y avisa con
-`error C2026: string too big, trailing characters truncated`. GCC no tiene ese
-límite, así que un bloque que en Linux compila limpio puede no compilar en
-Windows sin que nada en local lo delate.
+**MSVC does not allow a string literal longer than 16380 bytes** and warns with `error C2026: string too big, trailing characters truncated`. GCC has no such limit, so a block that compiles cleanly on Linux may fail to compile on Windows without anything locally giving it away.
 
-El caso real: `nt::styleSheet()` (`src/ui/theme.cpp`) tenía el QSS entero —
-30 627 bytes, 624 líneas — en un único literal crudo `R"QSS(…)QSS"`. El
-build x86 usa **toolset v142** (VS2019, obligatorio para Win7) y ahí reventaba;
-el x64 con el toolset de `windows-latest` lo aceptaba, así que **solo se veía
-en el x86**. C2026 lo dispara el lexer al recorrer el literal, de modo que el
-arreglo tiene que estar en el literal, no en una compilación condicional.
+The real case: `nt::styleSheet()` (`src/ui/theme.cpp`) had the entire QSS — 30 627 bytes, 624 lines — in a single raw literal `R"QSS(…)QSS"`. The x86 build uses **toolset v142** (VS2019, mandatory for Win7) and it blew up there; x64 with the `windows-latest` toolset accepted it, so it was **only visible on x86**. C2026 is triggered by the lexer while scanning the literal, so the fix has to be in the literal, not in a conditional compilation.
 
-El QSS vive ahora en `static const char *const kTrozos[]` (cinco trozos, el
-mayor de 8359 bytes) que `styleSheet()` une con `QString::fromUtf8`. Reglas:
+The QSS now lives in `static const char *const kTrozos[]` (five chunks, the largest 8359 bytes) that `styleSheet()` joins with `QString::fromUtf8`. Rules:
 
-- **NO volver a levantar el QSS en un solo literal.** Si crece, se añade otro
-  trozo al array.
-- El reparto cae **siempre entre reglas** (en línea en blanco), nunca dentro
-  de una, y el resultado es el mismo qss de antes byte a byte.
-- Se une con `fromUtf8` y no con `QStringLiteral` a propósito: así es el runtime
-  quien decodifica UTF-8 y no depende del charset con el que MSVC leyó el
-  fichero (aunque `/utf-8` sigue puesto en CMakeLists).
-- Comprobado que no queda ningún literal de más de 16380 bytes en `src/`, y
-  `--selftest-theme` sigue parseando la hoja completa y la valida igual.
+- **Do NOT put the QSS back into a single literal.** If it grows, another chunk is added to the array.
+- The split always falls **between rules** (on a blank line), never inside one, and the result is the same qss as before, byte for byte.
+- It is joined with `fromUtf8` and not with `QStringLiteral` on purpose: that way the runtime decodes UTF-8 and it doesn't depend on the charset with which MSVC read the file (even though `/utf-8` is still set in CMakeLists).
+- It has been checked that no literal longer than 16380 bytes remains in `src/`, and `--selftest-theme` still parses the whole sheet and validates it the same way.
 
-Para detectarlo sin esperar al CI, basta con mirar el tamaño de los literales
-crudos: cualquier `R"…(` de más de 16 KB es un C2026 en el x86.
+To detect it without waiting for CI, just look at the size of the raw literals: any `R"…(` over 16 KB is a C2026 on x86.
 
-## Icono de la app
+## App icon
 
-La app tiene icono en cuatro superficies, todas desde los mismos ficheros:
+The app has an icon on four surfaces, all from the same files:
 
-| superficie | mecanismo |
+| surface | mechanism |
 |---|---|
-| `.exe` de Windows | `resources/nt.rc` (`IDI_ICON1 ICON DISCARDABLE "icon/nt.ico"`), añadido con `target_sources` dentro del `if(WIN32)` de CMakeLists; rc.exe resuelve la ruta con el `target_include_directories` a `resources/` |
-| Barra de tareas / Explorador | `nt.ico` multirres vía `IconFilename` en los accesos directos de `dist.iss` y `dist64.iss` |
-| El propio `setup.exe` | `SetupIconFile` en los dos `.iss` |
-| Ventana (Qt) | `app.setWindowIcon()` en `main.cpp` con los 7 PNG del `.qrc` |
+| Windows `.exe` | `resources/nt.rc` (`IDI_ICON1 ICON DISCARDABLE "icon/nt.ico"`), added with `target_sources` inside the `if(WIN32)` of CMakeLists; rc.exe resolves the path with the `target_include_directories` to `resources/` |
+| Taskbar / Explorer | multires `nt.ico` via `IconFilename` in the shortcuts of `dist.iss` and `dist64.iss` |
+| The `setup.exe` itself | `SetupIconFile` in the two `.iss` |
+| Window (Qt) | `app.setWindowIcon()` in `main.cpp` with the 7 PNGs from the `.qrc` |
 
-- El icono ACTUAL es el que eligió el usuario (un monitor brillante con botón
-  de reproducción rojo, a juego con el acento por defecto). Salió de un PNG del
-  modelo con el **damero de "transparencia" PINTADO** en los píxeles: se quitó
-  con un relleno por inundación desde el borde (grises claros conectados) y se
-  rellenó el RGB de la zona transparente para que el reescalado no deje halo
-  blanco. El maestro de 1024 es lo único que se toca a mano; el resto lo
-  regenera el script. NO hay que "adaptar" el icono al estilo de la app: manda
-  el icono.
-- Los ficheros viven en `resources/icon/` y los genera
-  `tools/gen_app_icon.py` desde el maestro `nt_icon.png` (1024, alfa real).
-  El generador **falla ruidosamente** si el maestro pierde transparencia o si
-  al `.ico` le falta alguna entrada, para que un cambio futuro no deje un
-  `.ico` de una sola entrada (barra borrosa) sin que nada se entere.
-- Las alturas son 16/24/32/48/64/128/256 porque **QIcon no escala**: elige la
-  entrada que más se parezca a lo que pide cada superficie. La de 16 es la barra
-  de tareas al 100 % y la más exigente: a ese tamaño el motivo tiene que seguir
-  leyéndose (en el icono anterior, un bisel de contorno de 1 px desaparecía:
-  medido, 1/16 del lienzo = 0,33 px).
-- `nt.ico` está en la lista `$need` del gate de manifiesto de iscc del x64: si
-  una edición de `[Files]` lo deja fuera, el CI lo dice en vez de crear los
-  accesos directos con el icono por defecto de Windows.
-- En Linux la ventana no muestra icono propio en el escritorio sin un
-  `.desktop` instalado; hoy no hay ninguno porque la app no se instala en Linux.
-- **Material de marca (a juego con el icono)**: los CTA de acento (`#primary`
-  —Buscar/Reproducir/OK—, `#accentChip` —"Ir a Buscar"— y `#subscribe`) van en
-  relleno PLANO del acento (moderno, sin gloss 3D) con un hairline de 1 px
-  blanco al ~15 % (`rgba(255,255,255,38)`) para que lean sobre el fondo oscuro,
-  y estados nítidos `@ACCENT_HOVER@`/`@ACCENT_PRESSED@`. Vale para los 7 colores
-  de Ajustes porque todo se deriva del acento. El logo de la app aparece en los
-  estados vacíos (`nt::appLogo` / `nt::emptyStateHtml`, encima del texto) y en
-  el del Home. La UI FUNCIONAL (fila del reproductor, listas, tarjetas, nav)
-  sigue PLANA: el material es solo de marca; no untar de degradados la app
-  entera.
+- The CURRENT icon is the one the user chose (a bright monitor with a red play button, matching the default accent). It came from a PNG of the mockup with the **"transparency" checkerboard PAINTED** into the pixels: it was removed with a flood fill from the border (connected light grays) and the RGB of the transparent area was filled in so that rescaling doesn't leave a white halo. The 1024 master is the only thing touched by hand; the rest is regenerated by the script. There is NO need to "adapt" the icon to the app's style: the icon rules.
+- The files live in `resources/icon/` and are generated by `tools/gen_app_icon.py` from the master `nt_icon.png` (1024, real alpha). The generator **fails loudly** if the master loses transparency or if the `.ico` is missing any entry, so that a future change doesn't leave a single-entry `.ico` (blurry taskbar) without anything noticing.
+- The heights are 16/24/32/48/64/128/256 because **QIcon does not scale**: it picks the entry closest to what each surface asks for. The 16 one is the taskbar at 100 % and the most demanding: at that size the motif must still be readable (in the previous icon, a 1 px contour bevel disappeared: measured, 1/16 of the canvas = 0.33 px).
+- `nt.ico` is in the `$need` list of the x64 iscc manifest gate: if an edit to `[Files]` leaves it out, CI says so instead of creating the shortcuts with Windows' default icon.
+- On Linux the window shows no icon of its own on the desktop without an installed `.desktop`; today there is none because the app is not installed on Linux.
+- **Brand material (matching the icon)**: the accent CTAs (`#primary` —Buscar/Reproducir/OK—, `#accentChip` —"Ir a Buscar"— and `#subscribe`) use a FLAT accent fill (modern, no 3D gloss) with a 1 px white hairline at ~15 % (`rgba(255,255,255,38)`) so they read against the dark background, and crisp `@ACCENT_HOVER@`/`@ACCENT_PRESSED@` states. It works for all 7 Ajustes colors because everything is derived from the accent. The app logo appears in the empty states (`nt::appLogo` / `nt::emptyStateHtml`, above the text) and in the Home one. The FUNCTIONAL UI (player row, lists, cards, nav) stays FLAT: the material is only for branding; do not smear gradients over the whole app.
 
-## Pieza protegida (NO modificar sin razón técnica y prueba)
+## Protected piece (do NOT modify without technical reason and proof)
 
-El reproductor funcional es una pieza protegida. Los siguientes elementos NO
-se deben tocar sin una razón técnica respaldada por una prueba concreta:
+The functional player is a protected piece. The following elements must NOT be touched without a technical reason backed by a concrete test:
 
-- `QOpenGLWidget` (clase `PlayerWidget`) como superficie de video
-- **Redibujado dirigido por eventos**: el motor notifica `frameReady` cuando
-  hay un frame nuevo (update callback de mpv instalado en
-  `MpvBackend::initGL` / `frameReady` por frame del FfmpegBackend) y
-  `PlayerWidget::onFrameReady` fuerza `QWidget::update()`. NO hay timer de
-  poll: en reposo (pausa, buffering, cubierto) no se repinta nada. Fue
-  sustituido por el antiguo `QTimer` de 33 ms, que quedó redundante al
-  existir la ruta de eventos (verificado: reproducción real + overlay
-  presente/auto-ocultado con capturas de pantalla, selftest-player).
-- `vo=libmpv` + `hwdec=auto` (funciona con y sin aceleración de hardware)
-- Renderizado directo a FBO (`mpv_render_context_render`) en `paintGL`
-- Cualquier cambio a la integración mpv (libmpv / mpv_render_context)
+- `QOpenGLWidget` (class `PlayerWidget`) as the video surface
+- **Event-driven redraw**: the engine notifies `frameReady` when there is a new frame (mpv update callback installed in `MpvBackend::initGL` / `frameReady` per frame from `FfmpegBackend`) and `PlayerWidget::onFrameReady` forces `QWidget::update()`. There is NO poll timer: at rest (paused, buffering, covered) nothing is repainted. It replaced the old 33 ms `QTimer`, which became redundant once the event path existed (verified: real playback + overlay shown/auto-hidden with screenshots, selftest-player).
+- `vo=libmpv` + `hwdec=auto` (works with and without hardware acceleration)
+- Direct rendering to FBO (`mpv_render_context_render`) in `paintGL`
+- Any change to the mpv integration (libmpv / mpv_render_context)
 
-Contexto: el primer intento de separar los controles multimedia (overlay
-flotante sobre el video) rompió la app y fue revertido. Hacer cambios de UI
-que toquen el reproductor por incrementos pequeños y verificando cada uno.
+Context: the first attempt to separate the multimedia controls (floating overlay over the video) broke the app and was reverted. Make UI changes that touch the player in small increments, verifying each one.
 
-## Layout de rejilla (vídeos) y "Tamaño de las miniaturas"
+## Grid layout (videos) and "Tamaño de las miniaturas"
 
-La rejilla del Home mantiene un **número de columnas FIJO** en cualquier ancho
-de ventana (5 por defecto; 4 o 6 según el ajuste). Cada celda se dimensiona
-según su contenido real (`VideoListView::applyGridGeometry`): `cellH =
-miniatura 16:9 + bloque de texto fijo` (hueco 8 + título 34 + línea de canal).
-NO usar un ratio fijo (`cellW * 258/320`) para la altura: al estrechar la
-ventana el texto no escala y un vídeo tapa el nombre del canal del siguiente.
-Ningún vídeo debe solaparse sobre otro, ni en vertical ni en horizontal.
+The Home grid keeps a **FIXED number of columns** at any window width (5 by
+default; 4 or 6 depending on the setting). Each cell is sized according to its
+real content (`VideoListView::applyGridGeometry`): `cellH =
+16:9 thumbnail + fixed text block` (8 gap + 34 title + channel line). Do NOT use
+a fixed ratio (`cellW * 258/320`) for the height: when the window narrows the
+text does not scale and one video covers the next one's channel name. No video
+may overlap another, neither vertically nor horizontally.
 
-El ajuste **"Tamaño de las miniaturas"** (Ajustes → Interfaz, clave
-`thumb_size` = `small|normal|large`) sustituye al antiguo "Densidad de
-cuadrícula" (`grid_density`), que se MIGRA al leerlo (`compact`→`small`,
-`cozy`→`normal`; la clave vieja se queda inerte en la BD). Se traduce a DOS
-efectos porque rejillas y listas no se dimensionan igual
-(`MainWindow::applyThumbSize`, el único punto que lo aplica, tanto al arrancar
-como en caliente):
+The **"Tamaño de las miniaturas"** setting (Ajustes → Interfaz, key
+`thumb_size` = `small|normal|large`) replaces the old "Densidad de cuadrícula"
+(`grid_density`), which is MIGRATED when read (`compact`→`small`,
+`cozy`→`normal`; the old key stays inert in the DB). It translates into TWO
+effects because grids and lists are not sized the same way
+(`MainWindow::applyThumbSize`, the only place that applies it, both at startup
+and live):
 
-| valor | Home (columnas) | Listas (escala de fila) |
+| value | Home (columns) | Lists (row scale) |
 |---|---|---|
-| `small` "Pequeñas" | 6 | 0.88 (fila 76 px) |
-| `normal` "Normales" | 5 (defecto) | 1.0 (fila 86 px) |
-| `large` "Grandes" | 4 | 1.15 (fila 99 px) |
+| `small` "Pequeñas" | 6 | 0.88 (row 76 px) |
+| `normal` "Normales" | 5 (default) | 1.0 (row 86 px) |
+| `large` "Grandes" | 4 | 1.15 (row 99 px) |
 
-- **En las listas** (búsqueda, canal, historial, playlists y la cola "A
-  continuación", todas `ListMode`) el factor `setDensity` sí se ve: la fila es
-  `kListH * d` y la miniatura `136d × 76d`.
-- **En las rejillas el factor NO hace nada visible** (por eso el ajuste antes
-  no se notaba en el Home): la celda la dimensiona el ANCHO con las columnas
-  fijas, así que a 903 px mide 175 px con densidad 1.0 y 175 px con 0.88. La
-  única palanca real es el número de columnas (`HomePage::setCellColumns` →
-  `setGridColumns` → `applyGridSizes`, que también recalcula la altura de cada
-  sección con el tamaño de celda nuevo).
-- **Tope por ancho**: `VideoListView::clampGridColumns` recorta las columnas
-  pedidas para que la celda no baje de `kMinCellW` = 130 px (por debajo, el
-  título de 2 líneas y la línea de canal se recortan). A 903 px caben 6
-  columnas (celda 147 px), a 700 px solo 5 y nunca baja de 3. Se aplica en
-  `HomePage::effectiveCellColumns` desde `applyGridSizes`, o sea también en
-  cada `resizeEvent`. Función pura testeada en `--selftest-grid` (12 casos de
-  columnas + 10 de texto + la monotonía de 100 a 900 px).
+- **In lists** (Búsqueda, Canal, Playlist, Historial/"Ver todo", "A continuación"
+  and the Biblioteca sections) the `setDensity` factor does show: the row is
+  `kListH * d` and the thumbnail `136d × 76d`.
+- **In grids the factor does nothing visible** (that is why the setting used to
+  go unnoticed on Home): the cell is sized by the WIDTH with the fixed columns,
+  so at 903 px it measures 175 px with density 1.0 and 175 px with 0.88. The
+  only real lever is the number of columns (`HomePage::setCellColumns` →
+  `setGridColumns` → `applyGridSizes`, which also recomputes each section's
+  height with the new cell size).
+- **Width cap**: `VideoListView::clampGridColumns` trims the requested columns so
+  that the cell does not drop below `kMinCellW` = 130 px (below that, the
+  2-line title and the channel line get clipped). At 903 px 6 columns fit
+  (cell 147 px), at 700 px only 5, and it never drops below 3. It is applied in
+  `HomePage::effectiveCellColumns` from `applyGridSizes`, that is, also on every
+  `resizeEvent`. Pure function tested in `--selftest-grid` (12 column cases + 10
+  text cases + monotonicity from 100 to 900 px).
 
-- **El texto de la celda se deriva de la celda** (ya no es fijo):
-  `VideoListView::gridTitlePx(cellW)` da **13 px con celda de 140 px hasta 18 px
-  con celda de 340 px** (lineal, con topes en los dos extremos), y
-  `gridTitleLineH` = 1,28 × tamaño. Antes eran 13 px y una caja de 34 px fijos
-  mientras la miniatura sí crecía, que en un monitor grande dejaba el texto
-  pequeño y descoyente. Con celda de 177 px (5 columnas a 903 px de viewport)
-  salen 13 px, y con 340 px o más 16 px (tope). El título va en **negrita**: se
-  probó sin ella y el usuario pidió volver a ella. Lo que no le gustaba era el
-  TAMAÑO, no el grosor (con la letra ya 1 px más pequeña la negrita solo ayuda a
-  distinguir el título de la línea de canal). La **línea de meta** (canal ·
-  visitas · fecha) va **2 px por debajo del tamaño del título** (suelo 10 px):
-  el usuario la pidió más discreta que el título.
-- **`kGridTitleLines` = 2 líneas, con la fuente 1 px más pequeña y sin
-  negrita.** Son las tres cosas que pidió el usuario al ver 14 px en negrita a 3
-  líneas: la celda queda bastante más compacta (175 px de alto en vez de 195 con
-  celda de 177) a cambio de un poco de legibilidad. Medido con las métricas
-  REALES de Qt (`QFontMetricsF`, misma fuente y mismo reparto voraz por palabras
-  que `drawGridTitle`) sobre los 90 títulos de la caché y la caja de 161 px que
-  sale a 5 columnas en una ventana de 941 px:
+- **The cell text is derived from the cell** (no longer fixed):
+  `VideoListView::gridTitlePx(cellW)` gives **13 px with a 140 px cell up to 18 px
+  with a 340 px cell** (linear, with caps at both ends), and
+  `gridTitleLineH` = 1.28 × size. Before it was 13 px and a fixed 34 px box
+  while the thumbnail did grow, which on a large monitor left the text small and
+  disjointed. With a 177 px cell (5 columns at a 903 px viewport) it comes out
+  13 px, and with 340 px or more 16 px (cap). The title is **bold**: it was tried
+  without it and the user asked to put it back. What he did not like was the
+  SIZE, not the weight (with the font already 1 px smaller, bold only helps
+  distinguish the title from the channel line). The **meta line** (channel ·
+  views · date) is **2 px below the title size** (floor 10 px): the user asked
+  for it to be more discreet than the title.
+- **`kGridTitleLines` = 2 lines, with the font 1 px smaller and without bold.**
+  Those are the three things the user asked for upon seeing 14 px bold at 3
+  lines: the cell ends up quite a bit more compact (175 px tall instead of 195
+  with a 177 px cell) in exchange for a little legibility. Measured with the
+  REAL Qt metrics (`QFontMetricsF`, same font and same greedy word wrapping as
+  `drawGridTitle`) over the 90 titles in the cache and the 161 px box that comes
+  out at 5 columns in a 941 px window:
 
-  | config | título entero | texto visible | de ellos, ≥5 líneas |
+  | config | full title | visible text | of them, ≥5 lines |
   |---|---|---|---|
-  | 14 px negrita, 3 líneas | 13% | 72% | 51/90 |
-  | **13 px negrita, 2 líneas (actual)** | 3% | 55% | 37/90 |
-  | 13 px normal, 2 líneas | 5% | 58% | 22/90 |
-  | 12 px normal, 2 líneas | 8% | 62% | 9/90 |
+  | 14 px bold, 3 lines | 13% | 72% | 51/90 |
+  | **13 px bold, 2 lines (current)** | 3% | 55% | 37/90 |
+  | 13 px normal, 2 lines | 5% | 58% | 22/90 |
+  | 12 px normal, 2 lines | 8% | 62% | 9/90 |
 
-  La negrita cuesta algo de legibilidad (3% enteros frente al 5% sin negrita) y
-  es el precio que el usuario eligió: la celda compacta le importa más que leer
-  el título entero. La celda mide `thumbH + 6 + 8 + gridTextBlockH(cellW)` y el
-  bloque `2*lineH + 14 + 20` (64 px a 12 px, o sea celda de 140); NO cambia el
-  número de vídeos por fila. Si algún día se queja de que se cortan títulos, el
-  primer experimento es **12 px** (medido: 8% enteros y 62% visible, MEJOR que
-  13 px) y el segundo volver a 3 líneas.
-  **Geometría y pintura comparten las mismas funciones puras**
-  (`gridTitlePx`/`gridTitleLineH`/`kGridTitleLines`), así que la celda reserva
-  exactamente lo que el título ocupa y no puede solaparse con la línea de canal.
-  El reparto en N líneas es voraz por palabras y en la ÚLTIMA línea entra todo
-  lo que queda desde el principio de esa línea, elidado: se ve el arranque del
-  resto en vez de un corte en seco. El modo **lista** no se toca (sigue a 2
-  líneas con el interlineado natural de la fuente, porque su altura de fila es
-  fija y no deriva de la celda).
-- **La celda tiene que medir lo mismo en los TRES sitios que la usan**: el
-  `sizeHint` que lleva cada item del modelo, `gridSize()` (de donde la página
-  saca la altura de la sección) y el rect que acaba pintando QListView. En
-  `IconMode` **manda el `sizeHint` del MODELO por encima de `gridSize()`**, así
-  que cuando divergen las filas ocupan una cosa y la sección se dimensiona con
-  otra, y **la última fila se sale de la vista** (con ella la línea de canal):
-  era un bug PREEXISTENTE con el `sizeHint` clavado en la constante `kGridH`
-  (258) mientras `applyGridGeometry` calculaba otro `cellH` (195 a celda de
-  177), o sea filas de 258 dentro de secciones de `rows*195`. La única fuente es
-  `applyGridGeometry`, que escribe además el `sizeHint` de todos los items
-  (`m_gridCell`, y `gridItemSize()` para los items nuevos); por eso se llama
-  DESPUÉS de crearlos. La altura de sección sigue siendo `rows * cellH` porque
-  en `IconMode` las filas van clavadas una detrás de otra: `setSpacing(4)` **no**
-  suma nada (medido: celda 177x195 -> rect 177x195 y paso 195) y el hueco visual
-  entre miniaturas es el margen interno de 6 px que pinta el delegate. Lo
-  comprueba `--selftest-grid` con un `VideoListView` de verdad (19 vídeos, 5
-  columnas): `sizeHint` == `gridSize` == rect real, la última fila cabe en
-  `rows*cellH` y las filas no se solapan.
-- OJO: el texto ya escala, pero el ajuste de la **columna** sigue siendo
-  decision del usuario (4/5/6). Con celdas muy estrechas el título se cortará
-  igual: ahí el que decide cuántas líneas caben es el ajuste, no la fuente.
+  Bold costs some legibility (3% full versus 5% without bold) and it is the
+  price the user chose: the compact cell matters to him more than reading the
+  full title. The cell measures `thumbH + 6 + 8 + gridTextBlockH(cellW)` and the
+  block `2*lineH + 14 + 20` (64 px at 12 px, that is, a 140 px cell); it does NOT
+  change the number of videos per row. If some day he complains that titles get
+  cut off, the first experiment is **12 px** (measured: 8% full and 62% visible,
+  BETTER than 13 px) and the second is going back to 3 lines.
+  **Geometry and painting share the same pure functions**
+  (`gridTitlePx`/`gridTitleLineH`/`kGridTitleLines`), so the cell reserves
+  exactly what the title occupies and cannot overlap the channel line.
+  The split into N lines is greedy by words and the LAST line takes in
+  everything left from the start of that line, elided: you see the beginning of
+  the rest instead of a hard cut. The **list** mode is not touched (it stays at
+  2 lines with the font's natural leading, because its row height is fixed and
+  does not derive from the cell).
+- **The cell must measure the same in the THREE places that use it**: the
+  `sizeHint` carried by each item of the model, `gridSize()` (from which the page
+  gets the section height) and the rect that QListView ends up painting. In
+  `IconMode` **the MODEL's `sizeHint` overrides `gridSize()`**, so when they
+  diverge the rows occupy one thing and the section is sized with another, and
+  **the last row runs off the view** (with it the channel line): it was a
+  PRE-EXISTING bug with `sizeHint` pinned to the constant `kGridH` (258) while
+  `applyGridGeometry` computed another `cellH` (195 at a 177 px cell), that is,
+  rows of 258 inside sections of `rows*195`. The only source is
+  `applyGridGeometry`, which also writes the `sizeHint` of all items
+  (`m_gridCell`, and `gridItemSize()` for new items); that is why it is called
+  AFTER creating them. The section height is still `rows * cellH` because in
+  `IconMode` the rows are pinned one after another: `setSpacing(4)` **adds**
+  nothing (measured: cell 177x195 -> rect 177x195 and step 195) and the visual
+  gap between thumbnails is the 6 px internal margin the delegate paints. It is
+  checked by `--selftest-grid` with a real `VideoListView` (19 videos, 5
+  columns): `sizeHint` == `gridSize` == real rect, the last row fits in
+  `rows*cellH` and the rows do not overlap.
+- NOTE: the text already scales, but the **column** setting is still the user's
+  decision (4/5/6). With very narrow cells the title will still get cut off:
+  there the one that decides how many lines fit is the setting, not the font.
 
-## Fila de vídeo en listas: UNA forma en todas las páginas
+## Video row in lists: ONE shape on every page
 
-La fila de `VideoListView` en `ListMode` (Búsqueda, Canal, Playlist,
-Historial/"Ver todo", "A continuación" y las secciones de Biblioteca) es la
-MISMA forma en todas partes: **miniatura + título + "canal • visitas • fecha" +
-botón de opciones ⋮**. Lo único que cambia entre páginas es el TAMAÑO de la
-miniatura y de la fila (Búsqueda/Canal/Playlist/cola a escala 1.0, Historial a
-1.21, Biblioteca con su miniatura de 236x133): el usuario pidió "mismo estilo,
-no mismo tamaño de letra o negrita", así que la tipografía es la que ya tenía
-cada superficie (título en negrita con la fuente de la app y meta reducida en
-las listas; 14/600 y 12 px en Biblioteca). NO unificar tamaños ni pesos.
+The `VideoListView` row in `ListMode` (Búsqueda, Canal, Playlist,
+Historial/"Ver todo", "A continuación" and the Biblioteca sections) is the
+SAME shape everywhere: **thumbnail + title + "channel • views • date" +
+options button ⋮**. The only thing that changes between pages is the SIZE of the
+thumbnail and the row (Búsqueda/Canal/Playlist/queue at scale 1.0, Historial at
+1.21, Biblioteca with its 236x133 thumbnail): the user asked for "same style,
+not same font size or bold", so the typography is what each surface already had
+(bold title with the app font and reduced meta in the lists; 14/600 and 12 px in
+Biblioteca). Do NOT unify sizes or weights.
 
-- **`format::metaLine(v)`** (`src/ui/format.*`) es la única función que compone
-  la línea de meta. La usan el delegate (rejilla y lista) y las filas de
-  Biblioteca. Antes estaba triplicada (dos copias en el delegate y una en
-  Biblioteca) y la fila de lista pintaba solo "canal • visitas": el mismo vídeo
-  se leía distinto según la página.
-- **El bloque de texto va CENTRADO en la fila**, y con la altura REAL del
-  título (1 o 2 líneas): `wrapTitle` (la misma función que pinta
-  `drawGridTitle`) da las líneas que ocupa y `paintList` centra con esa altura,
-  así que la meta queda pegada a la última línea del título. Antes se
-  reservaban 2 líneas siempre y con un título de una línea la meta caía un
-  renglón entero por debajo (medido: hueco ~31 px; ahora ~12). Las medidas del
-  bloque están en `VideosDelegate::listMetrics`, y la caja del título y la
-  línea base de la meta salen de ahí.
-- **Nada de texto debajo de los botones**: `textWidth(r, ...)` descuenta el
-  hueco real de la X y/o el ⋮, con la misma cuenta que `removeButtonRect`/
-  `moreButtonRect`. Medido: sin descontar el ⋮ el título llegaba a x=839 con los
-  puntos del botón en 838-841.
-- **El ⋮ va pegado al borde derecho cuando no hay X** (como el botón de
-  Biblioteca) y a la izquierda de la X cuando la hay. Antes reservaba siempre el
-  hueco de la X aunque no se pintara, y le robaba 34 px de texto a la fila (se
-  nota sobre todo en la columna estrecha de "A continuación").
-- Se borró el modo de meta de 2 bloques (`setMetaLines`/`paintRichMeta`/avatar
-  de canal): no lo llamaba nadie y pintaba una fila distinta, justo la
-  divergencia que se estaba quitando.
+- **`format::metaLine(v)`** (`src/ui/format.*`) is the only function that composes
+  the meta line. It is used by the delegate (grid and list) and by the
+  Biblioteca rows. Before it was triplicated (two copies in the delegate and one
+  in Biblioteca) and the list row painted only "channel • views": the same video
+  read differently depending on the page.
+- **The text block is CENTERED in the row**, and with the REAL height of the
+  title (1 or 2 lines): `wrapTitle` (the same function that paints
+  `drawGridTitle`) gives the lines it occupies and `paintList` centers with that
+  height, so the meta stays attached to the last line of the title. Before,
+  2 lines were always reserved and with a one-line title the meta fell a whole
+  line lower (measured: gap ~31 px; now ~12). The block's measurements are in
+  `VideosDelegate::listMetrics`, and the title box and the meta baseline come
+  from there.
+- **No text under the buttons**: `textWidth(r, ...)` discounts the real gap of
+  the X and/or the ⋮, with the same calculation as `removeButtonRect`/
+  `moreButtonRect`. Measured: without discounting the ⋮ the title reached x=839
+  with the button's dots at 838-841.
+- **The ⋮ sits flush against the right edge when there is no X** (like the
+  Biblioteca button) and to the left of the X when there is one. Before it always
+  reserved the X's slot even when it was not painted, and it stole 34 px of text
+  from the row (most noticeable in the narrow "A continuación" column).
+- The 2-block meta mode (`setMetaLines`/`paintRichMeta`/channel avatar) was
+  deleted: nobody called it and it painted a different row, exactly the
+  divergence that was being removed.
 
-### Menú ⋮: uno solo para todas las superficies
+### ⋮ menu: a single one for all surfaces
 
-`nt::addRowMenuActions` (`src/ui/row_menu.*`) añade las acciones estándar con
-los mismos textos y en el mismo orden: **Ver más tarde** (toggle; etiqueta
-"Guardar" o "Quitar de Ver más tarde" según el estado), **Añadir a playlist**
-(con "+ Nueva playlist" si la superficie pasa el callback) y **Compartir** y
-**Ver canal**. Cada superficie antepone su acción propia: Historial "Quitar del
-historial", "A continuación" "Quitar de la cola". Las acciones que escriben en
-la BD se ejecutan con `QTimer::singleShot(0)`: en el `triggered()` la lista de
-la que nació el menú puede quedarse sin la fila con el popup abierto.
+`nt::addRowMenuActions` (`src/ui/row_menu.*`) adds the standard actions with
+the same texts and in the same order: **Ver más tarde** (toggle; label
+"Guardar" or "Quitar de Ver más tarde" depending on the state), **Añadir a playlist**
+(with "+ Nueva playlist" if the surface passes the callback) and **Compartir** and
+**Ver canal**. Each surface prepends its own action: Historial "Quitar del
+historial", "A continuación" "Quitar de la cola". The actions that write to
+the DB are executed with `QTimer::singleShot(0)`: in the `triggered()` the list
+the menu was born from may be left without the row with the popup open.
 
-- Biblioteca, Historial y "A continuación" construyen el menú en la propia
-  página (tienen los repos y, la cola, el `PlayerController`).
-- Búsqueda, Canal y Playlist **no** tienen los repos: emiten
-  `rowMenuRequested(video, pos)` y `MainWindow::showVideoRowMenu` monta el menú
-  UNA vez (mismo helper) con los suyos. "Nueva playlist" sale por el diálogo
-  compartido `nt::inputText`, al que entra por
-  `LibraryPage::createPlaylistForVideo(videoId)` (el nombre ya no dice "popup"
-  porque es el overlay de la app, no un popover de la página).
-- "Quitar de la cola" usa `PlayerController::removeFromQueue(index)`, que NO
-  admite el índice en reproducción (dejaría la cola apuntando al siguiente con
-  el estado del que se fue) y reindexa las posiciones de reanudación
-  (`m_indexStartMs`) al desplazarse.
+- Biblioteca, Historial and "A continuación" build the menu in the page itself
+  (they have the repos and, the queue, the `PlayerController`).
+- Búsqueda, Canal and Playlist do **not** have the repos: they emit
+  `rowMenuRequested(video, pos)` and `MainWindow::showVideoRowMenu` builds the
+  menu ONCE (same helper) with its own. "Nueva playlist" comes out through the
+  shared dialog `nt::inputText`, which it enters through
+  `LibraryPage::createPlaylistForVideo(videoId)` (the name no longer says "popup"
+  because it is the app's overlay, not a page popover).
+- "Quitar de la cola" uses `PlayerController::removeFromQueue(index)`, which does
+  NOT accept the index currently playing (it would leave the queue pointing at
+  the next one with the state of the one that left) and reindexes the resume
+  positions (`m_indexStartMs`) when shifting.
 
-## Página Canal: ficha en caja y pestañas propias
+## Channel page: card in a box and its own tabs
 
-Lo que gobierna la página:
+What governs the page:
 
-- **La ficha va dentro de una caja** (`QFrame#channelCard`, #181818 + borde
-  #262626 + radio 12, como `#settingsCard` y `#watchDescCard`). Antes avatar,
-  título, suscriptores y "Suscribirse" iban sueltos sobre el fondo de la
-  página, y la descripción en una línea gris propia debajo. Ahora el avatar (80
-  px, circular), el nombre (`#channelName` 19px/700), la línea de
-  suscriptores (`#channelMeta` 12px `kMetaText`) y las dos acciones van en una
-  fila, y la descripción (`#channelDesc`, mismo color/peso que `#watchMeta`)
-  cierra la caja. El nombre es 19px porque es el H1 al que se entra; el resto de
-  superficies conservan su tipografía (aquí NO se unifica nada con Buscar,
-  Biblioteca o Player, solo la forma).
-- **Suscriptores con `compactCount`** (`format.h`), no el `long long` en crudo:
-  antes ponía tal cual "1234567 suscriptores".
-- **El avatar va circular de verdad**: `nt::circularAvatar` (`src/ui/icons.*`)
-  escala, recorta el centro y enmascara con un círculo. El `border-radius` del
-  QSS solo redondea el fondo de un QLabel, y el `setScaledContents` deformaba
-  cualquier avatar no cuadrado. Esta función sustituye a las dos copias idénticas
-  que tenía `channel_row.cpp` y `watch_page.cpp` (la del Player además estiraba
-  el pixmap).
-- **La descripción se recorta por LÍNEAS, no por píxeles**: 3 (`kDescLines`).
-  El tope anterior eran 165 px, que dependen del interlineado de la fuente. El
-  botón "…más"/"…menos" es `#descToggle` (enlace discreto, no cápsula) y el
-  degradado `#descFade` (26 px arriba del borde inferior de la caja,
-  `positionDescFade`). OJO: el **Player ya NO colapsa** (muestra la descripción
-  completa); este recorte + `#descToggle`/`#descFade` son solo de la página Canal.
-- **La descripción del Canal lleva enlaces como la del Player**: el QLabel
-  `#channelDesc` es `Qt::RichText` con `LinksAccessibleByMouse` +
-  `setOpenExternalLinks(true)`, y el texto se pinta con el MISMO HTML del Player
-  (`descriptionHtml()` en `src/ui/format.*`: escapa, `\n`→`<br>` y cada URL en
-  un `<a>` del color del acento, sin subrayado). El texto PLANO se guarda aparte
-  (`m_descText`) porque `applyDescriptionCap`/`toggleDescription` comprueban el
-  vacío contra el texto real, no contra el HTML renderizado (y `heightForWidth`
-  mide el mismo rich text que se pinta).
-- **Las pestañas ya no son un `QTabWidget`**: eran lo ÚNICO de la app sin estilo
-  (no hay regla `QTabWidget`/`QTabBar` en el QSS) y el "pane" pintaba una
-  columna casi negra `#020303` bajo la lista, más oscura que el fondo de la
-  página. Ahora son tres `QPushButton#tabBtn` dentro de una cápsula
-  `#channelTabs`; la seleccionada lleva el acento en el texto (como la nav) y
-  todas anulan el `:focus`. El contenido son tres widgets que `showTab()`
-  muestra a mano (no un `QStackedWidget`, que volvería a traer el fondo del tema
-  del escritorio). `#tabBtn` y su `:focus` los vigila `--selftest-theme`.
-- **Contador de vídeos** de la pestaña activa como pastilla `#tabCount`
-  (misma forma que `#queueCount`), oculto con 0 vídeos porque entonces ya sale
-  el estado vacío.
-- **Estado vacío por pestaña** = `#emptyState` (la misma caja punteada de la
-  Biblioteca) con el texto de esa pestaña + el logo de la app encima
-  (`nt::emptyStateHtml`), y la lista se oculta a la vez. Con **alto FIJO de
-  116 px** (eran 96 sin logo), y NO con stretch: medido en un QVBoxLayout de
-  700 px, una etiqueta con stretch 0 cuyo único hermano con stretch está oculto
-  se estira a los 700 px (una caja punteada gigante); con alto fijo queda en una
-  banda centrada verticalmente y de ancho completo.
-- **"Cargar más vídeos" es `#ghost` centrado** (alto 34). Era `#primary` con
-  `setFixedWidth(180)`, una barra roja ancha bajo la lista; cargar más no es la
-  acción principal de la página. Solo visible si la respuesta vino llena (25).
-- **Añadido botón "Compartir"** (chip `#actionChip` con `nt::Icon::Share`): copia
-  `https://www.youtube.com/channel/<id>`. Al re-tintar el acento hay que rehacer
-  el icono a mano (`applyAccent`): los `QIcon` llevan el color embebido.
+- **The card goes inside a box** (`QFrame#channelCard`, #181818 + border
+  #262626 + radius 12, like `#settingsCard` and `#watchDescCard`). Before, the
+  avatar, title, subscriber count and "Suscribirse" sat loose on the page
+  background, and the description on its own gray line below. Now the avatar (80
+  px, circular), the name (`#channelName` 19px/700), the subscriber line
+  (`#channelMeta` 12px `kMetaText`) and the two actions go in one
+  row, and the description (`#channelDesc`, same color/weight as `#watchMeta`)
+  closes the box. The name is 19px because it is the H1 you enter to; the rest of
+  the surfaces keep their typography (here NOTHING is unified with Search,
+  Library or Player, only the shape).
+- **Subscribers with `compactCount`** (`format.h`), not the raw `long long`:
+  before it printed as-is "1234567 suscriptores".
+- **The avatar is really circular**: `nt::circularAvatar` (`src/ui/icons.*`)
+  scales, crops the center and masks with a circle. The QSS `border-radius` only
+  rounds the background of a QLabel, and `setScaledContents` deformed
+  any non-square avatar. This function replaces the two identical copies
+  that `channel_row.cpp` and `watch_page.cpp` had (the Player's also stretched
+  the pixmap).
+- **The description is clipped by LINES, not pixels**: 3 (`kDescLines`).
+  The previous cap was 165 px, which depends on the font's line spacing. The
+  "…más"/"…menos" button is `#descToggle` (discreet link, not a pill) and the
+  `#descFade` gradient (26 px above the bottom edge of the box,
+  `positionDescFade`). NOTE: the **Player NO LONGER collapses** (it shows the full
+  description); this clipping + `#descToggle`/`#descFade` belong only to the Channel page.
+- **The Channel description carries links like the Player's**: the QLabel
+  `#channelDesc` is `Qt::RichText` with `LinksAccessibleByMouse` +
+  `setOpenExternalLinks(true)`, and the text is painted with the SAME HTML as the Player
+  (`descriptionHtml()` in `src/ui/format.*`: escapes, `\n`→`<br>` and each URL in
+  an `<a>` of the accent color, without underline). The PLAIN text is stored apart
+  (`m_descText`) because `applyDescriptionCap`/`toggleDescription` check for
+  emptiness against the real text, not against the rendered HTML (and `heightForWidth`
+  measures the same rich text that is painted).
+- **The tabs are no longer a `QTabWidget`**: they were the ONLY thing in the app without
+  styling (there is no `QTabWidget`/`QTabBar` rule in the QSS) and the "pane" painted a
+  nearly black `#020303` column under the list, darker than the page
+  background. Now they are three `QPushButton#tabBtn` inside a
+  `#channelTabs` capsule; the selected one carries the accent in the text (like the nav) and
+  they all cancel the `:focus`. The content is three widgets that `showTab()`
+  shows by hand (not a `QStackedWidget`, which would bring back the desktop theme
+  background). `#tabBtn` and its `:focus` are watched by `--selftest-theme`.
+- **Video counter** of the active tab as a `#tabCount` pill
+  (same shape as `#queueCount`), hidden with 0 videos because then the
+  empty state already shows.
+- **Empty state per tab** = `#emptyState` (the same dotted box as the
+  Library) with that tab's text + the app logo on top
+  (`nt::emptyStateHtml`), and the list hides at the same time. With a **FIXED height
+  of 116 px** (it was 96 without the logo), and NOT with stretch: measured in a 700 px
+  QVBoxLayout, a label with stretch 0 whose only stretch sibling is hidden
+  stretches to the full 700 px (a giant dotted box); with a fixed height it stays in a
+  band centered vertically and full width.
+- **"Cargar más vídeos" is a centered `#ghost`** (height 34). It was `#primary` with
+  `setFixedWidth(180)`, a wide red bar under the list; loading more is not
+  the main action of the page. Only visible if the response came full (25).
+- **Added "Compartir" button** (`#actionChip` chip with `nt::Icon::Share`): copies
+  `https://www.youtube.com/channel/<id>`. When re-tinting the accent, the icon must be
+  redone by hand (`applyAccent`): `QIcon`s carry the color embedded.
 
-## Página Player: scroll único (vídeo + descripción + A continuación)
+## Player page: single scroll (video + description + A continuación)
 
-La página Player scrollea como YouTube: vídeo, descripción y "A continuación"
-viven DENTRO de un único `QScrollArea` (`WatchPage::m_topScroll`) y el scroll
-mueve todo junto — al bajar, el vídeo se va de la pantalla y descripción/cola
-ganan espacio. Dentro del scroll, la descripción va a la izquierda y "A
-continuación" a la DERECHA (sin límite vertical: crece con todas sus filas y
-el scroll general la recorre). Ambos bloques se alinean ARRIBA y conservan su
-altura natural (`midLay->setAlignment(..., Qt::AlignTop)`): la fila crece con
-la cola, pero la descripción no se estira a esa altura — debajo de cada
-bloque solo queda espacio vacío scrollable, no un widget estirado. El botón
-"Volver" del Player es un enlace flotante **sobre el vídeo que solo aparece con
-el ratón** (detalle en el punto de `#backLink` de abajo): ya no hay barra fija
-que empuje la imagen para abajo.
+The Player page scrolls like YouTube: video, description and "A continuación"
+live INSIDE a single `QScrollArea` (`WatchPage::m_topScroll`) and the scroll
+moves everything together — as you scroll down, the video goes off screen and the description/queue
+gain space. Inside the scroll, the description goes on the left and "A
+continuación" on the RIGHT (with no vertical limit: it grows with all its rows and
+the general scroll traverses it). Both blocks are aligned at the TOP and keep their
+natural height (`midLay->setAlignment(..., Qt::AlignTop)`): the row grows with
+the queue, but the description does not stretch to that height — below each
+block there is only empty scrollable space, not a stretched widget. The Player's
+"Volver" button is a floating link **over the video that only appears with
+the mouse** (detail in the `#backLink` point below): there is no longer a fixed
+bar pushing the image down.
 
-- **"Volver" es el MISMO token en las cuatro superficies** con vuelta atrás
-  (Canal, Historial, Playlist y el Player): `QPushButton#backLink`, que es un
-  ENLACE (sin marco, `padding: 4px 8px`, 13 px/600, `@MUTED@` → `@TEXT@` al
-  hover) y no una cápsula. Antes era `#ghost` (con borde) en las tres páginas
-  y un botón flotante sobre el vídeo en el Player. Es el mismo criterio que
-  `#sectionLink` de Biblioteca: "volver" es navegación, no un control de la
-  página. El icono es `nt::icon(nt::Icon::Back, nt::kMuted, 13)` en las cuatro
-  (dibujado con QPainter, nunca el glifo `◀`). Lo que sí cambia entre
-  superficies es solo DÓNDE va el enlace: en las tres páginas dentro de su
-  propio layout de raíz, y en el Player **sobre el vídeo** en la esquina
-  superior izquierda (`m_back->move(12, 8)`), **solo mientras están visibles
-  los controles**: comparte el ciclo de 2,5 s con `m_ctrlBar`, o sea aparece al
-  mover el ratón encima de la imagen y se apaga solo con
-  `hideOverlayControls`. Vive como hijo de `gl` (el `OverlayHost` transparente
-  de la página 0 del overlay), no de la página: así el reparent del mini player
-  no necesita nada (el overlay ya es hijo del player) y `gl1`, que solo gestiona
-  el stretch y `m_ctrlBar`, no le toca la geometría.
-- **OJO con el histórico de este botón**, que ya dio dos vueltas: el usuario lo
-  pidió PRIMERO fuera de la imagen (vivía en un botón flotante `move(12,8)` +
-  `raise()`), entonces pasó a una barra fija de 38 px a todo el ancho encima
-  del scroll (`m_backBar`), y esa barra tampoco le gustó (banda llena de hueco
-  con un enlace de 63 px, y empujaba el vídeo a `y=38`). El estado actual es de
-  nuevo sobre la imagen pero **revelado con el ratón**, que es lo único que no
-  ocupa espacio propio. Si se vuelve a tocar, mirar el guard de
-  `m_inFullscreen` en `showOverlayControls`: `enterFullscreen()` llama a
-  `showOverlayControls()`, así que ocultar el botón SOLO desde
-  `enterFullscreen()` no basta (se vuelve a mostrar).
+- **"Volver" is the SAME token on the four surfaces** with a back action
+  (Channel, History, Playlist and the Player): `QPushButton#backLink`, which is a
+  LINK (no frame, `padding: 4px 8px`, 13 px/600, `@MUTED@` → `@TEXT@` on
+  hover) and not a pill. Before it was `#ghost` (with a border) on the three pages
+  and a floating button over the video in the Player. It is the same criterion as
+  `#sectionLink` in the Library: "back" is navigation, not a
+  control of the page. The icon is `nt::icon(nt::Icon::Back, nt::kMuted, 13)` on all four
+  (drawn with QPainter, never the `◀` glyph). What does change between
+  surfaces is only WHERE the link goes: on the three pages inside their
+  own root layout, and in the Player **over the video** in the top
+  left corner (`m_back->move(12, 8)`), **only while the controls are
+  visible**: it shares the 2.5 s cycle with `m_ctrlBar`, that is, it appears when
+  moving the mouse over the image and turns off by itself with
+  `hideOverlayControls`. It lives as a child of `gl` (the transparent `OverlayHost`
+  of page 0 of the overlay), not of the page: that way the mini player's reparent
+  needs nothing (the overlay is already a child of the player) and `gl1`, which only manages
+  the stretch and `m_ctrlBar`, does not touch its geometry.
+- **Beware the history of this button**, which has already gone two rounds: the user
+  asked for it FIRST outside the image (it lived in a floating button `move(12,8)` +
+  `raise()`), then it became a fixed 38 px bar across the full width above
+  the scroll (`m_backBar`), and that bar he didn't like either (a band full of empty space
+  with a 63 px link, and it pushed the video to `y=38`). The current state is again
+  over the image but **revealed with the mouse**, which is the only thing that does not
+  occupy space of its own. If it is touched again, look at the guard of
+  `m_inFullscreen` in `showOverlayControls`: `enterFullscreen()` calls
+  `showOverlayControls()`, so hiding the button ONLY from
+  `enterFullscreen()` is not enough (it shows again).
 
-- `PlayerContainer::updateMaxHeight()` fija `min = max = min(width/aspect,
-  kMaxPlayerHeight=560)` (no solo el máximo, como el split antiguo): dentro
-  del scroll el layout debe darle al vídeo EXACTAMENTE su altura, ni estirado
-  por políticas Expanding ni encogido por el contenido scrolleable. El tope
-  absoluto **NO aplica en pantalla completa** (`setFullscreen(true)` →
-  `capped = width/aspect`): si se re-aplica el 560 en fullscreen el vídeo
-  quedaría en 560 px con la pantalla llena de negro (regresión vista y
-  revertida en el layout split anterior). El tope sí aplica en ventana normal
-  y maximizada.
-- La cola "A continuación" va a la DERECHA de la descripción, SIN límite
-  vertical: en `WatchPage::updateQueue()` se fija su altura al contenido real
-  (`sizeHintForRow(0)` × nº de filas) para que el scroll general de la página
-  la recorra entera, sin scroll interno duplicado.
-- Fullscreen (solo vídeo): se ocultan el enlace Volver + descripción + cola
-  (`m_back`, `m_watchBody`, `m_bottomWidget`); con `widgetResizable` el
-  contenido queda = solo vídeo y se estira a toda la página (sin reparent del
-  player). Al salir se restauran y el scroll vuelve a 0.
-- Al cambiar de vídeo (`onCurrentChanged`) el scroll vuelve arriba (como
-  YouTube); no en fullscreen (ahí está oculto).
-- Verificación visual: QOpenGLWidget dentro de QScrollArea funciona en Qt
-  5.15, pero hay que comprobar en la máquina real que no haya parpadeo/
-  artefactos al scrollear y que el "salto al volver" del vídeo al volver
-  arriba tras estar fuera del viewport sea aceptable (mpv acumula frames
-  mientras no pinta).
+- `PlayerContainer::updateMaxHeight()` sets `min = max = min(width/aspect,
+  kMaxPlayerHeight=560)` (not only the maximum, like the old split): inside
+  the scroll the layout must give the video EXACTLY its height, neither stretched
+  by Expanding policies nor shrunk by the scrollable content. The absolute cap
+  **does NOT apply in fullscreen** (`setFullscreen(true)` →
+  `capped = width/aspect`): if the 560 is reapplied in fullscreen the video
+  would be 560 px with the screen full of black (regression seen and
+  reverted in the old split layout). The cap does apply in a normal window
+  and maximized.
+- The "A continuación" queue goes to the RIGHT of the description, with NO vertical
+  limit: in `WatchPage::updateQueue()` its height is set to the real content
+  (`sizeHintForRow(0)` × no. of rows) so that the page's general scroll
+  traverses it whole, with no duplicated internal scroll.
+- Fullscreen (video only): the Volver link + description + queue are hidden
+  (`m_back`, `m_watchBody`, `m_bottomWidget`); with `widgetResizable` the
+  content is = video only and stretches to the whole page (without reparenting the
+  player). On exit they are restored and the scroll returns to 0.
+- When changing video (`onCurrentChanged`) the scroll returns to the top (like
+  YouTube); not in fullscreen (there it is hidden).
+- Visual check: QOpenGLWidget inside a QScrollArea works in Qt
+  5.15, but you must check on the real machine that there is no flicker/
+  artifacts when scrolling and that the "jump on return" of the video when returning
+  to the top after being outside the viewport is acceptable (mpv accumulates frames
+  while it does not paint).
 
-### Fila de controles del Player e iconos (Material Symbols vectorial)
+### Player controls row and icons (vector Material Symbols)
 
-La barra de controles es **UNA sola fila** (estilo YouTube): el transporte
-arranca la fila con **reproducir/pausa primero** (como YouTube), luego
-anterior y siguiente, y por último barajar y repetir; tiempo transcurrido +
-slider de progreso + duración en el centro, y volumen/acciones a la derecha,
-todo dentro de `m_ctrlBar` (`#playerOverlay`):
+The control bar is **A single row** (YouTube style): the transport
+starts the row with **play/pause first** (like YouTube), then
+previous and next, and finally shuffle and repeat; elapsed time +
+progress slider + duration in the center, and volume/actions on the right,
+all inside `m_ctrlBar` (`#playerOverlay`):
 
 ```
 [play][prev][next][shuffle][repeat]  0:00 ──●──  3:21 │ [mute] ──●── │ [CC][playlist][gear][fs]
 ```
 
-- **"Anterior" tiene el comportamiento de YouTube** (`PlayerController::previous()`):
-  si el vídeo actual está avanzado más de `kPrevRestartThreshold` (5 s, el mismo
-  orden que el paso de búsqueda del teclado), el botón **vuelve al inicio** del
-  vídeo actual; solo si está al principio salta al vídeo previo de la cola. El
-  botón del overlay y su estado habilitado usan `previousAvailable()`
-  (`hasPrevious() || posición > umbral`), que se refresca con cada tick de
-  posición (`onPositionChanged`) para habilitarse al cruzar el umbral. La tecla
-  **P** (y **Shift+P**, que entra por el mismo `case`: el filtro de arriba solo
-  descarta Ctrl/Alt/Meta) hace lo MISMO que el botón: llama a `previous()`. Antes
-  la P era un salto DIRECTO (`previousTrack()`), y por eso en el primer vídeo de
-  la cola no hacía nada y parecía rota; ahora reinicia si el vídeo está avanzado
-  y el "nada que hacer" (primer vídeo sin avanzar) lo resuelve el propio
-  `previous()`. `previousTrack()` sigue existiendo porque `previous()` lo usa.
+- **"Anterior" has YouTube's behavior** (`PlayerController::previous()`):
+  if the current video is advanced more than `kPrevRestartThreshold` (5 s, the same
+  order as the keyboard seek step), the button **restarts** the
+  current video; only if it is at the beginning does it jump to the previous video
+  in the queue. The overlay's button and its enabled state use `previousAvailable()`
+  (`hasPrevious() || position > threshold`), which is refreshed on every position
+  tick (`onPositionChanged`) to become enabled when crossing the threshold. The
+  **P** key (and **Shift+P**, which enters through the same `case`: the filter above only
+  discards Ctrl/Alt/Meta) does the SAME as the button: it calls `previous()`. Before,
+  P was a DIRECT jump (`previousTrack()`), and that is why on the first video of
+  the queue it did nothing and seemed broken; now it restarts if the video is advanced
+  and the "nothing to do" (first video not advanced) is resolved by `previous()`
+  itself. `previousTrack()` still exists because `previous()` uses it.
 
-- **Los iconos son vectoriales, no PNG.** `src/ui/player_glyphs.{h,cpp}` define
-  `nt::PlayerIcon` + `nt::playerIcon(kind, color, size=20)`: la geometría es de
-  **Material Symbols** (`google/material-design-icons`, Apache-2.0; ficheros
-  `symbols/web/<nombre>/materialsymbolsoutlined/`), pero se pinta con
-  `QPainter` (un parser del subconjunto `M m L l H h V v Q q T t Z` construye el
-  `QPainterPath`), igual que `nt::icon()`. Es nítida a cualquier tamaño, se
-  recolorea en caliente con el acento (caché por icono/tamaño/color hex, sin el
-  retint que rompía la nav) y **no** mete PNGs en el `.qrc` ni enlaza
-  `Qt5::Svg` (que añadiría `Qt5Svg.dll` a los DOS empaquetados de Windows). El
-  transporte (`Play`/`Pause`/`Prev`/`Next`) usa la variante **rellena** de
-  Material como YouTube; el resto, la de contorno. Tamaños: play 22, resto 20
-  (mini 16). Los modos activos (barajar, repetir, subtítulos) van en el
-  color de acento.
-- **Sin marcos ni cajas**: todos los controles son `QPushButton#iconBtn`
-  (transparentes, solo relleno al hover). El play NO es un círculo.
-- **Responsive** en `OverlayHost::onWidth` (`gl->onWidth`, en watch_page.cpp):
-  `w < kCtrlWithVolMinW` (760) oculta el slider de volumen (el mute se queda) y
-  `w < kCtrlWithTimeMinW` (640) oculta además las etiquetas de tiempo. El slider
-  de progreso es el único flexible. Los umbrales y su suma están comentados en
-  las constantes (los `setFixedWidth` del slider de volumen no ceden y el
-  recorte caería en iconos y reloj).
-- **Barajar (shuffle) y repetir (repeat) son REALES**, en `PlayerController`
-  (`setShuffle`/`shuffle`, `setRepeat`/`repeat`; de sesión, no se persisten).
-  Barajar reordena al azar SOLO la cola por delante del vídeo actual (el actual
-  no se mueve, como YouTube) con Fisher-Yates y descarta las posiciones de
-  reanudación de los índices movidos (menos la del actual). Repetir vuelve al
-  primer vídeo al terminar el último (`next()` y la rama "ended" de
-  `onPlayerState` con wrap a `playIndex(0)`); con cola de uno es "repetir uno".
-  `updateOverlayIcons()` pinta su estado en acento.
-- **La descripción del Player se muestra COMPLETA**: se quitó el colapso a 3
-  líneas y el control "…más"/"…menos" (lo pidió el usuario). La página Canal SÍ
-  conserva el suyo (`#descToggle`/`#descFade` siguen en el QSS para ella). Las
-  URLs se envuelven en enlaces del acento con `descriptionHtml()` (`src/ui/format.*`),
-  el MISMO helper que usa la tarjeta del Canal: un solo HTML para ambas.
-- **El menú de calidad** (`#qualityMenu`) usa el MISMO borde que `#playerOverlay`
-  (fondo de overlay, borde `@BORDER@`, canto superior `@OVERLAY_EDGE@`, radio 12)
-  — antes era `#1F1F1F` con borde `@SELECTION@` y radio 6. Sus entradas llevan
-  HD/4K vía `qualityLabel()`: "720p HD", "1080p HD", "1440p HD", "2160p 4K" (el
-  resto, solo "NNNp").
-- **El chip de calidad desapareció**: el antiguo `QPushButton#chip` ("720p") es
-  ahora el engranaje `PlayerIcon::Settings` (`#iconBtn`). La resolución activa
-  vive en el **tooltip** (`setQualityIndex`/`onVideoSizeChanged`); el menú sigue
-  anclado a él (`toggleQualityMenu`). Por eso se borró la regla `QPushButton#chip`
-  del QSS Y su entrada en la lista de botones borderless de `--selftest-theme`.
-- **Los tooltips son DOS líneas: la acción y, solo si la tiene, el atajo.**
-  Formato `"Descripción\nAtajo"` — la segunda línea va SOLO el atajo, sin
-  paréntesis ni palabras (`"Reproducir/Pausa\nK"`, `"Anterior\nP"`,
-  `"Siguiente\nN"`, `"Silencio\nM"`, `"Pantalla completa\nF"`; el mini player,
-  `K`/`N`/`M`). Los que no tienen tecla (barajar, repetir, CC, añadir a playlist,
-  calidad) se quedan con la descripción. Los tooltips son ventanas del sistema
-  y por defecto se pintan con la paleta del tema del escritorio (el texto no se
-  leía según la distribución): por eso el QSS incluye una regla `QToolTip`
-  compacta (fondo `@POPOVER@`, texto `@TEXT@`, borde `@BORDER@`, padding
-  3×7 px, 12 px) para que el cuadro sea justo el del texto. OJO: el tooltip de
-  `m_quality` se SOBRESCRIBE en caliente con la resolución activa
-  (`setQualityIndex`/`onVideoSizeChanged`) y no lleva atajo.
-- **El reloj va partido**: `m_ovPos` (transcurrido, izquierda del slider) y
-  `m_ovDur` (duración, derecha), no un solo "0:00 / 0:00". QSS `#ovPos`/`#ovDur`
-  (`@TEXTSOFT@` 12 px) y separadores `QFrame#ovSep` (1×20, `@OVERLAY_EDGE@`).
-- **Los dos sliders del overlay (seek `#ovSeek` y volumen `#ovVolume`) se pintan
-  a mano** (`OverlaySlider` en `watch_page.cpp`), NO con QSS. El
-  `QStyleSheetStyle` de Qt 5.15 coloca el handle con el centro ~media anchura a
-  la IZQUIERDA del punto real y ancla el sub-página (el relleno) al borde del
-  WIDGET, no al de la pista: en el minuto 0 el círculo se salía por la izquierda
-  de la pista y asomaba un residuo rojo a su lado (el "algo de rojo" reportado).
-  Ningún margen lo alinea (el offset del handle y el anclaje del relleno van
-  acoplados; probadas 7 variantes). Por eso `paintEvent` dibuja pista de 6 px con
-  borde `@OVERLAY_EDGE@`, relleno `@ACCENT@` que termina en el borde IZQUIERDO
-  del círculo, y un círculo blanco de 12 px cuyo centro mapea entre [radio,
-  ancho-radio]: siempre entero y visible, y en 0:00 el relleno mide cero (sin
-  rojo). `SeekSlider` hereda de `OverlaySlider` (solo añade click/arrastre).
-  NO reintroducir reglas `QSlider#ovSeek`/`#ovVolume` en el QSS: no pintarían
-  nada, porque un `paintEvent` propio no pasa por el estilo. Las reglas
-  `QSlider::…` globales quedan solo como default de un slider futuro.
-- **Directos ("EN VIVO")**: un directo NO tiene duración final — mpv reporta
-  `duration` 0 (HLS live puro) o la duración "hasta ahora", que CRECE con el
-  tiempo. Con la barra pos/dur el porcentaje salta hacia ATRÁS cuando la
-  duración se materializa o crece (era el bug del vídeo de SEVENRO). La
-  detección tiene DOS vías:
-  - **Vía AUTORITATIVA (entrada inmediata)**: `videoDetails.isLive` del player
-    response (el `kFieldMask` lo pide y `handlePlayer` lo guarda en
+- **The icons are vector, not PNG.** `src/ui/player_glyphs.{h,cpp}` defines
+  `nt::PlayerIcon` + `nt::playerIcon(kind, color, size=20)`: the geometry is from
+  **Material Symbols** (`google/material-design-icons`, Apache-2.0; files
+  `symbols/web/<nombre>/materialsymbolsoutlined/`), but it is painted with
+  `QPainter` (a parser for the subset `M m L l H h V v Q q T t Z` builds the
+  `QPainterPath`), just like `nt::icon()`. It is sharp at any size, it is
+  recolored live with the accent (cache keyed by icon/size/hex color, without the
+  retint that broke the nav) and it does **not** put PNGs into the `.qrc` nor link
+  `Qt5::Svg` (which would add `Qt5Svg.dll` to BOTH Windows packages). The
+  transport (`Play`/`Pause`/`Prev`/`Next`) uses the **filled** variant of
+  Material like YouTube; the rest, the outlined one. Sizes: play 22, rest 20
+  (mini 16). The active modes (shuffle, repeat, subtitles) go in the
+  accent color.
+- **No frames or boxes**: all controls are `QPushButton#iconBtn`
+  (transparent, fill only on hover). Play is NOT a circle.
+- **Responsive** in `OverlayHost::onWidth` (`gl->onWidth`, in watch_page.cpp):
+  `w < kCtrlWithVolMinW` (760) hides the volume slider (mute stays) and
+  `w < kCtrlWithTimeMinW` (640) also hides the time labels. The progress
+  slider is the only flexible one. The thresholds and their sum are commented in
+  the constants (the `setFixedWidth` of the volume slider does not give way and the
+  trimming would fall on icons and clock).
+- **Shuffle and repeat are REAL**, in `PlayerController`
+  (`setShuffle`/`shuffle`, `setRepeat`/`repeat`; per-session, they are not persisted).
+  Shuffle randomly reorders ONLY the queue ahead of the current video (the current
+  one does not move, like YouTube) with Fisher-Yates and discards the resumes
+  positions of the moved indices (except the current one). Repeat goes back to the
+  first video when the last one ends (`next()` and the "ended" branch of
+  `onPlayerState` with wrap to `playIndex(0)`); with a queue of one it is "repeat one".
+  `updateOverlayIcons()` paints its state in accent.
+- **The Player description is shown COMPLETE**: the collapse to 3
+  lines and the "…más"/"…menos" control were removed (the user asked for it). The Channel page DOES
+  keep its own (`#descToggle`/`#descFade` remain in the QSS for it). The
+  URLs are wrapped in accent links with `descriptionHtml()` (`src/ui/format.*`),
+  the SAME helper the Channel card uses: a single HTML for both.
+- **The quality menu** (`#qualityMenu`) uses the SAME border as `#playerOverlay`
+  (overlay background, border `@BORDER@`, top edge `@OVERLAY_EDGE@`, radius 12)
+  — before it was `#1F1F1F` with border `@SELECTION@` and radius 6. Its entries carry
+  HD/4K via `qualityLabel()`: "720p HD", "1080p HD", "1440p HD", "2160p 4K" (the
+  rest, only "NNNp").
+- **The quality chip disappeared**: the old `QPushButton#chip` ("720p") is
+  now the gear `PlayerIcon::Settings` (`#iconBtn`). The active resolution
+  lives in the **tooltip** (`setQualityIndex`/`onVideoSizeChanged`); the menu remains
+  anchored to it (`toggleQualityMenu`). That is why the `QPushButton#chip` rule
+  was deleted from the QSS AND its entry in the borderless buttons list of `--selftest-theme`.
+- **The tooltips are TWO lines: the action and, only if it has one, the shortcut.**
+  Format `"Descripción\nAtajo"` — the second line is ONLY the shortcut, without
+  parentheses or words (`"Reproducir/Pausa\nK"`, `"Anterior\nP"`,
+  `"Siguiente\nN"`, `"Silencio\nM"`, `"Pantalla completa\nF"`; the mini player,
+  `K`/`N`/`M`). Those without a key (shuffle, repeat, CC, add to playlist,
+  quality) keep just the description. The tooltips are system windows
+  and by default are painted with the desktop theme palette (the text was not
+  readable depending on the distribution): that is why the QSS includes a compact
+  `QToolTip` rule (background `@POPOVER@`, text `@TEXT@`, border `@BORDER@`, padding
+  3×7 px, 12 px) so the box is just the size of the text. NOTE: the tooltip of
+  `m_quality` is OVERWRITTEN on the fly with the active resolution
+  (`setQualityIndex`/`onVideoSizeChanged`) and has no shortcut.
+- **The clock is split**: `m_ovPos` (elapsed, left of the slider) and
+  `m_ovDur` (duration, right), not a single "0:00 / 0:00". QSS `#ovPos`/`#ovDur`
+  (`@TEXTSOFT@` 12 px) and separators `QFrame#ovSep` (1×20, `@OVERLAY_EDGE@`).
+- **The two overlay sliders (seek `#ovSeek` and volume `#ovVolume`) are painted
+  by hand** (`OverlaySlider` in `watch_page.cpp`), NOT with QSS. Qt 5.15's
+  `QStyleSheetStyle` places the handle with its center ~half a width to
+  the LEFT of the real point and anchors the sub-page (the fill) to the edge of the
+  WIDGET, not to that of the track: at minute 0 the circle stuck out to the left
+  of the track and a red residue peeked out beside it (the "something red" reported).
+  No margin aligns it (the handle offset and the fill anchoring are
+  coupled; 7 variants were tried). That is why `paintEvent` draws a 6 px track with
+  border `@OVERLAY_EDGE@`, fill `@ACCENT@` that ends at the LEFT edge
+  of the circle, and a white circle of 12 px whose center maps between [radius,
+  width-radius]: always whole and visible, and at 0:00 the fill measures zero (no
+  red). `SeekSlider` inherits from `OverlaySlider` (it only adds click/drag).
+  Do NOT reintroduce `QSlider#ovSeek`/`#ovVolume` rules in the QSS: they would paint
+  nothing, because a custom `paintEvent` does not go through the style. The global
+  `QSlider::…` rules remain only as the default for a future slider.
+- **Live streams ("EN VIVO")**: a live stream has NO final duration — mpv reports
+  `duration` 0 (pure HLS live) or the "so far" duration, which GROWS with
+  time. With the pos/dur bar the percentage jumps BACKWARDS when the
+  duration materializes or grows (it was the bug of the SEVENRO video). The
+  detection has TWO paths:
+  - **AUTHORITATIVE path (immediate entry)**: `videoDetails.isLive` of the player
+    response (the `kFieldMask` requests it and `handlePlayer` stores it in
     `Innertube::lastIsLive()` → `StreamInfo.isLive` →
-    `PlayerController::currentIsLive()`). YouTube declara si el medio es un
-    directo actual, así que el modo EN VIVO se activa en el PRIMER tick de
-    posición tras resolver, sin esperar a que la duración crezca (y cubre los
-    directos PUROS con dur=0, que por definición nunca producen ascensos).
-    En las dos superficies: `if (!appStream && m_player->currentIsLive())
+    `PlayerController::currentIsLive()`). YouTube declares whether the media is a
+    current live stream, so EN VIVO mode activates on the FIRST position
+    tick after resolving, without waiting for the duration to grow (and it covers
+    PURE live streams with dur=0, which by definition never produce increases).
+    On both surfaces: `if (!appStream && m_player->currentIsLive())
     m_liveDet.forceLive();` — `LiveDetector::forceLive()` (`live_detect.h`)
-    marca directo y arma el reloj de desbloqueo desde AHORA; la vía heurística
-    sigue gobernando la SALIDA (un directo que termina y fija su duración se
-    desbloquea a los ~15 s igual que sin esta función, aunque la señal
-    autoritativa de la resolución siga activa).
-  - **Vía HEURÍSTICA (fallback, evidencia sostenida)**: **`nt::LiveDetector`**
-    (`src/ui/live_detect.h`, uno por superficie, alimentado en
-    `WatchPage::onPositionChanged` y en el mini de `MainWindow`), no con un
-    tick suelto. Reglas:
-  - **Solo cuentan los ASCENSOS de duración**: `duration > prevDur + 0.5`
-    (`kChangeS`), dos veces (`kLockChanges=2`) → directo. Un VOD materializa su
-    duración una vez (0 o 1 ascenso) y la mantiene estable: nunca llega a 2. Un
-    descenso o colapso NO cuenta: un VOD en reload reinicia la suya
-    (17659.5 → 0 → 1213.6 es el MISMO vídeo finito volviendo a materializarse,
-    no un directo). Tampoco se usa la rama "dur=0 con posición avanzada", que
-    marcaba vídeos normales de arranque lento.
-  - **Desbloqueo automático**: en modo directo, si llega una duración ESTABLE
-    (>0, sin ascensos) durante `kStableUnlockMs` (15 s), se vuelve a la barra
-    normal (un directo real sigue creciendo, no se desbloquea solo; un falso
-    positivo a los ~15 s recupera el seek).
-  - **EXCEPCIÓN — el HLS sintético de AV1 nunca es un directo**: la app lo
-    construye desde un fMP4 finito (playlist VOD+ENDLIST), así que por
-    construcción es un VOD — pero mpv le reporta duraciones INESTABLES mientras
-    carga los rangos BYTERANGE (medido: 0.0, 26.4, 55.8, 1213.6, incluso
-    2486.9 = más que la real), indistinguibles de un directo. Por eso
-    `emitAv1()` (yt.cpp) marca su `StreamInfo` con **`canBeLive=false`** y ambas
-    superficies hacen `!m_player->currentCanBeLive()` antes de alimentar el
-    detector (y sueltan el estado directo si estaba activo). El resto de flujos
-    (master de YouTube, filtrado —que también se sirve desde el servidor local—
-    y edge) SÍ pueden ser un directo: conservan `canBeLive=true` y, si el
-    player response lo declara, `isLive=true`. El sintético sale con las dos a
-    false (nunca es un directo por construcción).
-  En directo se pinta como YouTube: playhead PEGADO AL BORDE DERECHO (rango
-  (0,1) valor 1, la historia del directo rellena hacia atrás), la marca
-  **"EN VIVO" en `m_ovPos` con el acento** (regla QSS
-  `QLabel#ovPos[live="true"]`, propiedad dinámica + re-polish) y el tiempo
-  desde la emisión en NEGATIVO en `m_ovDur` (`-" + fmtTime(dur)`; sin
-  duración conocida, solo la marca). `SeekSlider::setLive(true)` traga los
-  clicks: en directo la barra es informativa, no se busca (los segundos 0..1
-  no significan nada). El mini muestra "Canal · EN VIVO" y la barra llena al
-  borde. Estado por superficie (`m_liveMedia`/`m_liveDurPeak` en la página,
-  `m_miniLive` en MainWindow, con su `LiveDetector` cada una) que se REINICIA
-  al cambiar de vídeo (`onCurrentChanged` / connect de `currentChanged`). Un
-  directo terminado (la playlist pasa a VOD y la duración se fija) vuelve
-  solo a la barra normal, como YouTube con el replay.
-- **Mini player**: mismos iconos (`nt::playerIcon`, 16 px) para play/pausa,
-  siguiente, volumen/silencio y cerrar (4 botones); fila más densa (spacing
-  6, `QWidget#miniBar QPushButton#iconBtn { padding: 4px; }`). El fondo es el
-  MISMO tono que la barra inferior (`#101010`, kTop), no el `kElevated` de
-  antes: las dos barras se leen como una sola pieza. Detalles que costaron una
-  vuelta y no hay que revertir sin querer:
-  - **Miniatura con esquinas redondeadas DE VERDAD** (`RoundedThumb`, subclase
-    de `QLabel` en mainwindow.cpp): el `border-radius` del QSS solo redondea el
-    FONDO del QLabel, no el `QPixmap` que se pinta encima, así que se veían
-    esquinas cuadradas. `RoundedThumb::paintEvent` recorta el pixmap a un rect
-    redondeado (centrado y sin reescalar: el pixmap ya viene "cover" y el clip
-    recorta el sobrante). Sin pixmap delega en `QLabel` (estado "sin
-    miniatura").
-  - **Barra de progreso pegada al borde inferior y a todo el ancho** (como
-    YouTube): `m_miniProgress` va FUERA del layout (que tiene márgenes
-    laterales) y `MiniPlayerBar::resizeEvent` la recoloca en
-    `(0, height-4, width, 4)`. Además `WA_TransparentForMouseEvents` para que
-    su clic no robe el "expandir" de la barra. Con `dur<=0` el rango es (0,1)
-    y valor 0, NUNCA (0,0): un rango 0,0 dibuja el chunk animado (modo "busy").
-  - **El progreso va en el ACENTO y mide 4 px** (más grueso que los 2 px
-    originales): el relleno es `@ACCENT@` (sigue el color que se elija en
-    Ajustes, porque el QSS se regenera al cambiarlo) y la pista `@HANDLE@`. La
-    altura se fija con `setFixedHeight(4)` en `setupMiniBar`.
-  - **Hover de toda la barra**: `MiniPlayerBar::enterEvent/leaveEvent` ponen la
-    propiedad dinámica `hover` (con `style()->unpolish/polish`, obligatorio) y
-    el QSS `QWidget#miniBar[hover="true"]` aclara el fondo a `#141414` (el
-    `#181818` anterior se veía demasiado pálido frente al `#101010`). El
-    `leaveEvent` NO apaga el hover si el cursor sigue dentro de `rect()`
-    (pasar de la barra a un botón hijo manda `Leave` al padre y parpadearía).
-    Ese guard solo se evalúa cuando LLEGA un `Leave` (interacción activa, donde
-    `QCursor::pos()` sí está fresco), así que el hover también se gobierna
-    explícitamente: `hideEvent` lo apaga siempre (al salir de la página Player,
-    entrar en el vídeo y volver no dejaba el tono encendido en falso),
-    `showEvent` lo re-evalúa contra la posición real del cursor al re-mostrar (Qt
-    no siempre re-manda Enter bajo el cursor), y el constructor conecta
-    `QGuiApplication::applicationStateChanged` para apagarlo al desactivar la app
-    — tanto alt-tab como cambio de espacio de trabajo (en ambos no llega ningún
-    Leave). OJO: al reactivar NO se re-evalúa con `QCursor::pos()`: con la app
-    inactiva esa posición se CONGELA en el último punto conocido (Wayland no
-    entrega eventos de puntero al cambiar de workspace) y, si el puntero estaba
-    sobre la barra al desactivar, re-iluminaría en falso al volver aunque el
-    puntero real esté en otro sitio. El hover solo se re-enciende con un
-    `enterEvent` real (o al mover el puntero sobre la barra).
-  - **La línea de metadatos va a la izquierda, junto al canal**: "Canal ·
-    m:ss / m:ss" en un solo `QLabel#miniTime`. Se probó a separarlos (canal izq,
-    tiempo der) y el tiempo quedaba pegado a los botones y lejos del canal (mala
-    posición, corregido). El mini NO se toca en su orden de botones sin querer:
+    marks live and arms the unlock clock from NOW; the heuristic path
+    still governs the EXIT (a live stream that ends and fixes its duration is
+    unlocked at ~15 s just as without this function, even though the authoritative
+    signal from the resolution remains active).
+  - **HEURISTIC path (fallback, sustained evidence)**: **`nt::LiveDetector`**
+    (`src/ui/live_detect.h`, one per surface, fed in
+    `WatchPage::onPositionChanged` and in the mini of `MainWindow`), not with a loose
+    tick. Rules:
+  - **Only duration INCREASES count**: `duration > prevDur + 0.5`
+    (`kChangeS`), twice (`kLockChanges=2`) → live. A VOD materializes its
+    duration once (0 or 1 increase) and keeps it stable: it never reaches 2. A
+    decrease or collapse does NOT count: a VOD in reload resets its own
+    (17659.5 → 0 → 1213.6 is the SAME finite video materializing again,
+    not a live stream). Nor is the "dur=0 with advanced position" branch used, which
+    marked normal slow-starting videos.
+  - **Automatic unlock**: in live mode, if a STABLE duration arrives
+    (>0, without increases) during `kStableUnlockMs` (15 s), it goes back to the
+    normal bar (a real live stream keeps growing, it does not unlock by itself; a false
+    positive at ~15 s recovers the seek).
+  - **EXCEPTION — the synthetic AV1 HLS is never a live stream**: the app
+    builds it from a finite fMP4 (VOD+ENDLIST playlist), so by
+    construction it is a VOD — but mpv reports UNSTABLE durations while
+    it loads the BYTERANGE ranges (measured: 0.0, 26.4, 55.8, 1213.6, even
+    2486.9 = more than the real one), indistinguishable from a live stream. That is why
+    `emitAv1()` (yt.cpp) marks its `StreamInfo` with **`canBeLive=false`** and both
+    surfaces do `!m_player->currentCanBeLive()` before feeding the
+    detector (and release the live state if it was active). The other streams
+    (YouTube master, filtered —which is also served from the local server—
+    and edge) CAN be a live stream: they keep `canBeLive=true` and, if the
+    player response declares it, `isLive=true`. The synthetic one comes out with both
+    false (it is never a live stream by construction).
+  In live mode it is painted like YouTube: playhead STUCK TO THE RIGHT EDGE (range
+  (0,1) value 1, the live history fills backwards), the mark
+  **"EN VIVO" in `m_ovPos` with the accent** (QSS rule
+  `QLabel#ovPos[live="true"]`, dynamic property + re-polish) and the time
+  since the broadcast in NEGATIVE in `m_ovDur` (`-" + fmtTime(dur)`; without a
+  known duration, only the mark). `SeekSlider::setLive(true)` swallows the
+  clicks: in live mode the bar is informative, it is not seeked (the seconds 0..1
+  mean nothing). The mini shows "Canal · EN VIVO" and the bar filled to the
+  edge. State per surface (`m_liveMedia`/`m_liveDurPeak` in the page,
+  `m_miniLive` in MainWindow, each with its own `LiveDetector`) that is RESET
+  when changing video (`onCurrentChanged` / connect of `currentChanged`). A
+  finished live stream (the playlist becomes VOD and the duration is fixed) goes back
+  by itself to the normal bar, like YouTube with the replay.
+- **Mini player**: same icons (`nt::playerIcon`, 16 px) for play/pause,
+  next, volume/mute and close (4 buttons); denser row (spacing
+  6, `QWidget#miniBar QPushButton#iconBtn { padding: 4px; }`). The background is the
+  SAME tone as the bottom bar (`#101010`, kTop), not the `kElevated` of
+  before: the two bars read as a single piece. Details that cost a
+  round and must not be reverted by accident:
+  - **Thumbnail with REALLY rounded corners** (`RoundedThumb`, subclass
+    of `QLabel` in mainwindow.cpp): the `border-radius` of the QSS only rounds the
+    BACKGROUND of the QLabel, not the `QPixmap` painted on top, so square
+    corners were seen. `RoundedThumb::paintEvent` clips the pixmap to a rounded
+    rect (centered and without rescaling: the pixmap already comes "cover" and the clip
+    trims the excess). Without a pixmap it delegates to `QLabel` ("no
+    thumbnail" state).
+  - **Progress bar glued to the bottom edge and full width** (like
+    YouTube): `m_miniProgress` goes OUTSIDE the layout (which has side
+    margins) and `MiniPlayerBar::resizeEvent` repositions it at
+    `(0, height-4, width, 4)`. Also `WA_TransparentForMouseEvents` so that
+    its click does not steal the bar's "expand". With `dur<=0` the range is (0,1)
+    and value 0, NEVER (0,0): a 0,0 range draws the animated chunk ("busy" mode).
+  - **The progress goes in the ACCENT and measures 4 px** (thicker than the 2 px
+    originals): the fill is `@ACCENT@` (it follows the color chosen in
+    Settings, because the QSS is regenerated when it is changed) and the track `@HANDLE@`. The
+    height is fixed with `setFixedHeight(4)` in `setupMiniBar`.
+  - **Hover of the whole bar**: `MiniPlayerBar::enterEvent/leaveEvent` set the
+    dynamic property `hover` (with `style()->unpolish/polish`, mandatory) and
+    the QSS `QWidget#miniBar[hover="true"]` lightens the background to `#141414` (the
+    previous `#181818` looked too pale next to `#101010`). The
+    `leaveEvent` does NOT turn off the hover if the cursor is still inside `rect()`
+    (moving from the bar to a child button sends `Leave` to the parent and it would flicker).
+    That guard is only evaluated when a `Leave` ARRIVES (active interaction, where
+    `QCursor::pos()` is indeed fresh), so the hover is also governed
+    explicitly: `hideEvent` always turns it off (when leaving the Player page,
+    entering the video and coming back did not leave the tone falsely lit),
+    `showEvent` re-evaluates it against the real cursor position when re-showing (Qt
+    does not always re-send Enter under the cursor), and the constructor connects
+    `QGuiApplication::applicationStateChanged` to turn it off when the app is deactivated
+    — both alt-tab and workspace change (in both no
+    Leave arrives). NOTE: on reactivation it does NOT re-evaluate with `QCursor::pos()`: with the app
+    inactive that position is FROZEN at the last known point (Wayland does not
+    deliver pointer events when changing workspace) and, if the pointer was
+    over the bar when deactivating, it would falsely re-light on return even though the
+    real pointer is elsewhere. The hover is only re-lit with a real
+    `enterEvent` (or when moving the pointer over the bar).
+  - **The metadata line goes on the left, next to the channel**: "Canal ·
+    m:ss / m:ss" in a single `QLabel#miniTime`. Separating them was tried (channel left,
+    time right) and the time ended up glued to the buttons and far from the channel (bad
+    position, fixed). The mini's button order is NOT to be touched by accident:
     play · siguiente · silencio · cerrar.
 
-## Pruebas de regresión
+## Regression tests
 
 ```sh
 ./build/nevertube_qt2 --selftest-db        # repos/SQLite
-./build/nevertube_qt2 --selftest-player    # hwdec=auto + redibujado por eventos + render ok
+./build/nevertube_qt2 --selftest-player    # hwdec=auto + event-driven redraw + render ok
 ./build/nevertube_qt2 --selftest-innertube # sw.js_data→visitorData→player→hlsManifestUrl
-./build/nevertube_qt2 --selftest-discover  # radios guardadas: guardar/recuperar/re-seleccionar/persistencia/descarte
-./build/nevertube_qt2 --selftest-av1hls    # HLS sintético AV1 (offline): MAP/BYTERANGE, /seg.mp4, &nt único
-./build/nevertube_qt2 --selftest-hwprobe   # sondeo HW offline (micro-clips): av1-hw|vp9-hw|h264-hw|soft-all
-./build/nevertube_qt2 --selftest-ssl       # backend TLS (OpenSSL 1.1 junto al exe) cargado
-./build/nevertube_qt2 --selftest-tls       # handshake TLS REAL contra hosts públicos (no solo carga)
-./build/nevertube_qt2 --selftest-search    # búsqueda Innertube REAL: vídeos con id no vacío
-./build/nevertube_qt2 --selftest-browse    # endpoints Innertube: canal + tabs (videos/shorts/live) + detalle + playlist
-./build/nevertube_qt2 --selftest-feeds     # canal por Innertube + trending (protocolo y cadena)
-./build/nevertube_qt2 --selftest-grid      # rejillas: tope de columnas (puro) + celda coherente modelo/gridSize/seccion (monta un VideoListView; sin red ni GPU: va en el CI)
-./build/nevertube_qt2 --selftest-theme     # QSS puro: selector duplicado, selector sin widget, paleta de selección y bordes de los botones: va en el CI
-./build/nevertube_qt2 --selftest-glyphs    # todo glifo no ASCII de la UI existe en la fuente real de la app: va en el CI
-./build/nevertube_qt2 --selftest-dates     # parser de fechas relativas ("hace 2 semanas" NO es 2 s → no "hoy"): va en el CI
+./build/nevertube_qt2 --selftest-discover  # saved radios: save/retrieve/re-select/persistence/discard
+./build/nevertube_qt2 --selftest-av1hls    # synthetic AV1 HLS (offline): MAP/BYTERANGE, /seg.mp4, unique &nt
+./build/nevertube_qt2 --selftest-hwprobe   # offline HW probe (micro-clips): av1-hw|vp9-hw|h264-hw|soft-all
+./build/nevertube_qt2 --selftest-ssl       # TLS backend (OpenSSL 1.1 next to the exe) loaded
+./build/nevertube_qt2 --selftest-tls       # REAL TLS handshake against public hosts (not just loading)
+./build/nevertube_qt2 --selftest-search    # REAL Innertube search: videos with a non-empty id
+./build/nevertube_qt2 --selftest-browse    # Innertube endpoints: channel + tabs (videos/shorts/live) + detail + playlist
+./build/nevertube_qt2 --selftest-feeds     # channel via Innertube + trending (protocol and chain)
+./build/nevertube_qt2 --selftest-grid      # grids: column cap (pure) + cell consistent across model/gridSize/section (mounts a VideoListView; no network or GPU: runs in CI)
+./build/nevertube_qt2 --selftest-theme     # pure QSS: duplicate selector, selector without widget, selection palette and button borders: runs in CI
+./build/nevertube_qt2 --selftest-glyphs    # every non-ASCII glyph of the UI exists in the app's real font: runs in CI
+./build/nevertube_qt2 --selftest-dates     # relative-date parser ("hace 2 semanas" is NOT 2 s → not "hoy"): runs in CI
 ```
 
-El selftest del player verifica invariantes del núcleo protegido sin
-reproducir ningún archivo. Ejecutar ambos antes de considerar estable un
-cambio que toque el reproductor.
+The player selftest verifies invariants of the protected core without
+playing any file. Run both before considering stable a change that touches
+the player.
 
-**Qué dispara cada workflow (importante para interpretar un tablero en rojo):**
+**What triggers each workflow (important for interpreting a red dashboard):**
 
-| workflow | se dispara |
+| workflow | triggers |
 |---|---|
-| `windows.yml` (x86 / Win7) | en **cada** push a `main` |
-| `windows_x64.yml` (Win10+) | solo si el push toca **el propio fichero** del workflow (filtro `paths:`), o a mano con `gh workflow run windows_x64.yml --ref main` |
+| `windows.yml` (x86 / Win7) | on **every** push to `main` |
+| `windows_x64.yml` (Win10+) | only if the push touches **the workflow file itself** (filter `paths:`), or manually with `gh workflow run windows_x64.yml --ref main` |
 
-O sea que un `main` en rojo **solo por x86** es normal, y un `main` donde solo
-corre el x64 significa que ese push tocó `windows_x64.yml`. Para validar un
-cambio en el build x64 hay que dispararlo a mano o tocar su workflow.
+That is, a `main` that is red **only because of x86** is normal, and a `main`
+where only x64 runs means that push touched `windows_x64.yml`. To validate a
+change in the x64 build you have to trigger it manually or touch its workflow.
 
-Ojo también con el toolset: el x86 usa **v142** (VS2019) por el target Win7 y el
-x64 el de `windows-latest` (más nuevo). No compilan lo mismo: un literal que el
-x64 acepta puede dar C2026 en el x86 (ver la sección del límite de MSVC). Un
-fallo que aparece solo en x86 no hay que buscarlo solo ahí.
+Also mind the toolset: x86 uses **v142** (VS2019) because of the Win7 target and
+x64 the one of `windows-latest` (newer). They do not compile the same: a literal
+that x64 accepts can give C2026 on x86 (see the section on the MSVC limit). A
+failure that appears only on x86 should not be looked for only there.
 
-## Recuperación ante sesión gateada (403 de YouTube)
+## Recovery from a gated session (YouTube 403)
 
-YouTube puede "gatear" una sesión de URLs (audio `>403` y segmentos HLS `>403`
-desde un punto concreto): mpv abre el vídeo mudo (`audio=eof`, sin `AO:`/sink)
-y los segmentos a partir de ~1:00 fallan → EOF prematuro a la ~1:03 con
-`Cache: 0.0s` y error, sin sonido durante todo el vídeo. Intermitente (~1/10
-sesiones). La app ahora se recupera sola re-resolviendo con URLs frescas:
+YouTube can "gate" a session of URLs (audio `>403` and HLS segments `>403`
+from a specific point): mpv opens the video muted (`audio=eof`, without
+`AO:`/sink) and the segments from ~1:00 fail → premature EOF at ~1:03 with
+`Cache: 0.0s` and an error, with no sound during the whole video. Intermittent
+(~1/10 sessions). The app now recovers on its own by re-resolving with fresh
+URLs:
 
-- `PlayerWidget::streamInterrupted()` se emite en dos casos: **EOF prematuro**
-  (EOF no-natural con `duration > 0`, que no es final de vídeo ni live) y
-  **sin pista de audio activa** (~10 s reproduciendo con `audio-params` de mpv
-  ausente y `position > 2s`; `kAudioDetectMs`). El watchdog de audio NO depende
-  del modo: con el gate también en HLS muxed mpv queda mudo (`audio=eof`), así
-  que se dispara a los ~10 s (antes solo vigilaba el audio EXTERNO y el HLS
-  agotaba ~60 s mudos por intento hasta el EOF). NO toca el render ni el
-  redibujado: es lógica de eventos y del watchdog de `checkStall` (audio).
-- `PlayerController::onStreamInterrupted()` re-resuelve (como el atasco):
-  `reloadCurrent()` con `m_recoverAttempts` (≤3, recaída <8s corta y estabilidad
-  >5 min reinicia; NO 60 s: el gate muere a los ~60 s y con 60 s el reinicio
-  borraba el presupuesto justo antes de cada muerte → reload → 60 s → reload…
-  bucle sin fin). Con el watchdog a ~10 s cada intento cuesta ~10-16 s
-  (resolución + espera): 3 intentos ≈ 40-50 s antes del último recurso. En
-  `soft-all`/HW el coste es un tramo de "loading" acotado; en funcionamiento
-  normal ningún código nuevo corre por frame.
-- **Rotación de sesión en la recuperación**: el gate es de SESIÓN, no de URL —
-  re-resolver con `forceRefresh` pide un pot nuevo DENTRO de la misma sesión
-  gateada y vuelve a fallar. Por eso `onStreamInterrupted()` y la recaída de
-  `onStreamStalled()` llaman `Yt::rotateStreamSession()` (→
-  `Innertube::rotateSession()`: descarta visitorData vigente + URLs firmadas
-  cacheadas) ANTES de `reloadCurrent()`: la re-resolución sale de la sesión
-  gateada con un visitorData nuevo (~9/10 de no estar gateada). Sigue acotado
-  por el presupuesto: si la sesión nueva también muere, en ≤3 intentos se
-  agota. Solo rota en la ruta de fallo.
-- **Último recurso: reinicio de la app con el último vídeo.** Al AGOTAR la
-  recuperación (`recoveryExhausted()` de `PlayerController`, tanto en el
-  `streamInterrupted` como en la recaída del atasco) `MainWindow::onRecoveryExhausted`
-  reinicia la app con el último vídeo: reiniciar SÍ sale del gate (estado del
-  proceso nuevo — verificado por el usuario: al reiniciar se arregla el audio).
-  Es el ÚNICO auto-reinicio de la app y SOLO en este error: relanza con la URL
-  del último vídeo únicamente (la cola NO se restaura) y reanuda la posición.
-  Guards anti-bucle: (1) en memoria `m_gateRestarting` — un mismo episodio no
-  relanza dos veces (PlayerController puede reemitir en una cascada de EOF);
-  (2) en settings `gate_restart_armed` — si la instancia YA vino de un
-  reinicio y sigue gateada, se muestra el error y se desarma el guard (nunca
-  se encadenan reinicios). El guard se desarma solo con
-  `PlayerController::recoveryHealthy()` (≥5 min de reproducción estable, emit
-  desde el `m_flushTimer`): tras un reinicio que funcionó, la próxima sesión
-  gateada podrá volver a reiniciar. Claves: `gate_restart_vid`,
-  `gate_restart_pos` (ms), `gate_restart_armed` (1/0). La instancia nueva
-  arranca con `http://...` → `MainWindow::playVideo` (leído en el constructor).
-- `hasActiveAudio()` consulta `audio-params` de mpv (`MPV_FORMAT_NODE`). Con
-  audio sano la pista está activa y la detección no se dispara (verificado:
-  tanda normal con `AO: [pipewire]` sin falsos `streamInterrupted`).
-- Sin sonido + vídeo que "se va" a ~1:00 = síntoma de sesión gateada, no del
-  sink de audio ni de la pieza protegida. Verificar con el log `E2E`
-  (`NEVERTUBE_DEBUG=1`): `audio=eof`, `HTTP error 403` en segmentos, y
+- `PlayerWidget::streamInterrupted()` is emitted in two cases: **premature EOF**
+  (non-natural EOF with `duration > 0`, which is not end of video nor live) and
+  **no active audio track** (~10 s playing with mpv's `audio-params`
+  absent and `position > 2s`; `kAudioDetectMs`). The audio watchdog does NOT
+  depend on the mode: with the gate also on muxed HLS mpv goes mute
+  (`audio=eof`), so it fires at ~10 s (before it only watched EXTERNAL audio and
+  the HLS exhausted ~60 s mute per attempt until EOF). It does NOT touch the
+  render nor the redraw: it is event logic and the `checkStall` watchdog
+  (audio).
+- `PlayerController::onStreamInterrupted()` re-resolves (like a stall):
+  `reloadCurrent()` with `m_recoverAttempts` (≤3, a setback <8s short and
+  stability >5 min resets; NOT 60 s: the gate dies at ~60 s and with 60 s the
+  reset erased the budget right before each death → reload → 60 s → reload…
+  endless loop). With the watchdog at ~10 s each attempt costs ~10-16 s
+  (resolution + wait): 3 attempts ≈ 40-50 s before the last resort. In
+  `soft-all`/HW the cost is a bounded "loading" stretch; in normal
+  operation no new code runs per frame.
+- **Session rotation on recovery**: the gate is of the SESSION, not of the URL —
+  re-resolving with `forceRefresh` asks for a new pot WITHIN the same gated
+  session and fails again. That is why `onStreamInterrupted()` and the setback of
+  `onStreamStalled()` call `Yt::rotateStreamSession()` (→
+  `Innertube::rotateSession()`: discards the current visitorData + cached signed
+  URLs) BEFORE `reloadCurrent()`: the re-resolution comes out of the gated
+  session with a new visitorData (~9/10 of not being gated). It is still bounded
+  by the budget: if the new session also dies, in ≤3 attempts it is
+  exhausted. It only rotates on the failure path.
+- **Last resort: app restart with the last video.** When the
+  recovery is EXHAUSTED (`recoveryExhausted()` of `PlayerController`, both in the
+  `streamInterrupted` and in the stall setback) `MainWindow::onRecoveryExhausted`
+  restarts the app with the last video: restarting DOES get out of the gate (state of
+  the new process — verified by the user: on restarting the audio is fixed).
+  It is the ONLY auto-restart of the app and ONLY on this error: it relaunches with the URL
+  of the last video only (the queue is NOT restored) and resumes the position.
+  Anti-loop guards: (1) in memory `m_gateRestarting` — the same episode does not
+  relaunch twice (PlayerController can re-emit in a cascade of EOF);
+  (2) in settings `gate_restart_armed` — if the instance ALREADY came from a
+  restart and is still gated, the error is shown and the guard is disarmed (restarts
+  are never chained). The guard is disarmed only with
+  `PlayerController::recoveryHealthy()` (≥5 min of stable playback, emitted
+  from the `m_flushTimer`): after a restart that worked, the next gated
+  session will be able to restart again. Keys: `gate_restart_vid`,
+  `gate_restart_pos` (ms), `gate_restart_armed` (1/0). The new instance
+  starts with `http://...` → `MainWindow::playVideo` (read in the constructor).
+- `hasActiveAudio()` queries mpv's `audio-params` (`MPV_FORMAT_NODE`). With
+  healthy audio the track is active and the detection does not fire (verified:
+  normal run with `AO: [pipewire]` without false `streamInterrupted`).
+- No sound + a video that "goes away" at ~1:00 = symptom of a gated session, not of the
+  audio sink nor of the protected piece. Verify with the `E2E` log
+  (`NEVERTUBE_DEBUG=1`): `audio=eof`, `HTTP error 403` on segments, and
   `E2E streamInterrupted -> reloadCurrent`.
 
-## Logging de depuración
+## Debug logging
 
-El logging `E2E ...` está activado por variable de entorno (no imprime por
-defecto, evitando ruido en el bucle de eventos del reproductor):
+The `E2E ...` logging is enabled by an environment variable (it does not print by
+default, avoiding noise in the event loop of the player):
 
 ```sh
 NEVERTUBE_DEBUG=1 ./build/nevertube_qt2
 ```
 
-En Windows, `NEVERTUBE_DEBUG=1` también hace que un lanzamiento con doble clic
-abra una consola propia para ese log; sin la variable, la app (subsistema GUI)
-no abre ninguna ventana de terminal. Lanzada desde una shell, siempre hereda la
-consola del proceso padre.
+On Windows, `NEVERTUBE_DEBUG=1` also makes a double-click launch
+open its own console for that log; without the variable, the app (GUI
+subsystem) does not open any terminal window. Launched from a shell, it always
+inherits the console of the parent process.
 
-Usar `NT_DEBUG(...)` (src/debug.h) para trazas de depuración.
+Use `NT_DEBUG(...)` (src/debug.h) for debug traces.
 
-## Modo de "A continuación" (siembra de la cola)
+## "A continuación" mode (queue seeding)
 
-El modo de siembra se elige con `NEVERTUBE_NEXT_MODE`:
+The seeding mode is chosen with `NEVERTUBE_NEXT_MODE`:
 
-- `radio` (defecto) → mix `RDAMVM<videoId>` del vídeo clicado (`/next` con
-  `playlistId`, estilo YouTube Music); si el vídeo no trae panel de
-  reproducción, se usa la mezcla de recomendaciones del mismo `/next`.
-- `suggestions` → `/next` estático: ~20 recomendaciones del vídeo actual.
-- `none` → sin siembra (la cola queda como vino de la entrada).
+- `radio` (default) → mix `RDAMVM<videoId>` of the clicked video (`/next` with
+  `playlistId`, YouTube Music style); if the video does not bring a
+  playback panel, the recommendations mix of the same `/next` is used.
+- `suggestions` → static `/next`: ~20 recommendations of the current video.
+- `none` → no seeding (the queue stays as it came from the entry).
 
-`radio` NO auto-siembra: la cola del mix se genera solo con un click explícito
-desde fuera de "A continuación" (`MainWindow::openWatch` → `WatchPage::triggerRadio`),
-es decir al abrir un vídeo desde search/home/channel/URL. Dentro de la lista
-"A continuación", cliqueando sus ítems solo se reproduce (no se regenera radio).
-`suggestions` sí auto-llena en `WatchPage::updateQueue` cuando quedan ≤5 ítems y
-cada vídeo nuevo se regenera. Innertube: `fetchRadio` (panel + mezcla),
-`fetchRadioMore` (continuación, si el cliente la emite). El selftest de
-innertube cubre el panel RDAMVM y el fallback.
+`radio` does NOT auto-seed: the mix queue is generated only with an explicit click
+from outside "A continuación" (`MainWindow::openWatch` → `WatchPage::triggerRadio`),
+that is, when opening a video from search/home/channel/URL. Inside the list
+"A continuación", clicking its items only plays (radio is not regenerated).
+`suggestions` does auto-fill in `WatchPage::updateQueue` when ≤5 items remain and
+each new video is regenerated. Innertube: `fetchRadio` (panel + mix),
+`fetchRadioMore` (continuation, if the client emits it). The innertube
+selftest covers the RDAMVM panel and the fallback.
 
-**Radio ya guardada (reuso sin red)**: los radios se guardan COMPLETOS en
-`discover_radios`/`discover_radio_videos` al generarse. Si al abrir un vídeo
-(`openWatchAt`, modo Radio) su radio ya está guardada, se reusa desde la BD
-para "A continuación" (`MainWindow` con `DiscoverRepo::radioVideoIdsForSeed` +
-`VideoCacheRepo::getMany`) y NO se vuelve a pedir a YouTube. Solo se llama
-`WatchPage::triggerRadio` cuando no hay radio guardada (o sus metadatos no
-están en la caché). Para Descubre, `hasRadio` ya evitaba re-pedir.
+**Already-saved radio (reuse without network)**: radios are saved COMPLETE in
+`discover_radios`/`discover_radio_videos` when generated. If when opening a video
+(`openWatchAt`, Radio mode) its radio is already saved, it is reused from the DB
+for "A continuación" (`MainWindow` with `DiscoverRepo::radioVideoIdsForSeed` +
+`VideoCacheRepo::getMany`) and YouTube is NOT asked again. Only
+`WatchPage::triggerRadio` is called when there is no saved radio (or its metadata is not
+in the cache). For Descubre, `hasRadio` already avoided re-asking.
 
-**Visitas y fecha de la cola (metadatos)**: el `compactVideoRenderer` del
-cliente VISIONOS (la mezcla de recomendaciones del `/next`) trae las visitas
-como texto localizado (`"85.805 visualizaciones"`, `"1,2 M de vistas"`) y NO
-trae fecha. Por eso:
+**Views and date of the queue (metadata)**: the `compactVideoRenderer` of the
+VISIONOS client (the recommendations mix of `/next`) brings the views
+as localized text (`"85.805 visualizaciones"`, `"1,2 M de vistas"`) and does NOT
+bring a date. That is why:
 
-- Las visitas se leen con `countFromText` (el parser propio que había en
-  `parseRelated` hacía `toLongLong` del texto entero y daba 0: la cola salía sin
-  visitas). Lo mismo en `parseWatchQueue` (panel), que hacía `toInt()` directo.
-- La fecha del lockup moderno viene ABREVIADA (`"hace 8 h"`, `"hace 3 d"`,
-  `"hace 2 m"`): `relativeToIso` acepta esas unidades (y las inglesas
-  `"2 months ago"`). Ojo, `m` = meses (medido: vídeos de millones de visitas no
-  pueden ser de hace 2 minutos).
-- El lockup da las visitas SIN la palabra "vistas" (`"21 K"`): `looksLikeCountText`
-  las reconoce solo si el texto es número + multiplicador (así un canal que
-  empieza por dígito, "3 Doors Down", no se confunde con un recuento). El lockup
-  también da el CANAL (primer dato que no es visitas ni fecha) y su id (en
+- The views are read with `countFromText` (the own parser that was in
+  `parseRelated` did `toLongLong` of the whole text and gave 0: the queue came out without
+  views). The same in `parseWatchQueue` (panel), which did `toInt()` directly.
+- The date of the modern lockup comes ABBREVIATED (`"hace 8 h"`, `"hace 3 d"`,
+  `"hace 2 m"`): `relativeToIso` accepts those units (and the English
+  `"2 months ago"`). Careful, `m` = months (measured: videos with millions of views cannot
+  be from 2 minutes ago).
+- The lockup gives the views WITHOUT the word "vistas" (`"21 K"`): `looksLikeCountText`
+  recognizes them only if the text is number + multiplier (so a channel that
+  starts with a digit, "3 Doors Down", is not confused with a count). The lockup
+  also gives the CHANNEL (the first data that is not views nor date) and its id (in
   `metadata.image.decoratedAvatarViewModel...browseEndpoint`).
-- Para que la cola tenga fecha, `handleRadio` no emite la mezcla de VISIONOS
-  directamente: pide UNA vez el mismo `/next` al cliente WEB
-  (`requestRadioWeb`), cuyo layout moderno (`lockupViewModel`) sí trae visitas y
-  fecha. Si esa petición falla, se emite la de VISIONOS (sin fecha). Es una
-  petición extra, no la cascada completa (~12-15 s).
-- **Refresco de radios viejas**: una radio guardada por un parser que no traía
-  ni visitas ni fecha se detecta al abrirla (`openWatchAt`: canal + algún
-  metadato) y se refresca UNA vez; `onRadioReadyDiscover` reescribe entonces su
-  lista de ids (`clearForSeed` + `saveRadio`, porque `saveRadio` no sobrescribe).
-  Así converge en una sola apertura y luego reusa sin red. Los vídeos que
-  YouTube devuelve sin fecha (directos, estrenos) no fuerzan refrescos: el
-  umbral es "algún metadato", no "todos".
+- So that the queue has a date, `handleRadio` does not emit the VISIONOS mix
+  directly: it asks ONCE for the same `/next` from the WEB client
+  (`requestRadioWeb`), whose modern layout (`lockupViewModel`) does bring views and
+  date. If that request fails, the VISIONOS one is emitted (without date). It is an extra
+  request, not the complete cascade (~12-15 s).
+- **Refresh of old radios**: a radio saved by a parser that brought
+  neither views nor date is detected when opening it (`openWatchAt`: channel + some
+  metadata) and is refreshed ONCE; `onRadioReadyDiscover` then rewrites its
+  list of ids (`clearForSeed` + `saveRadio`, because `saveRadio` does not overwrite).
+  Thus it converges in a single opening and then reuses without network. The videos that
+  YouTube returns without a date (live, premieres) do not force refreshes: the
+  threshold is "some metadata", not "all".
 
-- **Fechas relativas: "metalenguaje" declarativo, no una cascada de `if`s**. El
-  bug real (2026-10) fue que los vídeos de hace 2/4 semanas se pintaban como
-  **"hoy"** en Home, Canal, Búsqueda, cola, playlists y Player. Causa: en
-  `relativeToIso` la rama de segundos usaba `unit.startsWith('s')` y
-  **"semanas" también empieza por 's'**, así que `"hace 2 semanas"` se parseaba
-  como *2 segundos* → la fecha quedaba a 2 s de "ahora" → `format::publishedLabel`
-  (`days < 1`) devolvía "hoy". Las inglesas ("2 weeks ago") no fallaban porque
-  "weeks" no empieza por 's'. El arreglo **no** es blindar esa rama (eso dejaría
-  la siguiente colisión para mañana); el parser se reescribió como *metalenguaje*:
-  - **Extracción idioma-agnóstica**: se localiza el primer número (o el artículo
-    "un/una/um/uma/a/an") cuyo token siguiente sea una unidad reconocible. NO se
-    busca `"hace"`/`"ago"` (el conector depende del idioma). Así funcionan por
-    igual "hace 2 semanas", "Emitido hace 6 horas", "2 weeks ago" y el portugués
-    "há 2 semanas" **sin código nuevo**.
-  - **Tabla declarativa `kRelativeUnits`** (pista → factor, en `src/yt_innertube.cpp`):
-    la unidad se resuelve por **coincidencia MÁS LARGA**, no por orden de `if`s.
-    "sem" gana a "s" porque el `contains` de una pista de 1 letra exige token
-    exacto; añadir una unidad (p. ej. "quincena") o un idioma es **una fila más**,
-    no tocar la lógica. Las pistas se comparan **sin acentos** (`sinAcentos`, NFD +
-    quitar marcas) para cubrir "día"/"mês"/"año".
-  - **Lo que no se reconoce devuelve VACÍO** (la UI no inventa fecha) en vez de
-    caer a una unidad por defecto — que era lo que producía el falso "hoy".
-  - El clasificador de `metadataParts` del lockup WEB (`videoFromWebLockup`) ya
-    **no filtra por `t.contains("hace") || t.contains("ago")`** (era una segunda
-    copia del parser y en pt/otro conector la fecha no llegaba a clasificarse y el
-    texto caía en el nombre del canal): ahora `relativeToIso(t)` es la **única
-    autoridad** de "¿esto es una fecha?".
-  - Lo fija el selftest offline `--selftest-dates` (`Yt::relativeDateSelfTest`,
-    `src/yt_innertube.cpp`): **31 casos puros** con tolerancia de 5 s (semanas/
-    días/horas/minutos/segundos/meses/años, abreviaturas `h/d/m/s`, prefijos
-    "Emitido…", portugués con "há" y acentos, inglés con `a/an`, textos que no son
-    fecha y **unidades desconocidas → vacío**). El test caza la regresión: sin la
-    fila "sem" fallan los 4 casos de semanas. Va en el smoke de los DOS CI.
-  - Es la función que usan las 6 asignaciones de `publishedAt` de red.
+- **Relative dates: declarative "metalanguage", not a cascade of `if`s**. The
+  real bug (2026-10) was that videos from 2/4 weeks ago were painted as
+  **"hoy"** on Home, Canal, Búsqueda, queue, playlists and Player. Cause: in
+  `relativeToIso` the seconds branch used `unit.startsWith('s')` and
+  **"semanas" also starts with 's'**, so `"hace 2 semanas"` was parsed
+  as *2 seconds* → the date ended up 2 s from "now" → `format::publishedLabel`
+  (`days < 1`) returned "hoy". The English ones ("2 weeks ago") did not fail because
+  "weeks" does not start with 's'. The fix **is not** to shield that branch (that would leave
+  the next collision for tomorrow); the parser was rewritten as a *metalanguage*:
+  - **Language-agnostic extraction**: the first number (or the article
+    "un/una/um/uma/a/an") whose next token is a recognizable unit is located. It does NOT
+    look for `"hace"`/`"ago"` (the connector depends on the language). Thus "hace 2 semanas",
+    "Emitido hace 6 horas", "2 weeks ago" and the Portuguese
+    "há 2 semanas" work the same **without new code**.
+  - **Declarative table `kRelativeUnits`** (hint → factor, in `src/yt_innertube.cpp`):
+    the unit is resolved by **LONGEST match**, not by the order of `if`s.
+    "sem" beats "s" because the `contains` of a 1-letter hint requires an exact
+    token; adding a unit (e.g. "quincena") or a language is **one more row**,
+    not touching the logic. The hints are compared **without accents** (`sinAcentos`, NFD +
+    removing marks) to cover "día"/"mês"/"año".
+  - **What is not recognized returns EMPTY** (the UI does not invent a date) instead of
+    falling back to a default unit — which was what produced the false "hoy".
+  - The classifier of `metadataParts` of the WEB lockup (`videoFromWebLockup`) no
+    longer **filters by `t.contains("hace") || t.contains("ago")`** (it was a second
+    copy of the parser and in pt/another connector the date did not get classified and the
+    text fell into the channel name): now `relativeToIso(t)` is the **only
+    authority** of "is this a date?".
+  - It is fixed by the offline selftest `--selftest-dates` (`Yt::relativeDateSelfTest`,
+    `src/yt_innertube.cpp`): **31 pure cases** with a 5 s tolerance (weeks/
+    days/hours/minutes/seconds/months/years, abbreviations `h/d/m/s`, prefixes
+    "Emitido…", Portuguese with "há" and accents, English with `a/an`, texts that are not a
+    date and **unknown units → empty**). The test catches the regression: without the
+    "sem" row the 4 weeks cases fail. It goes in the smoke of BOTH CIs.
+  - It is the function used by the 6 network `publishedAt` assignments.
 
-## AV1 por HLS (sintético)
+## AV1 over HLS (synthetic)
 
-YouTube **no publica AV1 en su master HLS** (`hlsManifestUrl`): solo VP9/h264
-(verificado: todo `av01` de YouTube es `https`/DASH, no aparece en el master HLS). Además, la URL
-adaptativa AV1 directa (modo "edge") se **estrangula** (~150 KB/s) porque el
-throttle es **por petición** y una descarga continua agota su presupuesto. En
-cambio, cada petición `Range` corta (~2 MB) no está estrangulada, incluso por
-la misma conexión keep-alive (≈14 MB/s).
+YouTube **does not publish AV1 in its HLS master** (`hlsManifestUrl`): only VP9/h264
+(verified: every `av01` of YouTube is `https`/DASH, it does not appear in the HLS master). In
+addition, the direct adaptive AV1 URL ("edge" mode) is **throttled** (~150 KB/s)
+because the throttle is **per request** and a continuous download exhausts its
+budget. On the other hand, each short `Range` request (~2 MB) is not throttled, even over
+the same keep-alive connection (≈14 MB/s).
 
-`Yt::buildAv1Hls` (perfil `Modern`) sintetiza un HLS local sobre el
-`adaptiveFormat` AV1: media playlist fMP4 con `#EXT-X-MAP` (de `initRange`) y
-un segmento `#EXT-X-BYTERANGE` **por fragmento real del fMP4**. Claves para
-que funcione:
+`Yt::buildAv1Hls` (profile `Modern`) synthesizes a local HLS over the
+`adaptiveFormat` AV1: fMP4 media playlist with `#EXT-X-MAP` (from `initRange`) and
+one `#EXT-X-BYTERANGE` segment **per real fragment of the fMP4**. Keys for
+it to work:
 
-- **la frontera de cada segmento sale del `sidx`** (caja del `indexRange`, ~4
-  KB): `buildAv1Hls` baja esos bytes con `fetchRangeBlocking` y
-  `av1ParseSidx` da tamaño+duración exactos por subsegmento. Es
-  imprescindible: con trozos fijos (el respaldo antiguo de ~2 MB) la
-  reproducción secuencial funciona, pero **el seek cae a mitad de fragmento y
-  mpv no carga vídeo** (`Cache: 0.0s` + `Errors when loading file`, sin
-  `VO:`). Verificar con `mpv --no-config --vo=null --ao=null --frames=2
-  --start=<t> <m3u8>` para varios `t`;
-- sufijo de ruta `/seg.mp4` tras `/videoplayback` (YouTube lo ignora) para que
-  el demuxer HLS acepte la extensión sin `extension_picky`/whitelist;
-- `&nt=<n>` distinto por segmento: sin él ffmpeg **fusiona** los rangos
-  contiguos del mismo recurso en una sola petición y vuelve el throttle;
-- la escritura del `.m3u8` es atómica (`.tmp` + `rename`): la recuperación
-  reescribe la misma ruta mientras mpv puede estar leyéndola;
-- audio aparte (`PlayerWidget::setAudioFile`, como el modo edge).
+- **the boundary of each segment comes from the `sidx`** (box of the `indexRange`, ~4
+  KB): `buildAv1Hls` downloads those bytes with `fetchRangeBlocking` and
+  `av1ParseSidx` gives exact size+duration per subsegment. It is
+  essential: with fixed chunks (the old ~2 MB fallback) sequential
+  playback works, but **the seek falls in the middle of a fragment and
+  mpv does not load video** (`Cache: 0.0s` + `Errors when loading file`, without
+  `VO:`). Verify with `mpv --no-config --vo=null --ao=null --frames=2
+  --start=<t> <m3u8>` for several `t`;
+- path suffix `/seg.mp4` after `/videoplayback` (YouTube ignores it) so that
+  the HLS demuxer accepts the extension without `extension_picky`/whitelist;
+- a different `&nt=<n>` per segment: without it ffmpeg **merges** the contiguous
+  ranges of the same resource into a single request and the throttle returns;
+- the writing of the `.m3u8` is atomic (`.tmp` + `rename`): the recovery
+  rewrites the same path while mpv may be reading it;
+- separate audio (`PlayerWidget::setAudioFile`, like edge mode).
 
-Se sirve desde `HlsServer` (`http://127.0.0.1:<port>/<videoId>.m3u8`) y gana en
-`hlsReady` antes de `fetchMaster`; si no hay AV1 (u otro perfil), se mantiene el
-HLS de YouTube (VP9/h264). Verificado en logs de mpv: `● Video (av1 …)`,
-`Using hardware decoding (vulkan-copy)`, `paused-for-cache=0` y `cache-time`
-= duración completa en pocos segundos. El selftest offline `--selftest-av1hls`
-valida la playlist generada (`EXT-X-MAP`/`BYTERANGE`, sufijo `/seg.mp4`, `&nt`
-distinto por segmento, selección de altura y el parseo del `sidx`) sin red ni
-reproductor.
+It is served from `HlsServer` (`http://127.0.0.1:<port>/<videoId>.m3u8`) and wins in
+`hlsReady` before `fetchMaster`; if there is no AV1 (or another profile), YouTube's
+HLS is kept (VP9/h264). Verified in mpv logs: `● Video (av1 …)`,
+`Using hardware decoding (vulkan-copy)`, `paused-for-cache=0` and `cache-time`
+= complete duration in a few seconds. The offline selftest `--selftest-av1hls`
+validates the generated playlist (`EXT-X-MAP`/`BYTERANGE`, suffix `/seg.mp4`, `&nt`
+different per segment, height selection and the parsing of the `sidx`) without network nor
+player.
 
-## Perfil de códec por hardware (HwProbe)
+## Codec profile by hardware (HwProbe)
 
-El perfil que decide qué códec se pide a YouTube (`settings.codec_profile`)
-**no** se adivina durante la reproducción: se sondea **al arranque** con
-`HwProbe` (`src/hwprobe.*`), que reproduce en headless (`vo=null`,
-`hwdec=auto-copy`, sin audio ni config) tres micro-clips embebidos en
-`resources/clips/` (AV1, VP9, H.264) en ese orden. Perfiles: `av1-hw` >
-`vp9-hw` > `h264-hw` > `soft-all`. `MainWindow::applyCodecProfile` traduce el
-perfil a `Yt::CodecProfile` (Modern/Vp9/Legacy), espera inicial de buffer y, en
-`soft-all`, `m_noHw` + tope 1080p. Mientras se sondea no se reproduce: la
-petición se encola (`m_hasPendingWatch`) y se lanza al terminar. El cartel
-"Detectando hardware" solo aparece si el sondeo tarda (>300 ms, PC básico) o
-si el usuario intenta reproducir mientras sondea.
+The profile that decides which codec is requested from YouTube (`settings.codec_profile`)
+is **not** guessed during playback: it is probed **at startup** with
+`HwProbe` (`src/hwprobe.*`), which plays in headless mode (`vo=null`,
+`hwdec=auto-copy`, without audio or config) three micro-clips embedded in
+`resources/clips/` (AV1, VP9, H.264) in that order. Profiles: `av1-hw` >
+`vp9-hw` > `h264-hw` > `soft-all`. `MainWindow::applyCodecProfile` translates
+the profile to `Yt::CodecProfile` (Modern/Vp9/Legacy), an initial buffer wait and, in
+`soft-all`, `m_noHw` + 1080p cap. While probing, nothing is played: the
+request is queued (`m_hasPendingWatch`) and launched when it finishes. The
+"Detecting hardware" message only appears if the probe takes long (>300 ms, basic PC) or
+if the user tries to play while it is probing.
 
-**Veredicto por clip (el log de mpv manda; `hwdec-current` solo corrobora):**
-con `msg-level=all=no,vd=v,ffmpeg=v` se capturan la línea del decodificador
-(`Using hardware/software decoding`), los errores del intento HW (`av1_qsv:
-unsupported`, `Error initializing…` → `sawHwFailed`) y los decodificadores
-software. **Gracia de 400 ms tras el primer frame** (`video-params/h > 0`):
-el veredicto del decodificador se encola 1–10 ms DESPUÉS del primer frame y
-decidir antes era el origen del falso positivo `av1-hw` en i5/HD4600 (QSV
-reporta `qsv-copy` pero no decodifica AV1; los errores llegaban 5 ms después
-del veredicto). `hwprobe::clipVerdict` (función pura, testeada con 9 casos
-offline en `--selftest-hwprobe`): `HW` solo con log de HW limpio y sin señales
-en contra; `SW` con log de SW, intento HW fallido o `hwdec-current == "no"`;
-`""` (indeterminado) si no hay señal → se **avanza a la siguiente códec** en
-vez de abortar (así el i5 llega a H.264, que sí decodifica por HW). Un
-`END_FILE` por error o un timeout sin frames también avanza como indeterminado.
+**Verdict per clip (the mpv log rules; `hwdec-current` only corroborates):**
+with `msg-level=all=no,vd=v,ffmpeg=v` the decoder line is captured
+(`Using hardware/software decoding`), the errors of the HW attempt (`av1_qsv:
+unsupported`, `Error initializing…` → `sawHwFailed`) and the software
+decoders. **400 ms grace after the first frame** (`video-params/h > 0`):
+the decoder verdict is queued 1–10 ms AFTER the first frame and
+deciding earlier was the origin of the false positive `av1-hw` on i5/HD4600 (QSV
+reports `qsv-copy` but does not decode AV1; the errors arrived 5 ms after
+the verdict). `hwprobe::clipVerdict` (a pure function, tested with 9 offline
+cases in `--selftest-hwprobe`): `HW` only with a clean HW log and no signals
+against; `SW` with an SW log, a failed HW attempt or `hwdec-current == "no"`;
+`""` (indeterminate) if there is no signal → it **advances to the next codec**
+instead of aborting (thus the i5 reaches H.264, which it does decode in HW). An
+`END_FILE` due to error or a timeout without frames also advances as indeterminate.
 
-- Persistencia: primer códec con veredicto `HW` → ese perfil (se persiste);
-  si al final no hay HW pero hubo ≥1 `SW` decisivo → `soft-all` (veredicto
-  real, se persiste); si todo fue indeterminado → perfil vacío (soft-all
-  transitorio SIN persistir, se reintenta al arrancar). Solo
-  `decoded && veredicto` concluye.
-- Re-sondeo único al actualizar: la lógica del sondeo se versiona en
-  `settings.codec_probe_v` (`kCodecProbeVersion`). Si el valor persistido es de
-  una versión anterior (p.ej. un `av1-hw` falso positivo grabado por code viejo)
-  o no existe, se re-sondea UNA vez al arrancar **usando el valor guardado como
-  fallback** y el veredicto fresco lo reemplaza; al completarse se marca la
-  versión y los arranques siguientes son rápidos (no se re-sondea en cada boot,
-  crítico en la máquina de pruebas). Ajustes → "Volver a detectar hardware" borra
-  `codec_profile` y relanza `HwProbe` en caliente.
-- Nombres antiguos migrados al arrancar: `modern→av1-hw`, `vp9→vp9-hw`,
+- Persistence: first codec with a `HW` verdict → that profile (it is persisted);
+  if in the end there is no HW but there was ≥1 decisive `SW` → `soft-all` (real
+  verdict, it is persisted); if everything was indeterminate → empty profile (transient
+  soft-all WITHOUT persisting, retried at startup). Only
+  `decoded && verdict` concludes.
+- Single re-probe on update: the probe logic is versioned in
+  `settings.codec_probe_v` (`kCodecProbeVersion`). If the persisted value is from
+  a previous version (e.g. a false positive `av1-hw` recorded by old code)
+  or does not exist, it is re-probed ONCE at startup **using the stored value as
+  a fallback** and the fresh verdict replaces it; upon completion the
+  version is marked and the following startups are fast (it is not re-probed on every boot,
+  critical on the test machine). Ajustes → "Volver a detectar hardware" deletes
+  `codec_profile` and relaunches `HwProbe` live.
+- Old names migrated at startup: `modern→av1-hw`, `vp9→vp9-hw`,
   `legacy→h264-hw`, `nohw→soft-all`.
-- Escalera de descenso (`PlayerWidget::streamDecodeInfoReady` → `MainWindow`,
-  `hwprobe::lowerProfile`): el perfil se decide en el arranque (HwProbe) y, si la
-  reproducción demuestra que el perfil promete HW para el códec que suena pero
-  mpv decodifica en **software**, se baja un peldaño
-  (`av1-hw → vp9-hw → h264-hw → soft-all`) y se **re-resuelve** con el perfil
-  nuevo (`reloadCurrent`, SIN rotar sesión: un problema de códec no es de red).
-  Reglas duras: **solo evidencia de códec/HW, NUNCA por red** (un 403, un
-  visitorData vencido o un atasco de caché no cambian `hwdec-current`; la señal
-  solo existe con frames decodificados en software); `soft-all` es el suelo;
-  presupuesto propio y separado del de sesión (`kDescendMaxPerSession=3`) con
-  anti-rebote (`kDescendCooldownMs=15 s`) y reinicio del presupuesto con una
-  racha decodificada en HW. El descenso es **EFÍMERO** (no se persiste): un fallo
-  puntual no "condena" la máquina; "Volver a detectar hardware" restaura. La
-  comparación usa el perfil **activo en memoria** (`m_activeProfile`), no
-  `settings`, o tras un descenso efímero volvería a bajar en falso.
-  `--selftest-hwprobe` cubre la tabla offline de `hwprobe::lowerProfile`.
-- `Yt::codecRankedScore(altura, mime) = rank*100000 + altura`: la preferencia de
-  códec pesa más que la altura, así el códec que la GPU decodifica gana aunque su
-  variante sea más baja (p. ej. `h264-hw` prefiere h264 1080 antes que VP9 2160,
-  que iría a software). Se usa en `edgeHeight`, `buildEdgeMaster` y
-  `buildFilteredMaster`. El HLS sintético AV1 (`buildAv1Hls`) solo se genera con
-  perfil `Modern` (`av1-hw`).
-- El selftest `--selftest-hwprobe` verifica primero la tabla de decisión
-  offline (9 casos, regresión determinista) y luego imprime el perfil
-  detectado (dependiente de la GPU; no es un assert fijo). NO se corre en el
-  CI: el runner de GitHub no tiene GPU, así que el sondeo HW se valida en las
-  máquinas de pruebas (x86/x64). Por el mismo motivo `--selftest-ffmpeg` (gate del
-  FfmpegBackend) tampoco va en el smoke de CI: la VM no puede ejercitar AV1/
-  DXVA2 (av1 es imposible en x86, ver arriba); se corre en la máquina de pruebas, donde
-  salta el clip av1 si no hay decoder sw.
+- Descent ladder (`PlayerWidget::streamDecodeInfoReady` → `MainWindow`,
+  `hwprobe::lowerProfile`): the profile is decided at startup (HwProbe) and, if
+  playback shows that the profile promises HW for the codec that sounds but
+  mpv decodes in **software**, it drops one step
+  (`av1-hw → vp9-hw → h264-hw → soft-all`) and is **re-resolved** with the new
+  profile (`reloadCurrent`, WITHOUT rotating session: a codec problem is not a network
+  one). Hard rules: **only codec/HW evidence, NEVER by network** (a 403, an
+  expired visitorData or a cache stall do not change `hwdec-current`; the signal
+  only exists with frames decoded in software); `soft-all` is the floor;
+  its own budget separate from the session one (`kDescendMaxPerSession=3`) with
+  anti-bounce (`kDescendCooldownMs=15 s`) and budget reset with a
+  streak decoded in HW. The descent is **EPHEMERAL** (not persisted): an occasional
+  failure does not "condemn" the machine; "Volver a detectar hardware" restores it. The
+  comparison uses the profile **active in memory** (`m_activeProfile`), not
+  `settings`, or after an ephemeral descent it would drop again falsely.
+  `--selftest-hwprobe` covers the offline table of `hwprobe::lowerProfile`.
+- `Yt::codecRankedScore(altura, mime) = rank*100000 + altura`: the codec
+  preference weighs more than the height, so the codec the GPU decodes wins even if its
+  variant is lower (e.g. `h264-hw` prefers h264 1080 over VP9 2160,
+  which would go to software). It is used in `edgeHeight`, `buildEdgeMaster` and
+  `buildFilteredMaster`. The synthetic HLS AV1 (`buildAv1Hls`) is only generated with
+  profile `Modern` (`av1-hw`).
+- The self-test `--selftest-hwprobe` first verifies the offline decision
+  table (9 cases, deterministic regression) and then prints the detected
+  profile (GPU-dependent; it is not a fixed assert). It is NOT run in
+  CI: the GitHub runner has no GPU, so the HW probe is validated on the
+  test machines (x86/x64). For the same reason `--selftest-ffmpeg` (gate of the
+  FfmpegBackend) is not in the CI smoke either: the VM cannot exercise AV1/
+  DXVA2 (av1 is impossible on x86, see above); it is run on the test machine, where
+  it skips the av1 clip if there is no sw decoder.
 
-## Experimento ANGLE (zero-copy x64, opt-in)
+## ANGLE experiment (zero-copy x64, opt-in)
 
-El CPU al 100% de la máquina x64 de pruebas es el coste INHERENTE de
-`d3d11va-copy`: con GL de escritorio como superficie del widget, mpv no puede
-importar las texturas D3D11 del decodificador y copia VRAM→RAM→textura GL por
-frame. La vía de zero-copy real en Windows con libmpv+render es **ANGLE +
-`d3d11-egl`**: el contexto GL del widget es ANGLE (GLES sobre D3D11), el frame
-decodificado viaja por **EGLStream** de ANGLE a la textura sin pasar por CPU.
-EXPERIMENTAL y MEDIBLE con `NEVERTUBE_ANGLE=1` (solo Windows; no existe en el
-build x86, que sale por `NEVERTUBE_NO_MPV`):
+The 100% CPU of the x64 test machine is the INHERENT cost of
+`d3d11va-copy`: with desktop GL as the widget surface, mpv cannot
+import the D3D11 textures of the decoder and copies VRAM→RAM→GL texture per
+frame. The real zero-copy path on Windows with libmpv+render is **ANGLE +
+`d3d11-egl`**: the widget's GL context is ANGLE (GLES over D3D11), the
+decoded frame travels through ANGLE's **EGLStream** to the texture without going through
+CPU. EXPERIMENTAL and MEASURABLE with `NEVERTUBE_ANGLE=1` (Windows only; it does not exist
+in the x86 build, which goes out via `NEVERTUBE_NO_MPV`):
 
-- `main.cpp` fuerza `QT_OPENGL=angle` antes de `QApplication` (solo si el
-  usuario no fijó ya `QT_OPENGL`). Con eso Qt crea el contexto del
-  `QOpenGLWidget` con ANGLE/D3D11 (todo lo demás de la UI sigue por QPainter,
-  que no usa GL).
-- NO hace falta pasarle handles EGL a libmpv: mpv carga `LIBEGL.DLL` con la
-  búsqueda de LoadLibrary (mismo directorio → el MISMO ANGLE que Qt ya cargó)
-  y toma el display en `eglGetCurrentDisplay()` del hilo de render
-  (`paintGL`). `hwdec=auto` se queda (invariante protegida): en
-  `video/out/gpu/hwdec.c` el driver `d3d11-egl` va ANTES que `d3d11va`, así
-  que con contexto ANGLE mpv elige solo el zero-copy; con GL de escritorio
-  `eglGetCurrentDisplay()` es NULL y cae a `d3d11va-copy` (comportamiento
-  actual, sin daño).
-- `MpvBackend::initGL` loguea `E2E GL ctx es=… vendor=… renderer=…` para
-  confirmar empíricamente qué contexto hay (ANGLE → vendor "Google … (ANGLE)";
-  desktop → vendor del driver).
-- **Cómo medir en la máquina x64 de pruebas** (antes/después con el MISMO vídeo y calidad):
-  1. `NEVERTUBE_ANGLE=1 ./nevertube_qt2` (necesita `libEGL.dll`/`libGLESv2.dll`
-     junto al exe; `windeployqt` las despliega y el CI x64 lo verifica en el
-     `$missing` del portátil).
-  2. Con `NEVERTUBE_DEBUG=1`, el veredicto es el log de mpv + `hwdec-current`
-     en el E2E: `Using hardware decoding (d3d11-egl)` = zero-copy activo;
-     `(d3d11va-copy)` = no cambió nada. Comparar CPU en el Administrador de
+- `main.cpp` forces `QT_OPENGL=angle` before `QApplication` (only if the
+  user has not already set `QT_OPENGL`). With that Qt creates the context of the
+  `QOpenGLWidget` with ANGLE/D3D11 (everything else in the UI still goes via QPainter,
+  which does not use GL).
+- There is NO need to pass EGL handles to libmpv: mpv loads `LIBEGL.DLL` with
+  the LoadLibrary search (same directory → the SAME ANGLE that Qt already loaded)
+  and takes the display in `eglGetCurrentDisplay()` of the render thread
+  (`paintGL`). `hwdec=auto` stays (protected invariant): in
+  `video/out/gpu/hwdec.c` the driver `d3d11-egl` comes BEFORE `d3d11va`, so
+  with an ANGLE context mpv chooses only the zero-copy; with desktop GL
+  `eglGetCurrentDisplay()` is NULL and it falls back to `d3d11va-copy` (current
+  behavior, no harm).
+- `MpvBackend::initGL` logs `E2E GL ctx es=… vendor=… renderer=…` to
+  empirically confirm which context there is (ANGLE → vendor "Google … (ANGLE)";
+  desktop → driver vendor).
+- **How to measure on the x64 test machine** (before/after with the SAME video and quality):
+  1. `NEVERTUBE_ANGLE=1 ./nevertube_qt2` (needs `libEGL.dll`/`libGLESv2.dll`
+     next to the exe; `windeployqt` deploys them and the x64 CI verifies it in the
+     `$missing` of the portable).
+  2. With `NEVERTUBE_DEBUG=1`, the verdict is the mpv log + `hwdec-current`
+     in the E2E: `Using hardware decoding (d3d11-egl)` = zero-copy active;
+     `(d3d11va-copy)` = nothing changed. Compare CPU in the Administrador de
      tareas.
-- **Caídas esperadas (inocuas)**: si el ANGLE de Qt 5.15.2 no expone las
-  extensiones que exige `hwdec_d3d11egl.c` (`EGL_ANGLE_stream_producer_d3d_texture`,
+- **Expected (harmless) failures**: if the ANGLE of Qt 5.15.2 does not expose the
+  extensions that `hwdec_d3d11egl.c` requires (`EGL_ANGLE_stream_producer_d3d_texture`,
   `EGL_ANGLE_d3d_share_handle_client_buffer`, `EGL_EXT_device_query`, GLES
-  `GL_OES_EGL_image_external_essl3`/`GL_NV_EGL_stream_consumer_external`), el
-  `init` del driver falla y mpv sigue con `d3d11va-copy`: ni mejora ni rompe.
-  ANGLE usa WARP solo si la GPU no llega a D3D11 FL9_3 (la Apollo Lake de la
-  máquina x64 de pruebas es FL11_1: hardware). Si el modo ANGLE diera parpadeo/negro en el
-  widget, el redibujado por eventos (update callback) fuerza el repintado al
-  llegar cada frame; aún así, el modo
-  es reversible quitando la variable.
-- En Linux el guard `Q_OS_WIN` lo deja todo como estaba (GL de escritorio;
-  allí el zero-copy ya es posible por VAAPI/EGL sin ANGLE, ver `hwdec-current`).
+  `GL_OES_EGL_image_external_essl3`/`GL_NV_EGL_stream_consumer_external`), the
+  `init` of the driver fails and mpv continues with `d3d11va-copy`: neither improves nor breaks.
+  ANGLE uses WARP only if the GPU does not reach D3D11 FL9_3 (the Apollo Lake of the
+  x64 test machine is FL11_1: hardware). If the ANGLE mode gave flicker/black in the
+  widget, the event-driven redraw (update callback) forces the repaint when
+  each frame arrives; even so, the mode
+  is reversible by removing the variable.
+- On Linux the `Q_OS_WIN` guard leaves everything as it was (desktop GL;
+  there zero-copy is already possible via VAAPI/EGL without ANGLE, see `hwdec-current`).
 
-## Puntos de entrada CLI
+## CLI entry points
 
-- `./build/nevertube_qt2` → app normal
-- `./build/nevertube_qt2 --search <consulta>` → buscar al arrancar
-- `./build/nevertube_qt2 --channel <channelId>` → abrir canal al arrancar
-- `./build/nevertube_qt2 http://...` → reproducir una URL al arrancar
+- `./build/nevertube_qt2` → normal app
+- `./build/nevertube_qt2 --search <consulta>` → search at startup
+- `./build/nevertube_qt2 --channel <channelId>` → open channel at startup
+- `./build/nevertube_qt2 http://...` → play a URL at startup
 - `./build/nevertube_qt2 --selftest-db` / `--selftest-player` /
   `--selftest-innertube` / `--selftest-discover` / `--selftest-home` /
   `--selftest-feeds` / `--selftest-av1hls` / `--selftest-hwprobe` / `--selftest-search` /
   `--selftest-grid` / `--selftest-theme` / `--selftest-glyphs` /
-  `--selftest-dates` → pruebas
+  `--selftest-dates` → tests
 
-## Color de acento configurable
+## Configurable accent color
 
-El acento (`settings.ui_accent`, por defecto el rojo del icono `#FA011B` — el
-play del icono de la app, alineado a la marca) se cambia
-en caliente desde Ajustes (Interfaz → Color de acento) y se persiste.
+The accent (`settings.ui_accent`, by default the icon red `#FA011B` — the
+play of the app icon, aligned with the brand) is changed
+live from Ajustes (Interfaz → Color de acento) and is persisted.
 
-- Fuente única de la paleta: `nt::accentOptions()` en `src/ui/theme.*`
-  (label visible + hex canónico + sufijo de fichero). `accentHex()`,
-  `accentHoverHex()` (mezcla ~10% blanco; del rojo del icono sale `#FF1B35`) y
-  `accentPressedHex()` (`darker(115)`; del rojo del icono sale `#D90117`) se
-  leen en CADA llamada: nada `static`
-  que congele el acento al primer uso.
-- El QSS global se genera con placeholders `@ACCENT@`/`@ACCENT_PRESSED@`
-  sustituidos por llamada (`nt::styleSheet()`), así el re-polish en caliente
-  repinta slider/progreso/primary/selección/scrollbar con el color nuevo.
-- La navegación inferior usa **PNGs pre-pintados por acento**
-  (`nav/<key>_<state>_<suffix>.png`), NO retint en runtime: el retint era el
-  origen de dos bugs (cuadrado negro por `QColor(QRgb)` que forzaba alpha=255,
-  y acento congelado por cachear el color en un `static`). NUEVO COLOR DE
-  ACENTO: añadirlo a `nt::accentOptions()` y regenerar los PNG con
-  `tools/gen_nav_accent.cpp` (todos los sufijos se re-tiñen con un RECOLOR
-  EXACTO al valor de la variante — active=acento, hover=accentHover,
-  pressed=accentPressed —, píxel a píxel y conservando solo el alfa; NO se
-  pasa por HSL porque el roundtrip RGB→HSL→RGB de Qt es lossy y la nav debe
-  mostrar el MISMO valor que los botones de acento; el color NATIVO de los
-  sprites es el rojo `#FF0033` — `nativeRed` en el generador, que nunca
-  cambia — y como el sufijo `rojo` de la paleta apunta al rojo del icono
-  `#FA011B`, ese también se re-tiñe). Antes el tintado conservaba la
-  luminosidad del sprite y la nav salía en tonos que NO eran el rojo nuevo
-  (activo `#FE021F` en vez de `#FA011B`, hover salmón `#FF697B` en vez del
-  `#FF1B35` de los CTA, pressed `#CB0118` en vez de `#D90117`); el recolor
-  exacto es parte de la migración de la barra inferior al rojo del icono.
-- `MainWindow::accentChanged` aplica en caliente: stylesheet global, re-elección
-  de iconos de la nav (solo re-evalúa el sufijo), repintado de `VideoListView`
-  y `applyAccent()` en watch/channel/home/settings (suscribirse, acciones
-  activas, enlaces de la descripción, empty state, botón reset).
+- Single source of the palette: `nt::accentOptions()` in `src/ui/theme.*`
+  (visible label + canonical hex + file suffix). `accentHex()`,
+  `accentHoverHex()` (mixes ~10% white; from the icon red comes `#FF1B35`) and
+  `accentPressedHex()` (`darker(115)`; from the icon red comes `#D90117`) are
+  read on EVERY call: nothing `static`
+  that freezes the accent on first use.
+- The global QSS is generated with placeholders `@ACCENT@`/`@ACCENT_PRESSED@`
+  substituted per call (`nt::styleSheet()`), so the live re-polish
+  repaints slider/progress/primary/selection/scrollbar with the new color.
+- The bottom navigation uses **PNGs pre-painted per accent**
+  (`nav/<key>_<state>_<suffix>.png`), NOT retint at runtime: the retint was the
+  origin of two bugs (black square due to `QColor(QRgb)` that forced alpha=255,
+  and accent frozen by caching the color in a `static`). NEW ACCENT COLOR:
+  add it to `nt::accentOptions()` and regenerate the PNGs with
+  `tools/gen_nav_accent.cpp` (all suffixes are re-tinted with an EXACT RECOLOR
+  to the value of the variant — active=accent, hover=accentHover,
+  pressed=accentPressed —, pixel by pixel and keeping only the alpha; it is NOT
+  passed through HSL because Qt's RGB→HSL→RGB roundtrip is lossy and the nav must
+  show the SAME value as the accent buttons; the NATIVE color of the
+  sprites is the red `#FF0033` — `nativeRed` in the generator, which never
+  changes — and since the `rojo` suffix of the palette points to the icon red
+  `#FA011B`, that one is also re-tinted). Before, the tinting kept
+  the luminosity of the sprite and the nav came out in tones that were NOT the new red
+  (active `#FE021F` instead of `#FA011B`, salmon hover `#FF697B` instead of the
+  `#FF1B35` of the CTAs, pressed `#CB0118` instead of `#D90117`); the exact
+  recolor is part of the migration of the bottom bar to the icon red.
+- `MainWindow::accentChanged` applies live: global stylesheet, re-selection
+  of the nav icons (only re-evaluates the suffix), repaint of `VideoListView`
+  and `applyAccent()` in watch/channel/home/settings (subscribe, active
+  actions, description links, empty state, reset button).
 
-## Color de SELECCIÓN: texto y sugerencia (del usuario)
+## SELECTION color: text and suggestion (from the user)
 
-Dosposites que se perdían de vista y que el usuario señaló:
+Two details that went unnoticed and that the user pointed out:
 
-- **Seleccionar texto va en el gris de la app** (`kSelection` #2D2D2D, el mismo
-  token de los menús), no en el acento. Antes el `QLineEdit` pintaba
-  `selection-background-color: @ACCENT@` (rojo) y quedaba como un error. La
-  descripción del Player (un `QLabel` con `Qt::TextSelectableByMouse`) no la
-  cubre el QSS: la pinta con `QPalette::Highlight`, que sin más salía con el
-  azul del tema del escritorio. Por eso **la paleta se aplica en `main.cpp`**
-  (`nt::applyTextSelectionPalette`, justo tras crear la `QApplication`, sobre
-  `app.palette()`): es lo único que llega a los widgets seleccionables que el
-  QSS no alcanza. Solo se tocan `Highlight` y `HighlightedText` (este a `kText`,
-  11:1 sobre `kSelection`) para no cambiar nada más del tema del escritorio.
-  Medido sobre un render real: banda de selección `#2D2D2D` sobre campo `#1F1F1F`,
-  texto dentro en `#ECECEC`.
-- **La fila de sugerencia resaltada lleva el acento.** Se perdía porque
-  `QWidget#suggestRow[highlight="true"]` era `#1F1F1F`, MÁS oscuro que el popover
-  `#202020`: era un oscurecimiento, no un resaltado. Ahora es una **barra de
-  acento de 3 px a la izquierda** + un velo `@ACCENT_A16@`, sobre hover en
-  `kSelection`. El texto se queda en `kTextSoft`/`kMuted` (siguen dando 8:1 y 4:1
-  sobre el velo), así que no hay que tocar las etiquetas hijas. El borde
-  izquierdo se reserva siempre (3 px transparentes en la fila normal) para que la
-  barra no empuje el texto: medido, el texto arranca en `x=13` con la fila
-  resaltada y sin ella. La propiedad dinámica la pone `SuggestRow::setHighlighted`
-  (con re-polish, que es obligatorio: cambiar la propiedad no repinta solo).
+- **Selecting text goes in the app gray** (`kSelection` #2D2D2D, the same
+  token as the menus), not in the accent. Before, the `QLineEdit` painted
+  `selection-background-color: @ACCENT@` (red) and it looked like an error. The
+  Player description (a `QLabel` with `Qt::TextSelectableByMouse`) is not
+  covered by the QSS: it paints it with `QPalette::Highlight`, which without more
+  came out with the desktop theme blue. That is why **the palette is applied in `main.cpp`**
+  (`nt::applyTextSelectionPalette`, right after creating the `QApplication`, on
+  `app.palette()`): it is the only thing that reaches the selectable widgets that the
+  QSS does not reach. Only `Highlight` and `HighlightedText` are touched (the latter to `kText`,
+  11:1 on `kSelection`) so as not to change anything else of the desktop theme.
+  Measured on a real render: selection band `#2D2D2D` on field `#1F1F1F`,
+  text inside in `#ECECEC`.
+- **The highlighted suggestion row carries the accent.** It was lost because
+  `QWidget#suggestRow[highlight="true"]` was `#1F1F1F`, DARKER than the popover
+  `#202020`: it was a darkening, not a highlight. Now it is a **3 px accent bar
+  on the left** + an `@ACCENT_A16@` veil, on hover in
+  `kSelection`. The text stays in `kTextSoft`/`kMuted` (they still give 8:1 and 4:1
+  on the veil), so the child labels do not need to be touched. The left border
+  is always reserved (3 px transparent in the normal row) so that the
+  bar does not push the text: measured, the text starts at `x=13` with the row
+  highlighted and without it. The dynamic property is set by `SuggestRow::setHighlighted`
+  (with re-polish, which is mandatory: changing the property does not repaint by itself).
 
-`--selftest-theme` cubre las dos: paleta en `kSelection`/`kText`, que el QSS no
-seleccione en el acento, y que el bloque `[highlight="true"]` lleve el acento.
+`--selftest-theme` covers both: palette in `kSelection`/`kText`, that the QSS does not
+select in the accent, and that the `[highlight="true"]` block carries the accent.
 
-## Selectores del QSS sin widget detrás (`--selftest-theme`)
+## QSS selectors without a widget behind them (`--selftest-theme`)
 
-Una regla cuyo `#nombre` no se lo pone **nadie** a ningún widget no pinta nada:
-se aplicaba a la nada y no se notaba. Por eso `QPushButton#danger` puede estar
-en la hoja sin que se note (se borró; además era malo por usar el acento para
-decir "peligroso", que solo funciona si el acento es rojo).
-`--selftest-theme` lo caza: extrae los ids del QSS y exige que cada uno aparezca
-como **literal** en algún sitio de `src/`.
+A rule whose `#nombre` is set by **nobody** on any widget paints nothing:
+it applied to nothing and went unnoticed. That is why `QPushButton#danger` can be
+in the sheet without it being noticed (it was deleted; also it was bad for using the accent
+to say "peligroso", which only works if the accent is red).
+`--selftest-theme` catches it: it extracts the ids from the QSS and requires each one to appear
+as a **literal** somewhere in `src/`.
 
-Dos decisiones que hacen que el gate sirva y no estorbe:
+Two decisions that make the gate useful and not a hindrance:
 
-- **Se miran los literales de TODO `src/`, no solo los argumentos de
-  `setObjectName`.** Hay helpers que reciben el nombre como parámetro y lo
-  aplican por dentro (`makeSeg` en `watch_page.cpp` pone `#actionSegL` y
-  `#actionSegR`): con el criterio estricto salían como muertos sin serlo, y un
-  falso positivo enseña a ignorar el test. El trade-off es el inverso — que el
-  mismo nombre se cite de verdad en otro sitio y tape un selector muerto —, pero
-  eso es un falso **negativo**: avisa el CI y se mira, mientras que el falso
-  positivo mata el gate.
-- **Los comentarios se descartan antes de mirar los literales**, con los mismos
-  `sinComentarios`/`literalesDe` que usa `glyphSelfTest`. Si no, bastaría con
-  citar el nombre en un `// este botón se llama X` para que un selector muerto
-  pasara por vivo, y el propio comentario del gate se autobloquearía.
+- **The literals of ALL of `src/` are looked at, not just the arguments of
+  `setObjectName`.** There are helpers that receive the name as a parameter and
+  apply it inside (`makeSeg` in `watch_page.cpp` sets `#actionSegL` and
+  `#actionSegR`): with the strict criterion they came out as dead without being so, and a
+  false positive teaches you to ignore the test. The trade-off is the opposite — that the
+  same name is genuinely cited somewhere else and covers a dead selector —, but
+  that is a **false negative**: the CI warns and it is looked at, whereas a false
+  positive kills the gate.
+- **Comments are discarded before looking at the literals**, with the same
+  `sinComentarios`/`literalesDe` that `glyphSelfTest` uses. Otherwise it would be
+  enough to cite the name in a `// este botón se llama X` for a dead selector to
+  pass as live, and the gate's own comment would self-block.
 
-El estado de bloque **no cruza de fichero a otro**: un `/*` sin cerrar dejaría el
-fichero siguiente entero marcado como comentario y sus literales no se verían
-(agujero silencioso). Si el árbol de fuentes no está junto al binario se salta
-con un `[info]` y no falla, igual que hace `glyphSelfTest`.
+The block state **does not cross from one file to another**: an unclosed `/*` would leave
+the following file entirely marked as a comment and its literals would not be seen
+(a silent hole). If the source tree is not next to the binary it is skipped
+with an `[info]` and does not fail, just like `glyphSelfTest` does.
 
-Lo ha encontrado de verdad: `QLabel#muted` estaba en la hoja y el literal
-`"muted"` no aparecía por ningún sitio (el color sigue disponible para quien lo
-necesite como `@MUTED@`/`kMuted`).
+It has really found it: `QLabel#muted` was in the sheet and the literal
+`"muted"` did not appear anywhere (the color is still available to whoever
+needs it as `@MUTED@`/`kMuted`).
 
-## Glifos: la fuente por defecto NO tiene todos los caracteres (medido)
+## Glyphs: the default font does NOT have all the characters (measured)
 
-La UI pinta su texto con la fuente por defecto del sistema, y esa fuente
-(Liberation Sans en Linux, la que resuelve fontconfig) **no cubre todos los
-caracteres no ASCII**. Cuando el carácter no está, Qt pinta el *marcador de
-glifo ausente*: medido en pantalla, son **2x5 px**, o sea un botón casi
-invisible. Cuatro glifos de la UI estaban en esa situación:
+The UI paints its text with the system default font, and that font
+(Liberation Sans on Linux, the one fontconfig resolves) **does not cover all
+non-ASCII characters**. When the character is missing, Qt paints the *missing
+glyph marker*: measured on screen, it is **2x5 px**, i.e. an almost
+invisible button. Four glyphs of the UI were in that situation:
 
-| glifo | U+ | sitio | se ve como |
+| glyph | U+ | place | looks like |
 |---|---|---|---|
-| `✕` | 2715 | botón X de limpiar del buscador | marco vacío con un punto |
-| `◀` | 25C0 | botón "◀ Volver" del Player (además duplicaba el icono `Back` que ya tenía) | un punto antes de "Volver" |
-| `▾` | 25BE | sufijo de los 3 botones de valor de Ajustes (`makeValueButton`) | un punto |
-| `✔` | 2714 | etiqueta "ya está" del menú de playlists | un punto |
+| `✕` | 2715 | search clear X button | empty box with a dot |
+| `◀` | 25C0 | "◀ Volver" button of the Player (it also duplicated the `Back` icon it already had) | a dot before "Volver" |
+| `▾` | 25BE | suffix of the 3 value buttons of Ajustes (`makeValueButton`) | a dot |
+| `✔` | 2714 | "ya está" label of the playlists menu | a dot |
 
-Cómo se arregla, por orden de preferencia:
+How it is fixed, in order of preference:
 
-1. **Icono de `nt::icon()`** (`src/ui/icons.*`): dibuja con `QPainter`, no
-   depende de ninguna fuente. Es lo que se usa para el X de limpiar y para el
-   "Volver" (que ya tenía el icono `Back`: el `◀` del texto era redundante).
-2. **Un glifo que la fuente sí tenga** (comprobarlo antes, ver el selftest de
-   abajo).
-3. **Quitarlo**: si el texto ya dice lo mismo ("✔ ... (ya está)"), el glifo es
-   decorativo y sobra. Es lo que acabó pasando con el `▾` de los botones de
-   valor de Ajustes: el `▼` (U+25BC) que se puso por él SÍ está en la fuente,
-   pero el usuario pidió quitarlo del todo — el botón ya es un control con su
-   caja y el menú marca la opción con un check, así que el triángulo era
-   decoración redundante. `makeValueButton` es hoy un envoltorio de
-   `makeActionButton` con un comentario que prohíbe reintroducirlo.
-4. Lo que **no** hay que hacer es confiar en que el glifo se ve: `✕`, `▾`, `◀` y
-   `✔` no están en Liberation Sans y en pantalla salían como un punto.
+1. **Icon from `nt::icon()`** (`src/ui/icons.*`): draws with `QPainter`, it
+   does not depend on any font. It is what is used for the clear X and for
+   "Volver" (which already had the `Back` icon: the `◀` in the text was redundant).
+2. **A glyph the font does have** (check it first, see the self-test
+   below).
+3. **Remove it**: if the text already says the same thing ("✔ ... (ya está)"), the glyph is
+   decorative and superfluous. That is what ended up happening with the `▾` of the Ajustes
+   value buttons: the `▼` (U+25BC) put in its place IS in the font,
+   but the user asked to remove it entirely — the button is already a control with its
+   box and the menu marks the option with a check, so the triangle was
+   redundant decoration. `makeValueButton` is today a wrapper of
+   `makeActionButton` with a comment that forbids reintroducing it.
+4. What **not** to do is trust that the glyph is visible: `✕`, `▾`, `◀` and
+   `✔` are not in Liberation Sans and on screen they came out as a dot.
 
-`--selftest-glyphs` (`nt::glyphSelfTest` en `src/ui/theme.cpp`, en el smoke de
-los dos CI) recorre los **literales del propio árbol de fuentes** —los
-comentarios se descartan antes— y comprueba cada carácter no ASCII contra la
-fuente real de la app: un glifo nuevo que no exista sale en el CI en vez de en
-la pantalla del usuario. 66 ficheros, ~3360 literales, 17 glifos.
+`--selftest-glyphs` (`nt::glyphSelfTest` in `src/ui/theme.cpp`, in the smoke of
+both CIs) walks the **literals of the source tree itself** —comments are
+discarded first— and checks each non-ASCII character against the app's
+real font: a new glyph that does not exist comes out in the CI instead of on
+the user's screen. 66 files, ~3360 literals, 17 glyphs.
 
-- **OJO: `QFontMetrics::inFont()` NO sirve para esto.** Consulta el *fallback*
-  del sistema y devuelve true si **cualquier** fuente instalada tiene el
-  carácter (aquí hay 25 que cubren U+2715), mientras la app seguía pintando el
-  marcador de glifo ausente. Lo que decide es si lo tiene **el fichero** de la
-  fuente de la app, y eso lo responde `QRawFont::fromFont(appFont)` +
-  `supportsCharacter()`. Si la fuente no se puede abrir (una fuente compuesta
-  del sistema), se cae a `inFont` y se avisa por pantalla.
-- El `✕` que queda en los comentarios del código es a propósito: el test los
-  descarta, y citarlos explica por qué están prohibidos.
+- **WATCH OUT: `QFontMetrics::inFont()` does NOT work for this.** It queries the system
+  *fallback* and returns true if **any** installed font has the
+  character (here there are 25 that cover U+2715), while the app kept painting the
+  missing glyph marker. What decides is whether the **file** of the
+  app's font has it, and that is answered by `QRawFont::fromFont(appFont)` +
+  `supportsCharacter()`. If the font cannot be opened (a system composite
+  font), it falls back to `inFont` and warns on screen.
+- The `✕` that remains in the code comments is on purpose: the test
+  discards them, and citing them explains why they are forbidden.
 
-## Caché de miniaturas y suscripciones
+## Thumbnail and subscriptions cache
 
-- `ThumbnailCache::pixmap()` **cae a disco** si el LRU desalojó la imagen de
-  memoria. NO quitar ese fallback: el delegate de `VideoListView` pinta leyendo
-  de `pixmap()` en cada paint y nadie vuelve a pedir un ítem ya mostrado, así
-  que sin él las miniaturas "desaparecen" (search/canal/home) al compartir
-  presupuesto entre páginas.
-- Al suscribirse se persiste el avatar URL (`SubscriptionsRepo::add(..., avatar)`),
-  y `SubscriptionsRepo::setAvatar` lo actualiza cuando llega `ChannelInfo`.
-  `LibraryPage` pide `channelInfo` también cuando `s.avatar` está vacío (aunque
-  ya tenga el conteo), para rellenar avatares de suscripciones antiguas.
-- El feed "Nuevos de tus suscripciones" se invalida al entrar a Home comparando
-  la firma de ids de suscripciones guardada en `settings.feed_subs_sig`. Sin esa
-  comprobación el feed cacheado (TTL 30 min) seguiría mostrando solo las
-  suscripciones previas tras suscribirse.
+- `ThumbnailCache::pixmap()` **falls back to disk** if the LRU evicted the image from
+  memory. Do NOT remove that fallback: the `VideoListView` delegate paints reading
+  from `pixmap()` on every paint and nobody requests an item already shown again, so
+  without it the thumbnails "disappear" (search/channel/home) when the budget is
+  shared between pages.
+- On subscribing, the avatar URL is persisted (`SubscriptionsRepo::add(..., avatar)`),
+  and `SubscriptionsRepo::setAvatar` updates it when `ChannelInfo` arrives.
+  `LibraryPage` also requests `channelInfo` when `s.avatar` is empty (even if it
+  already has the count), to fill in avatars of old subscriptions.
+- The "Nuevos de tus suscripciones" feed is invalidated when entering Home by comparing
+  the signature of subscription ids stored in `settings.feed_subs_sig`. Without that
+  check the cached feed (TTL 30 min) would keep showing only the previous
+  subscriptions after subscribing.
 
-## "Continuar viendo" (duración + posición en el historial)
+## "Continuar viendo" (duration + position in the history)
 
-**La regla de "estado de reproducción" vive en UN sitio**:
-`HistoryRepo::progressFraction(v, positionMs)` (src/db/repositories.cpp) devuelve
-la fracción 0..1 de la barra, o 0 si no se puede mostrar (sin posición, sin
-duración conocida, ya completado, o fracción fuera de (0,1)). La llaman los TRES
-sitios donde se ve un vídeo con progreso, y no hay una cuarta copia:
+**The "playback state" rule lives in ONE place**:
+`HistoryRepo::progressFraction(v, positionMs)` (src/db/repositories.cpp) returns
+the fraction 0..1 of the bar, or 0 if it cannot be shown (no position, no known
+duration, already completed, or a fraction outside (0,1)). It is called by the THREE
+places where a video with progress is shown, and there is no fourth copy:
 
-| sitio | quién pinta la barra |
+| place | who paints the bar |
 |---|---|
-| Home, "Continuar viendo" | delegado de `VideoListView` (`drawProgressBar`) |
-| página Historial ("Ver todo") | el mismo delegado, en `ListMode` |
-| sección Historial de **Biblioteca** | `AsyncThumb::paintEvent` |
+| Home, "Continuar viendo" | `VideoListView` delegate (`drawProgressBar`) |
+| Historial page ("Ver todo") | the same delegate, in `ListMode` |
+| Historial section of **Biblioteca** | `AsyncThumb::paintEvent` |
 
-La sección de Biblioteca la pintaba a mano porque sus filas son `RowItem`
-(miniatura `QLabel` + texto), no el delegado; por eso usa las MISMAS medidas que
-`drawProgressBar` (2 px de margen, 3 px de alto, 1 px por encima del borde,
-radio 1,5) recortada al rectángulo redondeado de la miniatura. Como se pinta a
-mano con `nt::kAccent` (el QSS no alcanza un `paintEvent`), existe
-`LibraryPage::applyAccent()` para repintar las miniaturas al cambiar el acento en
-caliente, y `MainWindow` lo llama con las demás páginas. `buildRows` recibe un
-`QHash<videoId, fracción>`; vacío = sin barra, y solo la sección de Historial lo
-pasa.
+The Biblioteca section painted it by hand because its rows are `RowItem`
+(`QLabel` thumbnail + text), not the delegate; that is why it uses the SAME measurements
+as `drawProgressBar` (2 px margin, 3 px high, 1 px above the border,
+radius 1.5) clipped to the rounded rectangle of the thumbnail. Since it is painted by
+hand with `nt::kAccent` (the QSS does not reach a `paintEvent`), there is
+`LibraryPage::applyAccent()` to repaint the thumbnails when the accent changes hot,
+and `MainWindow` calls it along with the other pages. `buildRows` receives a
+`QHash<videoId, fraction>`; empty = no bar, and only the Historial section passes
+it.
 
-`HomePage::loadContinueWatching` exige, para cada id reciente: `pos > 0`, fila
-en `videos` (la caché), **`durationSeconds > 0`**, no completado y 0 < frac < 1
-(las tres últimas cosas son lo que devuelve `progressFraction`).
-Los dos últimos datos los escribe el reproductor, no la red:
+`HomePage::loadContinueWatching` requires, for each recent id: `pos > 0`, a row
+in `videos` (the cache), **`durationSeconds > 0`**, not completed and 0 < frac < 1
+(the last three things are what `progressFraction` returns).
+The last two data items are written by the player, not the network:
 
-- **Duración**: `PlayerWidget::durationUpdated` (lo emiten los DOS motores:
-  `mpv_backend.cpp` observando la propiedad `duration` y `ffmpeg_backend.cpp`
-  con el reloj de audio) → `PlayerController::onPlayerDuration` →
-  `durationChanged(double)` → `WatchPage::onDurationKnown`, que la guarda en la
-  caché. Es el dato AUTORITATIVO: `parseVideoDetail` (`/next`) no rellena
-  duración y los renderizadores de origen (search/home/canal) a veces tampoco, así
-  que sin esto un vídeo visto varios minutos se quedaba con `duration=0` y
-  NUNCA aparecía en "Continuar viendo" (el filtro lo descartaba en silencio).
-  `PlayerController` compara contra `m_reportedDuration` (reiniciado en cada
-  `playIndex`), no contra `m_duration`: los ticks de posición también actualizan
-  `m_duration` y podrían "consumirse" el aviso antes de que llegue la señal.
-  `onDurationKnown` rellena SOLO la duración y respeta lo ya cacheado — el
-  `upsert` es `INSERT OR REPLACE`, así que meter el ítem de cola tal cual
-  borraría título/canal/miniatura. Por lo mismo `onDetailReady` conserva la
-  duración buena cuando el `/next` la trae a 0.
-- **Posición**: `kPositionFlushMs = 20000` (20 s, antes 60 s: era el retardo
-  visible de la barra de progreso; YouTube guarda cada ~15-20 s). `savePosition()`
-  descarta la escritura si es el mismo vídeo y la posición no ha avanzado 2 s,
-  así que con el vídeo en pausa no se escribe nada. El coste por escritura es un
-  `INSERT OR REPLACE` de una fila (SQLite local) más el `changed()`.
-  Puntos en los que se guarda, todos ya en el código:
-  `playPause` (pausa), `playIndex` (cambio de vídeo: click explícito en
-  cualquier página, "A continuación" o auto-advance al terminar), `stop()`
-  (botón "Cerrar y detener" del mini), `aboutToQuit`, y
-  `MainWindow::savePositionNow()` al **entrar al Home** con algo reproduciéndose
-  en el mini player (`onNavButton` case 0 y `showPreviousTab` con destino 0).
-  Ese último es el que hace que la fila se pinte con el progreso REAL, y va
-  **antes** de `refreshDynamic()` a propósito: en `onNavButton` el
-  `setCurrentIndex` va después, así que la página sigue oculta y el `changed()`
-  del guardado lo salta el guard de visibilidad de `HomePage`.
-  `HomePage::refreshContinueWatching` (conectado a `HistoryRepo::changed`) hace
-  early-return si la página está oculta: cada flush con la app en el mini player
-  no debe reconstruir una rejilla que nadie ve.
-- **Al verificar en BD, copia también `mini_tube.db-wal`**: la app usa WAL y
-  copiar solo el `.db` da un snapshot obsoleto (parece que no se guarda nada).
+- **Duration**: `PlayerWidget::durationUpdated` (emitted by BOTH engines:
+  `mpv_backend.cpp` observing the `duration` property and `ffmpeg_backend.cpp`
+  with the audio clock) → `PlayerController::onPlayerDuration` →
+  `durationChanged(double)` → `WatchPage::onDurationKnown`, which stores it in the
+  cache. It is the AUTHORITATIVE datum: `parseVideoDetail` (`/next`) does not fill in
+  duration and the origin renderers (search/home/channel) sometimes do not either, so
+  without this a video watched several minutes stayed with `duration=0` and
+  NEVER appeared in "Continuar viendo" (the filter discarded it silently).
+  `PlayerController` compares against `m_reportedDuration` (reset on every
+  `playIndex`), not against `m_duration`: position ticks also update
+  `m_duration` and could "consume" the notice before the signal arrives.
+  `onDurationKnown` fills in ONLY the duration and respects what is already cached — the
+  `upsert` is `INSERT OR REPLACE`, so putting the queue item in as-is
+  would erase title/channel/thumbnail. For the same reason `onDetailReady` keeps the good
+  duration when the `/next` brings it as 0.
+- **Position**: `kPositionFlushMs = 20000` (20 s, previously 60 s: it was the
+  visible delay of the progress bar; YouTube saves every ~15-20 s). `savePosition()`
+  discards the write if it is the same video and the position has not advanced 2 s,
+  so with the video paused nothing is written. The cost per write is an
+  `INSERT OR REPLACE` of one row (local SQLite) plus the `changed()`.
+  Places where it is saved, all already in the code:
+  `playPause` (pause), `playIndex` (video change: explicit click on
+  any page, "A continuación" or auto-advance on finishing), `stop()`
+  (the "Cerrar y detener" button of the mini), `aboutToQuit`, and
+  `MainWindow::savePositionNow()` when **entering Home** with something playing
+  in the mini player (`onNavButton` case 0 and `showPreviousTab` with destination 0).
+  That last one is what makes the row paint with the REAL progress, and it goes
+  **before** `refreshDynamic()` on purpose: in `onNavButton` the
+  `setCurrentIndex` goes afterwards, so the page is still hidden and the `changed()`
+  of the save is skipped by the visibility guard of `HomePage`.
+  `HomePage::refreshContinueWatching` (connected to `HistoryRepo::changed`) does an
+  early-return if the page is hidden: every flush with the app in the mini player
+  must not rebuild a grid nobody sees.
+- **When verifying in the DB, also copy `mini_tube.db-wal`**: the app uses WAL and
+  copying only the `.db` gives an outdated snapshot (it looks like nothing is saved).
 
-## Insignia "En directo" en miniaturas (badge + refresco al re-entrar)
+## "En directo" badge on thumbnails (badge + refresh on re-entry)
 
-Un vídeo que es un **directo** ya no muestra su duración en la miniatura: muestra
-la insignia **"En directo"** (pastilla del acento, como la marca "EN VIVO" del
-reproductor y la píldora roja de YouTube). El dato viaja por fila en
-`VideoInfo.isLive` y se persiste en `videos.is_live` (migración `ALTER` para BD
-antiguas, `app_database.cpp`).
+A video that is a **live stream** no longer shows its duration on the thumbnail: it shows
+the **"En directo"** badge (accent pill, like the "EN VIVO" mark of the
+player and YouTube's red pill). The datum travels per row in
+`VideoInfo.isLive` and is persisted in `videos.is_live` (`ALTER` migration for old
+DBs, `app_database.cpp`).
 
-- **Quién lo pinta**: el delegate `VideoListView` (rejilla y lista:
-  `drawLiveBadge` sustituye a `drawBadge`, y `drawProgressBar` sale temprano si
-  `v.isLive` porque un directo no tiene fracción que mostrar) y `AsyncThumb`
-  (`setBadgeInfo(durationSeconds, isLive)`) para las filas de **Biblioteca**, que
-  no usan el delegate. Todas las miniaturas de vídeo de Biblioteca llevan
-  insignia (duración o "En directo"), uniforme como YouTube.
-- **De dónde sale `isLive` en la red** (helpers anónimos de `yt_innertube.cpp`,
-  cada cliente lo declara a su manera):
+- **Who paints it**: the `VideoListView` delegate (grid and list:
+  `drawLiveBadge` replaces `drawBadge`, and `drawProgressBar` returns early if
+  `v.isLive` because a live stream has no fraction to show) and `AsyncThumb`
+  (`setBadgeInfo(durationSeconds, isLive)`) for the **Biblioteca** rows, which
+  do not use the delegate. All video thumbnails of Biblioteca carry a
+  badge (duration or "En directo"), uniform like YouTube.
+- **Where `isLive` comes from in the network** (anonymous helpers of `yt_innertube.cpp`,
+  each client declares it its own way):
   - VISIONOS `compactVideoRenderer` (search/home/feed): `thumbnailOverlays[].
-    thumbnailOverlayTimeStatusRenderer.style` contiene `LIVE` (`overlayIsLive`).
-  - WEB clásico `videoRenderer`: `badges[].metadataBadgeRenderer.style` ==
-    `BADGE_STYLE_TYPE_LIVE_NOW` (`badgesIsLive`). `rendererIsLive` combina las dos
-    y se aplica en `videoFromHomeRenderer`, `parseRelated`, `parseWatchQueue`
-    (`playlistPanelVideoRenderer`) y `parsePlaylistBrowse`
+    thumbnailOverlayTimeStatusRenderer.style` contains `LIVE` (`overlayIsLive`).
+  - classic WEB `videoRenderer`: `badges[].metadataBadgeRenderer.style` ==
+    `BADGE_STYLE_TYPE_LIVE_NOW` (`badgesIsLive`). `rendererIsLive` combines the two
+    and is applied in `videoFromHomeRenderer`, `parseRelated`, `parseWatchQueue`
+    (`playlistPanelVideoRenderer`) and `parsePlaylistBrowse`
     (`playlistVideoRenderer`).
-  - WEB moderno `lockupViewModel` (pestañas de canal): `contentImage.
+  - modern WEB `lockupViewModel` (channel tabs): `contentImage.
     thumbnailViewModel.overlays[].thumbnailBottomOverlayViewModel.badges[].
     thumbnailBadgeViewModel.badgeStyle` == `THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE`
     (`webLockupMeta`).
-  - `/next` (`parseVideoDetail`): el `videoMetadataRenderer` NO trae duración ni
-    bandera de directo, pero el `viewCountText` SÍ distingue "sigue en emisión"
-    (`"10.554 usuarios viéndolo ahora"`) de "terminó"
+  - `/next` (`parseVideoDetail`): the `videoMetadataRenderer` does NOT bring duration or
+    live flag, but the `viewCountText` DOES distinguish "sigue en emisión"
+    (`"10.554 usuarios viéndolo ahora"`) from "terminó"
     (`"40.071 visualizaciones"`) → `viewCountShowsLive`.
-- **Fuente AUTORITATIVA al reproducir**: el player response
+- **AUTHORITATIVE source at playback time**: the player response
   (`videoDetails.isLive` → `StreamInfo.isLive` → `PlayerController::
-  currentIsLive()`) lo escribe `WatchPage::onDurationKnown` en la caché junto a
-  la duración. Un directo en emisión reporta una duración que **crece** con el
-  tiempo (la "hasta ahora"), así que ese guard no lo corta.
-- **Refresco al re-entrar**: un directo cacheado puede haber terminado entre
-  visitas. Al reconstruir Home ("Continuar viendo") o la sección Historial de
-  Biblioteca, cada fila `isLive` dispara `maybeRefreshLiveStatus` →
-  `Yt::getDetail` (el `/next`): si el viewCountText vuelve a "visualizaciones",
-  `onLiveDetailReady` llama `VideoCacheRepo::updateLiveStatus(id, false)` y la
-  fila se re-pinta como un vídeo normal (duración + barra). **NO se usa el player
-  response / `fetchHls` desde las páginas**: `m_videoId`/`m_flightVideoId` son
-  estado único de la fase player y una resolución concurrente corrompería una
-  reproducción en curso. El `/next` está serializado y es seguro.
-  Dedup: TTL en memoria `kLiveRecheckMs` (10 min) por id + guard in-flight
-  (`m_liveRefreshPending`) con limpieza en `detailFailed`.
-- **Límite conocida**: el `/next` no da la duración total, así que un directo
-  terminado conserva la última duración cacheada (la "hasta ahora" que escribió
-  `onDurationKnown` durante la emisión) hasta que se reproduzca, momento en el
-  que el player response fija la exacta.
-- **"Continuar viendo"**: `loadContinueWatching` ya no descarta un directo sin
-  fracción (`if (frac <= 0.0 && !v.isLive) continue;`): un directo con duración
-  0 o visto hasta el borde (`progressFraction` devuelve 0) entra igual y solo
-  pinta su insignia; la barra se añade únicamente si `frac > 0`.
+  currentIsLive()`) is written by `WatchPage::onDurationKnown` into the cache alongside
+  the duration. A live stream in progress reports a duration that **grows** with
+  time (the "hasta ahora"), so that guard does not cut it off.
+- **Refresh on re-entry**: a cached live stream may have ended between
+  visits. When rebuilding Home ("Continuar viendo") or the Historial section of
+  Biblioteca, each `isLive` row triggers `maybeRefreshLiveStatus` →
+  `Yt::getDetail` (the `/next`): if the viewCountText goes back to "visualizaciones",
+  `onLiveDetailReady` calls `VideoCacheRepo::updateLiveStatus(id, false)` and the
+  row is re-painted as a normal video (duration + bar). **The player
+  response / `fetchHls` is NOT used from the pages**: `m_videoId`/`m_flightVideoId` are unique
+  state of the player phase and a concurrent resolution would corrupt a
+  playback in progress. The `/next` is serialized and safe.
+  Dedup: in-memory TTL `kLiveRecheckMs` (10 min) per id + in-flight guard
+  (`m_liveRefreshPending`) with cleanup in `detailFailed`.
+- **Known limit**: the `/next` does not give the total duration, so a live stream
+  that ended keeps the last cached duration (the "hasta ahora" that
+  `onDurationKnown` wrote during the broadcast) until it is played, at which point
+  the player response sets the exact one.
+- **"Continuar viendo"**: `loadContinueWatching` no longer discards a live stream without a
+  fraction (`if (frac <= 0.0 && !v.isLive) continue;`): a live stream with duration
+  0 or watched to the edge (`progressFraction` returns 0) still enters and only
+  paints its badge; the bar is added only if `frac > 0`.
 
-## Convenciones
+## Conventions
 
-- UI, lógica y reproducción separadas. `PlayerController` (estado/cola) vs
-  `PlayerWidget` (render) vs páginas (vistas).
-- Repos SQLite en `src/db/`; infraestructura reutilizable en `src/ui/`.
-- **UN solo diálogo para confirmar y UNO solo para pedir un texto**, y son
-  `nt::confirm` / `nt::inputText` (`src/ui/confirm_dialog.*`). Los dos montan
-  un overlay **hijo de la VENTANA** (`page->window()`), con velo, modal, sin
-  `QDialog` y sin ventana flotante: una ventana propia secuestra el puntero.
-  Regla dura: si aparece una acción destructiva o un campo de texto, se llama a
-  uno de los dos; no se monta un `QFrame#popupDialog` por página. Hay siete
-  sitios de confirmación (las tres de Ajustes, borrar el historial de búsquedas,
-  borrar el historial de vídeos, y eliminar playlist en Biblioteca y en su
-  página) y cinco de texto (crear playlist en Biblioteca, Historial y Player,
-  y renombrar en Biblioteca y en su página). Los popovers que quedan son
-  deliberados y **no** son diálogos: son listas con scroll (gestionar
-  suscripciones, añadir a playlist, calidad). La caja mide 400 px en
-  `nt::confirm` (el cuerpo es un párrafo que envuelve) y 340 px en
-  `nt::inputText` (un campo suelto).
-- Resolución de streams: Innertube (cliente VISIONOS, `src/yt_innertube.*`) como única vía; si falla, `Yt::resolveError`.
-- Carga de canales: Innertube `fetchChannelVideos` (browse pestaña "Vídeos"), sin carrera ni fallback externo. Un resultado con 0 vídeos de id no vacío cuenta como vacío.
-- Búsqueda, ficha de canal, pestañas y detalle: TODO por Innertube (`src/yt_innertube.*`):
-  - `Yt::search` → POST `/search` (paginación por `continuation`; parser `compactVideoRenderer`).
-  - `Yt::channelInfo` → browse pestaña "Información": `c4TabbedHeaderRenderer` (nombre, avatar, suscriptores) + `channelAboutMetadataRenderer` (descripción).
-  - `Yt::channelTabVideos` → browse del canal con el cliente **WEB** para las tres pestañas (videos/shorts/live): VISIONOS solo expone "Vídeos" y su continuación devuelve páginas vacías, mientras que WEB sirve las tres con layout moderno (`lockupViewModel`/`shortsLockupViewModel`) y continuación funcional. El cliente WEB no necesita API key. `fetchChannelVideos` (feed de suscripciones, sin paginación) sigue por VISIONOS con `compactVideoRenderer`.
-  - `Yt::getDetail` → `/next`: `videoMetadataRenderer` (título/descripción traducidos, vistas, fecha, canal) + `likeButtonRenderer` (me gusta). El **id del canal** sale de `owner.videoOwnerRenderer.navigationEndpoint.browseEndpoint.browseId` y, si falta (vídeos de COLABORACIÓN: el owner solo trae `avatarStack` + `subscribeButton`), de `owner.subscribeButton.subscribeButtonRenderer.channelId`: sin esa vía el `channelId` quedaba vacío y los botones "Canal" y "Suscribirse" no hacían nada (los dos salen temprano si está vacío). Los renderers de la cola (`compactVideoRenderer`/`playlistPanelVideoRenderer`) también sacan el id de `longBylineText`/`shortBylineText` → `runs[0].navigationEndpoint.browseEndpoint.browseId` (`channelIdFromByline`), que antes solo se leía el nombre.
+- UI, logic and playback separated. `PlayerController` (state/queue) vs
+  `PlayerWidget` (render) vs pages (views).
+- SQLite repos in `src/db/`; reusable infrastructure in `src/ui/`.
+- **ONE single dialog to confirm and ONE only to ask for a text**, and they are
+  `nt::confirm` / `nt::inputText` (`src/ui/confirm_dialog.*`). Both mount
+  an overlay **child of the WINDOW** (`page->window()`), with a veil, modal, without
+  `QDialog` and without a floating window: a window of its own grabs the pointer.
+  Hard rule: if a destructive action or a text field appears, one of the two is called;
+  a `QFrame#popupDialog` is not mounted per page. There are seven
+  confirmation places (the three in Ajustes, deleting the search history,
+  deleting the video history, and deleting a playlist in Biblioteca and on its
+  page) and five text ones (creating a playlist in Biblioteca, Historial and Player,
+  and renaming in Biblioteca and on its page). The popovers that remain are
+  deliberate and are **not** dialogs: they are scrollable lists (managing
+  subscriptions, adding to playlist, quality). The box measures 400 px in
+  `nt::confirm` (the body is a wrapping paragraph) and 340 px in
+  `nt::inputText` (a single field).
+- Stream resolution: Innertube (VISIONOS client, `src/yt_innertube.*`) as the only path; if it fails, `Yt::resolveError`.
+- Channel loading: Innertube `fetchChannelVideos` (browse "Vídeos" tab), with no race or external fallback. A result with 0 videos of non-empty id counts as empty.
+- Search, channel info, tabs and detail: EVERYTHING via Innertube (`src/yt_innertube.*`):
+  - `Yt::search` → POST `/search` (pagination by `continuation`; parser `compactVideoRenderer`).
+  - `Yt::channelInfo` → browse "Información" tab: `c4TabbedHeaderRenderer` (name, avatar, subscribers) + `channelAboutMetadataRenderer` (description).
+  - `Yt::channelTabVideos` → channel browse with the **WEB** client for the three tabs (videos/shorts/live): VISIONOS only exposes "Vídeos" and its continuation returns empty pages, while WEB serves the three with the modern layout (`lockupViewModel`/`shortsLockupViewModel`) and a working continuation. The WEB client does not need an API key. `fetchChannelVideos` (subscriptions feed, without pagination) continues via VISIONOS with `compactVideoRenderer`.
+  - `Yt::getDetail` → `/next`: `videoMetadataRenderer` (title/description translated, views, date, channel) + `likeButtonRenderer` (likes). The **channel id** comes from `owner.videoOwnerRenderer.navigationEndpoint.browseEndpoint.browseId` and, if missing (COLLABORATION videos: the owner only brings `avatarStack` + `subscribeButton`), from `owner.subscribeButton.subscribeButtonRenderer.channelId`: without that path the `channelId` stayed empty and the "Canal" and "Suscribirse" buttons did nothing (both return early if it is empty). The queue renderers (`compactVideoRenderer`/`playlistPanelVideoRenderer`) also take the id from `longBylineText`/`shortBylineText` → `runs[0].navigationEndpoint.browseEndpoint.browseId` (`channelIdFromByline`), where before only the name was read.
   - `Yt::playlistDetail` → browse `VL<id>`: `playlistHeaderRenderer` + `playlistVideoRenderer`.
-- **Buscar con Enter cierra el desplegable de sugerencias de verdad**: `doSearch()`
-  para el debounce de 300 ms y marca la consulta como ya buscada
-  (`SearchPage::m_suggestClosedFor`), y `onSuggestReady` la ignora. Sin eso, al
-  escribir rápido y pulsar Enter la petición de sugerencias salía después y el
-  panel reaparecía encima de los resultados (también con una petición en vuelo).
-  Volver a escribir limpia la marca.
-- Empaquetado Windows (Win7 x86): la UCRT NO se copia app-local desde la Windows SDK — esa versión importa `GetSystemTimePreciseAsFileTime` (W8+) y ucrtbase no carga en Win7. En su lugar el setup empaqueta `VC_redist.x86.exe` (descargado en CI) y lo instala con `Exec` (`/install /passive /norestart`, códigos 0/1638/3010 aceptados) con `PrivilegesRequired=admin`. El CRT (msvcp140/vcruntime140) sí va junto al exe (`windeployqt --compiler-runtime`). ORDEN del setup: 1) app completa → 2) iconos (menú + acceso directo al escritorio, casilla `[Tasks] desktopicon` marcada por defecto) → 3) `InstallVcRedist` desde `CurStepChanged` → `ssPostInstall` (no en `AfterInstall` de un `[Files]`, que correría en mitad de la copia). El `[InstallDelete]` sigue purgando la UCRT app-local de instalaciones antiguas. El setup x86 **cancela en Windows de 64 bits 10/11** (`InitializeSetup` + `IsWin64` + `GetWindowsVersion >= $0A000000`) y dirige al build x64 (el `MsgBox` nombra `nevertube-setup-x64.exe`: cancelar sin decir dónde está el instalador que sí vale deja al usuario sin salida): el x86 ahí quedaría capado a h264 HW + VP9 software y sin AV1. Se permite en 32 bits y en 64 bits < 10 (donde el x64/mpv moderno no corre). **TOOLSET y REDIST (Win7)**: el x86 compila con `-T v142` (VS2019/14.29) sobre `runs-on: windows-2022` y el setup instala `vc_redist.x86` **2015-2019** (`aka.ms/vs/16`): el target (Win7) necesita ese CRT. `windows-latest` ya es VS2026 (MSVC 14.5x) y su runtime NO es Win7-compatible (imports W8+); un binario 14.5x tampoco enlaza contra el vs/16. No quitar el pin de toolset/imagen ni cambiar el redist a `vs/17`+ sin prueba en el target. Además, el CI purga `qtaudio_wasapi.dll` del paquete antes del gate: Qt5 Multimedia la despliega pero importa `RoGetActivationFactory` (W8+) y el gate de imports lo aborta; en Win7 el audio va por `qtaudio_windows.dll` (WaveOut), no WASAPI.
-- Empaquetado Windows x64 (Win10+): el entregable es un **setup.exe instalable**
-  (`dist64.iss`, compilado con `iscc` en `windows_x64.yml`), NO un zip portátil.
-  Es el gemelo de `dist.iss` (x86/Win7) con 5 diferencias, todas deliberadas:
-  (1) `ArchitecturesInstallIn64BitMode=x64compatible` para que `{autopf}` sea
-  `C:\Program Files` de 64 bits y no `Program Files (x86)`, y
-  `ArchitecturesAllowed=x64compatible` (64 bits real y Win11 ARM emulado);
-  (2) `MinVersion=10.0` (mpv moderno + Vulkan no existen antes de Win10). OJO:
-  Win10 se reporta como 6.3 salvo el manifiesto de compatibilidad que el setup de
-  Inno 6 sí lleva; con Inno 5.5.5 ese `MinVersion` rechazaría el propio Win10;
-  (3) NO hay problema de UCRT (Win10+ la trae en el sistema) → sin
-  `[InstallDelete]` de la UCRT app-local, y el redist es `VC_redist.x64.exe` de
-  `aka.ms/vs/17` (el 2022+, sin la restricción de imports W8+ que obliga al x86
-  a usar vs/16); (4) los ficheros vienen de `dist\` con `VC_redist.x64.exe`
-  excluido y copiado a `{tmp}` para que lo lance `InstallVcRedist` desde
-  `CurStepChanged`; (5) **NO hay `InitializeSetup`**: el guard de arquitectura
-  del x86 cancelaba en 64 bits 10/11 y aquí el 64 bits ES el objetivo (un 32
-  bits lo rechaza `ArchitecturesAllowed` antes de escribir en disco, con su
-  propio mensaje). Lo que SÍ comparte con el x86: `[Tasks] desktopicon` marcado
-  por defecto, `[UninstallDelete]` de la BD (`{userdocs}\mini_tube`) y de las
-  cachés (`{localappdata}\nevertube\nevertube`), `PrivilegesRequired=admin` y el
-  mismo orden app → iconos → redist. En `[Code]` los comentarios van con `//`:
-  el `;` solo es válido en el resto de secciones (dentro de `[Code]` es
-  separador de sentencias y `iscc` lo rechaza). El gate del workflow exige que
-  el setup pese >5 MB y comprueba los 9 ficheros clave contra el manifiesto que
-  `iscc` imprime (`Compressing: <ruta>` por fichero, guardado en `iscc.log`), no
-  contra `dist\`: un patrón de `[Files]` mal escrito compila igual. NO se usa
-  `innoextract` para eso: su última versión es 1.9 (2020) y no sabe leer el Inno
-  6.7 que instala choco (loader revision 2), así que solo daría un aviso; el log
-  del compilador es la fuente autoritativa (y ver `VC_redist.x64.exe` en la lista
-  es la prueba de que se compiló `dist64.iss` y no el del x86).
-- Overlay de los controles NO es un widget separado: vive dentro de
+- **Searching with Enter really closes the suggestions dropdown**: `doSearch()`
+  stops the 300 ms debounce and marks the query as already searched
+  (`SearchPage::m_suggestClosedFor`), and `onSuggestReady` ignores it. Without that,
+  when typing fast and pressing Enter the suggestions request came out later and the
+  panel reappeared over the results (also with a request in flight).
+  Typing again clears the mark.
+- Windows packaging (Win7 x86): the UCRT is NOT copied app-local from the Windows SDK — that version imports `GetSystemTimePreciseAsFileTime` (W8+) and ucrtbase does not load on Win7. Instead the setup bundles `VC_redist.x86.exe` (downloaded in CI) and installs it with `Exec` (`/install /passive /norestart`, codes 0/1638/3010 accepted) with `PrivilegesRequired=admin`. The CRT (msvcp140/vcruntime140) does go next to the exe (`windeployqt --compiler-runtime`). ORDER of the setup: 1) full app → 2) icons (menu + desktop shortcut, `[Tasks] desktopicon` checkbox checked by default) → 3) `InstallVcRedist` from `CurStepChanged` → `ssPostInstall` (not in `AfterInstall` of a `[Files]`, which would run in the middle of the copy). The `[InstallDelete]` keeps purging the app-local UCRT of old installations. The x86 setup **cancels on 64-bit Windows 10/11** (`InitializeSetup` + `IsWin64` + `GetWindowsVersion >= $0A000000`) and directs to the x64 build (the `MsgBox` names `nevertube-setup-x64.exe`: cancelling without saying where the installer that does work is leaves the user with no way out): the x86 there would be capped to h264 HW + VP9 software and without AV1. It is allowed on 32-bit and on 64-bit < 10 (where the x64/modern mpv does not run). **TOOLSET and REDIST (Win7)**: the x86 compiles with `-T v142` (VS2019/14.29) on `runs-on: windows-2022` and the setup installs `vc_redist.x86` **2015-2019** (`aka.ms/vs/16`): the target (Win7) needs that CRT. `windows-latest` is already VS2026 (MSVC 14.5x) and its runtime is NOT Win7-compatible (imports W8+); a 14.5x binary also does not link against vs/16. Do not remove the toolset/image pin nor change the redist to `vs/17`+ without testing on the target. Also, the CI purges `qtaudio_wasapi.dll` from the bundle before the gate: Qt5 Multimedia deploys it but it imports `RoGetActivationFactory` (W8+) and the imports gate aborts it; on Win7 audio goes through `qtaudio_windows.dll` (WaveOut), not WASAPI.
+- Windows x64 packaging (Win10+): the deliverable is an **installable setup.exe**
+  (`dist64.iss`, compiled with `iscc` in `windows_x64.yml`), NOT a portable zip.
+  It is the twin of `dist.iss` (x86/Win7) with 5 differences, all deliberate:
+  (1) `ArchitecturesInstallIn64BitMode=x64compatible` so that `{autopf}` is
+  64-bit `C:\Program Files` and not `Program Files (x86)`, and
+  `ArchitecturesAllowed=x64compatible` (real 64-bit and emulated Win11 ARM);
+  (2) `MinVersion=10.0` (modern mpv + Vulkan do not exist before Win10). CAREFUL:
+  Win10 reports as 6.3 unless the compatibility manifest that the Inno 6 setup does
+  carry; with Inno 5.5.5 that `MinVersion` would reject Win10 itself;
+  (3) there is NO UCRT problem (Win10+ brings it in the system) → without
+  `[InstallDelete]` of the app-local UCRT, and the redist is `VC_redist.x64.exe` from
+  `aka.ms/vs/17` (the 2022+, without the W8+ imports restriction that forces the x86
+  to use vs/16); (4) the files come from `dist\` with `VC_redist.x64.exe`
+  excluded and copied to `{tmp}` so that `InstallVcRedist` launches it from
+  `CurStepChanged`; (5) there is **NO `InitializeSetup`**: the x86 architecture
+  guard cancelled on 64-bit 10/11 and here 64-bit IS the target (a 32-bit
+  one is rejected by `ArchitecturesAllowed` before writing to disk, with its own
+  message). What it DOES share with the x86: `[Tasks] desktopicon` checked
+  by default, `[UninstallDelete]` of the DB (`{userdocs}\mini_tube`) and of the
+  caches (`{localappdata}\nevertube\nevertube`), `PrivilegesRequired=admin` and the
+  same order app → icons → redist. In `[Code]` comments go with `//`:
+  the `;` is only valid in the rest of the sections (inside `[Code]` it is a
+  statement separator and `iscc` rejects it). The workflow gate requires that
+  the setup weigh >5 MB and checks the 9 key files against the manifest that
+  `iscc` prints (`Compressing: <ruta>` per file, saved in `iscc.log`), not
+  against `dist\`: a badly written `[Files]` pattern compiles the same. `innoextract`
+  is NOT used for that: its last version is 1.9 (2020) and it cannot read the Inno
+  6.7 that choco installs (loader revision 2), so it would only give a warning; the
+  compiler log is the authoritative source (and seeing `VC_redist.x64.exe` in the list
+  is the proof that `dist64.iss` was compiled and not the x86 one).
+- The controls overlay is NOT a separate widget: it lives inside
   `WatchPage::m_overlay`/`PlayerContainer` (src/ui/pages/watch_page.cpp).
-  Cualquier cambio ahí que afecte el área de video requiere el selftest.
-- **Los botones multimedia NO llevan marco** (regla del usuario). Ni en reposo
-  ni **al pulsarlos**. Todos son `#iconBtn` (transparentes, sin borde en ningún
-  estado). El botón de calidad ANTES era el chip de texto `QPushButton#chip`
-  ("720p"), que llevaba `1px solid transparent` (conserva los 2 px para que el
-  foco no desplace el contenido, pero no se ve el marco); hoy es el engranaje
-  `PlayerIcon::Settings`, un `#iconBtn` más (sin texto ni borde propio), y la
-  regla `#chip` se borró del QSS. **El `:focus` se anula a mano**
-  (`border-color: transparent`): la regla global `QPushButton:focus { border-color:
-  @ACCENT@; }` se aplicaba igual y encendía un marco en el acento en cuanto se
-  pulsaba. El foco se marca SOLO con el relleno (`@HANDLE_HOVER@`).
-- **Los botones de acción de la página Player** (`#actionChip`: Compartir, Me
-  gusta (favoritos/estrella), Ver más tarde y Añadir a playlist) siguen la misma
-  regla que **Me gusta / No me gusta** (`#actionSegL`/`#actionSegR`, que ya
-  llevaban `border: none`): **sin marco en ningún estado**. `#actionChip` no
-  declaraba borde, así que heredaba el global `1px solid @BORDER@` y el
-  `QPushButton:focus` lo encendía en el acento al pulsarlo (un aro rojo). Ahora
-  declara `1px solid transparent` y su `:focus` se queda transparente; el estado
-  sigue marcándose por el relleno (`active` y `:hover`) y por el color del icono.
-  Lo vigila `--selftest-theme`: `#iconBtn`, `#actionChip` y los items de
-  `#qualityMenu` no pueden declarar un borde visible **en ningún estado**
-  (recursea por `:hover`/`:pressed`/`:focus`; comprobado que FALLA tanto si se
-  devuelve el marco en la base como si se devuelve solo en `:focus`).
+  Any change there that affects the video area requires the selftest.
+- **The media buttons have NO frame** (user rule). Neither at rest nor
+  **when pressed**. All are `#iconBtn` (transparent, no border in any
+  state). The quality button USED to be the text chip `QPushButton#chip`
+  ("720p"), which carried `1px solid transparent` (it keeps the 2 px so the
+  focus does not shift the content, but the frame is not visible); today it is the
+  `PlayerIcon::Settings` gear, one more `#iconBtn` (no text and no border of its own),
+  and the `#chip` rule was deleted from the QSS. **The `:focus` is nulled by hand**
+  (`border-color: transparent`): the global rule `QPushButton:focus { border-color:
+  @ACCENT@; }` applied anyway and lit a frame in the accent as soon as it was
+  pressed. Focus is marked ONLY with the fill (`@HANDLE_HOVER@`).
+- **The action buttons of the Player page** (`#actionChip`: Compartir, Me
+  gusta (favourites/star), Ver más tarde and Añadir a playlist) follow the same
+  rule as **Me gusta / No me gusta** (`#actionSegL`/`#actionSegR`, which already
+  carried `border: none`): **no frame in any state**. `#actionChip` did not
+  declare a border, so it inherited the global `1px solid @BORDER@` and the
+  `QPushButton:focus` lit it in the accent when pressed (a red ring). Now it
+  declares `1px solid transparent` and its `:focus` stays transparent; the state
+  is still marked by the fill (`active` and `:hover`) and by the icon colour.
+  `--selftest-theme` watches it: `#iconBtn`, `#actionChip` and the items of
+  `#qualityMenu` cannot declare a visible border **in any state**
+  (it recurses through `:hover`/`:pressed`/`:focus`; verified that it FAILS both if the frame
+  is brought back in the base and if it is brought back only in `:focus`).
 
-## Cobertura de ventanas y escala en x86 (FfmpegBackend)
+## Window coverage and scaling on x86 (FfmpegBackend)
 
-Síntoma posible (Win7 x86): **drops de FPS al abrir una ventana flotante
-encima del vídeo, con CPU/RAM de la app bajos**. Dos mecanismos:
+Possible symptom (Win7 x86): **FPS drops when opening a floating window
+over the video, with the app's CPU/RAM low**. Two mechanisms:
 
-1. Con DWM (Aero *o* tema Básico, que también compone) Windows **no le avisa a
-   la app de que la tapan**: el `QOpenGLWidget` sigue recibiendo paint events y
-   el FfmpegBackend seguía decodificando+convirtiendo+pintando frames que nadie
-   ve. El cuello de botella es la **presentación** del compositor en la GMA 950
-   (blend de la región superpuesta cada frame), no el cómputo de la app — por
-   eso el CPU/RAM quedan bajos. El redibujado del reproductor no es el
-   culpable.
-2. El arreglo es quirúrgico y **solo aplica a FfmpegBackend**:
-   - `PlayerWidget` arranca un timer de **250 ms** (solo si
-     `occlusionSkipSupported()`) que recorre el **z-order de Windows**
-     (`GetWindow` desde arriba hasta nuestra top-level; ventanas visibles, no
-     `WS_EX_LAYERED`, que cubran por completo el rect del widget). Cubierto →
-     `setVideoOccluded(true)` y: el hilo de decode deja de hacer copy-back y
-     `swscale` (el frame se descarta sin tocar CPU/RAM, manteniendo el decode
-     caliente y la **posición al día con el reloj de audio** — crítico: sin eso
-     el watchdog de atasco vería la posición congelada > 5 s con el vídeo
-     tapado y dispararía un falso `streamStalled`) y `paintGL` sale temprano
-     (no sube texturas ni pinta). Es frame-driven: al destapar se muestra el
-     frame más reciente, sin ráfaga. En **mpv/x64 NO aplica**: parar el render
-     ahí acumula frames y produce el "salto al volver" (ver mini player);
-     `MpvBackend` no sobreescribe los virtuales.
-   - `frameToImage` escala **solo hacia abajo** hasta el tamaño del surface de
-     render (px físicos, dados por `renderGL`), respetando el aspect del
-     stream: menos píxeles en `swscale` y en la subida de textura (win también
-     fuera del solapamiento: el mini bar 112×63 convierte casi gratis). Si el
-     surface es mayor que el stream, se queda a resolución completa (el
-     upscale lo hace GL, como antes). El guard del recorrido es `Q_OS_WIN`
-     (los child widgets no aparecen en la cadena de `GetWindow`).
+1. With DWM (Aero *or* Basic theme, which also composites) Windows **does not warn
+   the app that it is covered**: the `QOpenGLWidget` keeps receiving paint events and
+   the FfmpegBackend kept decoding+converting+painting frames nobody
+   sees. The bottleneck is the compositor's **presentation** on the GMA 950
+   (blend of the overlapping region every frame), not the app's computation — that is
+   why the CPU/RAM stay low. The player's redraw is not to
+   blame.
+2. The fix is surgical and **only applies to FfmpegBackend**:
+   - `PlayerWidget` starts a **250 ms** timer (only if
+     `occlusionSkipSupported()`) that walks the **Windows z-order**
+     (`GetWindow` from the top down to our top-level; visible windows, not
+     `WS_EX_LAYERED`, that fully cover the widget's rect). Covered →
+     `setVideoOccluded(true)` and: the decode thread stops doing copy-back and
+     `swscale` (the frame is discarded without touching CPU/RAM, keeping the decode
+     hot and the **position up to date with the audio clock** — critical: without that
+     the stall watchdog would see the position frozen > 5 s with the video
+     covered and would fire a false `streamStalled`) and `paintGL` returns early
+     (it does not upload textures nor paint). It is frame-driven: on uncovering the most
+     recent frame is shown, without a burst. On **mpv/x64 it does NOT apply**: stopping the render
+     there accumulates frames and produces the "jump on return" (see mini player);
+     `MpvBackend` does not override the virtuals.
+   - `frameToImage` scales **only downwards** to the size of the render
+     surface (physical px, given by `renderGL`), respecting the aspect of the
+     stream: fewer pixels in `swscale` and in the texture upload (win also
+     outside the overlap: the mini bar 112×63 converts almost for free). If the
+     surface is larger than the stream, it stays at full resolution (the
+     upscale is done by GL, as before). The guard of the walk is `Q_OS_WIN`
+     (the child widgets do not appear in the `GetWindow` chain).
 
-_Futuro (pendiente, decidido 2026-09-24):_ port de la detección de cobertura a
-**X11 para Puppy Linux** (máquina x86 como banco de pruebas del FfmpegBackend
-sin Windows): mismo timer de 250 ms + `XQueryTree` desde la raíz hasta nuestra
-top-level (`map_state == IsViewable`, geometría + `XTranslateCoordinates` a
-coordenadas de pantalla), misma regla → `setVideoOccluded`. Lo único de
-plataforma es la DETECCIÓN (`occludedByTopWindow`, hoy `#ifdef Q_OS_WIN`): el
-plumbing (timer, `setVideoOccluded`, descarte de frames del hilo) ya es neutro.
-Con CMake "inteligente" (build Linux sin mpv → `NEVERTUBE_NO_MPV` en Linux, o
-forzar `NEVERTUBE_BACKEND=ffmpeg`; el FfmpegBackend ya compila en Linux por
-pkg-config). En **Wayland NO** es posible (no hay z-order global). La escala al
-surface ya funciona en cualquier Linux sin tocar nada.
+_Future (pending, decided 2026-09-24):_ port of the coverage detection to
+**X11 for Puppy Linux** (x86 machine as a test bench for the FfmpegBackend
+without Windows): same 250 ms timer + `XQueryTree` from the root down to our
+top-level (`map_state == IsViewable`, geometry + `XTranslateCoordinates` to
+screen coordinates), same rule → `setVideoOccluded`. The only platform-specific
+thing is the DETECTION (`occludedByTopWindow`, today `#ifdef Q_OS_WIN`): the
+plumbing (timer, `setVideoOccluded`, frame discard of the thread) is already neutral.
+With a "smart" CMake (Linux build without mpv → `NEVERTUBE_NO_MPV` on Linux, or
+force `NEVERTUBE_BACKEND=ffmpeg`; the FfmpegBackend already compiles on Linux via
+pkg-config). On **Wayland it is NOT** possible (there is no global z-order). The scaling to the
+surface already works on any Linux without touching anything.
 
-## Mini player con vídeo en vivo (reparent del PlayerWidget)
+## Mini player with live video (PlayerWidget reparent)
 
-Al salir de la página Player con reproducción activa, el mini player muestra
-**la miniatura estática** y, debajo de ella, el `PlayerWidget` sigue
-renderizando de verdad. Motivo: si el widget se oculta, mpv deja de dibujar
-y acumula frames que, al volver, reproduce en ráfaga para igualar el audio
-(el "salto al volver", peor cuanto más tiempo en mini). `vid=no`/`framedrop`
-fuerzan reconfig o descartes que se ven como parpadeo. En cambio, reparentar
-el `PlayerWidget` al hueco del mini y dejarlo visible (aunque tapado por la
-miniatura) mantiene el pipeline caliente SIN reconf del decodificador y SIN
-frames acumulados.
+When leaving the Player page with playback active, the mini player shows
+**the static thumbnail** and, below it, the `PlayerWidget` keeps
+rendering for real. Reason: if the widget is hidden, mpv stops drawing
+and accumulates frames that, on returning, it plays in a burst to match the audio
+(the "jump on return", worse the longer it spends in mini). `vid=no`/`framedrop`
+force reconfig or discards that show up as flicker. In contrast, reparenting
+the `PlayerWidget` to the mini slot and leaving it visible (even if covered by the
+thumbnail) keeps the pipeline hot WITHOUT decoder reconfig and WITHOUT
+accumulated frames.
 
-- `WatchPage::detachPlayerTo(host)` reparenta el `PlayerWidget` al host del
-  mini bar y oculta el overlay de controles; `attachPlayer()` lo devuelve al
-  `PlayerContainer` (que lo reintegra en su layout y recalcula el overlay).
-  El overlay es hijo del player y se mueve con él (no se re-parenta).
-- Reparentar **dentro de la misma ventana top-level conserva el contexto GL y
-  el `mpv_render_context`** (verificado: `initializeGL` solo 1 vez en todo el
-  ciclo mini→volver). NO reparentar a otra ventana: destruiría el contexto.
-- `MainWindow::updateMiniPlayer` gestiona las transiciones en los cambios de
-  estado (guard `m_miniDetached`); `applyMiniVideoMode()` aplica el setting
-  `mini_video` (`video` → el vídeo en vivo llena el hueco y la miniatura se
-  oculta; `thumb` → la miniatura va POR ENCIMA con `raise()` y el vídeo
-  renderiza invisible debajo a 112x63). En ambos modos el `PlayerWidget` sigue
-  visible y renderizando: solo cambia qué tapa qué.
-- Orden importante: `MainWindow::openWatchAt` cambia a la página Player ANTES
-  de activar la cola; si se activa primero, `updateMiniPlayer` ve "reprodu-
-  ciendo fuera de Player" y engancha/suelta el mini un frame (parpadeo al
-  abrir un vídeo).
-- `PlayerContainer` (antes en anónima) vive en `watch_page.cpp` a nivel global
-  solo para poder referenciarlo desde `WatchPage` (miembro `m_playerContainer`).
+- `WatchPage::detachPlayerTo(host)` reparents the `PlayerWidget` to the host of the
+  mini bar and hides the controls overlay; `attachPlayer()` returns it to the
+  `PlayerContainer` (which reintegrates it into its layout and recomputes the overlay).
+  The overlay is a child of the player and moves with it (it is not re-parented).
+- Reparenting **within the same top-level window preserves the GL context and
+  the `mpv_render_context`** (verified: `initializeGL` only once in the whole
+  mini→return cycle). Do NOT reparent to another window: it would destroy the context.
+- `MainWindow::updateMiniPlayer` manages the transitions on state
+  changes (guard `m_miniDetached`); `applyMiniVideoMode()` applies the
+  `mini_video` setting (`video` → the live video fills the slot and the thumbnail is
+  hidden; `thumb` → the thumbnail goes ON TOP with `raise()` and the video
+  renders invisible underneath at 112x63). In both modes the `PlayerWidget` stays
+  visible and rendering: only what covers what changes.
+- Important order: `MainWindow::openWatchAt` switches to the Player page BEFORE
+  activating the queue; if it is activated first, `updateMiniPlayer` sees "playing
+  outside Player" and hooks/unhooks the mini for one frame (flicker when
+  opening a video).
+- `PlayerContainer` (previously in an anonymous namespace) lives in `watch_page.cpp` at global scope
+  only so it can be referenced from `WatchPage` (member `m_playerContainer`).
