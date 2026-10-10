@@ -63,4 +63,13 @@ rpm -qpl "$rpm" | grep 'hicolor/256x256/apps/nevertube_qt2.png' >/dev/null
 rpm -qp --requires "$rpm" | tee "$rpmtop/requires.txt"
 grep -q '^mpv-libs' "$rpmtop/requires.txt"
 grep -q '^qt5-qtbase' "$rpmtop/requires.txt"
+
+# Installability: install the package in the container and run offline
+# selftests from the INSTALLED path (not the build tree): catches a package
+# that builds and lists its files but does not start.
+dnf remove -y nevertube-qt2 >/dev/null 2>&1 || true
+dnf install -y --nogpgcheck "$rpm"
+QT_QPA_PLATFORM=offscreen /usr/bin/nevertube_qt2 --selftest-db
+QT_QPA_PLATFORM=offscreen /usr/bin/nevertube_qt2 --selftest-i18n
+
 echo "OK: $rpm ($(du -h "$rpm" | cut -f1))"

@@ -51,4 +51,12 @@ tar -xOf "$pkg" .PKGINFO > "$repo/archbuild/PKGINFO"
 for dep in qt5-base mpv ffmpeg libpulse; do
   grep -qx "depend = $dep" "$repo/archbuild/PKGINFO"
 done
+
+# Installability: install the package and run offline selftests from the
+# INSTALLED path (not the build tree), like the .deb job does on the runner.
+pacman -R --noconfirm nevertube-qt2 >/dev/null 2>&1 || true
+pacman -U --noconfirm "$pkg"
+QT_QPA_PLATFORM=offscreen /usr/bin/nevertube_qt2 --selftest-db
+QT_QPA_PLATFORM=offscreen /usr/bin/nevertube_qt2 --selftest-i18n
+
 echo "OK: $pkg ($(du -h "$pkg" | cut -f1))"
