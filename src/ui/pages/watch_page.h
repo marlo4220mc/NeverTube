@@ -103,9 +103,20 @@ public slots:
     // the color without rebuilding the page.
     void applyAccent();
 
+    // Re-applies the composed labels (title, channel/subscribe buttons, meta line,
+    // queue counter, quality tooltip) in the active language. Called by MainWindow
+    // when the language changes; the static chrome is live-bound.
+    void retranslate();
+
 private:
     void updateQueue();
     void updateInfo();
+    // Meta line (views · date) alone, without re-requesting the channel avatar.
+    void updateMeta();
+    // Writes the gear's tooltip: the active resolution if it is known, the plain
+    // "Calidad" key otherwise. Shared by the constructor, setQualityIndex,
+    // onVideoSizeChanged and retranslate.
+    void refreshQualityTooltip();
     void updateChannelRow();
     void updateSubscribeButton(bool subscribed);
     void updateSubscription(const VideoInfo &v, bool subscribe);

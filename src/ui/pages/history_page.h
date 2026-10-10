@@ -26,6 +26,11 @@ public:
 
     void reload();
 
+    // Re-applies the composed texts ("N vídeos" counter and the empty state,
+    // wrapped by emptyStateHtml) in the active language. Called by MainWindow
+    // when the language changes; the rest is live-bound.
+    void retranslate();
+
 signals:
     void backRequested();
     void historyChanged();

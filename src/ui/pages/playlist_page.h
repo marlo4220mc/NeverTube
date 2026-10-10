@@ -24,6 +24,11 @@ public:
 
     void openPlaylist(const QString &id, const QString &title);
 
+    // Re-applies the composed texts (title fallback, "N vídeos", empty state) in
+    // the active language. Called by MainWindow when the language changes; the
+    // rest is live-bound.
+    void retranslate();
+
 signals:
     void backRequested();
     void openRequested(const QVector<VideoInfo> &videos, int startIndex);
@@ -41,6 +46,9 @@ private:
     VideoCacheRepo *m_cache;
     ThumbnailCache *m_thumbs;
     QString m_playlistId;
+    // Title as given by openPlaylist: the QLabel shows it (or the "playlist.title"
+    // fallback) and retranslate() needs it to recompose in another language.
+    QString m_titleText;
     QFrame *m_card = nullptr;
     // Stretch container shared by the list and the empty-state box
     // (see the constructor's comment).

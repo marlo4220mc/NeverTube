@@ -30,6 +30,10 @@ public:
     // Re-applies the "Subscribe" button with the current accent (MainWindow
     // calls it when the accent color changes in Settings, without rebuilding).
     void applyAccent();
+    // Re-applies the composed texts (name, subscribers, tab empty states, tab
+    // counter, "…más"/"…menos") in the active language. Called by MainWindow when
+    // the language changes; the tab buttons and "Cargar más" are live-bound.
+    void retranslate();
 
 protected:
     // Re-evaluates the description cap when the page width changes
@@ -85,6 +89,9 @@ private:
     QString m_avatarUrl;
     QString m_channelId;
     QString m_channelName;
+    // Subscribers as reported by channelInfo; kept so retranslate() can
+    // recompose "N suscriptores" without asking the network again.
+    long long m_subscriberCount = 0;
     bool m_descExpanded = false;
     bool m_descCollapsible = false;
 

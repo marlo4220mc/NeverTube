@@ -16,6 +16,10 @@ Uso:
     python3 tools/gen_app_icon.py                 # regenera desde el maestro
     python3 tools/gen_app_icon.py --cuadrar       # ademas cuadra el maestro
 
+El motivo se RECORTA de su margen transparente y se reescala para llenar el
+lienzo (normalizar()): el maestro traia la baldosa al ~90 % x 85 % y descentrada,
+y por eso el icono se veia mas pequeno que los demas en la barra de tareas.
+
 Nota sobre el maestro: el PNG que dio el modelo de imagen venia con un damero
 de "transparencia" PINTADO en los pixeles (modo RGB, sin canal alfa). Se
 retiro por relleno por inundacion antes de commitear el maestro; aqui ya no
@@ -64,6 +68,31 @@ def cuadrar(im):
     return out
 
 
+# Fraction of the canvas the MOTIF must fill (its larger dimension). The tile is
+# trimmed of its transparent margin and rescaled until it reaches the edges, like
+# the rest of the system icons (Chrome, Drawio, Basecamp... measure 100 %). The
+# original master had the motif at ~90 % x 85 % and shifted up, which is what made
+# the app icon look "smaller" than the others in the taskbar and menus.
+RELLENO = 1.0
+
+
+def normalizar(im, relleno=RELLENO):
+    """Recorta el margen transparente y escala el motivo para que ocupe `relleno`
+    del lienzo, centrado. Devuelve (imagen, (ancho %, alto %))."""
+    caja = im.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
+    if not caja:
+        return im, (0.0, 0.0)
+    motivo = im.crop(caja)
+    lado = max(im.size)
+    escala = (lado * relleno) / max(motivo.size)
+    nuevo = motivo.resize(
+        (max(1, round(motivo.width * escala)),
+         max(1, round(motivo.height * escala))), Image.LANCZOS)
+    out = Image.new("RGBA", (lado, lado), (0, 0, 0, 0))
+    out.paste(nuevo, ((lado - nuevo.width) // 2, (lado - nuevo.height) // 2))
+    return out, (100.0 * nuevo.width / lado, 100.0 * nuevo.height / lado)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cuadrar", action="store_true",
@@ -78,16 +107,17 @@ def main():
     im = cuadrar(im)
     if im.size != (LADO_MAESTRO, LADO_MAESTRO):
         im = im.resize((LADO_MAESTRO, LADO_MAESTRO), Image.LANCZOS)
+    # Normaliza el encuadre: recorta el margen transparente y reescala el motivo
+    # para que llene el lienzo. Sin esto la baldosa ocupaba ~90 % x 85 % y se veia
+    # mas pequena que los demas iconos del sistema.
+    im, ocup = normalizar(im)
     if args.cuadrar:
         im.save(MAESTRO)
-        print("maestro cuadrado y reescrito: %dx%d" % im.size)
+        print("maestro cuadrado y normalizado, reescrito: %dx%d" % im.size)
     comprobar_alfa(im, "maestro")
 
-    # Useful frame: the tile does not reach the edge, so it is measured over the alpha.
-    caja = im.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
-    util = 100.0 * (caja[2] - caja[0]) / im.width
-    print("maestro %dx%d, la baldosa ocupa el %.1f%% del ancho"
-          % (im.width, im.height, util))
+    print("maestro %dx%d, la baldosa ocupa el %.1f%% x %.1f%% del lienzo"
+          % (im.width, im.height, ocup[0], ocup[1]))
 
     for t in TAMANOS:
         p = os.path.join(DIR, "nt_%d.png" % t)

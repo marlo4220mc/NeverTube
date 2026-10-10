@@ -125,7 +125,7 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     m_shareBtn->setCursor(Qt::PointingHandCursor);
     m_shareBtn->setFixedSize(38, 38);
     nt::bindTooltip(m_shareBtn, "channel.copyTip");
-    m_shareBtn->setAccessibleName(nt::tr("channel.shareA11y"));
+    nt::bindAccessibleName(m_shareBtn, "channel.shareA11y");
     head->addWidget(m_shareBtn, 0, Qt::AlignVCenter);
     cardLay->addLayout(head);
 
@@ -289,6 +289,7 @@ void ChannelPage::openChannel(const QString &channelId)
 {
     m_channelId = channelId;
     m_channelName.clear();
+    m_subscriberCount = 0;
     m_avatarKey.clear();
     m_avatarUrl.clear();
     m_title->setText(nt::tr("channel.loading"));
@@ -377,6 +378,7 @@ void ChannelPage::onChannelInfo(const ChannelInfo &channel)
     if (channel.id != m_channelId)
         return;
     m_channelName = channel.name;
+    m_subscriberCount = channel.subscriberCount;
     m_title->setText(channel.name);
     // Subscribers with the same compact format the rest of the app uses
     // (compactCount): it used to print the raw number ("1234567 suscriptores").
@@ -464,6 +466,33 @@ void ChannelPage::applyAccent()
     // The Compartir chip paints its icon by hand, and icons carry their color
     // embedded: they must be rebuilt with the current accent/kText.
     m_shareBtn->setIcon(nt::icon(nt::Icon::Share, nt::kText, 18));
+}
+
+// Called by MainWindow when the language changes. The tab buttons and
+// "Cargar más" are live-bound; the texts composed with data (or wrapped by
+// emptyStateHtml, which adds the logo) are re-applied here.
+void ChannelPage::retranslate()
+{
+    m_title->setText(m_channelId.isEmpty()
+                         ? nt::tr("channel.title")
+                         : m_channelName.isEmpty() ? nt::tr("channel.loading")
+                                                   : m_channelName);
+    m_meta->setText(m_subscriberCount > 0
+                        ? nt::tr("channel.subscribers")
+                              .arg(compactCount(m_subscriberCount))
+                        : QString());
+    for (int i = 0; i < m_emptyLabels.size(); ++i) {
+        if (m_emptyLabels.at(i))
+            m_emptyLabels.at(i)->setText(
+                nt::emptyStateHtml(emptyTextFor(m_tabKeys.at(i))));
+    }
+    updateTabCount();
+    updateSubscribeButton(m_subs->isSubscribed(m_channelId));
+    // "…más"/"…menos" depends on the expanded state, not on the layout: it is
+    // re-applied from it (no re-measuring needed).
+    if (m_descCollapsible && m_descToggle)
+        m_descToggle->setText(m_descExpanded ? nt::tr("channel.less")
+                                             : nt::tr("channel.more"));
 }
 
 void ChannelPage::onTabVideos(const QString &channelId, const QString &tab,

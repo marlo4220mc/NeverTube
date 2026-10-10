@@ -33,7 +33,7 @@ const char *const kBaseCode = "es";
 // the system language): English. Kept apart from the base on purpose.
 const char *const kDefaultCode = "en";
 
-enum BindingKind { KText, KTooltip, KPlaceholder, KAction };
+enum BindingKind { KText, KTooltip, KPlaceholder, KAction, KAccessibleName };
 
 struct Binding
 {
@@ -142,6 +142,10 @@ void applyOne(const Binding &b)
         if (auto *a = qobject_cast<QAction *>(b.obj.data()))
             a->setText(t);
         break;
+    case KAccessibleName:
+        if (auto *w = qobject_cast<QWidget *>(b.obj.data()))
+            w->setAccessibleName(t);
+        break;
     }
 }
 
@@ -157,7 +161,7 @@ QStringList keysInLine(const QString &code)
 {
     static const char *const kPrefixes[] = {
         "nt::tr(",           "nt::bindText(", "nt::bindTooltip(",
-        "nt::bindPlaceholder(", "nt::bindAction(",
+        "nt::bindAccessibleName(", "nt::bindPlaceholder(", "nt::bindAction(",
     };
     QStringList out;
     for (const char *rawPrefix : kPrefixes) {
@@ -307,6 +311,12 @@ void bindTooltip(QWidget *w, const char *key)
 {
     if (w)
         addBinding(w, key, KTooltip);
+}
+
+void bindAccessibleName(QWidget *w, const char *key)
+{
+    if (w)
+        addBinding(w, key, KAccessibleName);
 }
 
 void bindPlaceholder(QLineEdit *w, const char *key)

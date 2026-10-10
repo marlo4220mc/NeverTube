@@ -78,6 +78,9 @@ QString tr(const QString &key);
 void bindText(QLabel *w, const char *key);
 void bindText(QAbstractButton *w, const char *key);
 void bindTooltip(QWidget *w, const char *key);
+// Accessible name (screen readers). Kept apart from bindTooltip because an
+// icon-only button carries BOTH and they are set on different properties.
+void bindAccessibleName(QWidget *w, const char *key);
 void bindPlaceholder(QLineEdit *w, const char *key);
 void bindAction(QAction *a, const char *key);
 

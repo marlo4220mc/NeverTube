@@ -10,6 +10,7 @@
 #include "../../yt_innertube.h"
 
 class QJsonDocument;
+class QLabel;
 class QLineEdit;
 class QScrollArea;
 class QStackedWidget;
@@ -32,6 +33,11 @@ public:
                         ThumbnailCache *thumbs, QWidget *parent = nullptr);
     ~SearchPage() override;
     void startSearch(const QString &query);
+
+    // Re-applies the composed texts (the channel cards' meta) in the active
+    // language. Called by MainWindow when the language changes; the rest is
+    // live-bound.
+    void retranslate();
 
     // Sizes of the dropdown. The endpoint returns up to 14 suggestions and the
     // history adds more; without a cap the panel grew downward and covered the
@@ -132,6 +138,10 @@ private:
 
     QLineEdit *m_field;
     QPushButton *m_clearBtn = nullptr;
+    // "Buscando" / "Sin resultados": members so their visibility is not decided
+    // by matching translated text (see the constructor).
+    QLabel *m_busyLabel = nullptr;
+    QLabel *m_emptyLabel = nullptr;
     QTimer *m_suggestDebounce = nullptr;
     QWidget *m_historyBox;
     QWidget *m_resultBox;
@@ -143,6 +153,9 @@ private:
     QVector<VideoInfo> m_results;
     QVector<ChannelInfo> m_channels;
     QHash<QString, ChannelRow *> m_channelButtons;
+    // Last ChannelInfo per channel card, so retranslate() can recompose its meta
+    // without asking the network again.
+    QHash<QString, ChannelInfo> m_channelInfos;
     QWidget *m_channelStrip = nullptr;
     QString m_error;
     bool m_searching = false;

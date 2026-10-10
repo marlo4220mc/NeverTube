@@ -405,18 +405,23 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     auto *rBox = new QVBoxLayout(m_resultBox);
     rBox->setContentsMargins(0, 0, 0, 0);
     rBox->setSpacing(8);
-    auto *spinner = new QLabel(this);
-    spinner->setObjectName(QStringLiteral("sectionSub"));
-    nt::bindText(spinner, "search.busy");
-    spinner->setAlignment(Qt::AlignCenter);
-    spinner->setContentsMargins(0, 40, 0, 0);
-    spinner->hide();
-    auto *empty = new QLabel(this);
-    empty->setObjectName(QStringLiteral("sectionSub"));
-    nt::bindText(empty, "search.noResults");
-    empty->setAlignment(Qt::AlignCenter);
-    empty->setContentsMargins(0, 40, 0, 0);
-    empty->hide();
+    // Busy and empty share the #sectionSub look. They are MEMBERS, not locals:
+    // the show/hide used to be done by matching their TRANSLATED text
+    // ("Buscando" / "Sin..."), which only matched in Spanish — in English the
+    // spinner was never hidden and the empty state never showed, and it broke on
+    // a live language switch.
+    m_busyLabel = new QLabel(this);
+    m_busyLabel->setObjectName(QStringLiteral("sectionSub"));
+    nt::bindText(m_busyLabel, "search.busy");
+    m_busyLabel->setAlignment(Qt::AlignCenter);
+    m_busyLabel->setContentsMargins(0, 40, 0, 0);
+    m_busyLabel->hide();
+    m_emptyLabel = new QLabel(this);
+    m_emptyLabel->setObjectName(QStringLiteral("sectionSub"));
+    nt::bindText(m_emptyLabel, "search.noResults");
+    m_emptyLabel->setAlignment(Qt::AlignCenter);
+    m_emptyLabel->setContentsMargins(0, 40, 0, 0);
+    m_emptyLabel->hide();
     m_channelBox = new QWidget(this);
     auto *channelLayout = new QVBoxLayout(m_channelBox);
     channelLayout->setContentsMargins(0, 0, 0, 0);
@@ -445,8 +450,8 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
         m_moreButton->setEnabled(false);
         m_yt->search(m_activeQuery, 20, m_results.size());
     });
-    rBox->addWidget(spinner);
-    rBox->addWidget(empty);
+    rBox->addWidget(m_busyLabel);
+    rBox->addWidget(m_emptyLabel);
     rBox->addWidget(m_channelBox);
     rBox->addWidget(m_list, 1);
     rBox->addWidget(m_moreButton, 0, Qt::AlignHCenter);
@@ -557,14 +562,10 @@ void SearchPage::doSearch()
     m_channels.clear();
     m_channelBox->hide();
     m_list->showVideos(QVector<VideoInfo>(), VideoListView::ListMode);
-    for (auto *child : m_resultBox->findChildren<QLabel *>()) {
-        if (child->objectName() == QLatin1String("sectionSub")) {
-            if (child->text().startsWith(QStringLiteral("Buscando")))
-                child->show();
-            else if (child->text().startsWith(QStringLiteral("Sin")))
-                child->hide();
-        }
-    }
+    if (m_busyLabel)
+        m_busyLabel->show();
+    if (m_emptyLabel)
+        m_emptyLabel->hide();
     m_error.clear();
 
     QStringList hist = history();
@@ -587,10 +588,8 @@ void SearchPage::onSearchReady(const QString &query, const QVector<VideoInfo> &v
         return;
     m_searching = false;
     NT_DEBUG("E2E searchReady count=%d\n", (int)videos.size());
-    for (auto *child : m_resultBox->findChildren<QLabel *>()) {
-        if (child->text().startsWith(QStringLiteral("Buscando")))
-            child->hide();
-    }
+    if (m_busyLabel)
+        m_busyLabel->hide();
     if (m_results.isEmpty())
         m_results = videos;
     else
@@ -598,16 +597,12 @@ void SearchPage::onSearchReady(const QString &query, const QVector<VideoInfo> &v
     if (m_results.isEmpty()) {
         m_list->clearVideos();
         m_moreButton->hide();
-        for (auto *child : m_resultBox->findChildren<QLabel *>()) {
-            if (child->text().startsWith(QStringLiteral("Sin")))
-                child->show();
-        }
+        if (m_emptyLabel)
+            m_emptyLabel->show();
         return;
     }
-    for (auto *child : m_resultBox->findChildren<QLabel *>()) {
-        if (child->text().startsWith(QStringLiteral("Sin")))
-            child->hide();
-    }
+    if (m_emptyLabel)
+        m_emptyLabel->hide();
     if (m_list->isEmpty()) {
         buildChannelButtons();
         m_list->showVideos(m_results, VideoListView::ListMode);
@@ -626,6 +621,7 @@ void SearchPage::buildChannelButtons()
     }
     m_channels.clear();
     m_channelButtons.clear();
+    m_channelInfos.clear();
     QSet<QString> seenChannels;
     for (const VideoInfo &video : m_results) {
         if (video.channelId.isEmpty() || seenChannels.contains(video.channelId))
@@ -640,8 +636,9 @@ void SearchPage::buildChannelButtons()
         m_channelBox->hide();
         return;
     }
-    auto *title = new QLabel(nt::tr("search.channels"), this);
+    auto *title = new QLabel(this);
     title->setObjectName(QStringLiteral("sectionTitle"));
+    nt::bindText(title, "search.channels");
     m_channelBox->layout()->addWidget(title);
     auto *scroll = new QScrollArea(m_channelBox);
     scroll->setWidgetResizable(false);
@@ -694,6 +691,7 @@ void SearchPage::onChannelInfo(const ChannelInfo &channel)
     ChannelRow *card = m_channelButtons.value(channel.id, nullptr);
     if (!card)
         return;
+    m_channelInfos.insert(channel.id, channel);
     card->setTitle(channel.name);
     if (!channel.avatarUrl.isEmpty())
         card->setAvatarUrl(channel.avatarUrl);
@@ -707,6 +705,27 @@ void SearchPage::onChannelInfo(const ChannelInfo &channel)
         m_channelStrip->layout()->invalidate();
         m_channelStrip->layout()->activate();
         m_channelStrip->adjustSize();
+    }
+}
+
+// Called by MainWindow when the language changes. The static chrome ("Canales",
+// "Recientes", "Borrar historial", the search field, the empty/busy labels) is
+// live-bound; the channel cards carry a composed meta ("@handle · N
+// suscriptores") that is re-applied from the stored ChannelInfo.
+void SearchPage::retranslate()
+{
+    for (auto it = m_channelInfos.constBegin();
+         it != m_channelInfos.constEnd(); ++it) {
+        ChannelRow *card = m_channelButtons.value(it.key(), nullptr);
+        if (!card)
+            continue;
+        const ChannelInfo &ch = it.value();
+        QString meta = channelHandleFor(ch.name);
+        if (ch.subscriberCount > 0)
+            meta = nt::tr("search.subscribers")
+                       .arg(meta, compactCount(ch.subscriberCount));
+        card->setMeta(meta);
+        card->applyContentWidth();
     }
 }
 
@@ -747,16 +766,18 @@ void SearchPage::showHistory()
     auto *headLay = new QHBoxLayout(head);
     headLay->setContentsMargins(0, 0, 0, 0);
     headLay->setSpacing(8);
-    auto *hTitle = new QLabel(nt::tr("search.recent"), head);
+    auto *hTitle = new QLabel(head);
     hTitle->setObjectName(QStringLiteral("sectionSub"));
+    nt::bindText(hTitle, "search.recent");
     // "Borrar historial de búsquedas", not "Borrar historial": the app has two
     // histories (this one, of queries, and the one of watched videos in
     // Library) and alone the name did not say which one was deleted. The
     // dialog already said it in the body; now the button says it too. Still
     // shorter than the "historial de búsqueda" that nt::metaLine composes for
     // the rows.
-    auto *clear = new QPushButton(nt::tr("search.clearHistory"), head);
+    auto *clear = new QPushButton(head);
     clear->setObjectName(QStringLiteral("ghost"));
+    nt::bindText(clear, "search.clearHistory");
     clear->setCursor(Qt::PointingHandCursor);
     // 30 and not 34: it is a header control, not the page's big button. The
     // global padding (7px 14px) plus a 13 px line fit in just right without
@@ -780,7 +801,7 @@ void SearchPage::showHistory()
         auto *del = new QPushButton(row);
         del->setObjectName(QStringLiteral("iconBtn"));
         del->setIcon(nt::icon(nt::Icon::Clear, nt::kMuted, 14));
-        del->setToolTip(nt::tr("search.removeOne"));
+        nt::bindTooltip(del, "search.removeOne");
         del->setFixedSize(28, 28);
         del->setCursor(Qt::PointingHandCursor);
         connect(del, &QPushButton::clicked, this,

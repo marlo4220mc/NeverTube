@@ -1317,6 +1317,26 @@ void MainWindow::applyLanguage(const QString &code)
     // "Ver todo / Ver menos" toggles are dynamic; the page re-applies them.
     if (m_library)
         m_library->retranslate();
+    // Pages that compose text with data or wrap it in the empty-state HTML (the
+    // logo): the static chrome is live-bound and re-applied by
+    // nt::setLanguage(), but these need to recompose.
+    if (m_search)
+        m_search->retranslate();
+    if (m_channel)
+        m_channel->retranslate();
+    if (m_watch)
+        m_watch->retranslate();
+    if (m_playlist)
+        m_playlist->retranslate();
+    if (m_historyPage)
+        m_historyPage->retranslate();
+    // List rows paint their meta line (channel · views · date) and the "EN VIVO"
+    // badge with nt::tr AT PAINT TIME (format::metaLine plus the delegate and
+    // AsyncThumb): neither a binding nor a page retranslate covers them, so the
+    // tree is repainted.
+    const auto widgets = findChildren<QWidget *>();
+    for (QWidget *w : widgets)
+        w->update();
     // Shell text that is NOT a binding because it depends on the playback
     // state: the mini title fallback and the "no thumbnail" hint.
     const VideoInfo cur = m_player.current();
@@ -1617,12 +1637,14 @@ void MainWindow::showHwPopup()
     auto *lay = new QVBoxLayout(m_hwPopup);
     lay->setContentsMargins(28, 22, 28, 22);
     lay->setSpacing(8);
-    auto *title = new QLabel(nt::tr("hw.detecting"), m_hwPopup);
+    auto *title = new QLabel(m_hwPopup);
     title->setObjectName(QStringLiteral("hwPopupTitle"));
     title->setAlignment(Qt::AlignCenter);
-    auto *text = new QLabel(nt::tr("hw.note"), m_hwPopup);
+    nt::bindText(title, "hw.detecting");
+    auto *text = new QLabel(m_hwPopup);
     text->setObjectName(QStringLiteral("hwPopupBody"));
     text->setAlignment(Qt::AlignCenter);
+    nt::bindText(text, "hw.note");
     lay->addWidget(title);
     lay->addWidget(text);
     m_hwPopup->adjustSize();

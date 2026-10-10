@@ -656,9 +656,11 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // chip "720p" to be the settings icon of the row. The active resolution
     // now lives in the tooltip (see onVideoSizeChanged/setQualityIndex).
     m_quality = makeIconBtn(m_ctrlBar);
-    // NOT bound: onVideoSizeChanged overwrites the tooltip with the active
-    // resolution. The initial text is in the active language.
-    m_quality->setToolTip(nt::tr("player.quality"));
+    // NOT bound: onVideoSizeChanged/setQualityIndex overwrite the tooltip with
+    // the active resolution, which is not a static key. All three paths
+    // (constructor, those two and retranslate()) go through
+    // refreshQualityTooltip().
+    refreshQualityTooltip();
     connect(m_quality, &QPushButton::clicked, this,
             &WatchPage::toggleQualityMenu);
     btnRow->addWidget(m_quality);
@@ -762,9 +764,10 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_qualityMenuAnchor = gl;
 
     m_overlay->addWidget(gl);
-    auto *spinner = new QLabel(nt::tr("common.loading"), this);
+    auto *spinner = new QLabel(this);
     spinner->setAlignment(Qt::AlignCenter);
     spinner->setObjectName(QStringLiteral("ovSpinner"));
+    nt::bindText(spinner, "common.loading");
     m_overlay->addWidget(spinner);
 
     m_errorLabel = new QLabel(this);
@@ -886,7 +889,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     auto *segLay = new QHBoxLayout(seg);
     segLay->setContentsMargins(0, 0, 0, 0);
     segLay->setSpacing(0);
-    auto makeSeg = [&](const QString &objName, nt::Icon icon, const QString &tip,
+    auto makeSeg = [&](const QString &objName, nt::Icon icon, const char *key,
                        QPushButton **out, nt::Icon *iconOut) {
         auto *b = new QPushButton(seg);
         b->setObjectName(objName);
@@ -894,15 +897,17 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         b->setIcon(nt::icon(icon, nt::kMuted, 20));
         b->setIconSize(QSize(20, 20));
         b->setFixedSize(52, 44);
-        b->setToolTip(tip);
-        b->setAccessibleName(tip);
+        // Live-bound: the button is icon-only, so the tooltip and the accessible
+        // name ARE its text.
+        nt::bindTooltip(b, key);
+        nt::bindAccessibleName(b, key);
         *out = b;
         *iconOut = icon;
     };
     makeSeg(QStringLiteral("actionSegL"), nt::Icon::Thumb,
-            nt::tr("watch.like"), &m_likeBtn, &m_likeIcon);
+            "watch.like", &m_likeBtn, &m_likeIcon);
     makeSeg(QStringLiteral("actionSegR"), nt::Icon::ThumbDown,
-            nt::tr("watch.dislike"), &m_dislikeBtn, &m_dislikeIcon);
+            "watch.dislike", &m_dislikeBtn, &m_dislikeIcon);
     segLay->addWidget(m_likeBtn);
     segLay->addWidget(m_dislikeBtn);
     actionsRow->addWidget(seg);
@@ -910,7 +915,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // Rest of the actions: circular icon-only pill, with tooltip. They are
     // added EXPLICITLY to actionsRow: creating the button is not enough, without
     // addWidget it stays out of the layout and is not visible.
-    auto makeAction = [this, actionsRow](nt::Icon icon, const QString &tip,
+    auto makeAction = [this, actionsRow](nt::Icon icon, const char *key,
                              QPushButton **out, nt::Icon *iconOut) {
         auto *b = new QPushButton(this);
         b->setObjectName(QStringLiteral("actionChip"));
@@ -918,19 +923,19 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         b->setIcon(nt::icon(icon, nt::kMuted, 20));
         b->setIconSize(QSize(20, 20));
         b->setFixedSize(44, 44);
-        b->setToolTip(tip);
-        b->setAccessibleName(tip);
+        nt::bindTooltip(b, key);
+        nt::bindAccessibleName(b, key);
         actionsRow->addWidget(b);
         *out = b;
         *iconOut = icon;
     };
-    makeAction(nt::Icon::Share, nt::tr("row.share"),
+    makeAction(nt::Icon::Share, "row.share",
                &m_shareBtn, &m_shareIcon);
-    makeAction(nt::Icon::Star, nt::tr("watch.favorite"),
+    makeAction(nt::Icon::Star, "watch.favorite",
                &m_starBtn, &m_starIcon);
-    makeAction(nt::Icon::WatchLater, nt::tr("library.watchLater"),
+    makeAction(nt::Icon::WatchLater, "library.watchLater",
                &m_watchLaterBtn, &m_watchLaterIcon);
-    makeAction(nt::Icon::ListAdd, nt::tr("watch.addToPlaylist"),
+    makeAction(nt::Icon::ListAdd, "watch.addToPlaylist",
                &m_playlistBtn, &m_playlistIcon);
     connect(m_playlistBtn, &QPushButton::clicked, this,
             &WatchPage::showPlaylistMenu);
@@ -963,8 +968,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     auto *quRow = new QHBoxLayout;
     quRow->setContentsMargins(0, 0, 0, 0);
     quRow->setSpacing(8);
-    auto *quTitle = new QLabel(nt::tr("watch.upNext"), this);
+    auto *quTitle = new QLabel(this);
     quTitle->setObjectName(QStringLiteral("queueTitle"));
+    nt::bindText(quTitle, "watch.upNext");
     m_queueCount = new QLabel(this);
     m_queueCount->setObjectName(QStringLiteral("queueCount"));
     quRow->addWidget(quTitle);
@@ -1321,6 +1327,16 @@ void WatchPage::updateInfo()
 {
     if (!m_player->isActive())
         return;
+    updateMeta();
+    updateChannelRow();
+}
+
+// Meta line (views · date) alone, without touching the channel row: retranslate()
+// uses it so a language change does not re-request the channel avatar.
+void WatchPage::updateMeta()
+{
+    if (!m_player->isActive())
+        return;
     const VideoInfo v = m_player->current();
     QStringList meta;
     if (v.viewCount > 0)
@@ -1331,7 +1347,32 @@ void WatchPage::updateInfo()
             meta << p;
     }
     m_meta->setText(meta.join(nt::tr("fmt.metaSep")));
-    updateChannelRow();
+}
+
+// Called by MainWindow when the language changes. The transport tooltips and the
+// "A continuación" title are live-bound; here the COMPOSED labels are re-applied:
+// the title depends on the playback state, the channel button on the current
+// video, the subscribe button on the subscription, the meta line and the queue
+// counter are composed with data and the quality tooltip carries the resolution.
+void WatchPage::retranslate()
+{
+    if (!m_player->isActive()) {
+        m_title->setText(nt::tr("watch.playing"));
+        m_channelBtn->setText(nt::tr("channel.title"));
+        refreshQualityTooltip();
+        return;
+    }
+    const VideoInfo v = m_player->current();
+    m_title->setText(v.title);
+    m_channelBtn->setText(v.channel.isEmpty() ? nt::tr("channel.title")
+                                              : v.channel);
+    updateSubscribeButton(m_subs->isSubscribed(v.channelId));
+    updateMeta();
+    if (m_queueCount)
+        m_queueCount->setText(m_queue.isEmpty()
+            ? QString()
+            : nt::tr("common.videos").arg(m_queue.size()));
+    refreshQualityTooltip();
 }
 
 void WatchPage::updateChannelRow()
@@ -1915,8 +1956,23 @@ void WatchPage::setQualityIndex(int index)
 {
     m_qualityIndex = index;
     onQualityChanged(index);
-    m_quality->setToolTip(
-        nt::tr("watch.qualityTip").arg(idxToQuality(index)));
+    refreshQualityTooltip();
+}
+
+// The gear is icon-only: its tooltip carries the active resolution (the old text
+// chip left with the new row). Composed here so retranslate() can redo it in the
+// new language; onVideoSizeChanged already writes m_videoHeight when it knows it.
+void WatchPage::refreshQualityTooltip()
+{
+    if (!m_quality)
+        return;
+    if (m_videoHeight > 0) {
+        const int requested = idxToQuality(m_qualityIndex);
+        m_quality->setToolTip(
+            nt::tr("watch.qualityTip").arg(qMin(requested, m_videoHeight)));
+    } else {
+        m_quality->setToolTip(nt::tr("player.quality"));
+    }
 }
 
 void WatchPage::toggleQualityMenu()

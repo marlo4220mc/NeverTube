@@ -21,8 +21,9 @@ PlaceholderPage::PlaceholderPage(const QString &title, QWidget *parent)
     row->addStretch(1);
     lay->addLayout(row);
 
-    auto *hint = new QLabel(nt::tr("placeholder.soon"), this);
+    auto *hint = new QLabel(this);
     hint->setObjectName(QStringLiteral("placeholderHint"));
+    nt::bindText(hint, "placeholder.soon");
     hint->setAlignment(Qt::AlignCenter);
     lay->addWidget(hint, 1);
     lay->addStretch(8);

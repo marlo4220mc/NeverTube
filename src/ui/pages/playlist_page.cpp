@@ -176,8 +176,21 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
 void PlaylistPage::openPlaylist(const QString &id, const QString &title)
 {
     m_playlistId = id;
-    m_title->setText(title);
+    m_titleText = title;
+    m_title->setText(title.isEmpty() ? nt::tr("playlist.title") : title);
     reload();
+}
+
+// Called by MainWindow when the language changes. The buttons are live-bound;
+// the title fallback, the "N vídeos" counter and the empty state (wrapped by
+// emptyStateHtml, which adds the logo) are re-applied here.
+void PlaylistPage::retranslate()
+{
+    m_title->setText(m_titleText.isEmpty() ? nt::tr("playlist.title")
+                                           : m_titleText);
+    m_empty->setText(nt::emptyStateHtml(nt::tr("playlist.empty")));
+    if (!m_playlistId.isEmpty())
+        m_meta->setText(nt::tr("common.videos").arg(m_videos.size()));
 }
 
 void PlaylistPage::reload()

@@ -212,6 +212,15 @@ void HistoryPage::reload()
     applyProgress();
 }
 
+// Called by MainWindow when the language changes. The title and the clear button
+// are live-bound; the counter and the empty state (wrapped by emptyStateHtml,
+// which adds the logo) are re-applied here.
+void HistoryPage::retranslate()
+{
+    m_meta->setText(nt::tr("common.videos").arg(m_videos.size()));
+    m_empty->setText(nt::emptyStateHtml(nt::tr("history.empty")));
+}
+
 void HistoryPage::applyProgress()
 {
     for (const VideoInfo &v : m_videos) {
