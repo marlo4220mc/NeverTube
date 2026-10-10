@@ -644,8 +644,7 @@ the player.
 
 | workflow | triggers |
 |---|---|
-| `linux.yml` (2x `.deb` + `.rpm` + pacman) | **manual**, or a push that touches **the workflow file itself** (filter `paths:`). It does NOT run on every push to `main`. |
-| `linux-online.yml` (report only) | **ONLY manual**. It has deliberately NO `push` trigger. |
+| `linux.yml` (2x `.deb` + `.rpm` + pacman; the `online-report` job in the same file is report only) | **manual**, or a push that touches **the workflow file itself** (filter `paths:`). It does NOT run on every push to `main`; the online job runs only on manual dispatch with the `online_selftests` box ticked. |
 | `windows.yml` (x86 / Win7) | **manual** (`gh workflow run windows.yml --ref main`) or if the push touches **the workflow file itself** (filter `paths:`). It does NOT run on every push to `main`. |
 | `windows_x64.yml` (Win10+) | only if the push touches **the workflow file itself** (filter `paths:`), or manually with `gh workflow run windows_x64.yml --ref main` |
 
@@ -668,8 +667,9 @@ the distinction is a hard rule:
   `--selftest-ffmpeg`, `--selftest-player`) that need the real machine. YouTube
   can rate-limit a runner or answer a video without a channel
   (`--selftest-search canalVacio=1` turned an x86 run red once) and no runner has
-  a GPU, so they moved out: on Linux to `linux-online.yml` (manual only,
-  `continue-on-error` + `::warning::`) and on Windows behind the
+  a GPU, so they moved out: on Linux to the optional `online-report` job of
+  `linux.yml` (only on manual dispatch with the box ticked, `continue-on-error` +
+  `::warning::`) and on Windows behind the
   `online_selftests` input of `workflow_dispatch` (UNTICKED by default) with
   `::warning::` instead of `exit`. In the Windows smokes the offline list uses
   `--selftest-ssl` where the old one went straight to `--selftest-tls`.

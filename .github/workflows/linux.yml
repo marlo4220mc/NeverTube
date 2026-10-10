@@ -7,6 +7,17 @@ name: Linux viability (build + selftests + deb/rpm/arch)
 # a per-commit gate.
 on:
   workflow_dispatch:
+    inputs:
+      # The online selftests need the network (a real TLS handshake against
+      # public hosts plus Innertube search/browse/feeds) and are INFORMATIONAL:
+      # they never gate anything, so a rate-limited or empty YouTube response
+      # cannot turn a push red. They are one extra job of THIS workflow
+      # (online-report) that runs ONLY when this box is ticked on a manual
+      # dispatch; a push runs the four package builds and nothing else.
+      online_selftests:
+        description: 'Also run the online selftests (TLS handshake + YouTube search/browse/feeds + GPU). Informational.'
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -20,10 +31,12 @@ on:
 # .rpm or a pacman package. The packaging recipes live in the repo under
 # packaging/linux/<distro>/ and are the same ones you can run by hand.
 #
-# EVERY selftest run in these jobs is offline and deterministic. The ones that
+# The four package jobs run ONLY offline, deterministic selftests. The ones that
 # need the network (a real TLS handshake, Innertube search/browse/feeds) are NOT
-# here: they live in linux-online.yml, manual-only and informational, so a
-# rate-limited or empty YouTube response can never turn a push red.
+# part of any gate: they are the optional `online-report` job at the bottom of
+# THIS workflow, which runs only on a manual dispatch with the online_selftests
+# box ticked, and it is continue-on-error: a rate-limited or empty YouTube
+# response can never turn a push red.
 jobs:
   build-deb:
     name: Ubuntu 22.04 (.deb)
@@ -115,3 +128,58 @@ jobs:
           name: linux-arch
           path: dist/*.pkg.tar.zst
           retention-days: 21
+
+  # INFORMATIONAL, manual dispatch only. It is a JOB of this workflow on purpose
+  # (not a workflow of its own): these selftests need the network and no runner
+  # has a GPU, and YouTube can rate-limit a runner or answer a video without a
+  # channel, so they must never be a gate. It runs only when the online_selftests
+  # box is ticked on a manual dispatch; on a push it is skipped (0 cost).
+  online-report:
+    name: online selftests (informational)
+    if: github.event_name == 'workflow_dispatch' && inputs.online_selftests
+    runs-on: ubuntu-22.04
+    env:
+      NEVERTUBE_DEBUG: 1
+      DEBIAN_FRONTEND: noninteractive
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same recipe as the .deb job (build + offline gate + install), but
+      # continue-on-error so a failure reports instead of gating.
+      - name: build + install (same recipe as the .deb job)
+        continue-on-error: true
+        run: bash packaging/linux/deb/build.sh
+
+      # --selftest-tls really handshakes (a backend that loads but aborts was a
+      # real bug on 32-bit Windows).
+      - name: network selftests (informational)
+        continue-on-error: true
+        run: |
+          bin=/usr/bin/nevertube_qt2
+          if [ ! -x "$bin" ]; then echo "::warning::$bin no está (el build falló)"; exit 0; fi
+          for t in --selftest-tls --selftest-innertube --selftest-search \
+                   --selftest-browse --selftest-feeds --selftest-home; do
+            echo "::group::selftest $t"
+            if timeout 240 "$bin" "$t"; then
+              echo "OK $t"
+            else
+              echo "::warning::online selftest $t failed (informational, not a gate)"
+            fi
+            echo "::endgroup::"
+          done
+
+      - name: GPU selftests (informational)
+        continue-on-error: true
+        run: |
+          bin=/usr/bin/nevertube_qt2
+          if [ ! -x "$bin" ]; then echo "::warning::$bin no está (el build falló)"; exit 0; fi
+          for t in --selftest-hwprobe --selftest-ffmpeg --selftest-player; do
+            echo "::group::selftest $t"
+            if timeout 300 "$bin" "$t"; then
+              echo "OK $t"
+            else
+              echo "::warning::GPU selftest $t failed (informational, not a gate)"
+            fi
+            echo "::endgroup::"
+          done
