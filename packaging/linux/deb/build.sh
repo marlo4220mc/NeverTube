@@ -16,9 +16,13 @@ here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
 cd "$repo"
 
+# On the GitHub runner this is a normal user with passwordless sudo; inside a
+# root container (local testing) there is no sudo. Support both.
+if [ "$(id -u)" -eq 0 ]; then SUDO=""; elif command -v sudo >/dev/null 2>&1; then SUDO="sudo"; else SUDO=""; fi
+
 echo "== installing Debian/Ubuntu build dependencies =="
-sudo apt-get update
-sudo apt-get install -y --no-install-recommends \
+$SUDO apt-get update
+$SUDO apt-get install -y --no-install-recommends \
   build-essential cmake pkg-config \
   qtbase5-dev libqt5sql5-sqlite \
   libgl1-mesa-dev \

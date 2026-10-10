@@ -24,10 +24,12 @@ A lightweight YouTube client built with Qt5 and the mpv playback core.
 
 # The workflow (packaging/linux/rpm/build.sh) compiles the app and leaves the
 # install tree under BUILD/nevertube_qt2/ (usr/bin, usr/share). This spec only
-# packages it; it does not compile.
+# packages it; it does not compile. The staging path arrives as the `stage`
+# macro (rpmbuild runs %install in its own subdirectory, so a relative path is
+# not safe).
 %install
 mkdir -p %{buildroot}
-cp -a nevertube_qt2/. %{buildroot}/
+cp -a %{stage}/. %{buildroot}/
 
 %files
 %{_bindir}/nevertube_qt2
@@ -41,3 +43,5 @@ cp -a nevertube_qt2/. %{buildroot}/
 %{_datadir}/icons/hicolor/256x256/apps/nevertube_qt2.png
 
 %changelog
+* Sat Oct 10 2026 marlo4220mc <marlo4220mc@users.noreply.github.com> - __VERSION__-1
+- Initial package

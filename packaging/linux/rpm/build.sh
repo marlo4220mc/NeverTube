@@ -50,7 +50,9 @@ mkdir -p "$rpmtop"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 # spec only copies it into %{buildroot}, it does not compile.
 DESTDIR="$rpmtop/BUILD/nevertube_qt2" cmake --install build-rpm --prefix /usr
 sed "s|__VERSION__|$ver|g" packaging/linux/rpm/nevertube_qt2.spec > "$rpmtop/SPECS/nevertube_qt2.spec"
-rpmbuild --define "_topdir $rpmtop" -bb "$rpmtop/SPECS/nevertube_qt2.spec"
+rpmbuild --define "_topdir $rpmtop" \
+         --define "stage $rpmtop/BUILD/nevertube_qt2" \
+         -bb "$rpmtop/SPECS/nevertube_qt2.spec"
 
 mkdir -p dist
 rpm="dist/nevertube-qt2-${ver}-1.x86_64.rpm"
