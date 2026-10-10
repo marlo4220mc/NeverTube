@@ -1,9 +1,16 @@
 name: Windows selftest completo (CI x86)
 
+# Trigger: MANUAL (Actions → Run workflow), plus a push that touches this file
+# itself so a change to the workflow can be validated. It deliberately does NOT
+# run on every push to main: it is the heavy Win7-quality gate (Qt + FFmpeg +
+# Inno + full smoke) and running it per commit only burns CI time. Same policy as
+# windows_x64.yml.
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-  workflow_dispatch:
+    paths:
+      - '.github/workflows/windows.yml'
 
 jobs:
   windows:
@@ -237,8 +244,39 @@ jobs:
           if (-not $iscc) {
             Write-Host "ISCC.exe no encontrado (choco innosetup falló antes?)"
             exit 1 }
-          & $iscc.FullName dist.iss
+          & $iscc.FullName dist.iss | Tee-Object -FilePath iscc.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Setup gate (size + manifest). The setup can compile without error
+          # and still not carry what is needed, so the check reads the files iscc
+          # says it COMPRESSED (iscc.log), not the ones present in dist\.
+          # nt.ico in the list is the icon of the shortcuts ([Icons]
+          # IconFilename) and the same one embedded in the .exe (resources/nt.rc);
+          # without this gate, a [Files] edit that leaves it out would create the
+          # shortcuts with the default Windows icon and nobody would notice
+          # locally. VC_redist.x86.exe is also the proof that dist.iss (x86) was
+          # compiled and not dist64.iss (that one packages VC_redist.x64.exe).
+          $setup = 'setup-out\nevertube-setup.exe'
+          if (-not (Test-Path $setup)) {
+            Write-Host "no está $setup"; exit 1 }
+          $sz = (Get-Item $setup).Length
+          Write-Host ("setup: {0:N1} MB" -f ($sz / 1MB))
+          if ($sz -lt 5MB) {
+            Write-Host "el setup son menos de 5 MB: el paquete va vacío o incompleto"
+            exit 1 }
+          $packed = foreach ($l in (Get-Content iscc.log)) {
+            if ($l -match 'Compressing:\s+(.+)$') {
+              $p = $matches[1].Trim() -replace '\s+\([^)]*\)$',''
+              [System.IO.Path]::GetFileName($p)
+            }
+          }
+          if (-not $packed) {
+            Write-Host "no se pudo leer el manifiesto de iscc (¿cambió su formato?)"
+            exit 1 }
+          $need = @('nevertube_qt2.exe', 'qwindows.dll', 'nt.ico',
+            'VC_redist.x86.exe')
+          $missing = $need | Where-Object { $packed -notcontains $_ }
+          if ($missing) { Write-Host "el setup NO lleva: $missing"; exit 1 }
+          Write-Host "gate del setup x86 OK: el instalador lleva los $($need.Count) ficheros clave"
           Get-ChildItem setup-out | Select-Object Name, Length
 
       # Smoke test: launch the binary FROM dist\ (with all its DLL

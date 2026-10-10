@@ -257,3 +257,28 @@ if(WIN32)
     target_compile_definitions(nevertube_qt2 PRIVATE WINVER=0x0601 _WIN32_WINNT=0x0601)
   endif()
 endif()
+
+# ── Linux desktop integration ────────────────────────────────────────────────
+# Windows gets the icon from resources/nt.rc (embedded in the .exe) and the
+# shortcuts of dist*.iss. On Linux there is nothing equivalent: without a
+# .desktop entry and the icons in a theme the app shows no icon and does not
+# appear in the menu. `cmake --install` (or the distro packaging) drops it in
+# the standard paths:
+#   - the binary in <prefix>/bin
+#   - the .desktop in <prefix>/share/applications
+#   - the PNG set in <prefix>/share/icons/hicolor/<N>x<N>/apps/nevertube_qt2.png
+# hicolor is the fallback theme read by EVERY desktop environment (GNOME, KDE,
+# XFCE, Cinnamon, MATE, ...), so one install covers them all. The window icon
+# comes from main.cpp (setWindowIcon + setDesktopFileName). Override the prefix
+# with -DCMAKE_INSTALL_PREFIX=/usr to install system-wide.
+if(UNIX AND NOT APPLE)
+  include(GNUInstallDirs)
+  install(TARGETS nevertube_qt2 RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+  install(FILES packaging/linux/nevertube_qt2.desktop
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+  foreach(_size 16 24 32 48 64 128 256)
+    install(FILES "resources/icon/nt_${_size}.png"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/${_size}x${_size}/apps"
+            RENAME "nevertube_qt2.png")
+  endforeach()
+endif()

@@ -1,0 +1,21 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=NeverTube
+GenericName=YouTube client
+Comment=Lightweight YouTube client
+Comment[es]=Cliente ligero de YouTube
+# Installed with `cmake --install` next to the binary it refers to; the icon is
+# the .png set installed in the hicolor theme (see CMakeLists.txt). hicolor is
+# the fallback theme EVERY desktop environment reads (GNOME, KDE, XFCE,
+# Cinnamon, MATE, ...), so the menu entry and the taskbar icon show up without
+# shipping per-DE files.
+Exec=nevertube_qt2
+Icon=nevertube_qt2
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=youtube;video;player;media;
+StartupNotify=true
+# Window <-> launcher association on X11. On Wayland the association comes from
+# QGuiApplication::setDesktopFileName("nevertube_qt2.desktop") in main.cpp.
+StartupWMClass=nevertube_qt2
