@@ -63,12 +63,26 @@ rpm -qpl "$rpm" | grep 'hicolor/256x256/apps/nevertube_qt2.png' >/dev/null
 rpm -qp --requires "$rpm" | tee "$rpmtop/requires.txt"
 grep -q '^mpv-libs' "$rpmtop/requires.txt"
 grep -q '^qt5-qtbase' "$rpmtop/requires.txt"
+# The soname requires rpmbuild adds by itself must carry the FFmpeg runtime (the
+# FfmpegBackend is compiled in Fedora: mpv-devel pulls the libav dev packages) and
+# the Qt GUI/Widgets libs. dnf resolves each soname to the package that provides
+# it, so nothing is assumed about the system.
+grep -q '^libavformat\.so' "$rpmtop/requires.txt"
+grep -q '^libQt5Gui\.so' "$rpmtop/requires.txt"
+grep -q '^libQt5Widgets\.so' "$rpmtop/requires.txt"
 
 # Installability: install the package in the container and run offline
 # selftests from the INSTALLED path (not the build tree): catches a package
 # that builds and lists its files but does not start.
 dnf remove -y nevertube-qt2 >/dev/null 2>&1 || true
 dnf install -y --nogpgcheck "$rpm"
+# ldd catches a package whose Requires do not cover a NEEDED library. grep WITHOUT
+# -q: with pipefail, -q closes the pipe early and ldd dies with SIGPIPE (141).
+if ldd /usr/bin/nevertube_qt2 | grep 'not found' >/dev/null; then
+  echo "ERROR: missing shared libraries after install:" >&2
+  ldd /usr/bin/nevertube_qt2 | grep 'not found' >&2
+  exit 1
+fi
 QT_QPA_PLATFORM=offscreen /usr/bin/nevertube_qt2 --selftest-db
 QT_QPA_PLATFORM=offscreen /usr/bin/nevertube_qt2 --selftest-i18n
 

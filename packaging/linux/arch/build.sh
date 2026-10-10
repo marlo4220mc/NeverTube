@@ -48,14 +48,26 @@ cp archbuild/*.pkg.tar.zst "$pkg"
 tar -tvf "$pkg" | grep 'usr/bin/nevertube_qt2' >/dev/null
 tar -tvf "$pkg" | grep 'usr/share/applications/nevertube_qt2.desktop' >/dev/null
 tar -xOf "$pkg" .PKGINFO > "$repo/archbuild/PKGINFO"
-for dep in qt5-base mpv ffmpeg libpulse; do
+# Every runtime package the binary needs is a hard `depend`: makepkg does not
+# derive them from the sonames, so the PKGBUILD lists them by hand and this gate
+# checks none is missing.
+for dep in qt5-base mpv ffmpeg libpulse libglvnd openssl hicolor-icon-theme; do
   grep -qx "depend = $dep" "$repo/archbuild/PKGINFO"
 done
+# Wayland is optional (optdepend): the app runs via xcb/XWayland without it.
+grep -q '^optdepend = qt5-wayland' "$repo/archbuild/PKGINFO"
 
 # Installability: install the package and run offline selftests from the
 # INSTALLED path (not the build tree), like the .deb job does on the runner.
 pacman -R --noconfirm nevertube-qt2 >/dev/null 2>&1 || true
 pacman -U --noconfirm "$pkg"
+# ldd catches a package whose depends do not cover a NEEDED library. grep WITHOUT
+# -q: with pipefail, -q closes the pipe early and ldd dies with SIGPIPE (141).
+if ldd /usr/bin/nevertube_qt2 | grep 'not found' >/dev/null; then
+  echo "ERROR: missing shared libraries after install:" >&2
+  ldd /usr/bin/nevertube_qt2 | grep 'not found' >&2
+  exit 1
+fi
 QT_QPA_PLATFORM=offscreen /usr/bin/nevertube_qt2 --selftest-db
 QT_QPA_PLATFORM=offscreen /usr/bin/nevertube_qt2 --selftest-i18n
 

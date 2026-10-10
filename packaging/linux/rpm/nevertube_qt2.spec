@@ -13,6 +13,10 @@ Group: Applications/Multimedia
 # not needed to play (mpv is the playback core; the FfmpegBackend is optional).
 Requires: mpv-libs, qt5-qtbase, pulseaudio-libs, mesa-libGL, openssl-libs
 Requires: hicolor-icon-theme
+# Wayland session (Fedora Workstation's default): without this plugin Qt falls
+# back to xcb through XWayland. Recommends, not Requires: on a pure X11 desktop
+# (or with XWayland present) the app works without it.
+Recommends: qt5-qtwayland
 BuildArch: x86_64
 
 %description

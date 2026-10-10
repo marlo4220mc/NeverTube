@@ -12,6 +12,8 @@ arch=('x86_64')
 url='https://github.com/marlo4220mc/nevertube_qt2'
 license=('GPL-3.0-or-later')
 depends=('qt5-base' 'mpv' 'ffmpeg' 'libpulse' 'libglvnd' 'openssl' 'hicolor-icon-theme')
+# Native Wayland on a Wayland session (otherwise Qt goes through xcb/XWayland).
+optdepends=('qt5-wayland: native Wayland instead of XWayland')
 makedepends=('cmake' 'gcc' 'make' 'pkgconf' 'qt5-base' 'mpv' 'ffmpeg' 'libpulse')
 source=('nevertube_qt2-__PKGVER__.tar.gz')
 sha256sums=('SKIP')

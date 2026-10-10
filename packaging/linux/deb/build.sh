@@ -78,7 +78,7 @@ shlibs="$( cd "$tmp" && dpkg-shlibdeps -O -e"$repo/build-deb/nevertube_qt2" \
 depends="$shlibs, libqt5sql5-sqlite"
 echo "Depends: $depends"
 
-for needle in libmpv libqt5 libqt5sql5; do
+for needle in libmpv libavformat libpulse libopengl libqt5 libqt5sql5; do
   case "$depends" in
     *"$needle"*) : ;;
     *) echo "ERROR: Depends does not carry $needle: $depends" >&2; exit 1 ;;
@@ -104,4 +104,20 @@ dpkg-deb -c "$deb" | grep -E 'usr/bin/nevertube_qt2$|applications/nevertube_qt2.
 chk="$tmp/chk"
 dpkg-deb -x "$deb" "$chk"
 test -x "$chk/usr/bin/nevertube_qt2"
+
+# Installability (same "viability" gate as the .rpm and pacman jobs): install the
+# package and run the offline selftests from the INSTALLED path (not the build
+# tree). apt pulls the declared Depends, so nothing is assumed about the system.
+$SUDO apt-get install -y "$repo/$deb"
+# ldd catches a package whose Depends do not cover a NEEDED library. grep WITHOUT
+# -q: with pipefail, -q closes the pipe early and ldd dies with SIGPIPE (141).
+if ldd /usr/bin/nevertube_qt2 | grep 'not found' >/dev/null; then
+  echo "ERROR: missing shared libraries after install:" >&2
+  ldd /usr/bin/nevertube_qt2 | grep 'not found' >&2
+  exit 1
+fi
+export QT_QPA_PLATFORM=offscreen
+/usr/bin/nevertube_qt2 --selftest-db
+/usr/bin/nevertube_qt2 --selftest-i18n
+
 echo "OK: $deb ($(du -h "$deb" | cut -f1))"
