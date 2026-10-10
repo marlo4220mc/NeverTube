@@ -143,7 +143,7 @@ const char kWebClientVersion[] = "2.20240726.00.00";
 const char kFieldMask[] =
     "playabilityStatus.status,playabilityStatus.reason,"
     "streamingData.hlsManifestUrl,streamingData.adaptiveFormats,"
-    "videoDetails.videoId,videoDetails.lengthSeconds";
+    "videoDetails.videoId,videoDetails.lengthSeconds,videoDetails.isLive";
 
 // Alturas de vídeo únicas y ascendentes extraídas de streamingData.
 // Solo se tienen en cuenta entradas de vídeo (con width/height > 0);
@@ -847,6 +847,7 @@ void Innertube::fetchHls(const QString &videoId, int preferredClient,
     m_videoId = videoId;
     m_retryingVisitor = false;
     m_lastWinClient = -1;
+    m_lastIsLive = false;
     m_clientIndex = 0;
     if (preferredClient >= 0 && preferredClient < kPlayerClientCount)
         m_clientIndex = preferredClient;
@@ -2409,75 +2410,169 @@ int homeDurationOf(const QJsonArray &overlays)
     return 0;
 }
 
-// "hace 3 días" / "hace 8 h" / "2 months ago" → fecha ISO aproximada (para
-// ordenar feeds sin depender de una marca exacta). Si no reconoce el texto,
-// devuelve vacío. Acepta las unidades abreviadas del lockupViewModel del /next
-// ("hace 8 h", "hace 2 m", "hace 3 d"): sin ellas, la fecha se perdía y "A
-// continuación" salía sin ella.
+// ¿El thumbnailOverlayTimeStatusRenderer declara un directo? En VISIONOS un
+// directo lleva style "LIVE" en ese overlay (texto "En directo ahora" en vez
+// de una duración); un VOD no tiene style de directo.
+bool overlayIsLive(const QJsonArray &overlays)
+{
+    for (const QJsonValue &val : overlays) {
+        const QString style = val.toObject()
+            .value(QStringLiteral("thumbnailOverlayTimeStatusRenderer")).toObject()
+            .value(QStringLiteral("style")).toString();
+        if (style.contains(QStringLiteral("LIVE")))
+            return true;
+    }
+    return false;
+}
+
+// ¿La lista badges del renderer clásico declara un directo? El cliente WEB lo
+// hace con metadataBadgeRenderer.style == "BADGE_STYLE_TYPE_LIVE_NOW" (icono
+// LIVE, label "EN DIRECTO").
+bool badgesIsLive(const QJsonArray &badges)
+{
+    for (const QJsonValue &b : badges) {
+        const QString style = b.toObject()
+            .value(QStringLiteral("metadataBadgeRenderer")).toObject()
+            .value(QStringLiteral("style")).toString();
+        if (style.contains(QStringLiteral("LIVE")))
+            return true;
+    }
+    return false;
+}
+
+// Un renderer clásico (videoRenderer/compactVideoRenderer/playlistPanelVideo
+// Renderer) es un directo si lo declara cualquiera de las dos vías.
+bool rendererIsLive(const QJsonObject &r)
+{
+    return overlayIsLive(r.value(QStringLiteral("thumbnailOverlays")).toArray())
+        || badgesIsLive(r.value(QStringLiteral("badges")).toArray());
+}
+
+// ¿El viewCountText del /next describe un directo EN EMISIÓN ("10.554
+// usuarios viéndolo ahora", "10,554 watching now", "assistindo agora") en vez
+// de "N visualizaciones"? Es el discriminador de "sigue en directo": un
+// directo terminado vuelve al formato de vistas normales.
+bool viewCountShowsLive(const QString &text)
+{
+    const QString t = text.toLower();
+    return t.contains(QStringLiteral("viéndolo"))
+        || t.contains(QStringLiteral("watching"))
+        || t.contains(QStringLiteral("assistindo"));
+}
+
+// --- "Metalenguaje" de las fechas relativas -------------------------------
+// El parser NO se apoya en las palabras del idioma ("hace"/"ago") ni en una
+// cascada de startsWith() en un orden fijado a mano. Ese diseño ya escondio un
+// bug real: "semanas" empieza por 's' igual que "segundos", cayó en la rama de
+// segundos y la fecha de "hace 2 semanas" salia a 2 s de ahora -> la app la
+// pintaba "hoy". Para que no vuelva a pasar con otra unidad o idioma:
+//   1) extraction idioma-agnostica: se busca el primer numero (o el articulo
+//      "uno") cuyo token SIGUIENTE sea una unidad reconocible. Da igual el
+//      conector: "hace 2 semanas", "2 weeks ago", "Emitido hace 6 horas" o el
+//      portugues "ha 2 semanas" funcionan sin tocar nada.
+//   2) la unidad se reconoce con una TABLA declarativa (pista -> factor) por
+//      coincidencia MAS LARGA, no por orden de ifs: "sem" gana a "s" sin tener
+//      que blindar ninguna rama, y anadir una unidad nueva (p. ej. "quincena")
+//      es anadir una fila.
+//   3) lo que no se reconoce devuelve VACIO: la UI no inventa una fecha (antes
+//      una unidad rara podia colarse y salir "hoy").
+// Las pistas se comparan sin acentos (la unidad se normaliza a NFD y se quitan
+// las marcas) para cubrir cualquier idioma.
+struct RelativeUnitHint
+{
+    const char *hint; // subcadena (o token exacto si mide 1), minusculas, sin acentos
+    qint64 factor;    // segundos por unidad
+};
+
+// El orden no importa: se elige la pista mas larga. "sem" cubre semana(s),
+// "seg"/"segund" cubren segundo(s), "mes"/"mese" cubren mes(es), etc.
+const RelativeUnitHint kRelativeUnits[] = {
+    {"segund", 1},           {"seg", 1},          {"sec", 1},  {"s", 1},
+    {"minut", 60},           {"min", 60},         {"m", 30 * 86400},
+    {"hora", 3600},          {"hour", 3600},      {"hr", 3600},  {"h", 3600},
+    {"dia", 86400},          {"day", 86400},      {"d", 86400},
+    {"sem", 7 * 86400},      {"week", 7 * 86400}, {"wk", 7 * 86400}, {"w", 7 * 86400},
+    {"mes", 30 * 86400},     {"month", 30 * 86400},
+    {"ano", 365 * 86400},    {"year", 365 * 86400}, {"yr", 365 * 86400},
+    {"a", 365 * 86400},      {"y", 365 * 86400},
+};
+
+// Espana/Portugues comen acentos ("día", "mês", "año"): se quitan para que la
+// misma pista ("dia", "mes", "ano") valga en los tres idiomas soportados.
+QString sinAcentos(const QString &s)
+{
+    const QString d = s.normalized(QString::NormalizationForm_D);
+    QString out;
+    out.reserve(d.size());
+    for (const QChar c : d) {
+        const QChar::Category cat = c.category();
+        if (cat != QChar::Mark_NonSpacing
+            && cat != QChar::Mark_SpacingCombining)
+            out.append(c);
+    }
+    return out;
+}
+
+// Segundos por unidad (0 si no se reconoce). Pista mas larga gana; si la unidad
+// es de UNA letra, se exige coincidencia EXACTA (no "s" dentro de "semanas").
+qint64 unidadSegundos(const QString &rawUnit)
+{
+    const QString u = sinAcentos(rawUnit.toLower()).trimmed();
+    if (u.isEmpty())
+        return 0;
+    qint64 best = 0;
+    int bestLen = 0;
+    for (const RelativeUnitHint &p : kRelativeUnits) {
+        const QLatin1String hint(p.hint);
+        const bool hit =
+            (hint.size() == 1) ? (u == hint) : u.contains(hint);
+        if (hit && hint.size() > bestLen) {
+            bestLen = hint.size();
+            best = p.factor;
+        }
+    }
+    return best;
+}
+
+// "hace 3 días" / "hace 8 h" / "2 months ago" / "há 2 semanas" → fecha ISO
+// aproximada (para ordenar feeds sin depender de una marca exacta). Si no
+// reconoce el texto, devuelve vacío (la UI no inventa fecha). Reconoce las
+// unidades abreviadas del lockupViewModel del /next ("hace 8 h", "hace 2 m",
+// "hace 3 d"): sin ellas, la fecha se perdía y "A continuación" salía sin ella.
+// El reconocimiento (número + unidad) es idioma-agnóstico y usa la tabla
+// kRelativeUnits; ver el "metalenguaje" unas líneas más arriba.
 QString relativeToIso(const QString &text)
 {
     const QString t = text.trimmed().toLower();
-    QStringList parts = t.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    const QStringList parts = t.split(QLatin1Char(' '), Qt::SkipEmptyParts);
     if (parts.size() < 2)
         return QString();
-    QString countText;
-    QString unit;
-    // "hace" puede ir en cualquier posición por el prefijo del texto: "hace 3
-    // días", "Emitido hace 6 horas", "Emitió en directo hace 2 días",
-    // "Estrenado hace 1 semana". Se busca el "hace" y se toman las dos palabras
-    // siguientes. (Antes se asumía "hace" en cabeza o en segunda posición con
-    // la cuenta delante, y con "Emitido hace 6 horas" tomaba "Emitido" como
-    // número: los directos y estrenos se quedaban sin fecha.)
-    const int hi = parts.indexOf(QLatin1String("hace"));
-    if (hi >= 0 && hi + 2 < parts.size()) {
-        countText = parts.at(hi + 1);
-        unit = parts.at(hi + 2);
-    } else if (parts.size() >= 3
-               && parts.last() == QLatin1String("ago")) { // "2 months ago"
-        countText = parts.at(0);
-        unit = parts.at(1);
-    } else {
-        return QString();
+    // Extracción idioma-agnóstica: primer número (o artículo "uno") cuyo token
+    // siguiente sea una unidad reconocible. NO se ancla a "hace"/"ago".
+    double n = 0;
+    qint64 factor = 0;
+    for (int i = 0; i + 1 < parts.size(); ++i) {
+        const QString tok = parts.at(i);
+        bool ok = false;
+        double val = tok.toDouble(&ok);
+        if (!ok) {
+            if (tok == QLatin1String("un") || tok == QLatin1String("una")
+                || tok == QLatin1String("um") || tok == QLatin1String("uma")
+                || tok == QLatin1String("an") || tok == QLatin1String("a"))
+                val = 1;
+            else
+                continue;
+        }
+        const qint64 f = unidadSegundos(parts.at(i + 1));
+        if (val > 0 && f > 0) {
+            n = val;
+            factor = f;
+            break;
+        }
     }
-    bool ok = false;
-    double n = countText.toDouble(&ok);
-    if (!ok) {
-        // "hace un mes" / "hace una hora": el lockup usa cifras, pero por si
-        // acaso se acepta el artículo.
-        if (countText == QLatin1String("un") || countText == QLatin1String("una")
-            || countText == QLatin1String("an") || countText == QLatin1String("a"))
-            n = 1;
-        else
-            return QString();
-    }
-    qint64 secs = 0;
-    if (unit.contains(QStringLiteral("segund")) || unit.startsWith(QLatin1Char('s'))
-        || unit.startsWith(QLatin1String("sec")))
-        secs = qint64(n);
-    else if (unit.contains(QStringLiteral("min")))
-        secs = qint64(n * 60);
-    else if (unit.contains(QStringLiteral("hora")) || unit.startsWith(QLatin1Char('h'))
-             || unit.startsWith(QLatin1String("hour")))
-        secs = qint64(n * 3600);
-    else if (unit.contains(QStringLiteral("día"))
-             || unit.contains(QStringLiteral("dia"))
-             || unit.startsWith(QLatin1Char('d'))
-             || unit.startsWith(QLatin1String("day")))
-        secs = qint64(n * 86400);
-    else if (unit.contains(QStringLiteral("sem"))
-             || unit.startsWith(QLatin1String("week")))
-        secs = qint64(n * 7 * 86400);
-    else if (unit.contains(QStringLiteral("mes"))
-             || unit.startsWith(QLatin1String("month"))
-             || unit == QLatin1String("m"))
-        secs = qint64(n * 30 * 86400);
-    else if (unit.contains(QStringLiteral("año"))
-             || unit.contains(QStringLiteral("ano"))
-             || unit.startsWith(QLatin1String("year"))
-             || unit == QLatin1String("a"))
-        secs = qint64(n * 365 * 86400);
-    else
+    if (factor <= 0)
         return QString();
+    const qint64 secs = qint64(n * factor);
     if (secs <= 0)
         return QString();
     return QDateTime::currentDateTimeUtc().addSecs(-secs)
@@ -2605,6 +2700,7 @@ VideoInfo Innertube::videoFromHomeRenderer(const QJsonObject &item) const
                              .value(QStringLiteral("url")).toString();
     v.durationSeconds = homeDurationOf(
         r->value(QStringLiteral("thumbnailOverlays")).toArray());
+    v.isLive = rendererIsLive(*r);
     v.viewCount = countFromText(homeTextOf(r->value(QStringLiteral("viewCountText"))));
     v.publishedAt = relativeToIso(homeTextOf(
         r->value(QStringLiteral("publishedTimeText"))));
@@ -2796,29 +2892,41 @@ QString webLockupThumb(const QJsonObject &contentImage)
         : sources.last().toObject().value(QStringLiteral("url")).toString();
 }
 
-int webLockupDuration(const QJsonObject &contentImage)
+// Duración y marca de directo del layout moderno WEB (lockupViewModel): el
+// overlay inferior lleva una insignia por miniatura — la duración ("12:34")
+// para los VOD y la de directo ("EN DIRECTO", badgeStyle THUMBNAIL_OVERLAY_
+// BADGE_STYLE_LIVE) para los directos.
+int webLockupMeta(const QJsonObject &contentImage, int *secondsOut,
+                  bool *isLiveOut)
 {
+    int seconds = 0;
     const QJsonArray overlays = contentImage
                                     .value(QStringLiteral("thumbnailViewModel"))
                                     .toObject().value(QStringLiteral("overlays"))
                                     .toArray();
     for (const QJsonValue &ov : overlays) {
-        const QJsonArray badges = ov.toObject()
-            .value(QStringLiteral("thumbnailBottomOverlayViewModel")).toObject()
-            .value(QStringLiteral("badges")).toArray();
+        const QJsonObject bvm = ov.toObject()
+            .value(QStringLiteral("thumbnailBottomOverlayViewModel")).toObject();
+        const QJsonArray badges = bvm.value(QStringLiteral("badges")).toArray();
         for (const QJsonValue &b : badges) {
-            const QString txt = b.toObject()
-                .value(QStringLiteral("thumbnailBadgeViewModel")).toObject()
-                .value(QStringLiteral("text")).toString();
+            const QJsonObject tbvm = b.toObject()
+                .value(QStringLiteral("thumbnailBadgeViewModel")).toObject();
+            const QString style = tbvm.value(QStringLiteral("badgeStyle")).toString();
+            if (style.contains(QStringLiteral("LIVE")))
+                if (isLiveOut)
+                    *isLiveOut = true;
+            const QString txt = tbvm.value(QStringLiteral("text")).toString();
             const QStringList parts = txt.split(QLatin1Char(':'));
             if (parts.size() == 2)
-                return parts.at(0).toInt() * 60 + parts.at(1).toInt();
-            if (parts.size() == 3)
-                return parts.at(0).toInt() * 3600 + parts.at(1).toInt() * 60
-                       + parts.at(2).toInt();
+                seconds = parts.at(0).toInt() * 60 + parts.at(1).toInt();
+            else if (parts.size() == 3)
+                seconds = parts.at(0).toInt() * 3600 + parts.at(1).toInt() * 60
+                          + parts.at(2).toInt();
         }
     }
-    return 0;
+    if (secondsOut)
+        *secondsOut = seconds;
+    return seconds;
 }
 
 // shortsLockupViewModel: id en entityId="shorts-shelf-item-<id>", título y
@@ -2890,9 +2998,13 @@ VideoInfo videoFromWebLockup(const QJsonObject &lv)
         for (const QJsonValue &p : parts) {
             const QString t = p.toObject().value(QStringLiteral("text")).toObject()
                                   .value(QStringLiteral("content")).toString();
-            if (t.contains(QStringLiteral("hace"))
-                || t.contains(QStringLiteral("ago")))
-                v.publishedAt = relativeToIso(t);
+            // El parser de fechas es la UNICA autoridad de "esto es una fecha":
+            // no se filtra por "hace"/"ago" aqui (era una segunda copia del
+            // conocimiento del parser y con pt "ha 2 semanas" la fecha no
+            // llegaba a clasificarse, cayendo el texto en el nombre del canal).
+            const QString iso = relativeToIso(t);
+            if (!iso.isEmpty())
+                v.publishedAt = iso;
             else if (t.contains(QStringLiteral("visualizacion"))
                      || t.contains(QStringLiteral("view")))
                 v.viewCount = countFromText(t);
@@ -2917,7 +3029,7 @@ VideoInfo videoFromWebLockup(const QJsonObject &lv)
         v.channelId = channelEndpoint.value(QStringLiteral("browseId")).toString();
     const QJsonObject contentImage = lv.value(QStringLiteral("contentImage")).toObject();
     v.thumbnailUrl = webLockupThumb(contentImage);
-    v.durationSeconds = webLockupDuration(contentImage);
+    v.durationSeconds = webLockupMeta(contentImage, nullptr, &v.isLive);
     if (v.thumbnailUrl.isEmpty())
         v.thumbnailUrl = fallbackThumbnailUrl(v.id);
     return v;
@@ -3057,8 +3169,14 @@ void Innertube::parseVideoDetail(const QJsonObject &root, VideoInfo *video,
     if (video) {
         video->id = vm.value(QStringLiteral("videoId")).toString();
         video->title = homeTextOf(vm.value(QStringLiteral("title")));
-        video->viewCount = countFromText(
-            homeTextOf(vm.value(QStringLiteral("viewCountText"))));
+        const QString viewCountText =
+            homeTextOf(vm.value(QStringLiteral("viewCountText")));
+        video->viewCount = countFromText(viewCountText);
+        // Un directo en emisión muestra "N usuarios viéndolo ahora" en vez de
+        // "N visualizaciones": es lo que distingue "sigue en directo" de
+        // "terminó" en el refresco por /next (el player response manda cuando
+        // se reproduce, pero el /next no toca la fase player).
+        video->isLive = viewCountShowsLive(viewCountText);
         video->publishedAt = relativeToIso(
             homeTextOf(vm.value(QStringLiteral("dateText"))));
         // Si dateText no da una fecha relativa, se prueba publishedTimeText
@@ -3146,6 +3264,7 @@ void Innertube::parsePlaylistBrowse(const QJsonObject &root, PlaylistInfo *info,
             }
             v.durationSeconds =
                 pv.value(QStringLiteral("lengthSeconds")).toString().toInt();
+            v.isLive = rendererIsLive(pv);
             const QJsonArray thumbs = pv.value(QStringLiteral("thumbnail"))
                                           .toObject()
                                           .value(QStringLiteral("thumbnails"))
@@ -3272,6 +3391,7 @@ void Innertube::parseWatchQueue(const QJsonObject &root, QVector<VideoInfo> *out
                                     + parts.at(1).toInt() * 60
                                     + parts.at(2).toInt();
             }
+            v.isLive = rendererIsLive(pvr);
             // Mismo parser localizado que el resto ("1,2 M de visitas"): con
             // toInt() directo un panel con texto daba visitas=0.
             v.viewCount = static_cast<int>(countFromText(
@@ -3416,6 +3536,7 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
                                  .value(QStringLiteral("url")).toString();
         v.durationSeconds = durationSecondsOf(
             r->value(QStringLiteral("thumbnailOverlays")).toArray());
+        v.isLive = rendererIsLive(*r);
         v.viewCount = viewCountOf(homeTextOf(r->value(QStringLiteral("viewCountText"))));
         v.publishedAt = relativeToIso(homeTextOf(
             r->value(QStringLiteral("publishedTimeText"))));
@@ -3678,11 +3799,18 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
         }
     }
     m_lastWinClient = m_clientIndex;
+    // Señal autoritativa de directo (videoDetails.isLive): YouTube declara si
+    // el medio es un directo actual. Se copia a la caché para reutilizarla.
+    m_lastIsLive = root.value(QStringLiteral("videoDetails"))
+                       .toObject()
+                       .value(QStringLiteral("isLive"))
+                       .toBool();
     const qint64 elapsed =
         QDateTime::currentMSecsSinceEpoch() - m_hlsStartMs;
-    NT_DEBUG("E2E innertube hls ok len=%d alturas=%d client=%s (%lldms)\n",
+    NT_DEBUG("E2E innertube hls ok len=%d alturas=%d client=%s isLive=%d "
+             "(%lldms)\n",
              hls.size(), heights.size(), kPlayerClients[m_clientIndex].name,
-             static_cast<long long>(elapsed));
+             m_lastIsLive ? 1 : 0, static_cast<long long>(elapsed));
     // Caché de sesión: guarda hlsManifestUrl firmada, su expiración y los
     // adaptiveFormats (con url directa) + duración, para no repetir el POST
     // player en cambios de resolución del mismo vídeo.
@@ -3690,7 +3818,7 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
     m_hlsCache.insert(m_videoId,
                       HlsCacheEntry{hls, QByteArray(), heights, exp,
                                     m_clientIndex, adaptiveFormats,
-                                    durationSeconds});
+                                    durationSeconds, m_lastIsLive});
     saveHlsCacheToDisk();
     m_hlsInFlight = false;
     mMasterInFlight = false;
@@ -3759,6 +3887,7 @@ bool Innertube::serveCachedHls(const QString &videoId)
         return false;
     }
     m_lastWinClient = it->clientIndex;
+    m_lastIsLive = it->isLive;
     m_videoId = videoId;
     // Emitir primero los adaptiveFormats cacheados: Yt puede reconstruir el
     // master edge sin repetir el POST player; si no procede, hlsReady cubre
@@ -3840,6 +3969,7 @@ void Innertube::saveHlsCacheToDisk() const
         o.insert(QStringLiteral("clientIndex"), e.clientIndex);
         o.insert(QStringLiteral("adaptiveFormats"), e.adaptiveFormats);
         o.insert(QStringLiteral("durationSeconds"), e.durationSeconds);
+        o.insert(QStringLiteral("isLive"), e.isLive);
         arr.append(o);
     }
     const QByteArray json = QJsonDocument(arr).toJson(QJsonDocument::Compact);
@@ -3888,6 +4018,7 @@ void Innertube::loadHlsCacheFromDisk()
             o.value(QStringLiteral("adaptiveFormats")).toArray();
         e.durationSeconds =
             o.value(QStringLiteral("durationSeconds")).toInt();
+        e.isLive = o.value(QStringLiteral("isLive")).toBool();
         m_hlsCache.insert(videoId, e);
     }
 }
@@ -4382,6 +4513,105 @@ bool suggestParseSelfTest()
 
     std::fprintf(stderr, "SUGGEST PARSE %s\n",
                  fail == 0 ? "OK" : "FAIL");
+    return fail == 0;
+}
+
+bool relativeDateSelfTest()
+{
+    int fail = 0;
+    const auto check = [&fail](bool ok, const char *what) {
+        std::fprintf(stderr, "  [%s] %s\n", ok ? "OK  " : "FAIL", what);
+        if (!ok)
+            ++fail;
+    };
+    // Segundos que relativeToIso ha restado a "ahora". El parser devuelve la
+    // fecha en ISO UTC; se compara contra el reloj actual con tolerancia (el
+    // reloj puede ir por milisegundos y el propio test no es de precision).
+    const auto deltaSecs = [](const QString &text) -> qint64 {
+        const QDateTime d =
+            QDateTime::fromString(relativeToIso(text), Qt::ISODate);
+        if (!d.isValid())
+            return -1;
+        return d.secsTo(QDateTime::currentDateTimeUtc());
+    };
+    const auto near = [&deltaSecs](const QString &text, qint64 want) {
+        const qint64 got = deltaSecs(text);
+        return got >= 0 && qAbs(got - want) <= 5;
+    };
+
+    // EL BUG (regresion que este test fija): "semanas" NO puede caer en
+    // segundos, o la fecha queda a 2 s de ahora y publishedLabel pinta "hoy".
+    check(near(QStringLiteral("hace 2 semanas"), 2 * 7 * 86400),
+          "hace 2 semanas -> 14 dias (no 'hoy')");
+    check(near(QStringLiteral("hace 4 semanas"), 4 * 7 * 86400),
+          "hace 4 semanas -> 28 dias (no 'hoy')");
+    check(near(QStringLiteral("hace 1 semana"), 7 * 86400),
+          "hace 1 semana -> 7 dias");
+    // Resto de unidades, sin regresion.
+    check(near(QStringLiteral("hace 5 segundos"), 5),
+          "hace 5 segundos -> 5 s");
+    check(near(QStringLiteral("hace 51 minutos"), 51 * 60),
+          "hace 51 minutos -> minutos");
+    check(near(QStringLiteral("hace 4 horas"), 4 * 3600),
+          "hace 4 horas -> horas");
+    check(near(QStringLiteral("hace 3 días"), 3 * 86400),
+          "hace 3 dias -> dias");
+    check(near(QStringLiteral("hace 1 mes"), 30 * 86400),
+          "hace 1 mes -> meses");
+    check(near(QStringLiteral("hace 4 años"), 4 * 365 * 86400),
+          "hace 4 anos -> anos");
+    // Abreviaturas del lockup moderno ("hace 8 h", "hace 3 d", "hace 2 m").
+    check(near(QStringLiteral("hace 8 h"), 8 * 3600), "hace 8 h -> horas");
+    check(near(QStringLiteral("hace 3 d"), 3 * 86400), "hace 3 d -> dias");
+    check(near(QStringLiteral("hace 2 m"), 2 * 30 * 86400),
+          "hace 2 m -> meses");
+    // Prefijo de directos/estrenos y las formas en ingles.
+    check(near(QStringLiteral("Emitido hace 6 horas"), 6 * 3600),
+          "prefijo 'Emitido hace 6 horas'");
+    check(near(QStringLiteral("2 weeks ago"), 14 * 86400),
+          "2 weeks ago -> 14 dias (no segundos)");
+    check(near(QStringLiteral("2 months ago"), 2 * 30 * 86400),
+          "2 months ago -> meses");
+    check(near(QStringLiteral("hace 3 semanas"), 3 * 7 * 86400),
+          "hace 3 semanas -> 21 dias (colision ya resuelta)");
+    // El parser ya no depende del idioma: PORTUGUES (idioma soportado por la
+    // app) usa "ha", no "hace", y "mes" lleva acento. Antes no se reconocia.
+    check(near(QStringLiteral("há 2 semanas"), 14 * 86400),
+          "pt 'há 2 semanas' -> 14 dias");
+    check(near(QStringLiteral("há 3 dias"), 3 * 86400),
+          "pt 'há 3 dias' -> dias");
+    check(near(QStringLiteral("há 1 mês"), 30 * 86400),
+          "pt 'há 1 mês' (acento) -> meses");
+    check(near(QStringLiteral("há 2 anos"), 2 * 365 * 86400),
+          "pt 'há 2 anos' -> anos");
+    check(near(QStringLiteral("há 5 minutos"), 5 * 60),
+          "pt 'há 5 minutos' -> minutos");
+    check(near(QStringLiteral("Transmitido há 2 horas"), 2 * 3600),
+          "pt prefijo 'Transmitido há 2 horas'");
+    // Ingles variado y el articulo "a"/"an" (sin numero explicito).
+    check(near(QStringLiteral("Streamed 3 hours ago"), 3 * 3600),
+          "en 'Streamed 3 hours ago'");
+    check(near(QStringLiteral("1 year ago"), 365 * 86400),
+          "en '1 year ago'");
+    check(near(QStringLiteral("a year ago"), 365 * 86400),
+          "en 'a year ago' (articulo)");
+    check(near(QStringLiteral("2 seconds ago"), 2),
+          "en '2 seconds ago' -> 2 s");
+    // Textos que no son fecha -> vacio (sin reventar).
+    check(relativeToIso(QString()).isEmpty(), "texto vacio -> vacio");
+    check(relativeToIso(QStringLiteral("hola mundo")).isEmpty(),
+          "texto no-fecha -> vacio");
+    check(relativeToIso(QStringLiteral("hace 0 semanas")).isEmpty(),
+          "cuenta 0 -> vacio");
+    // Unidad que NO reconocemos -> VACIO (no se inventa fecha ni cae a "hoy",
+    // que era el sintoma del bug). Anadir una unidad futura es una fila mas en
+    // la tabla, no un if.
+    check(relativeToIso(QStringLiteral("hace 2 quincenas")).isEmpty(),
+          "unidad desconocida (es) -> vacio (no 'hoy')");
+    check(relativeToIso(QStringLiteral("2 fortnights ago")).isEmpty(),
+          "unidad desconocida (en) -> vacio");
+
+    std::fprintf(stderr, "RELATIVE-DATES %s\n", fail == 0 ? "OK" : "FAIL");
     return fail == 0;
 }
 

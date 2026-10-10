@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QSet>
 #include <QString>
 #include <QVector>
 #include <QWidget>
@@ -82,6 +83,11 @@ private:
     void rebuildHistory();
     void rebuildPlaylists();
     void onChannelInfo(const ChannelInfo &channel);
+    // Un directo cacheado puede terminar entre visitas: al re-entrar en la
+    // página se re-comprueba con el /next (no toca la fase player) con
+    // dedup de kLiveRecheckMs e in-flight por vídeo.
+    void maybeRefreshLiveStatus(const VideoInfo &v);
+    void onLiveDetailReady(const VideoInfo &video);
     void addStandardMenuActions(QMenu *menu, const VideoInfo &v,
                                 bool withWatchLater);
 
@@ -139,6 +145,11 @@ private:
     VideoSection m_fav;
     VideoSection m_later;
     VideoSection m_historySec;
+
+    // Re-comprobación de directos del Historial: ids con una petición /next en
+    // vuelo y la última hora de comprobación de cada uno.
+    QSet<QString> m_liveRefreshPending;
+    QHash<QString, qint64> m_liveRefreshedAt;
 
     QFrame *m_managePopup = nullptr;
     QVBoxLayout *m_manageLay = nullptr;

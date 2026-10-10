@@ -632,6 +632,14 @@ int main(int argc, char *argv[])
         return ok ? 0 : 1;
     }
 
+    if (args.contains(QLatin1String("--selftest-dates"))) {
+        // Parser de fechas relativas (relativeToIso): funcion pura, sin red ni
+        // GPU. Fija la regresion de "hace N semanas" -> segundos -> "hoy".
+        const bool ok = relativeDateSelfTest();
+        std::fprintf(stderr, "SELFTEST dates -> %s\n", ok ? "OK" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
     if (args.contains(QLatin1String("--selftest-suggest-panel"))) {
         // El desplegable en si (offline): construye una SearchPage y comprueba
         // los dos grupos, el filtrado del historial y el descarte de respuestas

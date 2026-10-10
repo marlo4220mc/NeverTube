@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPixmap>
 #include <QPushButton>
 #include <QRandomGenerator>
 #include <QScrollArea>
@@ -41,6 +42,9 @@ const qint64 kFeedTtlMs = 30 * 60 * 1000;
 const qint64 kHomeTtlMs = 60 * 60 * 1000;
 const qint64 kTrendTtlMs = 2 * 60 * 60 * 1000;
 const qint64 kDiscoverTtlMs = 60 * 60 * 1000;
+// Cada cuánto se re-comprueba con el /next si un directo de "Continuar viendo"
+// sigue en emisión (barato y sin tocar la fase player). Igual que en Biblioteca.
+const qint64 kLiveRecheckMs = 10 * 60 * 1000;
 // Backoff de la generación de inicialización de Descubre (cuando no hay radios
 // guardadas): tras un intento sin resultados se espera antes de reintentar,
 // para no martillear la red al abrir Home repetidamente sin conexión.
@@ -211,6 +215,17 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
             &HomePage::refreshContinueWatching);
     connect(m_history, &HistoryRepo::changed, this, &HomePage::refreshBusy);
 
+    // Re-comprobación de directos de "Continuar viendo": el /next distingue
+    // "sigue en directo" de "terminó" (viewCountText "viéndolo ahora" frente a
+    // "visualizaciones"). Al terminar, la fila pasa a duración + barra.
+    connect(m_yt, &Yt::detailReady, this,
+            [this](const VideoInfo &video, const QString &, qint64,
+                   const QVector<FormatInfo> &) { onLiveDetailReady(video); });
+    connect(m_yt, &Yt::detailFailed, this, [this](const QString &id) {
+        if (m_liveRefreshPending.remove(id))
+            m_liveRefreshedAt.insert(id, QDateTime::currentMSecsSinceEpoch());
+    });
+
     connect(m_contGrid, &VideoListView::videoActivated, this,
             [this](int index, const VideoInfo &) {
                 if (index >= 0 && index < m_continuePositions.size())
@@ -277,6 +292,15 @@ void HomePage::buildEmptyState()
     auto *emptyLay = new QVBoxLayout(emptyBox);
     emptyLay->setContentsMargins(28, 24, 28, 24);
     emptyLay->setSpacing(8);
+    // Logo de la app (marca) encima del título: da identidad al estado vacío en
+    // vez de una caja muda. Si el recurso no estuviera, se omite sin más.
+    if (const QPixmap logo = nt::appLogo(72); !logo.isNull()) {
+        auto *logoLabel = new QLabel(emptyBox);
+        logoLabel->setObjectName(QStringLiteral("emptyStateLogo"));
+        logoLabel->setPixmap(logo);
+        logoLabel->setAlignment(Qt::AlignCenter);
+        emptyLay->addWidget(logoLabel);
+    }
     auto *emptyTitle = new QLabel(
         QStringLiteral("Aún no hay contenido personalizado"), emptyBox);
     emptyTitle->setObjectName(QStringLiteral("emptyStateTitle"));
@@ -464,11 +488,18 @@ void HomePage::loadContinueWatching()
         if (!m_videoCache->get(id, v))
             continue;
         const double frac = HistoryRepo::progressFraction(v, pos);
-        if (frac <= 0.0)
+        // Un directo entra aunque no tenga fracción (duración 0 o posición
+        // pegada al borde): se muestra con la marca "En directo" en vez de la
+        // barra. Su estado se re-comprueba al re-entrar (maybeRefreshLiveStatus)
+        // y, si ya terminó, vuelve a ser un vídeo normal con barra.
+        if (frac <= 0.0 && !v.isLive)
             continue;
         out.append(v);
         m_continuePositions.append(pos);
-        progress.append({id, frac});
+        if (frac > 0.0)
+            progress.append({id, frac});
+        if (v.isLive)
+            maybeRefreshLiveStatus(v);
     }
     m_continueVideos = out;
     m_contGrid->showVideos(m_continueVideos, VideoListView::GridMode);
@@ -477,6 +508,38 @@ void HomePage::loadContinueWatching()
     adjustGridHeight(m_contGrid);
     m_contTitle->setVisible(!out.isEmpty());
     m_contGrid->setVisible(!out.isEmpty());
+}
+
+// Un directo cacheado puede terminar entre visitas. El re-análisis de los
+// renderers lo aclararía solo al volver a pedir esa superficie; aquí, al
+// re-entrar en Home, se re-comprueba con el /next (getDetail: NO toca la fase
+// player) la marca de cada directo de "Continuar viendo". El /next distingue
+// "sigue en directo" ("N usuarios viéndolo ahora") de "terminó" ("N
+// visualizaciones"); la DURACIÓN total de un directo terminado solo la da el
+// player response al reproducir, así que al terminar se conserva la última
+// duración conocida.
+void HomePage::maybeRefreshLiveStatus(const VideoInfo &v)
+{
+    if (!v.isLive || m_liveRefreshPending.contains(v.id))
+        return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (now - m_liveRefreshedAt.value(v.id, 0) < kLiveRecheckMs)
+        return;
+    m_liveRefreshPending.insert(v.id);
+    m_yt->getDetail(v.id);
+}
+
+void HomePage::onLiveDetailReady(const VideoInfo &video)
+{
+    if (!m_liveRefreshPending.remove(video.id))
+        return;
+    m_liveRefreshedAt.insert(video.id, QDateTime::currentMSecsSinceEpoch());
+    if (video.isLive)
+        return; // sigue en emisión: se re-comprueba dentro de 10 min
+    // Terminó: se apaga la marca y "Continuar viendo" la re-pinta como un vídeo
+    // normal (duración + barra de la posición del usuario).
+    if (m_videoCache->updateLiveStatus(video.id, false))
+        loadContinueWatching();
 }
 
 // Carga/refresca todas las secciones de red. Cada una: si la caché es fresca

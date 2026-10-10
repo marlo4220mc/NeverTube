@@ -99,8 +99,12 @@ private slots:
 private:
     bool cachedFresh(qint64 at, qint64 ttlMs) const;
     void loadContinueWatching();
-    void loadSections();
-    void loadFeed();
+    // Un directo cacheado puede terminar entre visitas: al re-entrar en Home
+    // se re-comprueba con el /next (no toca la fase player) con dedup de
+    // kLiveRecheckMs e in-flight por vídeo.
+    void maybeRefreshLiveStatus(const VideoInfo &v);
+    void onLiveDetailReady(const VideoInfo &video);
+    void loadSections();    void loadFeed();
     void requestNextChannel();
     // Firma del conjunto de suscripciones (ids ordenados). Se persiste tras
     // construir el feed; si al entrar a Home difiere, el feed cacheado quedó
@@ -184,6 +188,10 @@ private:
 
     QVector<VideoInfo> m_continueVideos;
     QVector<qlonglong> m_continuePositions; // alineado con m_continueVideos
+    // Re-comprobación de directos de "Continuar viendo": ids con una petición
+    // /next en vuelo y la última hora de comprobación de cada uno.
+    QSet<QString> m_liveRefreshPending;
+    QHash<QString, qint64> m_liveRefreshedAt;
     QVector<VideoInfo> m_feed;
     // Copia del feed mostrado tomada al iniciar una actualización (loadFeed).
     // Si la actualización acaba vacía/falla, onFeedDone la restaura en vez de

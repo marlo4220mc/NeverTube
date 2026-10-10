@@ -11,6 +11,7 @@
 #include "db/repositories.h"
 #include "player_controller.h"
 #include "ui/icons.h"
+#include "ui/live_detect.h"
 
 class HomePage;
 class ChannelPage;
@@ -173,6 +174,11 @@ private:
     QString m_miniChannel;
     double m_miniPos = 0.0;
     double m_miniDur = 0.0;
+    // Estado visible del modo directo en el mini. La DETECCIÓN vive en
+    // nt::LiveDetector (misma regla que el overlay); se reinicia al cambiar
+    // de vídeo.
+    bool m_miniLive = false;
+    nt::LiveDetector m_miniLiveDet;
     QProgressBar *m_miniProgress = nullptr;
     QPushButton *m_miniPlayBtn = nullptr;
     QPushButton *m_miniNextBtn = nullptr;

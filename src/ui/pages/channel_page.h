@@ -76,6 +76,7 @@ private:
     QLabel *m_title = nullptr;
     QLabel *m_meta = nullptr;
     QLabel *m_description = nullptr;
+    QString m_descText;  // texto plano de la descripción (el QLabel lleva HTML)
     QFrame *m_descFade = nullptr;
     QPushButton *m_descToggle = nullptr;
     QPushButton *m_subscribeBtn = nullptr;

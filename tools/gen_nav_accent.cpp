@@ -1,15 +1,24 @@
 // Genera los PNG pre-pintados de la navegación inferior para cada color de la
 // paleta de acentos (nt::accentOptions() en src/ui/theme.h). El runtime ya NO
 // re-tiñe: NavButton solo elige el fichero por sufijo del acento vigente
-// (:/nav/<key>_<state>_<suffix>.png). La fuente de cada estado es el PNG
-// original (active/hover/pressed, con su sombreado propio) y el transform es
-// idéntico al que pintaba el retint en runtime: por píxel, se conserva la
-// luminosidad del sprite y se fuerza el tono/saturación de la variante
-// (activo=acento, hover=accentHover, pressed=accentPressed), preservando el
-// canal alfa (QColor::fromRgba — jamás QColor(QRgb), que fuerza alpha=255 y
-// produce el "cuadrado negro"). El acento nativo de los sprites (rojo
-// #FF0033) se COPIA byte-idéntico: el retint HSL es ligeramente lossy y el
-// default no debe cambiar ni un píxel.
+// (:/nav/<key>_<state>_<suffix>.png). El transform es un RECOLOR EXACTO al
+// valor de la variante (active=acento, hover=accentHover, pressed=accentPressed):
+// por píxel se fuerza el HSL COMPLETO del target y solo se conserva el alfa
+// (la forma del glifo vía QColor::fromRgba — jamás QColor(QRgb), que fuerza
+// alpha=255 y produce el "cuadrado negro").
+//
+// MOTIVO del recolor exacto (en vez de conservar la luminosidad del sprite,
+// como hacía la versión anterior): la barra inferior está migrando al NUEVO
+// rojo del icono (#FA011B). Preservando la luminosidad del sprite el tint
+// salía en tonos que NO eran el rojo nuevo — activo #FE021F en vez de
+// #FA011B, hover SALMÓN #FF697B en vez del #FF1B35 de los CTA, pressed
+// #CB0118 en vez de #D90117 — y la nav quedaba fuera de la marca. Con el
+// recolor exacto la nav muestra los MISMOS valores que los botones de acento
+// (y el hover deja de salir pálido por la luz del sprite). El color NATIVO de
+// los sprites originales es el rojo #FF0033; como el sufijo "rojo" de la
+// paleta apunta ahora al rojo del icono (#FA011B), ese sufijo también se
+// re-tiñe. nativeRed NUNCA cambia: es el píxel real de los PNG fuente, no el
+// hex de la paleta.
 //
 // Tras añadir un color a nt::accentOptions() hay que volver a ejecutarla:
 //   g++ -std=c++17 -fPIC tools/gen_nav_accent.cpp src/ui/theme.cpp \
@@ -26,23 +35,26 @@
 
 #include "../src/ui/theme.h"
 
-// Transform de tintado: misma lógica que el retint runtime ya verificado.
+// Recolor plano al valor EXACTO del target: por píxel se sustituye el RGB del
+// sprite por el RGB literal de la variante y solo se conserva el alfa (la forma
+// del glifo). NO se pasa por HSL a propósito: el redondeo del roundtrip
+// RGB→HSL→RGB de Qt es lossy (1-3 unidades por canal — medido
+// #FA011B→#FB011E) y aquí el objetivo es que la nav muestre el MISMO valor que
+// los botones de acento, píxel a píxel.
 static QImage tintTo(const QString &srcPath, const QColor &target)
 {
     QImage img(srcPath);
     if (img.isNull())
         return img;
     img = img.convertToFormat(QImage::Format_ARGB32);
-    const int targetH = target.hslHue();
-    const int targetS = target.hslSaturation();
     for (int y = 0; y < img.height(); ++y) {
         QRgb *line = reinterpret_cast<QRgb *>(img.scanLine(y));
         for (int x = 0; x < img.width(); ++x) {
             const QColor c = QColor::fromRgba(line[x]); // NO QColor(QRgb)
             if (c.alpha() == 0)
                 continue;
-            QColor r;
-            r.setHsl(targetH, targetS, c.lightness(), c.alpha());
+            QColor r(target);
+            r.setAlpha(c.alpha());
             line[x] = r.rgba();
         }
     }

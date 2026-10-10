@@ -176,6 +176,12 @@ void PlayerController::playIndex(int index)
     m_pendingStartMs = m_indexStartMs.value(index, 0);
     m_recoverAttempts = 0;
     m_lastRecoverMs = 0;
+    // Stream nuevo: por defecto puede ser un directo hasta que llegue el
+    // streamReady (el sintético de AV1 lo traerá a false), y NO es un directo
+    // declarado (la señal autoritativa llega con el streamReady, a true solo
+    // si el player response lo marcó como directo actual).
+    m_streamCanBeLive = true;
+    m_streamIsLive = false;
     setPhase(QStringLiteral("loading"));
     emit currentChanged();
 
@@ -223,6 +229,10 @@ void PlayerController::onStreamResolved(const StreamInfo &stream)
         m_errorMessage = QStringLiteral("No se obtuvo URL de streaming.");
         return;
     }
+    // El sintético de AV1 (construido desde un fMP4 finito) nunca es un
+    // directo; el resto de flujos pueden serlo.
+    m_streamCanBeLive = stream.canBeLive;
+    m_streamIsLive = stream.isLive;
     double from = m_seekBack;
     if (m_pendingStartMs > 0) {
         from = double(m_pendingStartMs) / 1000.0;
@@ -400,6 +410,18 @@ void PlayerController::next()
 }
 
 void PlayerController::previous()
+{
+    // Comportamiento de YouTube: si el vídeo actual ya está avanzado (más del
+    // umbral), "Anterior" vuelve al inicio del vídeo actual; solo si está al
+    // principio salta al vídeo previo de la cola.
+    if (m_position > kPrevRestartThreshold) {
+        seek(0.0);
+        return;
+    }
+    previousTrack();
+}
+
+void PlayerController::previousTrack()
 {
     if (hasPrevious())
         playIndex(m_index - 1);

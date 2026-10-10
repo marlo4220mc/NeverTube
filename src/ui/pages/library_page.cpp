@@ -2,8 +2,10 @@
 
 #include <QAction>
 #include <QClipboard>
+#include <QDateTime>
 #include <QGuiApplication>
 #include <QRandomGenerator>
+#include <QSet>
 #include <QTimer>
 #include <QToolTip>
 #include <QCursor>
@@ -43,6 +45,11 @@ constexpr int kThumbW = 236;
 constexpr int kThumbH = 133;
 constexpr int kCardMinW = 400;   // ancho mínimo de cada tarjeta (grid)
 constexpr int kMaxCardCols = 4;
+// Cada cuánto se re-comprueba con el /next si un directo del historial sigue
+// en emisión (barato frente al player response, que competiría con la
+// reproducción). 10 min: re-entrar 1 min después de comprobarlo no dispara
+// de nuevo el POST.
+constexpr qint64 kLiveRecheckMs = 10LL * 60LL * 1000LL;
 
 // Recorta manteniendo el centro y aplica esquinas redondeadas.
 QPixmap coverCrop(const QPixmap &pm, const QSize &sz, int radius)
@@ -77,6 +84,31 @@ QPixmap roundedSolid(const QSize &sz, int radius, const QPixmap &glyph)
     const int s = 28;
     p.drawPixmap((sz.width() - s) / 2, (sz.height() - s) / 2, glyph);
     return out;
+}
+
+// Insignia de la esquina inferior derecha de una miniatura (las mismas
+// medidas que VideoListView::drawBadgeCore): duración en negro translúcido o
+// "En directo" en el acento.
+void drawThumbBadge(QPainter *p, const QSize &sz, const QString &text,
+                    const QColor &bg)
+{
+    if (text.isEmpty())
+        return;
+    QFont bf = p->font();
+    bf.setPointSizeF(bf.pointSizeF() - 1.0);
+    bf.setBold(true);
+    p->save();
+    p->setFont(bf);
+    const QFontMetricsF fm(bf);
+    const qreal w = fm.horizontalAdvance(text) + 10;
+    const QRectF box(sz.width() - w - 2, sz.height() - fm.height() - 4,
+                     w, fm.height() + 4);
+    p->setPen(Qt::NoPen);
+    p->setBrush(bg);
+    p->drawRoundedRect(box, 4, 4);
+    p->setPen(Qt::white);
+    p->drawText(box, Qt::AlignCenter, text);
+    p->restore();
 }
 
 // Miniatura o avatar que se rellena solo desde ThumbnailCache.
@@ -132,32 +164,54 @@ public:
         update();
     }
 
+    // Insignia de la esquina inferior derecha: "En directo" (acento) mientras
+    // el vídeo es un directo, o la duración total en otro caso (como YouTube).
+    // La piden las secciones de vídeo; 0 y no-directo = sin insignia.
+    void setBadgeInfo(int durationSeconds, bool isLive)
+    {
+        if (m_seconds == durationSeconds && m_live == isLive)
+            return;
+        m_seconds = durationSeconds;
+        m_live = isLive;
+        update();
+    }
+
 protected:
     void paintEvent(QPaintEvent *e) override
     {
         QLabel::paintEvent(e);
-        if (m_frac <= 0.0)
-            return;
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
         // Mismas medidas que VideoListView::drawProgressBar (2 px de margen,
         // 3 px de alto, 1 px por encima del borde) para que la barra se lea
         // igual en todos los sitios. Se recorta al rectángulo redondeado de la
-        // miniatura para no asomar por las esquinas.
-        const QRectF bar(2, height() - 4, width() - 4, 3);
-        if (bar.width() <= 0)
-            return;
-        QPainter p(this);
-        p.setRenderHint(QPainter::Antialiasing);
-        QPainterPath clip;
-        clip.addRoundedRect(QRectF(rect()), m_avatar ? m_h / 2 : m_r,
-                            m_avatar ? m_h / 2 : m_r);
-        p.setClipPath(clip);
-        p.setPen(Qt::NoPen);
-        p.setBrush(QColor(0, 0, 0, 170));
-        p.drawRoundedRect(bar, 1.5, 1.5);
-        p.setBrush(nt::kAccent);
-        p.drawRoundedRect(QRectF(bar.left(), bar.top(), bar.width() * m_frac,
-                                  bar.height()),
-                          1.5, 1.5);
+        // miniatura para no asomar por las esquinas. Un directo NO lleva
+        // barra: su posición va pegada al borde y la barra engañaría.
+        if (m_frac > 0.0 && !m_live) {
+            const QRectF bar(2, height() - 4, width() - 4, 3);
+            if (bar.width() > 0) {
+                QPainterPath clip;
+                clip.addRoundedRect(QRectF(rect()), m_avatar ? m_h / 2 : m_r,
+                                    m_avatar ? m_h / 2 : m_r);
+                p.setClipPath(clip);
+                p.setPen(Qt::NoPen);
+                p.setBrush(QColor(0, 0, 0, 170));
+                p.drawRoundedRect(bar, 1.5, 1.5);
+                p.setBrush(nt::kAccent);
+                p.drawRoundedRect(QRectF(bar.left(), bar.top(),
+                                         bar.width() * m_frac, bar.height()),
+                                  1.5, 1.5);
+                p.setClipping(false);
+            }
+        }
+        // Insignia de tiempo/directo (fuera del clip de la miniatura, igual
+        // que el delegado).
+        if (m_live)
+            drawThumbBadge(&p, size(), QStringLiteral("En directo"),
+                           nt::kAccent);
+        else if (m_seconds > 0)
+            drawThumbBadge(&p, size(), durationLabel(m_seconds),
+                           QColor(0, 0, 0, 200));
     }
 
 private:
@@ -185,6 +239,8 @@ private:
     int m_r;
     bool m_avatar;
     double m_frac = 0.0;
+    int m_seconds = 0;
+    bool m_live = false;
 };
 
 // Fila genérica: miniatura/avatar a la izquierda, texto y botón de acción.
@@ -446,8 +502,9 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     connect(manageBtn, &QPushButton::clicked, this, &LibraryPage::openManageSubs);
 
     m_channelHint = new QLabel(
-        QStringLiteral("Aún no te has suscrito a ningún canal. Abre un vídeo "
-                       "o un canal y pulsa «Suscribirse»."),
+        nt::emptyStateHtml(QStringLiteral(
+            "Aún no te has suscrito a ningún canal. Abre un vídeo "
+            "o un canal y pulsa «Suscribirse».")),
         m_body);
     m_channelHint->setObjectName(QStringLiteral("emptyState"));
     m_channelHint->setWordWrap(true);
@@ -488,7 +545,8 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     m_fav.lay->setSpacing(2);
     lay->addWidget(m_fav.host);
     m_fav.empty = new QLabel(
-        QStringLiteral("Pulsa «Me gusta» en un vídeo y aparecerá aquí."),
+        nt::emptyStateHtml(
+            QStringLiteral("Pulsa «Me gusta» en un vídeo y aparecerá aquí.")),
         m_body);
     m_fav.empty->setObjectName(QStringLiteral("emptyState"));
     m_fav.empty->setWordWrap(true);
@@ -510,7 +568,8 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     m_later.lay->setSpacing(2);
     lay->addWidget(m_later.host);
     m_later.empty = new QLabel(
-        QStringLiteral("Pulsa el reloj en un vídeo para guardarlo aquí."),
+        nt::emptyStateHtml(
+            QStringLiteral("Pulsa el reloj en un vídeo para guardarlo aquí.")),
         m_body);
     m_later.empty->setObjectName(QStringLiteral("emptyState"));
     m_later.empty->setWordWrap(true);
@@ -530,7 +589,9 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     m_historySec.lay->setSpacing(2);
     lay->addWidget(m_historySec.host);
     m_historySec.empty = new QLabel(
-        QStringLiteral("Los vídeos que veas aparecerán aquí."), m_body);
+        nt::emptyStateHtml(
+            QStringLiteral("Los vídeos que veas aparecerán aquí.")),
+        m_body);
     m_historySec.empty->setObjectName(QStringLiteral("emptyState"));
     m_historySec.empty->setWordWrap(true);
     m_historySec.empty->setAlignment(Qt::AlignCenter);
@@ -551,7 +612,9 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     m_playlistGrid->setVerticalSpacing(6);
     lay->addWidget(playlistHost);
     m_playlistEmpty = new QLabel(
-        QStringLiteral("Crea tu primera playlist con «+ Nueva»."), m_body);
+        nt::emptyStateHtml(
+            QStringLiteral("Crea tu primera playlist con «+ Nueva».")),
+        m_body);
     m_playlistEmpty->setObjectName(QStringLiteral("emptyState"));
     m_playlistEmpty->setWordWrap(true);
     m_playlistEmpty->setAlignment(Qt::AlignCenter);
@@ -567,6 +630,18 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     setupManageSubsPopup();
 
     connect(m_yt, &Yt::channelInfoReady, this, &LibraryPage::onChannelInfo);
+
+    // Re-comprobación de directos del Historial: el /next distingue "sigue en
+    // directo" de "terminó" (viewCountText "viéndolo ahora" frente a "visua-
+    // lizaciones"). Al terminar, la fila pasa a duración + barra sin esperar
+    // a que una superficie vuelva a pedir los renderers.
+    connect(m_yt, &Yt::detailReady, this,
+            [this](const VideoInfo &video, const QString &, qint64,
+                   const QVector<FormatInfo> &) { onLiveDetailReady(video); });
+    connect(m_yt, &Yt::detailFailed, this, [this](const QString &id) {
+        if (m_liveRefreshPending.remove(id))
+            m_liveRefreshedAt.insert(id, QDateTime::currentMSecsSinceEpoch());
+    });
 
     reload();
 }
@@ -704,6 +779,7 @@ void LibraryPage::buildRows(
         // (vacío el mapa = sin barra). Solo lo pasan las secciones que saben
         // la posición: el Historial.
         thumb->setProgress(progress.value(v.id, 0.0));
+        thumb->setBadgeInfo(v.durationSeconds, v.isLive);
         row->setLeading(thumb);
         row->setTitle(v.title);
         row->setMeta(metaLine(v));
@@ -784,9 +860,17 @@ void LibraryPage::rebuildHistory()
     if (!has)
         return;
     // Estado de reproducción, igual que en el Home: barra de progreso al pie
-    // de la miniatura de cada fila que se puede reanudar.
+    // de la miniatura de cada fila que se puede reanudar. Un directo NO lleva
+    // barra (su posición va pegada al borde y la barra engañaría): solo la
+    // marca "En directo".
     QHash<QString, double> progress;
     for (const VideoInfo &v : m_historySec.videos) {
+        if (v.isLive) {
+            // Directo cacheado: re-comprobar si sigue en emisión al re-entrar
+            // (ver maybeRefreshLiveStatus). Sin fracción que pintar.
+            maybeRefreshLiveStatus(v);
+            continue;
+        }
         const double f =
             HistoryRepo::progressFraction(v, m_history->positionOf(v.id));
         if (f > 0.0)
@@ -810,6 +894,40 @@ void LibraryPage::rebuildHistory()
                   addStandardMenuActions(menu, v, true);
               },
               progress);
+}
+
+// Un directo cacheado puede terminar entre visitas. El re-análisis de los
+// renderers (search/canal/home) lo aclararía solo al volver a pedir esa
+// superficie; aquí, al re-entrar en la página, se re-comprueba con el /next
+// (getDetail: NO toca la fase player, encola sin colisionar con la
+// reproducción) la marca de cada directo del Historial. El /next distingue
+// "sigue en directo" (viewCountText "N usuarios viéndolo ahora") de
+// "terminó" ("N visualizaciones"); la DURACIÓN total de un directo terminado
+// solo la da el player response al reproducir, así que al terminar se
+// conserva la última duración conocida (la "hasta ahora" que escribió
+// onDurationKnown durante la emisión).
+void LibraryPage::maybeRefreshLiveStatus(const VideoInfo &v)
+{
+    if (!v.isLive || m_liveRefreshPending.contains(v.id))
+        return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (now - m_liveRefreshedAt.value(v.id, 0) < kLiveRecheckMs)
+        return;
+    m_liveRefreshPending.insert(v.id);
+    m_yt->getDetail(v.id);
+}
+
+void LibraryPage::onLiveDetailReady(const VideoInfo &video)
+{
+    if (!m_liveRefreshPending.remove(video.id))
+        return;
+    m_liveRefreshedAt.insert(video.id, QDateTime::currentMSecsSinceEpoch());
+    if (video.isLive)
+        return; // sigue en emisión: nada que actualizar (se re-comprueba en 10 min)
+    // Terminó: se apaga la marca y la fila pasa a duración + barra de la
+    // posición del usuario.
+    if (m_cache->updateLiveStatus(video.id, false))
+        rebuildHistory();
 }
 
 // La lista de acciones es la compartida por TODAS las superficies con fila

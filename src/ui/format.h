@@ -17,3 +17,10 @@ QString viewsLabel(qint64 count);
 // Historial/"A continuación" y las secciones de Biblioteca), así que el estilo
 // no depende de la página: una sola función, no una copia por superficie.
 QString metaLine(const VideoInfo &v);
+
+// Descripción como HTML para un QLabel en RichText: escapa el texto, convierte
+// los saltos en <br> y envuelve cada URL en un enlace <a> del color del acento
+// (sin subrayado). Es el MISMO HTML en la descripción del Player y en la tarjeta
+// del Canal — una sola función, no una copia por superficie, para que el color
+// y el formato de los enlaces no se separen.
+QString descriptionHtml(const QString &plain);

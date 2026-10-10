@@ -310,6 +310,10 @@ jobs:
           # fija el formato de los dos tipos de item que devuelve el endpoint.
           $rc = Invoke-Selftest '--selftest-suggest-parse'
           if ($rc -ne 0) { exit $rc }
+          # Parser de fechas relativas (función pura, sin red ni GPU): fija la
+          # regresión de "hace N semanas" -> segundos -> "hoy".
+          $rc = Invoke-Selftest '--selftest-dates'
+          if ($rc -ne 0) { exit $rc }
           # Desplegable de sugerencias del buscador (offline, sin red): los
           # dos grupos, el filtrado del historial, el descarte de respuestas
           # tardías y el tope de altura del panel.

@@ -127,8 +127,26 @@ void AppDatabase::createSchema(QSqlDatabase &db)
         "  views INTEGER NOT NULL DEFAULT 0,"
         "  published TEXT,"
         "  thumb_url TEXT,"
-        "  description TEXT NOT NULL DEFAULT ''"
+        "  description TEXT NOT NULL DEFAULT '',"
+        "  is_live INTEGER NOT NULL DEFAULT 0"
         ")"));
+    // Migración de la caché de vídeos anterior a is_live (directos): la
+    // columna nueva se añade con ALTER (caché con datos, no se descarta).
+    if (tableExists(db, QStringLiteral("videos"))) {
+        bool hasIsLive = false;
+        QSqlQuery pv(db);
+        if (pv.exec(QStringLiteral("PRAGMA table_info(videos)"))) {
+            while (pv.next()) {
+                if (pv.value(1).toString() == QLatin1String("is_live")) {
+                    hasIsLive = true;
+                    break;
+                }
+            }
+        }
+        if (!hasIsLive)
+            exec(QStringLiteral(
+                "ALTER TABLE videos ADD COLUMN is_live INTEGER NOT NULL DEFAULT 0"));
+    }
     exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS history ("
         "  video_id TEXT PRIMARY KEY,"

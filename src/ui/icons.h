@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QIcon>
+#include <QString>
 
 class QColor;
 class QPixmap;
@@ -36,6 +37,16 @@ enum class Icon {
 };
 
 QIcon icon(Icon kind, const QColor &color, int size = 20);
+
+// Logo de la app (el icono del .qrc) escalado con suavizado, para superficies
+// de marca (estados vacíos, Home). Devuelve un pixmap nulo si el recurso no
+// está, para que el llamante pueda omitirlo.
+QPixmap appLogo(int size);
+
+// Texto enriquecido para las cajas de estado vacío: el logo de la app encima
+// del texto. QLabel detecta el HTML y pinta la imagen del .qrc; el color y la
+// alineación los sigue poniendo el QSS del widget.
+QString emptyStateHtml(const QString &text);
 
 // Avatar circular: escala la imagen al lado pedido, recorta el centro y la
 // enmascara con un círculo. La puerta de canal (ficha de Canal y tarjeta de

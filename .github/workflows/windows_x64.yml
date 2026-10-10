@@ -274,10 +274,11 @@ jobs:
           # --selftest-suggest-gestures son offline y deterministas (parser del
           # autocompletado, construcción del desplegable del buscador y sus
           # gestos con entrega de eventos real), así que sí van en el smoke.
+          # --selftest-dates también es puro (parser de fechas relativas).
           foreach ($t in @('--selftest-tls', '--selftest-db', '--selftest-grid',
                            '--selftest-theme', '--selftest-glyphs',
                            '--selftest-suggest-parse', '--selftest-suggest-panel',
-                           '--selftest-suggest-gestures',
+                           '--selftest-suggest-gestures', '--selftest-dates',
                            '--selftest-search', '--selftest-browse', '--selftest-feeds')) {
             $rc = Invoke-Selftest $t
             if ($rc -ne 0) {

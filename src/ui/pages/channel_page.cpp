@@ -129,7 +129,12 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
     m_description = new QLabel(m_card);
     m_description->setObjectName(QStringLiteral("channelDesc"));
     m_description->setWordWrap(true);
-    m_description->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    // RichText con enlaces, como la descripción del Player: cada URL va en un
+    // <a> del color del acento (format::descriptionHtml) y se abre externo.
+    m_description->setTextFormat(Qt::RichText);
+    m_description->setTextInteractionFlags(Qt::TextSelectableByMouse
+                                           | Qt::LinksAccessibleByMouse);
+    m_description->setOpenExternalLinks(true);
     m_description->hide();
     cardLay->addWidget(m_description);
 
@@ -200,10 +205,11 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
         // QVBoxLayout cuyo único elemento con stretch está oculto se estira a
         // TODO el alto del área (700 px de caja punteada); con alto fijo queda
         // como una banda centrada verticalmente (y=302 de 700, ancho completo).
-        auto *empty = new QLabel(emptyTextFor(keys.at(i)), page);
+        auto *empty = new QLabel(nt::emptyStateHtml(emptyTextFor(keys.at(i))),
+                                 page);
         empty->setObjectName(QStringLiteral("emptyState"));
         empty->setAlignment(Qt::AlignCenter);
-        empty->setFixedHeight(96);
+        empty->setFixedHeight(116);
         empty->hide();
         pageLay->addWidget(empty);
 
@@ -279,6 +285,7 @@ void ChannelPage::openChannel(const QString &channelId)
     m_avatarUrl.clear();
     m_title->setText(QStringLiteral("Cargando canal…"));
     m_meta->clear();
+    m_descText.clear();
     m_description->hide();
     m_description->setMaximumHeight(QWIDGETSIZE_MAX);
     // Nueva descripción: siempre arranca colapsada con el tope aplicado
@@ -370,10 +377,15 @@ void ChannelPage::onChannelInfo(const ChannelInfo &channel)
                               .arg(compactCount(channel.subscriberCount))
                         : QString());
     if (channel.description.isEmpty()) {
+        m_descText.clear();
         m_description->setText(QString());
         m_description->hide();
     } else {
-        m_description->setText(channel.description);
+        // Mismo HTML que la descripción del Player: texto plano guardado aparte
+        // (m_descText) para el chequeo de vacío del tope de líneas, que no debe
+        // depender del HTML renderizado.
+        m_descText = channel.description;
+        m_description->setText(descriptionHtml(channel.description));
         m_description->show();
     }
     // Tras el layout: aplicar el tope de líneas y medir la caja en E2E (solo
@@ -485,7 +497,7 @@ void ChannelPage::applyDescriptionCap()
 {
     if (!m_description)
         return;
-    if (m_description->text().isEmpty()) {
+    if (m_descText.isEmpty()) {
         m_descToggle->hide();
         if (m_descFade)
             m_descFade->hide();
@@ -514,7 +526,7 @@ void ChannelPage::applyDescriptionCap()
 
 void ChannelPage::toggleDescription()
 {
-    if (m_description->text().isEmpty())
+    if (m_descText.isEmpty())
         return;
     m_descExpanded = !m_descExpanded;
     applyDescriptionCap();

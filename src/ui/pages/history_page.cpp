@@ -131,12 +131,13 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
     // negro pelado y una línea de texto arriba. Es la misma caja punteada
     // #emptyState de la Biblioteca, de las pestañas del Canal y de la Playlist.
     m_empty = new QLabel(
-        QStringLiteral("Todavía no has visto ningún vídeo. Los que abras aparecerán aquí."),
+        nt::emptyStateHtml(QStringLiteral(
+            "Todavía no has visto ningún vídeo. Los que abras aparecerán aquí.")),
         this);
     m_empty->setObjectName(QStringLiteral("emptyState"));
     m_empty->setAlignment(Qt::AlignCenter);
     m_empty->setWordWrap(true);
-    m_empty->setFixedHeight(96);
+    m_empty->setFixedHeight(116);
     m_empty->hide();
 
     // Lista y caja vacía en un contenedor con stretch 1, por el mismo motivo que

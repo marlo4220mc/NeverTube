@@ -155,6 +155,12 @@ public slots:
     // resolución.
     int lastWinClient() const { return m_lastWinClient; }
 
+    // El player response declara el medio como DIRECTO actual
+    // (videoDetails.isLive): señal autoritativa de YouTube, no inferida de la
+    // duración. La usa Yt para marcar el StreamInfo y que la UI entre en modo
+    // EN VIVO al instante (y cubra los directos puros con dur=0).
+    bool lastIsLive() const { return m_lastIsLive; }
+
     // Ruta del archivo JSON de la caché de resolución (hls+master) en disco.
     // Público para que el reseteo de la aplicación pueda borrarlo con la
     // misma ruta que usa la persistencia.
@@ -351,6 +357,10 @@ private:
     bool m_retryingVisitor = false;
     int m_clientIndex = 0;
     int m_lastWinClient = -1;
+    // videoDetails.isLive del player response más reciente (resolución
+    // actual). Se copia a la caché para que una reutilización de la misma
+    // mantenga la señal autoritativa.
+    bool m_lastIsLive = false;
     // True si el visitorData vigente se obtuvo fresco en esta sesión
     // (sw.js_data). Las fases player/next/radio lo piden al arrancar; las
     // secciones del Home (home/feed/tendencias) usan directamente el
@@ -378,6 +388,7 @@ private:
         // permiten reconstruir el master edge sin repetir el POST player.
         QJsonArray adaptiveFormats;
         int durationSeconds = 0;
+        bool isLive = false;
     };
     QHash<QString, HlsCacheEntry> m_hlsCache;
     // Single-flight por fase: si ya hay una petición HLS o master en curso
@@ -532,3 +543,10 @@ bool suggestSelfTest();
 //   3) un body que no es el formato conocido (HTML de error, JSON vacio,
 //      envoltorio cambiado) devuelve lista vacia y NO revienta.
 bool suggestParseSelfTest();
+
+// Selftest OFFLINE del parser de fechas relativas (relativeToIso). Fija el bug
+// real en el que "hace N semanas" caia en la rama de SEGUNDOS — porque "sem…"
+// empieza por 's' igual que "seg…" —, la fecha salia a N segundos de "ahora" y
+// la app mostraba como "hoy" videos de hace 2/4 semanas (Home, canal, busqueda,
+// cola, playlist y Player). Sin red ni GPU: va al CI.
+bool relativeDateSelfTest();

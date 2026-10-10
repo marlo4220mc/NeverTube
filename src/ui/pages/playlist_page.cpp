@@ -137,12 +137,13 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
     // fuente de la app y saldría el marcador de glifo ausente. De ahí que se
     // diga "el menú" y no "el ⋮"; --selftest-glyphs avisa de esto.
     m_empty = new QLabel(
-        QStringLiteral("Esta playlist todavía no tiene vídeos. Añádelos desde el menú de cualquier vídeo."),
+        nt::emptyStateHtml(QStringLiteral(
+            "Esta playlist todavía no tiene vídeos. Añádelos desde el menú de cualquier vídeo.")),
         this);
     m_empty->setObjectName(QStringLiteral("emptyState"));
     m_empty->setAlignment(Qt::AlignCenter);
     m_empty->setWordWrap(true);
-    m_empty->setFixedHeight(96);
+    m_empty->setFixedHeight(116);
     m_empty->hide();
 
     // Lista y caja vacía van en un CONTENEDOR con stretch 1, y no sueltas en el

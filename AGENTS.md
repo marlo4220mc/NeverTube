@@ -120,6 +120,16 @@ La app tiene icono en cuatro superficies, todas desde los mismos ficheros:
   accesos directos con el icono por defecto de Windows.
 - En Linux la ventana no muestra icono propio en el escritorio sin un
   `.desktop` instalado; hoy no hay ninguno porque la app no se instala en Linux.
+- **Material de marca (a juego con el icono)**: los CTA de acento (`#primary`
+  —Buscar/Reproducir/OK—, `#accentChip` —"Ir a Buscar"— y `#subscribe`) van en
+  relleno PLANO del acento (moderno, sin gloss 3D) con un hairline de 1 px
+  blanco al ~15 % (`rgba(255,255,255,38)`) para que lean sobre el fondo oscuro,
+  y estados nítidos `@ACCENT_HOVER@`/`@ACCENT_PRESSED@`. Vale para los 7 colores
+  de Ajustes porque todo se deriva del acento. El logo de la app aparece en los
+  estados vacíos (`nt::appLogo` / `nt::emptyStateHtml`, encima del texto) y en
+  el del Home. La UI FUNCIONAL (fila del reproductor, listas, tarjetas, nav)
+  sigue PLANA: el material es solo de marca; no untar de degradados la app
+  entera.
 
 ## Pieza protegida (NO modificar sin razón técnica y prueba)
 
@@ -337,6 +347,14 @@ Lo que gobierna la página:
   degradado `#descFade` (26 px arriba del borde inferior de la caja,
   `positionDescFade`). OJO: el **Player ya NO colapsa** (muestra la descripción
   completa); este recorte + `#descToggle`/`#descFade` son solo de la página Canal.
+- **La descripción del Canal lleva enlaces como la del Player**: el QLabel
+  `#channelDesc` es `Qt::RichText` con `LinksAccessibleByMouse` +
+  `setOpenExternalLinks(true)`, y el texto se pinta con el MISMO HTML del Player
+  (`descriptionHtml()` en `src/ui/format.*`: escapa, `\n`→`<br>` y cada URL en
+  un `<a>` del color del acento, sin subrayado). El texto PLANO se guarda aparte
+  (`m_descText`) porque `applyDescriptionCap`/`toggleDescription` comprueban el
+  vacío contra el texto real, no contra el HTML renderizado (y `heightForWidth`
+  mide el mismo rich text que se pinta).
 - **Las pestañas ya no son un `QTabWidget`**: eran lo ÚNICO de la app sin estilo
   (no hay regla `QTabWidget`/`QTabBar` en el QSS) y el "pane" pintaba una
   columna casi negra `#020303` bajo la lista, más oscura que el fondo de la
@@ -349,12 +367,12 @@ Lo que gobierna la página:
   (misma forma que `#queueCount`), oculto con 0 vídeos porque entonces ya sale
   el estado vacío.
 - **Estado vacío por pestaña** = `#emptyState` (la misma caja punteada de la
-  Biblioteca) con el texto de esa pestaña, y la lista se oculta a la vez. Con
-  **alto FIJO de 96 px**, y NO con stretch: medido en un QVBoxLayout de 700 px,
-  una etiqueta con stretch 0 cuyo único hermano con stretch está oculto se
-  estira a los 700 px (una caja punteada gigante); con alto fijo queda en una
-  banda de 96 px centrada verticalmente y de ancho completo (medido: y=543..638
-  de un área de 258..920, x=17..923).
+  Biblioteca) con el texto de esa pestaña + el logo de la app encima
+  (`nt::emptyStateHtml`), y la lista se oculta a la vez. Con **alto FIJO de
+  116 px** (eran 96 sin logo), y NO con stretch: medido en un QVBoxLayout de
+  700 px, una etiqueta con stretch 0 cuyo único hermano con stretch está oculto
+  se estira a los 700 px (una caja punteada gigante); con alto fijo queda en una
+  banda centrada verticalmente y de ancho completo.
 - **"Cargar más vídeos" es `#ghost` centrado** (alto 34). Era `#primary` con
   `setFixedWidth(180)`, una barra roja ancha bajo la lista; cargar más no es la
   acción principal de la página. Solo visible si la respuesta vino llena (25).
@@ -432,13 +450,29 @@ que empuje la imagen para abajo.
 
 ### Fila de controles del Player e iconos (Material Symbols vectorial)
 
-La barra de controles es **UNA sola fila** (estilo YouTube): transporte a la
-izquierda, tiempo transcurrido + slider de progreso + duración en el centro, y
-volumen/acciones a la derecha, todo dentro de `m_ctrlBar` (`#playerOverlay`):
+La barra de controles es **UNA sola fila** (estilo YouTube): el transporte
+arranca la fila con **reproducir/pausa primero** (como YouTube), luego
+anterior y siguiente, y por último barajar y repetir; tiempo transcurrido +
+slider de progreso + duración en el centro, y volumen/acciones a la derecha,
+todo dentro de `m_ctrlBar` (`#playerOverlay`):
 
 ```
-[shuffle][prev][play][next][repeat]  0:00 ──●──  3:21 │ [mute] ──●── │ [CC][playlist][gear][fs]
+[play][prev][next][shuffle][repeat]  0:00 ──●──  3:21 │ [mute] ──●── │ [CC][playlist][gear][fs]
 ```
+
+- **"Anterior" tiene el comportamiento de YouTube** (`PlayerController::previous()`):
+  si el vídeo actual está avanzado más de `kPrevRestartThreshold` (5 s, el mismo
+  orden que el paso de búsqueda del teclado), el botón **vuelve al inicio** del
+  vídeo actual; solo si está al principio salta al vídeo previo de la cola. El
+  botón del overlay y su estado habilitado usan `previousAvailable()`
+  (`hasPrevious() || posición > umbral`), que se refresca con cada tick de
+  posición (`onPositionChanged`) para habilitarse al cruzar el umbral. La tecla
+  **P** (y **Shift+P**, que entra por el mismo `case`: el filtro de arriba solo
+  descarta Ctrl/Alt/Meta) hace lo MISMO que el botón: llama a `previous()`. Antes
+  la P era un salto DIRECTO (`previousTrack()`), y por eso en el primer vídeo de
+  la cola no hacía nada y parecía rota; ahora reinicia si el vídeo está avanzado
+  y el "nada que hacer" (primer vídeo sin avanzar) lo resuelve el propio
+  `previous()`. `previousTrack()` sigue existiendo porque `previous()` lo usa.
 
 - **Los iconos son vectoriales, no PNG.** `src/ui/player_glyphs.{h,cpp}` define
   `nt::PlayerIcon` + `nt::playerIcon(kind, color, size=20)`: la geometría es de
@@ -471,7 +505,9 @@ volumen/acciones a la derecha, todo dentro de `m_ctrlBar` (`#playerOverlay`):
   `updateOverlayIcons()` pinta su estado en acento.
 - **La descripción del Player se muestra COMPLETA**: se quitó el colapso a 3
   líneas y el control "…más"/"…menos" (lo pidió el usuario). La página Canal SÍ
-  conserva el suyo (`#descToggle`/`#descFade` siguen en el QSS para ella).
+  conserva el suyo (`#descToggle`/`#descFade` siguen en el QSS para ella). Las
+  URLs se envuelven en enlaces del acento con `descriptionHtml()` (`src/ui/format.*`),
+  el MISMO helper que usa la tarjeta del Canal: un solo HTML para ambas.
 - **El menú de calidad** (`#qualityMenu`) usa el MISMO borde que `#playerOverlay`
   (fondo de overlay, borde `@BORDER@`, canto superior `@OVERLAY_EDGE@`, radio 12)
   — antes era `#1F1F1F` con borde `@SELECTION@` y radio 6. Sus entradas llevan
@@ -482,9 +518,94 @@ volumen/acciones a la derecha, todo dentro de `m_ctrlBar` (`#playerOverlay`):
   vive en el **tooltip** (`setQualityIndex`/`onVideoSizeChanged`); el menú sigue
   anclado a él (`toggleQualityMenu`). Por eso se borró la regla `QPushButton#chip`
   del QSS Y su entrada en la lista de botones borderless de `--selftest-theme`.
+- **Los tooltips son DOS líneas: la acción y, solo si la tiene, el atajo.**
+  Formato `"Descripción\nAtajo"` — la segunda línea va SOLO el atajo, sin
+  paréntesis ni palabras (`"Reproducir/Pausa\nK"`, `"Anterior\nP"`,
+  `"Siguiente\nN"`, `"Silencio\nM"`, `"Pantalla completa\nF"`; el mini player,
+  `K`/`N`/`M`). Los que no tienen tecla (barajar, repetir, CC, añadir a playlist,
+  calidad) se quedan con la descripción. Los tooltips son ventanas del sistema
+  y por defecto se pintan con la paleta del tema del escritorio (el texto no se
+  leía según la distribución): por eso el QSS incluye una regla `QToolTip`
+  compacta (fondo `@POPOVER@`, texto `@TEXT@`, borde `@BORDER@`, padding
+  3×7 px, 12 px) para que el cuadro sea justo el del texto. OJO: el tooltip de
+  `m_quality` se SOBRESCRIBE en caliente con la resolución activa
+  (`setQualityIndex`/`onVideoSizeChanged`) y no lleva atajo.
 - **El reloj va partido**: `m_ovPos` (transcurrido, izquierda del slider) y
   `m_ovDur` (duración, derecha), no un solo "0:00 / 0:00". QSS `#ovPos`/`#ovDur`
   (`@TEXTSOFT@` 12 px) y separadores `QFrame#ovSep` (1×20, `@OVERLAY_EDGE@`).
+- **Los dos sliders del overlay (seek `#ovSeek` y volumen `#ovVolume`) se pintan
+  a mano** (`OverlaySlider` en `watch_page.cpp`), NO con QSS. El
+  `QStyleSheetStyle` de Qt 5.15 coloca el handle con el centro ~media anchura a
+  la IZQUIERDA del punto real y ancla el sub-página (el relleno) al borde del
+  WIDGET, no al de la pista: en el minuto 0 el círculo se salía por la izquierda
+  de la pista y asomaba un residuo rojo a su lado (el "algo de rojo" reportado).
+  Ningún margen lo alinea (el offset del handle y el anclaje del relleno van
+  acoplados; probadas 7 variantes). Por eso `paintEvent` dibuja pista de 6 px con
+  borde `@OVERLAY_EDGE@`, relleno `@ACCENT@` que termina en el borde IZQUIERDO
+  del círculo, y un círculo blanco de 12 px cuyo centro mapea entre [radio,
+  ancho-radio]: siempre entero y visible, y en 0:00 el relleno mide cero (sin
+  rojo). `SeekSlider` hereda de `OverlaySlider` (solo añade click/arrastre).
+  NO reintroducir reglas `QSlider#ovSeek`/`#ovVolume` en el QSS: no pintarían
+  nada, porque un `paintEvent` propio no pasa por el estilo. Las reglas
+  `QSlider::…` globales quedan solo como default de un slider futuro.
+- **Directos ("EN VIVO")**: un directo NO tiene duración final — mpv reporta
+  `duration` 0 (HLS live puro) o la duración "hasta ahora", que CRECE con el
+  tiempo. Con la barra pos/dur el porcentaje salta hacia ATRÁS cuando la
+  duración se materializa o crece (era el bug del vídeo de SEVENRO). La
+  detección tiene DOS vías:
+  - **Vía AUTORITATIVA (entrada inmediata)**: `videoDetails.isLive` del player
+    response (el `kFieldMask` lo pide y `handlePlayer` lo guarda en
+    `Innertube::lastIsLive()` → `StreamInfo.isLive` →
+    `PlayerController::currentIsLive()`). YouTube declara si el medio es un
+    directo actual, así que el modo EN VIVO se activa en el PRIMER tick de
+    posición tras resolver, sin esperar a que la duración crezca (y cubre los
+    directos PUROS con dur=0, que por definición nunca producen ascensos).
+    En las dos superficies: `if (!appStream && m_player->currentIsLive())
+    m_liveDet.forceLive();` — `LiveDetector::forceLive()` (`live_detect.h`)
+    marca directo y arma el reloj de desbloqueo desde AHORA; la vía heurística
+    sigue gobernando la SALIDA (un directo que termina y fija su duración se
+    desbloquea a los ~15 s igual que sin esta función, aunque la señal
+    autoritativa de la resolución siga activa).
+  - **Vía HEURÍSTICA (fallback, evidencia sostenida)**: **`nt::LiveDetector`**
+    (`src/ui/live_detect.h`, uno por superficie, alimentado en
+    `WatchPage::onPositionChanged` y en el mini de `MainWindow`), no con un
+    tick suelto. Reglas:
+  - **Solo cuentan los ASCENSOS de duración**: `duration > prevDur + 0.5`
+    (`kChangeS`), dos veces (`kLockChanges=2`) → directo. Un VOD materializa su
+    duración una vez (0 o 1 ascenso) y la mantiene estable: nunca llega a 2. Un
+    descenso o colapso NO cuenta: un VOD en reload reinicia la suya
+    (17659.5 → 0 → 1213.6 es el MISMO vídeo finito volviendo a materializarse,
+    no un directo). Tampoco se usa la rama "dur=0 con posición avanzada", que
+    marcaba vídeos normales de arranque lento.
+  - **Desbloqueo automático**: en modo directo, si llega una duración ESTABLE
+    (>0, sin ascensos) durante `kStableUnlockMs` (15 s), se vuelve a la barra
+    normal (un directo real sigue creciendo, no se desbloquea solo; un falso
+    positivo a los ~15 s recupera el seek).
+  - **EXCEPCIÓN — el HLS sintético de AV1 nunca es un directo**: la app lo
+    construye desde un fMP4 finito (playlist VOD+ENDLIST), así que por
+    construcción es un VOD — pero mpv le reporta duraciones INESTABLES mientras
+    carga los rangos BYTERANGE (medido: 0.0, 26.4, 55.8, 1213.6, incluso
+    2486.9 = más que la real), indistinguibles de un directo. Por eso
+    `emitAv1()` (yt.cpp) marca su `StreamInfo` con **`canBeLive=false`** y ambas
+    superficies hacen `!m_player->currentCanBeLive()` antes de alimentar el
+    detector (y sueltan el estado directo si estaba activo). El resto de flujos
+    (master de YouTube, filtrado —que también se sirve desde el servidor local—
+    y edge) SÍ pueden ser un directo: conservan `canBeLive=true` y, si el
+    player response lo declara, `isLive=true`. El sintético sale con las dos a
+    false (nunca es un directo por construcción).
+  En directo se pinta como YouTube: playhead PEGADO AL BORDE DERECHO (rango
+  (0,1) valor 1, la historia del directo rellena hacia atrás), la marca
+  **"EN VIVO" en `m_ovPos` con el acento** (regla QSS
+  `QLabel#ovPos[live="true"]`, propiedad dinámica + re-polish) y el tiempo
+  desde la emisión en NEGATIVO en `m_ovDur` (`-" + fmtTime(dur)`; sin
+  duración conocida, solo la marca). `SeekSlider::setLive(true)` traga los
+  clicks: en directo la barra es informativa, no se busca (los segundos 0..1
+  no significan nada). El mini muestra "Canal · EN VIVO" y la barra llena al
+  borde. Estado por superficie (`m_liveMedia`/`m_liveDurPeak` en la página,
+  `m_miniLive` en MainWindow, con su `LiveDetector` cada una) que se REINICIA
+  al cambiar de vídeo (`onCurrentChanged` / connect de `currentChanged`). Un
+  directo terminado (la playlist pasa a VOD y la duración se fija) vuelve
+  solo a la barra normal, como YouTube con el replay.
 - **Mini player**: mismos iconos (`nt::playerIcon`, 16 px) para play/pausa,
   siguiente, volumen/silencio y cerrar (4 botones); fila más densa (spacing
   6, `QWidget#miniBar QPushButton#iconBtn { padding: 4px; }`). El fondo es el
@@ -510,9 +631,24 @@ volumen/acciones a la derecha, todo dentro de `m_ctrlBar` (`#playerOverlay`):
     altura se fija con `setFixedHeight(4)` en `setupMiniBar`.
   - **Hover de toda la barra**: `MiniPlayerBar::enterEvent/leaveEvent` ponen la
     propiedad dinámica `hover` (con `style()->unpolish/polish`, obligatorio) y
-    el QSS `QWidget#miniBar[hover="true"]` aclara el fondo a `#181818`. El
+    el QSS `QWidget#miniBar[hover="true"]` aclara el fondo a `#141414` (el
+    `#181818` anterior se veía demasiado pálido frente al `#101010`). El
     `leaveEvent` NO apaga el hover si el cursor sigue dentro de `rect()`
     (pasar de la barra a un botón hijo manda `Leave` al padre y parpadearía).
+    Ese guard solo se evalúa cuando LLEGA un `Leave` (interacción activa, donde
+    `QCursor::pos()` sí está fresco), así que el hover también se gobierna
+    explícitamente: `hideEvent` lo apaga siempre (al salir de la página Player,
+    entrar en el vídeo y volver no dejaba el tono encendido en falso),
+    `showEvent` lo re-evalúa contra la posición real del cursor al re-mostrar (Qt
+    no siempre re-manda Enter bajo el cursor), y el constructor conecta
+    `QGuiApplication::applicationStateChanged` para apagarlo al desactivar la app
+    — tanto alt-tab como cambio de espacio de trabajo (en ambos no llega ningún
+    Leave). OJO: al reactivar NO se re-evalúa con `QCursor::pos()`: con la app
+    inactiva esa posición se CONGELA en el último punto conocido (Wayland no
+    entrega eventos de puntero al cambiar de workspace) y, si el puntero estaba
+    sobre la barra al desactivar, re-iluminaría en falso al volver aunque el
+    puntero real esté en otro sitio. El hover solo se re-enciende con un
+    `enterEvent` real (o al mover el puntero sobre la barra).
   - **La línea de metadatos va a la izquierda, junto al canal**: "Canal ·
     m:ss / m:ss" en un solo `QLabel#miniTime`. Se probó a separarlos (canal izq,
     tiempo der) y el tiempo quedaba pegado a los botones y lejos del canal (mala
@@ -536,6 +672,7 @@ volumen/acciones a la derecha, todo dentro de `m_ctrlBar` (`#playerOverlay`):
 ./build/nevertube_qt2 --selftest-grid      # rejillas: tope de columnas (puro) + celda coherente modelo/gridSize/seccion (monta un VideoListView; sin red ni GPU: va en el CI)
 ./build/nevertube_qt2 --selftest-theme     # QSS puro: selector duplicado, selector sin widget, paleta de selección y bordes de los botones: va en el CI
 ./build/nevertube_qt2 --selftest-glyphs    # todo glifo no ASCII de la UI existe en la fuente real de la app: va en el CI
+./build/nevertube_qt2 --selftest-dates     # parser de fechas relativas ("hace 2 semanas" NO es 2 s → no "hoy"): va en el CI
 ```
 
 El selftest del player verifica invariantes del núcleo protegido sin
@@ -688,6 +825,41 @@ trae fecha. Por eso:
   Así converge en una sola apertura y luego reusa sin red. Los vídeos que
   YouTube devuelve sin fecha (directos, estrenos) no fuerzan refrescos: el
   umbral es "algún metadato", no "todos".
+
+- **Fechas relativas: "metalenguaje" declarativo, no una cascada de `if`s**. El
+  bug real (2026-10) fue que los vídeos de hace 2/4 semanas se pintaban como
+  **"hoy"** en Home, Canal, Búsqueda, cola, playlists y Player. Causa: en
+  `relativeToIso` la rama de segundos usaba `unit.startsWith('s')` y
+  **"semanas" también empieza por 's'**, así que `"hace 2 semanas"` se parseaba
+  como *2 segundos* → la fecha quedaba a 2 s de "ahora" → `format::publishedLabel`
+  (`days < 1`) devolvía "hoy". Las inglesas ("2 weeks ago") no fallaban porque
+  "weeks" no empieza por 's'. El arreglo **no** es blindar esa rama (eso dejaría
+  la siguiente colisión para mañana); el parser se reescribió como *metalenguaje*:
+  - **Extracción idioma-agnóstica**: se localiza el primer número (o el artículo
+    "un/una/um/uma/a/an") cuyo token siguiente sea una unidad reconocible. NO se
+    busca `"hace"`/`"ago"` (el conector depende del idioma). Así funcionan por
+    igual "hace 2 semanas", "Emitido hace 6 horas", "2 weeks ago" y el portugués
+    "há 2 semanas" **sin código nuevo**.
+  - **Tabla declarativa `kRelativeUnits`** (pista → factor, en `src/yt_innertube.cpp`):
+    la unidad se resuelve por **coincidencia MÁS LARGA**, no por orden de `if`s.
+    "sem" gana a "s" porque el `contains` de una pista de 1 letra exige token
+    exacto; añadir una unidad (p. ej. "quincena") o un idioma es **una fila más**,
+    no tocar la lógica. Las pistas se comparan **sin acentos** (`sinAcentos`, NFD +
+    quitar marcas) para cubrir "día"/"mês"/"año".
+  - **Lo que no se reconoce devuelve VACÍO** (la UI no inventa fecha) en vez de
+    caer a una unidad por defecto — que era lo que producía el falso "hoy".
+  - El clasificador de `metadataParts` del lockup WEB (`videoFromWebLockup`) ya
+    **no filtra por `t.contains("hace") || t.contains("ago")`** (era una segunda
+    copia del parser y en pt/otro conector la fecha no llegaba a clasificarse y el
+    texto caía en el nombre del canal): ahora `relativeToIso(t)` es la **única
+    autoridad** de "¿esto es una fecha?".
+  - Lo fija el selftest offline `--selftest-dates` (`Yt::relativeDateSelfTest`,
+    `src/yt_innertube.cpp`): **31 casos puros** con tolerancia de 5 s (semanas/
+    días/horas/minutos/segundos/meses/años, abreviaturas `h/d/m/s`, prefijos
+    "Emitido…", portugués con "há" y acentos, inglés con `a/an`, textos que no son
+    fecha y **unidades desconocidas → vacío**). El test caza la regresión: sin la
+    fila "sem" fallan los 4 casos de semanas. Va en el smoke de los DOS CI.
+  - Es la función que usan las 6 asignaciones de `publishedAt` de red.
 
 ## AV1 por HLS (sintético)
 
@@ -859,17 +1031,20 @@ build x86, que sale por `NEVERTUBE_NO_MPV`):
 - `./build/nevertube_qt2 --selftest-db` / `--selftest-player` /
   `--selftest-innertube` / `--selftest-discover` / `--selftest-home` /
   `--selftest-feeds` / `--selftest-av1hls` / `--selftest-hwprobe` / `--selftest-search` /
-  `--selftest-grid` / `--selftest-theme` / `--selftest-glyphs` → pruebas
+  `--selftest-grid` / `--selftest-theme` / `--selftest-glyphs` /
+  `--selftest-dates` → pruebas
 
 ## Color de acento configurable
 
-El acento (`settings.ui_accent`, por defecto rojo NeverTube `#FF0033`) se cambia
+El acento (`settings.ui_accent`, por defecto el rojo del icono `#FA011B` — el
+play del icono de la app, alineado a la marca) se cambia
 en caliente desde Ajustes (Interfaz → Color de acento) y se persiste.
 
 - Fuente única de la paleta: `nt::accentOptions()` en `src/ui/theme.*`
   (label visible + hex canónico + sufijo de fichero). `accentHex()`,
-  `accentHoverHex()` (mezcla ~10% blanco, el `#FF1A47` histórico) y
-  `accentPressedHex()` (`darker(115)`) se leen en CADA llamada: nada `static`
+  `accentHoverHex()` (mezcla ~10% blanco; del rojo del icono sale `#FF1B35`) y
+  `accentPressedHex()` (`darker(115)`; del rojo del icono sale `#D90117`) se
+  leen en CADA llamada: nada `static`
   que congele el acento al primer uso.
 - El QSS global se genera con placeholders `@ACCENT@`/`@ACCENT_PRESSED@`
   sustituidos por llamada (`nt::styleSheet()`), así el re-polish en caliente
@@ -879,8 +1054,18 @@ en caliente desde Ajustes (Interfaz → Color de acento) y se persiste.
   origen de dos bugs (cuadrado negro por `QColor(QRgb)` que forzaba alpha=255,
   y acento congelado por cachear el color en un `static`). NUEVO COLOR DE
   ACENTO: añadirlo a `nt::accentOptions()` y regenerar los PNG con
-  `tools/gen_nav_accent.cpp` (el sufijo `rojo` se copia byte-idéntico de los
-  PNG originales; el resto re-tinta preservando luminosidad y alfa).
+  `tools/gen_nav_accent.cpp` (todos los sufijos se re-tiñen con un RECOLOR
+  EXACTO al valor de la variante — active=acento, hover=accentHover,
+  pressed=accentPressed —, píxel a píxel y conservando solo el alfa; NO se
+  pasa por HSL porque el roundtrip RGB→HSL→RGB de Qt es lossy y la nav debe
+  mostrar el MISMO valor que los botones de acento; el color NATIVO de los
+  sprites es el rojo `#FF0033` — `nativeRed` en el generador, que nunca
+  cambia — y como el sufijo `rojo` de la paleta apunta al rojo del icono
+  `#FA011B`, ese también se re-tiñe). Antes el tintado conservaba la
+  luminosidad del sprite y la nav salía en tonos que NO eran el rojo nuevo
+  (activo `#FE021F` en vez de `#FA011B`, hover salmón `#FF697B` en vez del
+  `#FF1B35` de los CTA, pressed `#CB0118` en vez de `#D90117`); el recolor
+  exacto es parte de la migración de la barra inferior al rojo del icono.
 - `MainWindow::accentChanged` aplica en caliente: stylesheet global, re-elección
   de iconos de la nav (solo re-evalúa el sufijo), repintado de `VideoListView`
   y `applyAccent()` en watch/channel/home/settings (suscribirse, acciones
@@ -1077,6 +1262,62 @@ Los dos últimos datos los escribe el reproductor, no la red:
   no debe reconstruir una rejilla que nadie ve.
 - **Al verificar en BD, copia también `mini_tube.db-wal`**: la app usa WAL y
   copiar solo el `.db` da un snapshot obsoleto (parece que no se guarda nada).
+
+## Insignia "En directo" en miniaturas (badge + refresco al re-entrar)
+
+Un vídeo que es un **directo** ya no muestra su duración en la miniatura: muestra
+la insignia **"En directo"** (pastilla del acento, como la marca "EN VIVO" del
+reproductor y la píldora roja de YouTube). El dato viaja por fila en
+`VideoInfo.isLive` y se persiste en `videos.is_live` (migración `ALTER` para BD
+antiguas, `app_database.cpp`).
+
+- **Quién lo pinta**: el delegate `VideoListView` (rejilla y lista:
+  `drawLiveBadge` sustituye a `drawBadge`, y `drawProgressBar` sale temprano si
+  `v.isLive` porque un directo no tiene fracción que mostrar) y `AsyncThumb`
+  (`setBadgeInfo(durationSeconds, isLive)`) para las filas de **Biblioteca**, que
+  no usan el delegate. Todas las miniaturas de vídeo de Biblioteca llevan
+  insignia (duración o "En directo"), uniforme como YouTube.
+- **De dónde sale `isLive` en la red** (helpers anónimos de `yt_innertube.cpp`,
+  cada cliente lo declara a su manera):
+  - VISIONOS `compactVideoRenderer` (search/home/feed): `thumbnailOverlays[].
+    thumbnailOverlayTimeStatusRenderer.style` contiene `LIVE` (`overlayIsLive`).
+  - WEB clásico `videoRenderer`: `badges[].metadataBadgeRenderer.style` ==
+    `BADGE_STYLE_TYPE_LIVE_NOW` (`badgesIsLive`). `rendererIsLive` combina las dos
+    y se aplica en `videoFromHomeRenderer`, `parseRelated`, `parseWatchQueue`
+    (`playlistPanelVideoRenderer`) y `parsePlaylistBrowse`
+    (`playlistVideoRenderer`).
+  - WEB moderno `lockupViewModel` (pestañas de canal): `contentImage.
+    thumbnailViewModel.overlays[].thumbnailBottomOverlayViewModel.badges[].
+    thumbnailBadgeViewModel.badgeStyle` == `THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE`
+    (`webLockupMeta`).
+  - `/next` (`parseVideoDetail`): el `videoMetadataRenderer` NO trae duración ni
+    bandera de directo, pero el `viewCountText` SÍ distingue "sigue en emisión"
+    (`"10.554 usuarios viéndolo ahora"`) de "terminó"
+    (`"40.071 visualizaciones"`) → `viewCountShowsLive`.
+- **Fuente AUTORITATIVA al reproducir**: el player response
+  (`videoDetails.isLive` → `StreamInfo.isLive` → `PlayerController::
+  currentIsLive()`) lo escribe `WatchPage::onDurationKnown` en la caché junto a
+  la duración. Un directo en emisión reporta una duración que **crece** con el
+  tiempo (la "hasta ahora"), así que ese guard no lo corta.
+- **Refresco al re-entrar**: un directo cacheado puede haber terminado entre
+  visitas. Al reconstruir Home ("Continuar viendo") o la sección Historial de
+  Biblioteca, cada fila `isLive` dispara `maybeRefreshLiveStatus` →
+  `Yt::getDetail` (el `/next`): si el viewCountText vuelve a "visualizaciones",
+  `onLiveDetailReady` llama `VideoCacheRepo::updateLiveStatus(id, false)` y la
+  fila se re-pinta como un vídeo normal (duración + barra). **NO se usa el player
+  response / `fetchHls` desde las páginas**: `m_videoId`/`m_flightVideoId` son
+  estado único de la fase player y una resolución concurrente corrompería una
+  reproducción en curso. El `/next` está serializado y es seguro.
+  Dedup: TTL en memoria `kLiveRecheckMs` (10 min) por id + guard in-flight
+  (`m_liveRefreshPending`) con limpieza en `detailFailed`.
+- **Límite conocida**: el `/next` no da la duración total, así que un directo
+  terminado conserva la última duración cacheada (la "hasta ahora" que escribió
+  `onDurationKnown` durante la emisión) hasta que se reproduzca, momento en el
+  que el player response fija la exacta.
+- **"Continuar viendo"**: `loadContinueWatching` ya no descarta un directo sin
+  fracción (`if (frac <= 0.0 && !v.isLive) continue;`): un directo con duración
+  0 o visto hasta el borde (`progressFraction` devuelve 0) entra igual y solo
+  pinta su insignia; la barra se añade únicamente si `frac > 0`.
 
 ## Convenciones
 

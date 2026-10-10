@@ -1,10 +1,12 @@
 #include "format.h"
 
 #include "../models.h"
+#include "theme.h"
 
 #include <cmath>
 
 #include <QDateTime>
+#include <QRegularExpression>
 
 QString fmtTime(double seconds)
 {
@@ -82,4 +84,14 @@ QString metaLine(const VideoInfo &v)
     if (!pub.isEmpty())
         parts << pub;
     return parts.join(QStringLiteral("  •  "));
+}
+
+QString descriptionHtml(const QString &plain)
+{
+    QString rich = plain.toHtmlEscaped();
+    rich.replace(QLatin1Char('\n'), QStringLiteral("<br>"));
+    const QRegularExpression urlRe(QStringLiteral(R"((https?://[^\s<]+))"));
+    rich.replace(urlRe, QStringLiteral(
+        "<a href=\"\\1\" style=\"color:%1;\">\\1</a>").arg(nt::accentHex()));
+    return QStringLiteral("<style>a { text-decoration:none; }</style>") + rich;
 }

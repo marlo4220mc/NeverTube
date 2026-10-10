@@ -455,6 +455,9 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
         s.label = QString::number(*av1H) + QLatin1Char('p');
         s.height = *av1H;
         s.multipleUrls = false;
+        // Construido desde un fMP4 finito (VOD+ENDLIST): NO es un directo nunca,
+        // aunque mpv reporte duraciones inestables mientras carga los rangos.
+        s.canBeLive = false;
         m_winningClient[videoId] = innTube->lastWinClient();
         NT_DEBUG("E2E av1-hls emit %dp url=%s\n", *av1H,
                  s.url.toUtf8().constData());
@@ -488,6 +491,7 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                     s.label = qualityName(maxHeight) + QLatin1Char('p');
                     s.height = maxHeight;
                     s.multipleUrls = false;
+                    s.isLive = innTube->lastIsLive();
                     emit streamReady(s);
                     return;
                 }
@@ -526,6 +530,7 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                                 QString::number(*edgeH) + QLatin1Char('p');
                             se.height = *edgeH;
                             se.multipleUrls = false;
+                            se.isLive = innTube->lastIsLive();
                             m_winningClient[videoId] =
                                 innTube->lastWinClient();
                             NT_DEBUG("E2E edge respaldo %dp url=%s\n",
@@ -541,6 +546,7 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                         s.label = QString::number(wanted) + QLatin1Char('p');
                         s.height = wanted;
                         s.multipleUrls = false;
+                        s.isLive = innTube->lastIsLive();
                         m_winningClient[videoId] = innTube->lastWinClient();
                         NT_DEBUG("E2E hls filtrado a %dp url=%s\n", wanted,
                                  s.url.toUtf8().constData());
@@ -567,6 +573,7 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                                 QString::number(*edgeH) + QLatin1Char('p');
                             se.height = *edgeH;
                             se.multipleUrls = false;
+                            se.isLive = innTube->lastIsLive();
                             m_winningClient[videoId] = innTube->lastWinClient();
                             NT_DEBUG("E2E edge respaldo %dp url=%s\n", *edgeH,
                                      edgeUrl->toUtf8().constData());

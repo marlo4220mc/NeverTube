@@ -18,13 +18,14 @@
 namespace nt {
 
 // Fuente única de la paleta de acentos (labels de Ajustes, hex persistido y
-// sufijo de los PNG pre-pintados de la navegación). El defecto es el rojo
-// NeverTube histórico (#FF0033). Mantener en sync con tools/gen_nav_accent.cpp
-// solo en el sentido de que regenerar los PNG tras cambiar AQUÍ es obligatorio.
+// sufijo de los PNG pre-pintados de la navegación). El defecto es el rojo del
+// icono (#FA011B, el play del icono de la app; ver kAccent en theme.h).
+// Mantener en sync con tools/gen_nav_accent.cpp solo en el sentido de que
+// regenerar los PNG tras cambiar AQUÍ es obligatorio.
 QVector<AccentOption> accentOptions()
 {
     return {
-        {QStringLiteral("Rojo (por defecto)"), QStringLiteral("#FF0033"),
+        {QStringLiteral("Rojo (por defecto)"), QStringLiteral("#FA011B"),
          QStringLiteral("rojo")},
         {QStringLiteral("Azul"), QStringLiteral("#1E88E5"),
          QStringLiteral("azul")},
@@ -68,6 +69,19 @@ QString styleSheet()
 }
 QMainWindow { background-color: #0F0F0F; }
 
+/* Tooltips: son ventanas del framework y por defecto se pintan con la paleta
+   del TEMA DEL SISTEMA (fuera del control de la app), así que el texto podía
+   salir ilegible según el escritorio. Estilo de la app: fondo de popover,
+   texto kText y borde, como el resto de superficies. QToolTip es una clase,
+   no un id: Qt se la aplica al tooltip automáticamente. */
+QToolTip {
+    background-color: @POPOVER@;
+    color: @TEXT@;
+    border: 1px solid @BORDER@;
+    padding: 3px 7px;
+    font-size: 12px;
+}
+
 /* (Sin reglas para shellPanel/contentHost: ningún setObjectName del código las
    usaba, eran restos del layout split revertido. Verificado por grep.) */
 
@@ -100,12 +114,21 @@ QToolButton#navBtn:hover { background: @HOVER@; color: #ECECEC; }
    relleno de acento y la pestaña recién clicada salía gris con el texto del
    acento sobre #242424 = 3,92:1 (por debajo del mínimo AA de 4,5:1). */
 QToolButton#navBtn:focus { background: @HOVER@; color: #ECECEC; }
-QToolButton#navBtn:checked { background: @ACCENT_A10@; color: @ACCENT@; }
-/* Activo en hover/foco: el relleno se queda al 10% y el texto sube a la
-   variante hover del acento (#FF1A47) para quedar en 4,72:1; subir el relleno al
-   16% bajaba el texto a 4,32:1. */
-QToolButton#navBtn:checked:hover { background: @ACCENT_A10@; color: @ACCENT_HOVER@; }
-QToolButton#navBtn:checked:focus { background: @ACCENT_A10@; color: @ACCENT_HOVER@; }
+/* El CUADRO que indica posición (la pestaña activa) es una VARIACIÓN DE TONO
+   del rojo del icono, no un relleno sólido: el fondo mezcla el acento con la
+   barra al 25% (@ACCENT_A25@ = #4A0C13 sobre #101010, del #FA011B). El texto
+   sube a la variante hover (#FF1B35) porque sobre el tinte el acento pleno cae
+   a 3,76:1 y el hover da 4,04:1; el icono (PNG pre-pintado en acento) se queda
+   con SU color — el cuadro es "acorde" al icono, no lo sustituye. Más relleno
+   (A30 = #560C13) se nota más rojo pero deja el texto en 3,49:1, así que A30
+   solo en hover, que es transitorio. */
+QToolButton#navBtn:checked { background: @ACCENT_A25@; color: @ACCENT_HOVER@; }
+/* Activo en hover/foco: el relleno sube un peldaño (A30) y el texto queda en
+   la variante hover; es el mismo gesto que el estado checked:hover viejo. */
+QToolButton#navBtn:checked:hover { background: @ACCENT_A30@; color: @ACCENT_HOVER@; }
+QToolButton#navBtn:checked:focus { background: @ACCENT_A25@; color: @ACCENT_HOVER@; }
+/* Al pulsar (cualquier pestaña) el relleno vuelve al tinte sutil del 10%:
+   es transitorio y así el icono pressed (rojo) se lee sobre el fondo. */
 QToolButton#navBtn:pressed { background: @ACCENT_A10@; color: @ACCENT_HOVER@; }
 QToolButton#navBtn:disabled { color: @DISABLED@; }
 
@@ -142,14 +165,19 @@ QPushButton:disabled {
     background-color: @BORDER@;
     border-color: @BORDER@;
 }
-QPushButton#primary { background-color: @ACCENT@; border-color: @ACCENT@; color: #FFFFFF; font-weight: 600; }
-/* Faltaba :pressed. Como :hover ya apuntaba a @ACCENT_PRESSED@, hover y
-   pressed se veían idénticos y el segundo nunca se veía. Ahora hover va a la
-   variante clara del acento y pressed a la oscura. */
-QPushButton#primary:hover { background-color: @ACCENT_HOVER@; }
-QPushButton#primary:pressed { background-color: @ACCENT_PRESSED@; }
+/* CTA DE MARCA (botones de acento): relleno PLANO del acento — sin el gloss 3D
+   anterior — con un hairline de 1 px blanco al ~15 % para que el botón lea
+   sobre el fondo oscuro (patrón de los sistemas de diseño actuales: un botón
+   de acento plano se funde con el fondo sin ese filo). Estados nítidos: hover
+   más claro, pressed más oscuro. */
+QPushButton#primary {
+    background: @ACCENT@; border: 1px solid rgba(255,255,255,38);
+    color: #FFFFFF; font-weight: 600;
+}
+QPushButton#primary:hover { background: @ACCENT_HOVER@; }
+QPushButton#primary:pressed { background: @ACCENT_PRESSED@; }
 QPushButton#primary:disabled {
-    color: @DISABLED_ON_ACCENT@; background-color: @ACCENT_MUTED@;
+    color: @DISABLED_ON_ACCENT@; background: @ACCENT_MUTED@;
     border-color: @ACCENT_MUTED@;
 }
 QPushButton#ghost { background: transparent; border: 1px solid @BORDER@; border-radius: 6px; }
@@ -279,8 +307,10 @@ QStatusBar { background: #101010; color: #8F8F8F; border-top: 1px solid #1F1F1F;
    kElevated de antes: las dos barras se leen como una sola pieza. */
 QWidget#miniBar { background-color: #101010; border-top: 1px solid @BORDER@; }
 /* Hover de toda la barra: aclara el fondo para senalar que es clicable
-   (expande al Player). La propiedad la pone MiniPlayerBar. */
-QWidget#miniBar[hover="true"] { background-color: #181818; }
+   (expande al Player). La propiedad la pone MiniPlayerBar. #181818 (el tono
+   anterior) se veia palido frente al #101010: se bajo a #141414, una subida
+   sutil que sigue señalando el hover sin romper la pieza unica con la nav. */
+QWidget#miniBar[hover="true"] { background-color: #141414; }
 /* Botones de la mini bar: mas densos que los de la fila del reproductor
    (padding 4 en vez de 6), porque el mini es una superficie compacta. */
 QWidget#miniBar QPushButton#iconBtn { padding: 4px; }
@@ -301,6 +331,9 @@ QWidget#playerOverlay {
 /* Reloj partido de la fila: transcurrido a la izquierda del slider y duracion a
    la derecha (ver WatchPage). Texto secundario, por debajo de los iconos. */
 QLabel#ovPos, QLabel#ovDur { color: @TEXTSOFT@; font-size: 12px; }
+/* En un directo (propiedad dinámica live): la marca "EN VIVO" del reloj va en
+   el acento y el temporizador negativo escribe lo que indique WatchPage. */
+QLabel#ovPos[live="true"] { color: @ACCENT@; }
 /* Separador vertical sutil entre los subgrupos de la fila (transporte / volumen
    / acciones): 1x20 px, con el mismo canto claro que el borde del panel. */
 QFrame#ovSep { background: @OVERLAY_EDGE@; border: none; }
@@ -417,27 +450,6 @@ QPushButton#actionSegL[active="true"], QPushButton#actionSegR[active="true"] {
 }
 QPushButton#actionSegL[active="true"]:hover,
 QPushButton#actionSegR[active="true"]:hover { background: @SELECTION@; }
-
-/* Pista de los dos sliders de la caja. Selector PROPIO (#ovSeek / #ovVolume) a
-   proposito: la regla QSlider global es compartida con el de volumen de la mini
-   bar y el de Ajustes, que no van sobre un panel translucido y no necesitan
-   contorno. El global es de 4 px; aqui 6 px para que el contorno de 1 px no
-   se coma el relleno. El handle baja de margin:-4px a -3px para seguir
-   centrado sobre una pista 2 px mas alta. */
-QSlider#ovSeek::groove:horizontal, QSlider#ovVolume::groove:horizontal {
-    height: 6px; background: @HANDLE@;
-    border: 1px solid @OVERLAY_EDGE@; border-radius: 3px;
-}
-QSlider#ovSeek::sub-page:horizontal, QSlider#ovVolume::sub-page:horizontal {
-    background: @ACCENT@; border-radius: 2px;
-}
-QSlider#ovSeek::handle:horizontal, QSlider#ovVolume::handle:horizontal {
-    width: 12px; height: 12px; margin: -3px 0;
-    background: #FFFFFF; border-radius: 6px;
-}
-QSlider#ovSeek::handle:horizontal:hover, QSlider#ovVolume::handle:horizontal:hover {
-    background: @ACCENT@;
-}
 
 /* Menu de calidad: MISMO lenguaje de borde que la caja del reproductor
    (#playerOverlay) — fondo translucido de overlay, borde @BORDER@ y canto
@@ -569,11 +581,14 @@ QPushButton#accentOutline {
    estado suscrito no se nota (borde y fondo son el mismo gris), pero en el de
    acento es visible. */
 QPushButton#subscribe {
-    background: @ACCENT@; border-radius: 18px; padding: 0 18px;
+    background: @ACCENT@; border: 1px solid rgba(255,255,255,38);
+    border-radius: 18px; padding: 0 18px;
     color: #FFFFFF; font-weight: 600; font-size: 13px;
 }
 QPushButton#subscribe:hover { background: @ACCENT_HOVER@; }
-QPushButton#subscribe[subscribed="true"] { background: @BORDER@; color: @TEXT@; }
+QPushButton#subscribe[subscribed="true"] {
+    background: @BORDER@; border-color: @BORDER@; color: @TEXT@;
+}
 QPushButton#subscribe[subscribed="true"]:hover { background: @SELECTION@; }
 
 /* Filas compactas de canales (channel_row) */
@@ -633,14 +648,15 @@ QLabel#tabCount {
 }
 
 )QSS",
-        R"QSS(/* Chip de acento plano: el boton "Ir a Buscar" del estado vacio del Home.
-   Se migra tal cual estaba, SIN :hover ni :pressed a proposito: el QSS global
-   tiene reglas de estado para #primary y aqui no las habia, y anadirlas seria
-   cambiar comportamiento en un refactor. */
+        R"QSS(/* Chip de acento ("Ir a Buscar" del estado vacio del Home): mismo CTA
+   de marca que #primary — relleno plano + hairline + estados nítidos. */
 QPushButton#accentChip {
-    background-color: @ACCENT@; border: none; border-radius: 8px;
+    background: @ACCENT@; border: 1px solid rgba(255,255,255,38);
+    border-radius: 8px;
     color: #FFFFFF; font-size: 12px; padding: 8px 18px;
 }
+QPushButton#accentChip:hover { background: @ACCENT_HOVER@; }
+QPushButton#accentChip:pressed { background: @ACCENT_PRESSED@; }
 
 /* Estado vacio del Home (va sobre un popupDialog) */
 QLabel#emptyStateTitle {
@@ -709,6 +725,8 @@ QWidget#playerArea { background-color: #000000; }
               .replace(QStringLiteral("@ACCENT_HOVER@"), accentHoverHex())
               .replace(QStringLiteral("@ACCENT_A10@"), accentAlpha(26))
               .replace(QStringLiteral("@ACCENT_A16@"), accentAlpha(41))
+              .replace(QStringLiteral("@ACCENT_A25@"), accentAlpha(64))
+              .replace(QStringLiteral("@ACCENT_A30@"), accentAlpha(77))
               .replace(QStringLiteral("@ACCENT_MUTED@"),
                        accentPressed(kAccent).darker(160).name())
               .replace(QStringLiteral("@DISABLED_ON_ACCENT@"),

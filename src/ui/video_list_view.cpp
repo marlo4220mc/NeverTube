@@ -126,7 +126,7 @@ public:
 
     void drawProgressBar(QPainter *p, const QRectF &thumbR, const VideoInfo &v) const
     {
-        if (!m_progress)
+        if (!m_progress || v.isLive)
             return;
         const auto it = m_progress->constFind(v.id);
         if (it == m_progress->constEnd())
@@ -195,7 +195,8 @@ public:
             paintList(p, opt, v, index.row());
     }
 
-    static void drawBadge(QPainter *p, const QRectF &r, const QString &text)
+    static void drawBadgeCore(QPainter *p, const QRectF &r, const QString &text,
+                              const QColor &bg)
     {
         if (text.isEmpty())
             return;
@@ -206,14 +207,28 @@ public:
         p->setFont(bf);
         const QFontMetricsF fm(bf);
         const qreal w = fm.horizontalAdvance(text) + 10;
-        const QRectF bg(r.right() - w - 2, r.bottom() - fm.height() - 4,
+        const QRectF box(r.right() - w - 2, r.bottom() - fm.height() - 4,
                         w, fm.height() + 4);
         p->setPen(Qt::NoPen);
-        p->setBrush(QColor(0, 0, 0, 200));
-        p->drawRoundedRect(bg, 4, 4);
+        p->setBrush(bg);
+        p->drawRoundedRect(box, 4, 4);
         p->setPen(Qt::white);
-        p->drawText(bg, Qt::AlignCenter, text);
+        p->drawText(box, Qt::AlignCenter, text);
         p->restore();
+    }
+
+    static void drawBadge(QPainter *p, const QRectF &r, const QString &text)
+    {
+        drawBadgeCore(p, r, text, QColor(0, 0, 0, 200));
+    }
+
+    // Pastilla de directo: el acento de fondo (como la marca "EN VIVO" del
+    // reproductor y la píldora roja de YouTube) en vez del negro translúcido
+    // de la duración. Mientras un vídeo está en directo no hay duración que
+    // mostrar: el badge la sustituye.
+    static void drawLiveBadge(QPainter *p, const QRectF &r)
+    {
+        drawBadgeCore(p, r, QStringLiteral("En directo"), nt::kAccent);
     }
 
     // Escalado de miniatura cacheado por tamaño de destino. `m_thumbs->pixmap()`
@@ -256,7 +271,7 @@ public:
     }
 
     void drawThumb(QPainter *p, const QRectF &r, const QString &key,
-                   const QString &duration) const
+                   const QString &duration, bool isLive) const
     {
         const QPixmap pm = m_thumbs->pixmap(key);
         QPainterPath clip;
@@ -282,7 +297,9 @@ public:
             p->drawPixmap(r, scaled, src);
         }
         p->restore();
-        if (!duration.isEmpty())
+        if (isLive)
+            drawLiveBadge(p, r);
+        else if (!duration.isEmpty())
             drawBadge(p, r, duration);
     }
 
@@ -370,7 +387,8 @@ private:
                             gw - 12 * m_scale, (gw - 12 * m_scale) * 9.0 / 16.0);
         // Se pasa la clave, no el pixmap: el escalado va cacheado por
         // (video, tamano), asi que hace falta la clave para consultarlo.
-        drawThumb(p, thumbR, cacheKeyFor(v), durationLabel(v.durationSeconds));
+        drawThumb(p, thumbR, cacheKeyFor(v), durationLabel(v.durationSeconds),
+                  v.isLive);
         drawProgressBar(p, thumbR, v);
 
         // Título y línea de canal al tamaño que manda en ESTA celda (ver
@@ -514,7 +532,8 @@ private:
                             136 * m_scale, 76 * m_scale);
         // Se pasa la clave, no el pixmap: el escalado va cacheado por
         // (video, tamano), asi que hace falta la clave para consultarlo.
-        drawThumb(p, thumbR, cacheKeyFor(v), durationLabel(v.durationSeconds));
+        drawThumb(p, thumbR, cacheKeyFor(v), durationLabel(v.durationSeconds),
+                  v.isLive);
         drawProgressBar(p, thumbR, v);
 
         // Título: la fuente de la app en negrita (la que ya tenía la fila) y 2

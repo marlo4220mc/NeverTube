@@ -161,7 +161,22 @@ private:
 class MiniPlayerBar : public QWidget
 {
 public:
-    using QWidget::QWidget;
+    explicit MiniPlayerBar(QWidget *parent = nullptr) : QWidget(parent)
+    {
+        // Al cambiar de ventana o de espacio de trabajo la app se desactiva y
+        // no llega ningún Leave: apagar el hover en el acto. Al reactivar NO se
+        // re-evalúa con QCursor::pos(): con la app inactiva esa posición queda
+        // CONGELADA en el último punto conocido (Wayland no entrega eventos de
+        // puntero al cambiar de workspace) y, si el puntero estaba sobre la
+        // barra al desactivar, re-iluminaría en falso al volver aunque el
+        // puntero real esté en otro sitio. El hover solo se re-enciende con un
+        // enterEvent real (o al mover el puntero sobre la barra).
+        connect(qApp, &QGuiApplication::applicationStateChanged, this,
+                [this](Qt::ApplicationState state) {
+                    if (state == Qt::ApplicationInactive)
+                        setHover(false);
+                });
+    }
     std::function<void()> onActivate;
     // Barra de progreso pegada al borde inferior y a todo el ancho. Va fuera
     // del layout (que lleva márgenes laterales) y se recoloca aquí: es lo que
@@ -200,7 +215,8 @@ protected:
     {
         // No apagar el hover si el cursor sigue dentro de la barra: al pasar de
         // la barra a un botón hijo, Qt manda Leave al padre y el fondo
-        // parpadearía.
+        // parpadearía. El guard solo se evalúa cuando llega un Leave (interacción
+        // activa, donde QCursor::pos() sí está fresco).
         if (!rect().contains(mapFromGlobal(QCursor::pos())))
             setHover(false);
         QWidget::leaveEvent(event);
@@ -214,6 +230,23 @@ protected:
                                   progress->height());
             progress->raise();
         }
+    }
+
+    // Al ocultar (salir de la página Player) el hover no debe sobrevivir: el
+    // Leave no llega si el cursor seguía dentro de la barra en el ocultado.
+    void hideEvent(QHideEvent *event) override
+    {
+        setHover(false);
+        QWidget::hideEvent(event);
+    }
+
+    // Al re-mostrar (volver de la página Player) Qt no siempre re-manda Enter
+    // bajo el cursor: re-evaluar contra la posición real. Si el puntero quedó
+    // sobre la barra se re-ilumina; si no, se mantiene apagado.
+    void showEvent(QShowEvent *event) override
+    {
+        QWidget::showEvent(event);
+        setHover(rect().contains(mapFromGlobal(QCursor::pos())));
     }
 
 private:
@@ -455,9 +488,14 @@ MainWindow::MainWindow(QWidget *parent)
     // global (setStyleSheet(nt::styleSheet()) al final del constructor), así
     // que el QSS ya nace con el acento elegido.
     {
+        // Migración: el rojo por defecto era #FF0033 y ahora es el rojo del
+        // icono #FA011B. El viejo default ya no está en la paleta (nadie lo
+        // eligió a mano: era el de fábrica), así que se trata como ausente.
         const QString savedAccent = m_settings.getString(
             QStringLiteral("ui_accent"), nt::accentHex());
-        const QColor accent(savedAccent);
+        const QColor accent(savedAccent.toLower() == QStringLiteral("#ff0033")
+                                ? QStringLiteral("#fa011b")
+                                : savedAccent);
         if (accent.isValid())
             nt::setAccent(accent);
     }
@@ -749,6 +787,9 @@ MainWindow::MainWindow(QWidget *parent)
             });
     connect(&m_player, &PlayerController::currentChanged, this,
             [this]() {
+                // Vídeo nuevo: la detección de directo parte de cero.
+                m_miniLiveDet.reset();
+                m_miniLive = false;
                 updateMiniPlayer();
                 m_home->setCurrentVideoId(m_player.current().id);
                 // Cuando cambia el video, copiar a cache del Home si es necesario
@@ -759,15 +800,35 @@ MainWindow::MainWindow(QWidget *parent)
             [this]() { updateMiniIcons(); });
     connect(&m_player, &PlayerController::positionChanged, this,
             [this](double pos, double dur) {
+                // Misma regla de directo que el overlay (nt::LiveDetector):
+                // evidencia de duración inestable con desbloqueo automático.
+                // Un vídeo normal no se marca; un directo real llena la barra
+                // al borde en vez de saltar hacia atrás con cada segmento.
+                // EXCEPCIÓN: el HLS sintético de AV1 (construido por la app
+                // desde un fMP4 finito) nunca es un directo — se excluye de la
+                // detección aunque su duración oscile mientras carga.
+                const bool appStream = !m_player.currentCanBeLive();
+                if (appStream && m_miniLive)
+                    m_miniLive = false;
+                // Señal AUTORITATIVA (videoDetails.isLive): mismo criterio que
+                // el overlay — entrada inmediata en modo EN VIVO, sin esperar
+                // los 2 ascensos de duración (y cubre los directos puros con
+                // dur=0). El detector sigue gobernando la salida.
+                if (!appStream && m_player.currentIsLive())
+                    m_miniLiveDet.forceLive();
+                const bool live = !appStream && m_miniLiveDet.feed(dur);
+                m_miniLive = live;
                 if (m_miniProgress) {
                     // dur<=0 (aún sin duración) NO va en modo "busy": el rango
-                    // 0,0 dibuja un chunk animado. Se deja la pista vacía.
-                    if (dur > 0) {
+                    // 0,0 dibuja un chunk animado. En directo, la barra llena
+                    // marca el borde del live (playhead al final, como el
+                    // overlay); sin duración, pista vacía.
+                    if (dur > 0 && !m_miniLive) {
                         m_miniProgress->setRange(0, qRound(dur));
                         m_miniProgress->setValue(qRound(pos));
                     } else {
                         m_miniProgress->setRange(0, 1);
-                        m_miniProgress->setValue(0);
+                        m_miniProgress->setValue(m_miniLive ? 1 : 0);
                     }
                 }
                 m_miniPos = pos;
@@ -855,11 +916,15 @@ bool MainWindow::handleShortcut(QKeyEvent *event)
             m_player.next();
         return true;
     case Qt::Key_P:
-        // Vídeo anterior de la cola.
+        // Igual que el botón "Anterior" (YouTube): si el vídeo pasó de
+        // kPrevRestartThreshold (5 s) reinicia el vídeo actual; si está al
+        // principio, salta al vídeo anterior de la cola. En el primer vídeo
+        // sin avanzar no hace nada (no hay anterior al que saltar), igual que
+        // el botón deshabilitado. Shift+P entra por el mismo case (el filtro
+        // de arriba solo descarta Ctrl/Alt/Meta): ambas hacen lo mismo.
         if (!m_player.isActive())
             return false;
-        if (m_player.hasPrevious())
-            m_player.previous();
+        m_player.previous();
         return true;
     case Qt::Key_Up:
         if (!m_player.isActive())
@@ -1060,28 +1125,28 @@ void MainWindow::setupMiniBar()
     m_miniPlayBtn->setObjectName(QStringLiteral("iconBtn"));
     m_miniPlayBtn->setCursor(Qt::PointingHandCursor);
     m_miniPlayBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Play, nt::kText, 16));
-    m_miniPlayBtn->setToolTip(QStringLiteral("Reproducir / Pausar (K)"));
+    m_miniPlayBtn->setToolTip(QStringLiteral("Reproducir / Pausar\nK"));
     row->addWidget(m_miniPlayBtn);
 
     m_miniNextBtn = new QPushButton(m_miniBar);
     m_miniNextBtn->setObjectName(QStringLiteral("iconBtn"));
     m_miniNextBtn->setCursor(Qt::PointingHandCursor);
     m_miniNextBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Next, nt::kText, 16));
-    m_miniNextBtn->setToolTip(QStringLiteral("Siguiente"));
+    m_miniNextBtn->setToolTip(QStringLiteral("Siguiente\nN"));
     row->addWidget(m_miniNextBtn);
 
     m_miniMuteBtn = new QPushButton(m_miniBar);
     m_miniMuteBtn->setObjectName(QStringLiteral("iconBtn"));
     m_miniMuteBtn->setCursor(Qt::PointingHandCursor);
     m_miniMuteBtn->setIcon(
-        nt::playerIcon(nt::PlayerIcon::Volume, nt::kMuted, 16));
-    m_miniMuteBtn->setToolTip(QStringLiteral("Silenciar (M)"));
+        nt::playerIcon(nt::PlayerIcon::Volume, nt::kText, 16));
+    m_miniMuteBtn->setToolTip(QStringLiteral("Silenciar\nM"));
     row->addWidget(m_miniMuteBtn);
 
     m_miniCloseBtn = new QPushButton(m_miniBar);
     m_miniCloseBtn->setObjectName(QStringLiteral("iconBtn"));
     m_miniCloseBtn->setCursor(Qt::PointingHandCursor);
-    m_miniCloseBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Close, nt::kMuted, 16));
+    m_miniCloseBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Close, nt::kText, 16));
     m_miniCloseBtn->setToolTip(QStringLiteral("Cerrar y detener"));
     row->addWidget(m_miniCloseBtn);
 
@@ -1275,7 +1340,7 @@ void MainWindow::updateMiniIcons()
         nt::kText, 16));
     m_miniMuteBtn->setIcon(nt::playerIcon(
         m_player.muted() ? nt::PlayerIcon::Muted : nt::PlayerIcon::Volume,
-        nt::kMuted, 16));
+        nt::kText, 16));
     if (m_miniNextBtn) {
         m_miniNextBtn->setEnabled(m_player.hasNext());
         m_miniNextBtn->setIcon(
@@ -1294,16 +1359,22 @@ void MainWindow::updateMiniTitleElide()
     m_miniTitle->setText(elided);
 }
 
-// Segunda línea del mini: "Canal · m:ss / m:ss" (el canal solo si se conoce).
+// Segunda línea del mini: "Canal · m:ss / m:ss". En un directo no hay duración
+// final: solo la marca "EN VIVO" (la barra va llena al borde del live). Con la
+// duración aún desconocida (arranque de un vídeo normal) se muestra solo el
+// transcurrido, para no pintar un "/ 0:00" que salta al materializarse.
 void MainWindow::updateMiniTimeText()
 {
     if (!m_miniTime)
         return;
-    // Segunda línea del mini: "Canal · m:ss / m:ss", todo a la izquierda (junto
-    // al canal). Alinearlo a la derecha lo dejaba pegado a los botones y lejos
-    // del canal.
-    QString t = QStringLiteral("%1 / %2")
-                    .arg(fmtTime(m_miniPos), fmtTime(m_miniDur));
+    QString t;
+    if (m_miniLive)
+        t = QStringLiteral("EN VIVO");
+    else if (m_miniDur <= 0)
+        t = fmtTime(m_miniPos);
+    else
+        t = QStringLiteral("%1 / %2")
+                .arg(fmtTime(m_miniPos), fmtTime(m_miniDur));
     if (!m_miniChannel.isEmpty())
         t = m_miniChannel + QStringLiteral(" · ") + t;
     m_miniTime->setText(t);

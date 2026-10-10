@@ -33,6 +33,9 @@ public:
     bool upsert(const VideoInfo &v);
     bool get(const QString &id, VideoInfo &out) const;
     QVector<VideoInfo> getMany(const QStringList &ids) const;
+    // Cambia solo la marca de directo (refresco por /next, que no trae
+    // duración); el resto de campos queda intacto.
+    bool updateLiveStatus(const QString &id, bool isLive);
 
 private:
     VideoInfo fromRow(const QSqlQuery &q) const;

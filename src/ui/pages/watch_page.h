@@ -5,6 +5,7 @@
 
 #include "../../models.h"
 #include "../icons.h"
+#include "../live_detect.h"
 
 class VideoCacheRepo;
 class FavoritesRepo;
@@ -239,6 +240,14 @@ private:
     // la derecha (como el mockup). Antes era un solo "0:00 / 0:00".
     QLabel *m_ovPos = nullptr;
     QLabel *m_ovDur = nullptr;
+    // Estado visible del modo directo (barra al final, "EN VIVO", reloj
+    // negativo). La DETECCIÓN vive en nt::LiveDetector (evidencia de duración
+    // inestable + desbloqueo); se reinicia al cambiar de vídeo.
+    bool m_liveMedia = false;
+    nt::LiveDetector m_liveDet;
+    // Pico de duración visto en modo directo: el reloj negativo es monótono
+    // aunque la duración reportada oscile (ventana DVR).
+    double m_liveDurPeak = 0.0;
     QPushButton *m_ovMuteBtn = nullptr;
     QSlider *m_ovVolume = nullptr;
     QPushButton *m_ovSubsBtn = nullptr;

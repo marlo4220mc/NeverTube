@@ -115,6 +115,26 @@ bool databaseSelfTest(const QString &dbPath)
                   && many[1].id == QLatin1String("vidB"),
               "cache getMany order");
 
+    // Marca de directo: sobrevive al upsert/lectura y updateLiveStatus la apaga
+    // sin tocar el resto de campos.
+    VideoInfo live;
+    live.id = QStringLiteral("vidLive");
+    live.title = QStringLiteral("Directo");
+    live.channel = QStringLiteral("Canal L");
+    live.durationSeconds = 0;
+    live.isLive = true;
+    ok &= yes(videoCache.upsert(live), "cache upsert live");
+    VideoInfo liveOut;
+    ok &= yes(videoCache.get(QStringLiteral("vidLive"), liveOut)
+                  && liveOut.isLive && liveOut.title == QStringLiteral("Directo"),
+              "cache live roundtrip");
+    ok &= yes(videoCache.updateLiveStatus(QStringLiteral("vidLive"), false),
+              "cache live status update");
+    ok &= yes(videoCache.get(QStringLiteral("vidLive"), liveOut)
+                  && !liveOut.isLive
+                  && liveOut.title == QStringLiteral("Directo"),
+              "cache live status cleared keeps fields");
+
     qlonglong lastTs = 0;
     tick(lastTs);
     ok &= yes(history.add(QStringLiteral("vidA"), 15000), "history add");
@@ -329,7 +349,7 @@ bool VideoCacheRepo::upsert(const VideoInfo &v)
     q.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO videos "
         "(id, title, channel, channel_id, duration, views, published, "
-        " thumb_url, description) VALUES (?,?,?,?,?,?,?,?,?)"));
+        " thumb_url, description, is_live) VALUES (?,?,?,?,?,?,?,?,?,?)"));
     q.addBindValue(v.id);
     q.addBindValue(v.title);
     q.addBindValue(v.channel);
@@ -339,6 +359,7 @@ bool VideoCacheRepo::upsert(const VideoInfo &v)
     q.addBindValue(v.publishedAt);
     q.addBindValue(v.thumbnailUrl);
     q.addBindValue(v.description);
+    q.addBindValue(v.isLive ? 1 : 0);
     return q.exec();
 }
 
@@ -347,7 +368,8 @@ bool VideoCacheRepo::get(const QString &id, VideoInfo &out) const
     QSqlQuery q(m_db.db());
     if (!q.prepare(QStringLiteral(
             "SELECT id, title, channel, channel_id, duration, views, "
-            "published, thumb_url, description FROM videos WHERE id=? LIMIT 1")))
+            "published, thumb_url, description, is_live "
+            "FROM videos WHERE id=? LIMIT 1")))
         return false;
     q.addBindValue(id);
     if (!q.exec() || !q.next())
@@ -367,7 +389,7 @@ QVector<VideoInfo> VideoCacheRepo::getMany(const QStringList &ids) const
         marks << QStringLiteral("?");
     QSqlQuery q(m_db.db());
     q.prepare(QStringLiteral("SELECT id, title, channel, channel_id, duration, "
-                             "views, published, thumb_url, description "
+                             "views, published, thumb_url, description, is_live "
                              "FROM videos WHERE id IN (%1)")
                   .arg(marks.join(QStringLiteral(","))));
     for (const QString &id : ids)
@@ -400,7 +422,20 @@ VideoInfo VideoCacheRepo::fromRow(const QSqlQuery &q) const
     v.publishedAt = q.value(6).toString();
     v.thumbnailUrl = q.value(7).toString();
     v.description = q.value(8).toString();
+    v.isLive = q.value(9).toBool();
     return v;
+}
+
+// Re-comprobación de directos al re-entrar en una página: apaga (o deja
+// encendida) la marca de directo cacheada sin tocar el resto de campos, que
+// es lo que necesita el refresco por /next (que no trae duración).
+bool VideoCacheRepo::updateLiveStatus(const QString &id, bool isLive)
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral("UPDATE videos SET is_live=? WHERE id=?"));
+    q.addBindValue(isLive ? 1 : 0);
+    q.addBindValue(id);
+    return q.exec();
 }
 
 HistoryRepo::HistoryRepo(AppDatabase &db, DiscoverRepo *discover,

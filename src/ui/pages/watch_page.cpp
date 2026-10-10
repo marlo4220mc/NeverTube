@@ -17,7 +17,6 @@
 #include <QPalette>
 #include <QPixmap>
 #include <QPushButton>
-#include <QRegularExpression>
 #include <QResizeEvent>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -223,31 +222,155 @@ private:
     bool m_fullscreen = false;
 };
 
+// --- Deslizadores del overlay (seek y volumen), pintados a mano -------------
+// El QSlider con QSS de Qt 5.15 NO coloca bien el handle: su centro queda ~media
+// anchura a la IZQUIERDA del punto real y el sub-página (el relleno) se ancla al
+// borde del WIDGET, no al de la pista. Resultado en valor mínimo: el círculo se
+// sale por la izquierda de la pista y asoma un residuo rojo a su lado (el "algo
+// de rojo" en 0:00). Los márgenes no lo arreglan (el offset del handle y el
+// anclaje del relleno van acoplados); por eso se pinta aquí, con la MISMA
+// estética del QSS anterior: pista #2F2F2F con borde translúcido de 1 px,
+// relleno de acento y círculo blanco de 12 px. Claves del pintado: el centro del
+// círculo mapea entre radio y ancho-radio (SIEMPRE queda entero dentro del
+// widget) y el relleno termina en el borde IZQUIERDO del círculo, así que en
+// 0:00 mide cero y no deja rojo a la vista.
+class OverlaySlider : public QSlider
+{
+public:
+    explicit OverlaySlider(Qt::Orientation orientation, QWidget *parent = nullptr)
+        : QSlider(orientation, parent)
+    {
+        setMinimumHeight(18);
+        setMouseTracking(true);
+    }
+
+protected:
+    static constexpr qreal kRadius = 6.0; // círculo de 12 px
+    static constexpr qreal kTrackH = 6.0; // relleno de la pista
+
+    // Centro X del círculo para un valor: entre [radio, ancho - radio]. Función
+    // pura (solo depende del ancho y el rango), compartida por el pintado y el
+    // hover.
+    static qreal handleCenterX(int widgetWidth, int value, int vmin, int vmax)
+    {
+        const int span = vmax - vmin;
+        const qreal ratio = span > 0 ? qreal(value - vmin) / qreal(span) : 0.0;
+        return kRadius
+               + ratio * qMax(qreal(0.0), qreal(widgetWidth) - 2.0 * kRadius);
+    }
+
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setPen(Qt::NoPen);
+
+        const qreal w = qreal(width());
+        const qreal cy = qreal(height()) / 2.0;
+
+        // Pista: caja de 8 px (6 de relleno + 1 de borde por lado), radio 3,
+        // como el QSS #ovSeek/#ovVolume anterior.
+        const qreal boxW = qMax(1.0, w - 1.0);
+        p.setBrush(QColor(255, 255, 255, 71)); // @OVERLAY_EDGE@
+        p.drawRoundedRect(QRectF(0.5, cy - 4.0, boxW, 8.0), 3.0, 3.0);
+        const QRectF track(1.5, cy - kTrackH / 2.0, qMax(1.0, boxW - 2.0), kTrackH);
+        p.setBrush(nt::kHandle);
+        p.drawRoundedRect(track, 2.0, 2.0);
+
+        // Relleno: del arranque de la pista al borde IZQUIERDO del círculo (en
+        // 0:00, ancho cero). Discreto cuando el slider está deshabilitado.
+        const qreal cx = handleCenterX(width(), value(), minimum(), maximum());
+        const qreal fillEnd = cx - kRadius;
+        if (fillEnd > track.left() + 0.5) {
+            p.setBrush(isEnabled() ? nt::kAccent : nt::kSelection);
+            p.drawRoundedRect(QRectF(track.left(), cy - kTrackH / 2.0,
+                                     fillEnd - track.left(), kTrackH),
+                              2.0, 2.0);
+        }
+
+        // Círculo: blanco; en acento con el cursor encima o mientras se arrastra.
+        p.setBrush(!isEnabled() ? nt::kDisabled
+                  : (m_handleHot || isSliderDown()) ? nt::kAccent
+                                                    : QColor(0xFF, 0xFF, 0xFF));
+        p.drawEllipse(QPointF(cx, cy), kRadius, kRadius);
+    }
+
+    void enterEvent(QEvent *event) override
+    {
+        updateHandleHover(mapFromGlobal(QCursor::pos()));
+        QSlider::enterEvent(event);
+    }
+
+    void leaveEvent(QEvent *event) override
+    {
+        if (m_handleHot) {
+            m_handleHot = false;
+            update();
+        }
+        QSlider::leaveEvent(event);
+    }
+
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+        updateHandleHover(event->pos());
+        QSlider::mouseMoveEvent(event);
+    }
+
+private:
+    // El hover solo se enciende con el cursor SOBRE el círculo (como el
+    // `::handle:hover` del QSS que sustituye), no en cualquier punto del widget.
+    void updateHandleHover(const QPoint &pos)
+    {
+        const qreal cx = handleCenterX(width(), value(), minimum(), maximum());
+        const qreal m = kRadius + 2.0;
+        const QRectF hr(cx - m, qreal(height()) / 2.0 - m, m * 2.0, m * 2.0);
+        const bool hot = hr.contains(QPointF(pos));
+        if (hot != m_handleHot) {
+            m_handleHot = hot;
+            update();
+        }
+    }
+
+    bool m_handleHot = false;
+};
+
 // Deslizador de búsqueda: click en cualquier punto del track busca ahí y el
 // arrastre no pelea con las actualizaciones de posición mientras se mantiene
 // pulsado. Emite el valor buscado (gatillo de seek) por cada cambio.
-class SeekSlider : public QSlider
+class SeekSlider : public OverlaySlider
 {
 public:
     explicit SeekSlider(Qt::Orientation orientation, QWidget *parent = nullptr)
-        : QSlider(orientation, parent)
+        : OverlaySlider(orientation, parent)
     {
         setTracking(true);
     }
 
     bool isSeeking() const { return m_dragging; }
 
+    // Directo ("EN VIVO"): la barra es informativa (playhead en el borde, el
+    // "ahora" del live); un clic no debe buscar a un valor sin sentido.
+    void setLive(bool live) { m_live = live; }
+
 protected:
     static int valueFromPos(const QSlider *slider, int x)
     {
-        const int w = qMax(1, slider->width());
-        const qreal r = qBound(qreal(0.0), qreal(x) / qreal(w), qreal(1.0));
+        // Mismo mapeo que el pintado (centro del círculo entre radio y
+        // ancho-radio) para que el valor caiga justo bajo el cursor.
+        const qreal w = qMax(qreal(1.0), qreal(slider->width()));
+        const qreal r = qBound(qreal(0.0),
+                               (qreal(x) - kRadius) / qMax(qreal(1.0), w - 2.0 * kRadius),
+                               qreal(1.0));
         return slider->minimum()
                + qRound(qreal(slider->maximum() - slider->minimum()) * r);
     }
 
     void mousePressEvent(QMouseEvent *event) override
     {
+        if (m_live) {
+            event->accept();
+            return;
+        }
         if (event->button() == Qt::LeftButton) {
             m_dragging = true;
             const int v = valueFromPos(this, event->pos().x());
@@ -268,7 +391,8 @@ protected:
             event->accept();
             return;
         }
-        QSlider::mouseMoveEvent(event);
+        // Cae al base para que el hover del círculo siga funcionando.
+        OverlaySlider::mouseMoveEvent(event);
     }
 
     void mouseReleaseEvent(QMouseEvent *event) override
@@ -286,6 +410,7 @@ protected:
 
 private:
     bool m_dragging = false;
+    bool m_live = false;
 };
 
 namespace {
@@ -403,12 +528,13 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     barLay->setContentsMargins(12, 8, 12, 8);
     barLay->setSpacing(6);
 
-    // Fila ÚNICA de controles (estilo YouTube): transporte a la izquierda,
-    // tiempo transcurrido + slider de progreso + duración en el centro, y
-    // volumen/acciones a la derecha. Todos los controles son #iconBtn
-    // (transparentes, solo relleno al hover): sin marcos, sin cajas de botón,
-    // sin play circular. Los iconos son los de nt::playerIcon (Material Symbols
-    // dibujado con QPainter, vectorial).
+    // Fila ÚNICA de controles (estilo YouTube): el TRANSPORTE arranca la fila
+    // con reproducir/pausa (como YouTube), luego anterior y siguiente, y por
+    // último barajar y repetir; tiempo transcurrido + slider de progreso +
+    // duración en el centro, y volumen/acciones a la derecha. Todos los
+    // controles son #iconBtn (transparentes, solo relleno al hover): sin
+    // marcos, sin cajas de botón, sin play circular. Los iconos son los de
+    // nt::playerIcon (Material Symbols dibujado con QPainter, vectorial).
     auto *btnRow = new QHBoxLayout;
     btnRow->setSpacing(6);
 
@@ -419,6 +545,29 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         return b;
     };
 
+    m_ovPlayBtn = makeIconBtn(m_ctrlBar);
+    m_ovPlayBtn->setToolTip(QStringLiteral("Reproducir/Pausa\nK"));
+    connect(m_ovPlayBtn, &QPushButton::clicked, this,
+            &WatchPage::onPlayPause);
+    btnRow->addWidget(m_ovPlayBtn);
+
+    m_ovPrevBtn = makeIconBtn(m_ctrlBar);
+    m_ovPrevBtn->setToolTip(QStringLiteral("Anterior\nP"));
+    // El comportamiento de YouTube vive en PlayerController::previous() (y el
+    // habilitado del botón en previousAvailable()): la lógica no es de la UI.
+    connect(m_ovPrevBtn, &QPushButton::clicked, this, [this]() {
+        m_player->previous();
+    });
+    btnRow->addWidget(m_ovPrevBtn);
+
+    m_ovNextBtn = makeIconBtn(m_ctrlBar);
+    m_ovNextBtn->setToolTip(QStringLiteral("Siguiente\nN"));
+    connect(m_ovNextBtn, &QPushButton::clicked, this, [this]() {
+        if (m_player->hasNext())
+            m_player->next();
+    });
+    btnRow->addWidget(m_ovNextBtn);
+
     m_ovShuffleBtn = makeIconBtn(m_ctrlBar);
     m_ovShuffleBtn->setToolTip(QStringLiteral("Barajar cola"));
     connect(m_ovShuffleBtn, &QPushButton::clicked, this, [this]() {
@@ -426,28 +575,6 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         updateOverlayIcons();
     });
     btnRow->addWidget(m_ovShuffleBtn);
-
-    m_ovPrevBtn = makeIconBtn(m_ctrlBar);
-    m_ovPrevBtn->setToolTip(QStringLiteral("Anterior"));
-    connect(m_ovPrevBtn, &QPushButton::clicked, this, [this]() {
-        if (m_player->hasPrevious())
-            m_player->previous();
-    });
-    btnRow->addWidget(m_ovPrevBtn);
-
-    m_ovPlayBtn = makeIconBtn(m_ctrlBar);
-    m_ovPlayBtn->setToolTip(QStringLiteral("Reproducir/Pausa"));
-    connect(m_ovPlayBtn, &QPushButton::clicked, this,
-            &WatchPage::onPlayPause);
-    btnRow->addWidget(m_ovPlayBtn);
-
-    m_ovNextBtn = makeIconBtn(m_ctrlBar);
-    m_ovNextBtn->setToolTip(QStringLiteral("Siguiente"));
-    connect(m_ovNextBtn, &QPushButton::clicked, this, [this]() {
-        if (m_player->hasNext())
-            m_player->next();
-    });
-    btnRow->addWidget(m_ovNextBtn);
 
     m_ovRepeatBtn = makeIconBtn(m_ctrlBar);
     m_ovRepeatBtn->setToolTip(QStringLiteral("Repetir cola"));
@@ -485,12 +612,12 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     btnRow->addWidget(makeSep(m_ctrlBar));
 
     m_ovMuteBtn = makeIconBtn(m_ctrlBar);
-    m_ovMuteBtn->setToolTip(QStringLiteral("Silencio"));
+    m_ovMuteBtn->setToolTip(QStringLiteral("Silencio\nM"));
     connect(m_ovMuteBtn, &QPushButton::clicked, this,
             &WatchPage::onToggleMute);
     btnRow->addWidget(m_ovMuteBtn);
 
-    m_ovVolume = new QSlider(Qt::Horizontal, m_ctrlBar);
+    m_ovVolume = new OverlaySlider(Qt::Horizontal, m_ctrlBar);
     m_ovVolume->setObjectName(QStringLiteral("ovVolume"));
     m_ovVolume->setRange(0, m_player->volumeMax());
     m_ovVolume->setValue(int(m_player->volume()));
@@ -534,7 +661,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     btnRow->addWidget(m_quality);
 
     m_ovFsBtn = makeIconBtn(m_ctrlBar);
-    m_ovFsBtn->setToolTip(QStringLiteral("Pantalla completa"));
+    m_ovFsBtn->setToolTip(QStringLiteral("Pantalla completa\nF"));
     connect(m_ovFsBtn, &QPushButton::clicked, this,
             &WatchPage::toggleFullscreen);
     btnRow->addWidget(m_ovFsBtn);
@@ -1050,6 +1177,18 @@ void WatchPage::attachPlayer()
 
 void WatchPage::onCurrentChanged()
 {
+    // Nuevo vídeo: la detección de directo se reinicia (la duración se recibe
+    // desde cero; no se arrastra el estado del vídeo anterior).
+    m_liveDet.reset();
+    m_liveDurPeak = 0.0;
+    if (m_liveMedia) {
+        m_liveMedia = false;
+        m_ovSeek->setLive(false);
+        m_ovPos->setProperty("live", false);
+        m_ovPos->style()->unpolish(m_ovPos);
+        m_ovPos->style()->polish(m_ovPos);
+        m_ovPos->update();
+    }
     if (!m_player->isActive()) {
         m_title->setText(QStringLiteral("Reproduciendo…"));
         return;
@@ -1402,7 +1541,15 @@ void WatchPage::onDurationKnown(double seconds)
         return;
     VideoInfo cached;
     const bool known = m_cache->get(cur.id, cached);
-    if (known && cached.durationSeconds == dur)
+    // El player response es la fuente AUTORITATIVA de si el medio es un directo
+    // (videoDetails.isLive, ya cableado hasta currentIsLive()): se escribe la
+    // marca junto a la duración para que Home/Biblioteca la pinten sin esperar
+    // a re-analizar un renderer. Un directo en emisión aporta una duración que
+    // crece con el tiempo (la "hasta ahora"), así que el guard de igualdad no lo
+    // corta; se compara también isLive por el caso raro de duración repetida con
+    // el estado cambiado.
+    const bool live = m_player->currentIsLive();
+    if (known && cached.durationSeconds == dur && cached.isLive == live)
         return; // ya está al día: no escribir por gusto
     if (known) {
         // Rellenar solo lo que falte: el upsert es INSERT OR REPLACE, así que
@@ -1420,9 +1567,11 @@ void WatchPage::onDurationKnown(double seconds)
         if (cached.publishedAt.isEmpty())
             cached.publishedAt = cur.publishedAt;
         cached.durationSeconds = dur;
+        cached.isLive = live;
     } else {
         cached = cur;
         cached.durationSeconds = dur;
+        cached.isLive = live;
     }
     m_cache->upsert(cached);
 }
@@ -1510,9 +1659,10 @@ bool WatchPage::isCurrentVideo(const QString &videoId) const
     return m_player->isActive() && videoId == m_player->current().id;
 }
 
-// Pinta la descripción del vídeo como HTML enriquecido (enlaces + saltos de
-// línea) y guarda el texto plano. Crece a altura completa (sin tope ni
-// "Ver más"). Vacía = oculta la descripción.
+// Pinta la descripción del vídeo como el HTML del helper compartido
+// (format::descriptionHtml: enlaces del acento + saltos de línea) y guarda el
+// texto plano. Crece a altura completa (sin tope ni "Ver más"). Vacía = oculta
+// la descripción.
 void WatchPage::applyDescription(const QString &description)
 {
     m_description = description;
@@ -1522,13 +1672,8 @@ void WatchPage::applyDescription(const QString &description)
             m_descCard->hide();
         return;
     }
-    QString rich = description.toHtmlEscaped();
-    rich.replace(QLatin1Char('\n'), QStringLiteral("<br>"));
-    const QRegularExpression urlRe(QStringLiteral(R"((https?://[^\s<]+))"));
-    rich.replace(urlRe, QStringLiteral(
-        "<a href=\"\\1\" style=\"color:%1;\">\\1</a>").arg(nt::accentHex()));
-    m_descLabel->setText(QStringLiteral(
-        "<style>a { text-decoration:none; }</style>") + rich);
+    QString rich = descriptionHtml(description);
+    m_descLabel->setText(rich);
     // Sin tope de altura: la descripción se muestra entera.
     m_descLabel->setMaximumHeight(QWIDGETSIZE_MAX);
     m_descLabel->show();
@@ -1573,14 +1718,85 @@ void WatchPage::onPhaseChanged(const QString &phase)
 
 void WatchPage::onPositionChanged(double position, double duration)
 {
+    // Un directo no tiene "duración final": mpv reporta 0 (HLS live puro) o la
+    // duración "hasta ahora", que crece/u oscila con cada segmento. Con la
+    // barra pos/dur el porcentaje salta hacia atrás cuando la duración cambia.
+    // Se trata como YouTube: playhead en el borde derecho (el "ahora" del
+    // directo), marca "EN VIVO" y el tiempo desde la emisión en negativo.
+    // La DETECCIÓN usa evidencia sostenida (nt::LiveDetector): un VOD materializa
+    // su duración una vez y la mantiene estable, un directo la cambia con cada
+    // segmento; y si la duración se estabiliza, se desbloquea (falso positivo
+    // → barra normal y seek recuperado). Un vídeo normal nunca se marca.
+    NT_DEBUG("E2E tick pos=%.1f dur=%.1f\n", position, duration);
+    // HLS sintético de AV1 (construido por la app desde un fMP4 finito):
+    // por construcción NO puede ser un directo, y mpv reporta ahí duraciones
+    // inestables (crecen/resetean mientras se cargan los rangos BYTERANGE),
+    // que en un directo real son la señal. Este stream queda EXCLUIDO de la
+    // detección: nunca "EN VIVO", barra normal y seek operativo siempre.
+    const bool appStream = !m_player->currentCanBeLive();
+    if (appStream && m_liveMedia) {
+        m_liveMedia = false;
+        m_ovSeek->setLive(false);
+        m_liveDurPeak = 0.0;
+        m_ovPos->setProperty("live", false);
+        m_ovPos->style()->unpolish(m_ovPos);
+        m_ovPos->style()->polish(m_ovPos);
+        m_ovPos->update();
+        NT_DEBUG("E2E live released (app stream) pos=%.1f dur=%.1f\n",
+                 position, duration);
+    }
+    // Señal AUTORITATIVA (videoDetails.isLive del player response): YouTube
+    // declara el medio como directo actual -> entrar en modo EN VIVO al
+    // INSTANTE, sin esperar los 2 ascensos de duración (y cubre los directos
+    // puros con dur=0, que nunca producen ascensos). El detector sigue
+    // gobernando la salida: si la duración se estabiliza (directo terminado),
+    // se desbloquea solo a los ~15 s como siempre.
+    if (!appStream && m_player->currentIsLive())
+        m_liveDet.forceLive();
+    const bool live = !appStream && m_liveDet.feed(duration);
+    if (live != m_liveMedia) {
+        m_liveMedia = live;
+        m_ovSeek->setLive(live);
+        NT_DEBUG("E2E live %s pos=%.1f dur=%.1f\n",
+                 live ? "detect" : "released", position, duration);
+        // Reloj negativo desde cero en cada (re)entrada.
+        m_liveDurPeak = 0.0;
+        // La marca "EN VIVO" se pinta en el acento con una regla QSS por
+        // propiedad dinámica (re-polish obligatorio al cambiarla).
+        m_ovPos->setProperty("live", live);
+        m_ovPos->style()->unpolish(m_ovPos);
+        m_ovPos->style()->polish(m_ovPos);
+        m_ovPos->update();
+    }
     QSignalBlocker blockOv(m_ovSeek);
-    m_ovSeek->setRange(0, duration > 0 ? qRound(duration) : 0);
-    if (!m_ovSeek->isSeeking())
-        m_ovSeek->setValue(qRound(position));
-    // El reloj va partido: transcurrido a la izquierda del slider y duración a
-    // la derecha, como el mockup.
-    m_ovPos->setText(fmtTime(position));
-    m_ovDur->setText(fmtTime(duration));
+    if (m_liveMedia) {
+        // Barra al final: el playhead pegado al borde derecho y la historia
+        // del directo rellena hacia atrás. El reloj negativo usa el PICO de
+        // duración visto (monótono, sin el vaivén de la ventana DVR); sin
+        // duración conocida queda solo la marca.
+        m_ovSeek->setRange(0, 1);
+        m_ovSeek->setValue(1);
+        m_ovPos->setText(QStringLiteral("EN VIVO"));
+        m_liveDurPeak = qMax(m_liveDurPeak, duration);
+        m_ovDur->setText(m_liveDurPeak > 0
+                             ? QStringLiteral("-%1").arg(fmtTime(m_liveDurPeak))
+                             : QString());
+    } else {
+        m_ovSeek->setRange(0, duration > 0 ? qRound(duration) : 0);
+        if (!m_ovSeek->isSeeking())
+            m_ovSeek->setValue(qRound(position));
+        // El reloj va partido: transcurrido a la izquierda del slider y
+        // duración a la derecha, como el mockup.
+        m_ovPos->setText(fmtTime(position));
+        m_ovDur->setText(fmtTime(duration));
+    }
+    // "Anterior" se habilita al cruzar el umbral de reinicio (avanzado); el
+    // cambio solo se aplica cuando difiere, así no se repinta cada segundo.
+    if (m_ovPrevBtn) {
+        const bool available = m_player->previousAvailable();
+        if (m_ovPrevBtn->isEnabled() != available)
+            m_ovPrevBtn->setEnabled(available);
+    }
 }
 
 void WatchPage::onQualityChanged(int index)
@@ -1979,7 +2195,9 @@ void WatchPage::updateOverlayIcons()
     m_ovNextBtn->setEnabled(m_player->hasNext());
     m_ovNextBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Next, nt::kText, 20));
     if (m_ovPrevBtn) {
-        m_ovPrevBtn->setEnabled(m_player->hasPrevious());
+        // Habilitado si hay previo O si el actual ya está avanzado (reinicio):
+        // previousAvailable() es la misma condición que decide previous().
+        m_ovPrevBtn->setEnabled(m_player->previousAvailable());
         m_ovPrevBtn->setIcon(
             nt::playerIcon(nt::PlayerIcon::Prev, nt::kText, 20));
     }

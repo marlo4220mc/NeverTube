@@ -14,6 +14,11 @@ struct VideoInfo
     QString publishedAt;
     int durationSeconds = 0;
     int viewCount = 0;
+    // Directo actual: lo declaran los renderers (badge LIVE / "En directo",
+    // viewCount "viéndolo ahora" del /next) y el player response
+    // (videoDetails.isLive). Se persiste en la caché (videos.is_live) y las
+    // miniaturas muestran "En directo" en vez de la duración.
+    bool isLive = false;
 };
 
 struct ChannelInfo
@@ -40,6 +45,18 @@ struct StreamInfo
     QString label;
     int height = 0;
     bool multipleUrls = false;
+    // Falso solo para streams CONSTRUIDOS por la app desde un medio finito
+    // (el HLS sintético de AV1: un fMP4 con playlist VOD+ENDLIST). Un stream
+    // así no puede ser un directo por construcción, así que la UI de directo
+    // (EN VIVO, playhead al borde) se desactiva para él aunque el backend
+    // reporte duraciones inestables mientras carga. El resto de flujos (master
+    // de YouTube, filtrado, edge) SÍ pueden ser un directo y quedan con true.
+    bool canBeLive = true;
+    // Señal AUTORITATIVA de directo (videoDetails.isLive del player response
+    // de YouTube): true solo si YouTube declara el medio como directo actual.
+    // Permite entrar en modo EN VIVO al instante, sin esperar a que la
+    // duración "hasta ahora" crezca (y cubre los directos puros con dur=0).
+    bool isLive = false;
 };
 
 struct PlaylistInfo

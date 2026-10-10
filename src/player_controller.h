@@ -43,7 +43,14 @@ public:
     bool removeFromQueue(int index);
     void playIndex(int index);
     void next();
+    // "Anterior" con el comportamiento de YouTube: si el vídeo actual ya está
+    // avanzado (más de kPrevRestartThreshold), vuelve al inicio; solo si está
+    // al principio salta al vídeo previo de la cola. Lo usa el botón del
+    // overlay del Player.
     void previous();
+    // Salto DIRECTO al vídeo anterior de la cola, sin reiniciar el actual: lo
+    // usa el atajo de teclado "P", cuyo papel es navegar la cola (no reiniciar).
+    void previousTrack();
     // Modos del reproductor (botones de la fila de controles). Barajar
     // reordena al azar SOLO la cola por delante del vídeo en reproducción (el
     // actual no se mueve, como YouTube). Repetir vuelve al primer vídeo al
@@ -78,6 +85,17 @@ public:
     void renameCurrent(const QString &videoId, const QString &title);
     bool hasNext() const { return m_index >= 0 && m_index < m_queue.size() - 1; }
     bool hasPrevious() const { return m_index > 0; }
+    // El botón "Anterior" está operativo si hay vídeo previo O si el actual ya
+    // está avanzado (entonces el botón reinicia el vídeo actual, como YouTube).
+    bool previousAvailable() const
+    {
+        return m_index >= 0
+               && (hasPrevious() || m_position > kPrevRestartThreshold);
+    }
+    // Umbral de "Anterior" (segundos): con más avance que este, el botón vuelve
+    // al inicio del vídeo actual en vez de saltar al vídeo previo de la cola.
+    // Mismo orden de magnitud que el paso de búsqueda del teclado (±5 s).
+    static constexpr double kPrevRestartThreshold = 5.0;
     bool isActive() const { return m_index >= 0; }
     QString phase() const { return m_phase; }
     QString errorMessage() const { return m_errorMessage; }
@@ -86,6 +104,18 @@ public:
     bool isPaused() const { return m_phase == QLatin1String("paused"); }
     double position() const { return m_position; }
     double duration() const { return m_duration; }
+    // El stream actual lo construyó la app desde un medio finito (HLS sintético
+    // de AV1: fMP4 + playlist VOD+ENDLIST) -> por construcción NO puede ser un
+    // directo. La UI de directo (EN VIVO, playhead al borde) se desactiva para
+    // él aunque el backend reporte duraciones inestables (las reporta mientras
+    // carga los rangos BYTERANGE). true en el resto de flujos (un master de
+    // YouTube, filtrado o edge SÍ pueden ser un directo).
+    bool currentCanBeLive() const { return m_streamCanBeLive; }
+    // El player response de YouTube declaró el stream actual como DIRECTO
+    // (videoDetails.isLive): señal autoritativa que permite entrar en modo
+    // EN VIVO al instante, sin esperar a que la duración "hasta ahora" crezca
+    // (y cubre los directos puros con dur=0). false en VODs y en el sintético.
+    bool currentIsLive() const { return m_streamIsLive; }
     // Fuerza el guardado de la posición actual en el historial (no hace nada
     // si no hay vídeo en fase playing/paused). Lo llama MainWindow al entrar al
     // Home con algo reproduciéndose en el mini player: la fila "Continuar
@@ -165,6 +195,12 @@ private:
     // vídeo, aunque los ticks de posición hayan actualizado m_duration antes.
     double m_reportedDuration = -1.0;
     bool m_muted = false;
+    // canBeLive del stream actual (StreamInfo). true hasta que llega el stream
+    // resuelto; el HLS sintético de AV1 lo trae a false (nunca es un directo).
+    bool m_streamCanBeLive = true;
+    // videoDetails.isLive del stream actual (StreamInfo), señal autoritativa
+    // de directo del player response. false hasta que llega el stream resuelto.
+    bool m_streamIsLive = false;
     double m_volume = 100.0;
     int m_volumeMax = 100;
     // Modos de reproducción (barajar/repetir). De memoria de sesión, sin señal

@@ -455,6 +455,29 @@ QIcon icon(Icon kind, const QColor &color, int size)
     return QIcon(pm);
 }
 
+QPixmap appLogo(int size)
+{
+    if (size <= 0)
+        return QPixmap();
+    // La entrada de 256 es la mayor del .qrc (el maestro de 1024 no se embebe).
+    static const QPixmap src(QStringLiteral(":/icon/nt_256.png"));
+    if (src.isNull())
+        return QPixmap();
+    return src.scaled(size, size, Qt::KeepAspectRatio,
+                      Qt::SmoothTransformation);
+}
+
+QString emptyStateHtml(const QString &text)
+{
+    static const bool hasLogo =
+        !QPixmap(QStringLiteral(":/icon/nt_48.png")).isNull();
+    if (!hasLogo)
+        return text;
+    return QStringLiteral(
+               "<img src=':/icon/nt_48.png' width='40' height='40'><br>%1")
+        .arg(text.toHtmlEscaped());
+}
+
 QPixmap circularAvatar(const QPixmap &src, int size)
 {
     if (src.isNull() || size <= 0)
