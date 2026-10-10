@@ -1,0 +1,43 @@
+Name: nevertube-qt2
+Version: __VERSION__
+Release: 1%{?dist}
+Summary: Lightweight YouTube client (Qt5 + libmpv)
+License: GPL-3.0-or-later
+URL: https://github.com/marlo4220mc/nevertube_qt2
+Vendor: marlo4220mc
+Packager: marlo4220mc
+Group: Applications/Multimedia
+# The binary is built inside Fedora (see packaging/linux/rpm/build.sh), so the
+# sonames it links (Qt5, mpv, pulse, GL, openssl) are the ones in these runtime
+# packages. FFmpeg is NOT a Requires on Fedora: it lives in RPM Fusion and is
+# not needed to play (mpv is the playback core; the FfmpegBackend is optional).
+Requires: mpv-libs, qt5-qtbase, pulseaudio-libs, mesa-libGL, openssl-libs
+Requires: hicolor-icon-theme
+BuildArch: x86_64
+
+%description
+A lightweight YouTube client built with Qt5 and the mpv playback core.
+
+%prep
+
+%build
+
+# The workflow (packaging/linux/rpm/build.sh) compiles the app and leaves the
+# install tree under BUILD/nevertube_qt2/ (usr/bin, usr/share). This spec only
+# packages it; it does not compile.
+%install
+mkdir -p %{buildroot}
+cp -a nevertube_qt2/. %{buildroot}/
+
+%files
+%{_bindir}/nevertube_qt2
+%{_datadir}/applications/nevertube_qt2.desktop
+%{_datadir}/icons/hicolor/16x16/apps/nevertube_qt2.png
+%{_datadir}/icons/hicolor/24x24/apps/nevertube_qt2.png
+%{_datadir}/icons/hicolor/32x32/apps/nevertube_qt2.png
+%{_datadir}/icons/hicolor/48x48/apps/nevertube_qt2.png
+%{_datadir}/icons/hicolor/64x64/apps/nevertube_qt2.png
+%{_datadir}/icons/hicolor/128x128/apps/nevertube_qt2.png
+%{_datadir}/icons/hicolor/256x256/apps/nevertube_qt2.png
+
+%changelog
