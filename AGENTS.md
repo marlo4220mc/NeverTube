@@ -35,6 +35,51 @@ The QSS now lives in `static const char *const kTrozos[]` (five chunks, the larg
 
 To detect it without waiting for CI, just look at the size of the raw literals: any `R"…(` over 16 KB is a C2026 on x86.
 
+### Preprocessor directives are NOT allowed inside a macro invocation (C2121)
+
+Same family of trap, and it bit the same way: **MSVC rejects a `#if`/`#ifdef`
+placed inside the arguments of a MACRO INVOCATION** (`error C2121: '#': invalid
+character: possibly the result of a macro expansion`, plus a cascade of
+`C2065 'ifdef': undeclared identifier` and `C2143`/`C2059`), while **GCC accepts
+it**. Inside the parentheses of a normal function or of a type constructor it is
+fine in both compilers — in `src/ffmpeg_backend.cpp` there is a
+`QLatin1String(\n#if defined(Q_OS_WIN)\n"dxva2"\n#else\n"vaapi"\n#endif\n)` that
+has always compiled on x86. The rule applies to MACROS only.
+
+The real case: the guards added to compile the `FfmpegBackend` against FFmpeg 4.4
+(libavutil 56 has no `AVChannelLayout`) were put inside the body of `NT_DEBUG(…)`,
+which IS a macro. Every Linux build and the x64 Windows build stayed green and
+**only the x86 Windows job failed**, for two compounding reasons: (1) the guard
+sat inside a macro call, and (2) x86 is the ONLY build that compiles
+`ffmpeg_backend.cpp` against libav at all (`NEVERTUBE_X86_FFMPEG_BUILD`; x64
+links mpv, so those lines are not even preprocessed there). A change in `src/`
+does not trigger the Windows workflows (their `paths:` filter is the workflow
+file itself), so it was latent until a workflow edit ran them.
+
+The fix is to hoist the value into a LOCAL before the call:
+
+```cpp
+// NOT: NT_DEBUG("...", ac->sample_rate,
+//        #ifdef X
+//          a,
+//        #else
+//          b,
+//        #endif
+//        tail);
+#ifdef NT_FFMPEG_NEW_CHLAYOUT
+    const int acChannels = ac->ch_layout.nb_channels;
+#else
+    const int acChannels = ac->channels;
+#endif
+    NT_DEBUG("E2E ffmpeg audio %dHz ch=%d src=%s\n", ac->sample_rate, acChannels,
+             extAudio ? "externa" : "muxed");
+```
+
+To detect it without waiting for the x86 job, scan `src/` for a preprocessor
+directive whose enclosing parenthesis belongs to an ALL-CAPS identifier (that is,
+a macro). A directive inside `foo(...)` is fine; inside `FOO(...)` it is a C2121
+on MSVC.
+
 ## App icon
 
 The app has an icon on four surfaces, all from the same files:
@@ -646,7 +691,8 @@ alone was 18 % of the binary.
 
 Also mind the toolset: x86 uses **v142** (VS2019) because of the Win7 target and
 x64 the one of `windows-latest` (newer). They do not compile the same: a literal
-that x64 accepts can give C2026 on x86 (see the section on the MSVC limit). A
+that x64 accepts can give C2026 on x86, and a preprocessor directive inside a
+macro call gives C2121 on x86 (both are documented in the MSVC section above). A
 failure that appears only on x86 should not be looked for only there.
 
 ## Recovery from a gated session (YouTube 403)

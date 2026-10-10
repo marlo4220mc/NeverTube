@@ -779,14 +779,23 @@ static void runLoop(FfmpegBackend::Impl *m)
             sink.reset();
         }
     }
-    if (ac)
-        NT_DEBUG("E2E ffmpeg audio %dHz ch=%d src=%s\n", ac->sample_rate,
+    if (ac) {
+        // The channel count is read into a local BEFORE the macro call on
+        // purpose: MSVC does NOT accept a preprocessor directive inside the
+        // arguments of a macro (error C2121 "'#': invalid character: possibly
+        // the result of a macro expansion"), while GCC accepts it happily. A
+        // guard placed directly in the NT_DEBUG(...) argument list therefore
+        // compiles on Linux and blows up ONLY on the x86 Windows build (the only
+        // one with libav, so the only one that reaches these lines). Hoisting it
+        // out of the call keeps both compilers and both builds happy.
 #ifdef NT_FFMPEG_NEW_CHLAYOUT
-                 ac->ch_layout.nb_channels,
+        const int acChannels = ac->ch_layout.nb_channels;
 #else
-                 ac->channels,
+        const int acChannels = ac->channels;
 #endif
-                 extAudio ? "externa" : "muxed");
+        NT_DEBUG("E2E ffmpeg audio %dHz ch=%d src=%s\n", ac->sample_rate,
+                 acChannels, extAudio ? "externa" : "muxed");
+    }
 
     // Resampler to stereo S16 48 kHz.
     SwrContext *swr = nullptr;
