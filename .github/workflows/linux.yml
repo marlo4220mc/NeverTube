@@ -1,0 +1,105 @@
+name: Linux viability (build + selftests + deb/rpm/arch)
+
+# Trigger: MANUAL (Actions -> Run workflow), plus a push that touches this file
+# itself. Uploading this workflow from the GitHub web UI fires one run so the
+# change is validated immediately; a normal push to main does NOT run it. Same
+# opt-in policy as windows.yml / windows_x64.yml: it is a viability signal, not
+# a per-commit gate.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/linux.yml'
+
+# Three distro families, one job each. The app is a native Qt5/CMake binary
+# that links the distro's own sonames (Qt5, mpv, FFmpeg, pulse, GL), so each
+# package has to be compiled in its distro: there is no portable Ubuntu binary
+# that can go into an .rpm or a pacman package. The packaging recipes live in
+# the repo under packaging/linux/<distro>/ and are the same ones you can run by
+# hand.
+jobs:
+  build-deb:
+    name: Debian/Ubuntu (.deb)
+    runs-on: ubuntu-22.04
+    env:
+      NEVERTUBE_DEBUG: 1
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build, selftests and package (.deb)
+        run: bash packaging/linux/deb/build.sh
+
+      # Network and GPU dependent: informative, not a gate. A runner may be
+      # rate-limited/blocked by YouTube or lack a real GPU.
+      - name: Network / GPU selftests (informational)
+        continue-on-error: true
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          bin=./build-deb/nevertube_qt2
+          for t in --selftest-tls --selftest-innertube --selftest-search \
+                   --selftest-browse --selftest-feeds --selftest-ffmpeg \
+                   --selftest-player --selftest-hwprobe; do
+            echo "::group::selftest $t (informational)"
+            if timeout 180 "$bin" "$t"; then echo "OK $t"; else echo "::warning::informational selftest failed: $t"; fi
+            echo "::endgroup::"
+          done
+
+      # NOTE: there is no separate "smoke the installed .deb" step because
+      # packaging/linux/deb/build.sh already does it as part of the gate:
+      # desktop-file-validate, apt-get install of the .deb (pulling the declared
+      # Depends), an ldd check with no "not found" and the offline selftests run
+      # from /usr/bin. The three jobs are the same on that point.
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb
+          path: dist/*.deb
+          retention-days: 21
+
+  build-rpm:
+    name: Fedora (.rpm)
+    runs-on: ubuntu-latest
+    env:
+      NEVERTUBE_DEBUG: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      # The build runs inside a Fedora container so the binary links Fedora's
+      # sonames. The container writes as root; the artifact dir is chowned back
+      # so upload-artifact can read it.
+      - name: Build, selftests and package (.rpm) inside Fedora
+        run: |
+          set -euo pipefail
+          docker run --rm -e NEVERTUBE_DEBUG=1 -v "$PWD:/work" -w /work fedora:latest \
+            bash /work/packaging/linux/rpm/build.sh
+          sudo chown -R "$(id -u):$(id -g)" dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-rpm
+          path: dist/*.rpm
+          retention-days: 21
+
+  build-arch:
+    name: Arch (pacman)
+    runs-on: ubuntu-latest
+    env:
+      NEVERTUBE_DEBUG: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build, selftests and package (pacman) inside Arch
+        run: |
+          set -euo pipefail
+          docker run --rm -e NEVERTUBE_DEBUG=1 -v "$PWD:/work" -w /work archlinux:latest \
+            bash /work/packaging/linux/arch/build.sh
+          sudo chown -R "$(id -u):$(id -g)" dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-arch
+          path: dist/*.pkg.tar.zst
+          retention-days: 21
