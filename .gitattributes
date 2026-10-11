@@ -15,4 +15,6 @@
 # the vendored FFmpeg tree.
 third_party/qt-win64/** -text
 third_party/qt-win32/** -text
+third_party/openssl-win64/** -text
+third_party/openssl-win32/** -text
 third_party/ffmpeg-win32/** -text

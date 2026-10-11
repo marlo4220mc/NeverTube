@@ -34,17 +34,16 @@ jobs:
       # two to an earlier build (tag + release asset name).
       MPV_TAG: '20260924'
       MPV_ASSET: 'mpv-dev-x86_64-20260924-git-2a4eb8067c.7z'
+      # Qt comes from the repository, not from a download. Qt stopped publishing
+      # Windows binaries at 5.15.2 and the 5.15.19 archive is source only, so the
+      # tree under third_party/qt-win64 is built ONCE and vendored (the same
+      # precedent as third_party/ffmpeg-win32). Setting Qt5_DIR here keeps the
+      # rest of this workflow unchanged: CMake consumes it via CMAKE_PREFIX_PATH
+      # and windeployqt is derived from it further down. Provenance (per-module
+      # SHA256, compiler, configure flags) is in third_party/qt-win64/BOM.json.
+      Qt5_DIR: ${{ github.workspace }}\third_party\qt-win64\lib\cmake\Qt5
     steps:
       - uses: actions/checkout@v4
-
-      # Qt 5.15.2 MSVC2019 x64. x64 targets are Win10+ (no Win7 restriction).
-      - uses: jurplel/install-qt-action@v4
-        with:
-          version: '5.15.2'
-          host: 'windows'
-          target: 'desktop'
-          arch: 'win64_msvc2019_64'
-          cache: true
 
       # MODERN x64 libmpv. The package already brings `libmpv-2.dll` with the correct
       # name and `include/mpv/*.h` (unlike the 2021 i686, there is no need to
@@ -78,27 +77,23 @@ jobs:
           Copy-Item $vk.FullName vulkan-1.dll
           Get-Item vulkan-1.dll | Select-Object Name, Length
 
-      # OpenSSL 1.1.1w x64: Qt5Network (msvc2019_64) loads its TLS backend via
-      # LoadLibrary of libssl-1_1-x64.dll / libcrypto-1_1-x64.dll next to the exe.
-      # windeployqt does NOT deploy them: without them, any HTTPS fails.
-      - name: extraer OpenSSL 1.1.1w x64 (DLLs TLS de Qt5Network)
+      # OpenSSL 3.5.9 x64, from the repository. Qt5Network is built with
+      # -openssl-runtime, so it resolves libssl-3-x64.dll / libcrypto-3-x64.dll at
+      # run time; windeployqt does NOT deploy them and without them every HTTPS
+      # fails. It is vendored (third_party/openssl-win64) instead of downloaded:
+      # 1.1.1 was EOL since 2023 and the packages were pulling a frozen
+      # third-party build on every run, with no path to pick up security patches.
+      # BOM.json in that directory records the compiler it was built with.
+      - name: copiar OpenSSL 3.5.9 x64 (DLLs TLS de Qt5Network)
         shell: pwsh
         run: |
-          curl.exe -sL -o innoextract.zip `
-            https://github.com/dscharrer/innoextract/releases/download/1.9/innoextract-1.9-windows.zip
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Expand-Archive innoextract.zip innoextract-tool -Force
-          curl.exe -sL -o openssl-111.exe `
-            https://slproweb.com/download/Win64OpenSSL_Light-1_1_1w.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & .\innoextract-tool\innoextract.exe openssl-111.exe | Out-Null
-          $ssl = Get-ChildItem . -Recurse -Filter 'libssl-1_1-x64.dll' | Select-Object -First 1
-          $cry = Get-ChildItem . -Recurse -Filter 'libcrypto-1_1-x64.dll' | Select-Object -First 1
-          if (-not $ssl -or -not $cry) {
-            Write-Host 'OpenSSL x64 no extraído (libssl/libcrypto -x64)'; exit 1 }
-          Copy-Item $ssl.FullName libssl-1_1-x64.dll
-          Copy-Item $cry.FullName libcrypto-1_1-x64.dll
-          Get-Item libssl-1_1-x64.dll, libcrypto-1_1-x64.dll | Select-Object Name, Length
+          $src = Join-Path $env:GITHUB_WORKSPACE 'third_party\openssl-win64'
+          foreach ($n in @('libssl-3-x64.dll','libcrypto-3-x64.dll')) {
+            $f = Join-Path $src $n
+            if (-not (Test-Path $f)) { Write-Host "falta $f"; exit 1 }
+            Copy-Item $f .
+          }
+          Get-Item libssl-3-x64.dll, libcrypto-3-x64.dll | Select-Object Name, Length
 
       # MSVC x64 import-lib from the DLL: dumpbin /exports -> .def ->
       # lib /machine:x64 -> mpv-2.lib (and libmpv-2.lib, in case CMake's
@@ -186,8 +181,8 @@ jobs:
           Copy-Item (Get-ChildItem mpv-dev -Recurse -Filter libmpv-2.dll |
             Select-Object -First 1).FullName dist\
           Copy-Item vulkan-1.dll dist\
-          Copy-Item libssl-1_1-x64.dll dist\
-          Copy-Item libcrypto-1_1-x64.dll dist\
+          Copy-Item libssl-3-x64.dll dist\
+          Copy-Item libcrypto-3-x64.dll dist\
           curl.exe -sL -o dist\VC_redist.x64.exe `
             https://aka.ms/vs/17/release/vc_redist.x64.exe
           if ($LASTEXITCODE -ne 0) { Write-Host 'VC_redist.x64 no bajó'; exit 1 }
@@ -195,8 +190,8 @@ jobs:
           # (Qt5 dynamic GL switch) and they are the ones the
           # experimental NEVERTUBE_ANGLE=1 mode needs (zero-copy d3d11-egl). If they are missing,
           # the experiment cannot be tried on the x64 test machine: fail here.
-          $missing = @('libmpv-2.dll', 'vulkan-1.dll', 'libssl-1_1-x64.dll',
-            'libcrypto-1_1-x64.dll', 'libEGL.dll', 'libGLESv2.dll',
+          $missing = @('libmpv-2.dll', 'vulkan-1.dll', 'libssl-3-x64.dll',
+            'libcrypto-3-x64.dll', 'libEGL.dll', 'libGLESv2.dll',
             'VC_redist.x64.exe') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
           if ($missing) { Write-Host "dist incompleto: faltan $missing"; exit 1 }
@@ -257,7 +252,7 @@ jobs:
           # edit of [Files] leaves it out, the shortcuts are created with
           # the default Windows icon and nobody notices locally.
           $need = @('nevertube_qt2.exe', 'qwindows.dll', 'libmpv-2.dll',
-            'vulkan-1.dll', 'libssl-1_1-x64.dll', 'libcrypto-1_1-x64.dll',
+            'vulkan-1.dll', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll',
             'libEGL.dll', 'libGLESv2.dll', 'VC_redist.x64.exe', 'nt.ico')
           $missing = $need | Where-Object { $packed -notcontains $_ }
           if ($missing) { Write-Host "el setup NO lleva: $missing"; exit 1 }

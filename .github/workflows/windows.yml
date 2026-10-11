@@ -30,22 +30,20 @@ jobs:
     runs-on: windows-2022
     env:
       NEVERTUBE_DEBUG: 1
+      # Qt comes from the repository, not from a download. Qt stopped publishing
+      # Windows binaries at 5.15.2 and the 5.15.19 archive is source only, so
+      # third_party/qt-win32 is built ONCE and vendored (same precedent as
+      # third_party/ffmpeg-win32). Besides removing the aqtinstall mirror lottery
+      # (download.qt.io's redirector picks a mirror at random: the official CDN
+      # takes 35-55 s, a slow one up to ~13 min), it is what makes the 5.15.19
+      # security fixes reachable at all. The tree is built with the v142 toolset
+      # and the 19041 SDK, and its Win7 import gate passed, so it is linkable here
+      # exactly like the 5.15.2 msvc2019 build it replaces.
+      # Provenance: third_party/qt-win32/BOM.json (per-module SHA256, compiler,
+      # SDK, configure flags).
+      Qt5_DIR: ${{ github.workspace }}\third_party\qt-win32\lib\cmake\Qt5
     steps:
       - uses: actions/checkout@v4
-
-      # Qt 5.15.2 MSVC2019 x86 — the test machine is 32-bit (Windows x86 does not
-      # run x64 exe). Same config as BUILD_WINDOWS.md.
-      # cache: true → aqtinstall downloads Qt from a mirror that the download.qt.io
-      # redirector picks at random: sometimes the official CDN (35-55 s) and
-      # sometimes a slow mirror (up to ~13 min, e.g. mirror.ossplanet.net). With
-      # the cache, after the first time it is not downloaded again.
-      - uses: jurplel/install-qt-action@v4
-        with:
-          version: '5.15.2'
-          host: 'windows'
-          target: 'desktop'
-          arch: 'win32_msvc2019'
-          cache: true
 
       # Phase 5: the x86 build (Win7) does NOT use libmpv. Its only engine is
       # FfmpegBackend, linked against the VENDORED i686 FFmpeg package in
@@ -60,31 +58,27 @@ jobs:
       # (decodes h264/vp9/av1 + HLS fMP4 and does a TLS handshake). See
       # third_party/ffmpeg-win32/README.md. The CI does NOT download or compile FFmpeg.
 
-      # Qt 5.15.2 (msvc2019 x86) loads its TLS backend via LoadLibrary of the OpenSSL
-      # 1.1 DLLs (libssl-1_1.dll / libcrypto-1_1.dll) FROM the
-      # exe folder. windeployqt does NOT deploy them: without them, any
-      # HTTPS fails on the target machine with "qt.network.ssl ... TLS
-      # initialization failed" (innertube/YouTube do not load). The official
-      # OpenSSL 1.1.1w binaries (Shining Light Productions) are extracted from the
-      # Inno installer WITHOUT running it (innoextract): there is no elevation/UAC on
-      # the runner and it does not touch C:\ or the registry.
-      - name: extraer OpenSSL 1.1.1w (DLLs TLS que carga Qt5Network, build Win32)
+      # Qt5Network is built with -openssl-runtime, so it loads its TLS backend
+      # via LoadLibrary of libssl-3.dll / libcrypto-3.dll FROM the exe folder.
+      # windeployqt does NOT deploy them: without them any HTTPS fails on the
+      # target machine with "qt.network.ssl ... TLS initialization failed"
+      # (innertube/YouTube do not load). These are vendored, not downloaded:
+      # OpenSSL 1.1.1 (what the packages shipped until now) went EOL in Sep 2023
+      # and there was also a real 32-bit crash with it ("OpenSSL internal error,
+      # assertion failed: lock != NULL", see the tlsHandshakeSelfTest comment in
+      # src/main.cpp). The 3.5.9 x86 tree is built with the SAME v142 toolset and
+      # the SAME 19041 SDK as Qt and passed the Win7 import gate below, so it is
+      # as safe for Win7 as the Qt it serves. BOM.json records its provenance.
+      - name: copiar OpenSSL 3.5.9 (DLLs TLS que carga Qt5Network, build Win32)
         shell: pwsh
         run: |
-          curl.exe -sL -o innoextract.zip `
-            https://github.com/dscharrer/innoextract/releases/download/1.9/innoextract-1.9-windows.zip
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Expand-Archive innoextract.zip innoextract-tool -Force
-          curl.exe -sL -o openssl-111.exe `
-            https://slproweb.com/download/Win32OpenSSL_Light-1_1_1w.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & .\innoextract-tool\innoextract.exe openssl-111.exe | Out-Null
-          if (-not (Test-Path 'app\bin\libssl-1_1.dll') -or `
-              -not (Test-Path 'app\bin\libcrypto-1_1.dll')) {
-            Write-Host 'extracción OpenSSL falló (app\bin\*.dll)'
-            exit 1 }
-          Get-Item 'app\bin\libssl-1_1.dll', `
-            'app\bin\libcrypto-1_1.dll' | Select-Object Name, Length
+          $src = Join-Path $env:GITHUB_WORKSPACE 'third_party\openssl-win32'
+          foreach ($n in @('libssl-3.dll','libcrypto-3.dll')) {
+            $f = Join-Path $src $n
+            if (-not (Test-Path $f)) { Write-Host "falta $f"; exit 1 }
+            Copy-Item $f .
+          }
+          Get-Item libssl-3.dll, libcrypto-3.dll | Select-Object Name, Length
 
       # ── CONFIGURE: vendored i686 FFmpeg (MSVC import-libs already included) ──
       # third_party/ffmpeg-win32/ brings the MSVC import .lib files generated
@@ -186,11 +180,11 @@ jobs:
           # OpenSSL 1.1.1 = Qt5Network TLS backend. windeployqt does NOT deploy it:
           # without these DLLs next to the exe, all HTTPS fails on the test machine with
           # "TLS initialization failed" (innertube/YouTube do not load).
-          Copy-Item app\bin\libssl-1_1.dll dist\
-          Copy-Item app\bin\libcrypto-1_1.dll dist\
+          Copy-Item libssl-3.dll dist\
+          Copy-Item libcrypto-3.dll dist\
           $missing = @('avcodec-63.dll','avformat-63.dll','avutil-61.dll',
-            'swscale-10.dll','swresample-7.dll','libssl-1_1.dll',
-            'libcrypto-1_1.dll','VC_redist.x86.exe') |
+            'swscale-10.dll','swresample-7.dll','libssl-3.dll',
+            'libcrypto-3.dll','VC_redist.x86.exe') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
           if ($missing) {
             Write-Host "dist incompleto: faltan $missing"
