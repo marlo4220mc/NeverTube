@@ -1,0 +1,18 @@
+# The vendored Qt recipes and helpers are .ps1 files that RUN ON WINDOWS.
+# Windows PowerShell 5.1 reads a .ps1 saved as UTF-8 *without* BOM as ANSI
+# (cp1252), and any non-ASCII byte sequence then decodes into a typographic
+# quote that the parser accepts as a string delimiter: the script fails to load
+# with "The string is missing the terminator". The files in the repo are ASCII
+# + BOM + CRLF on purpose; this keeps them that way on a checkout made from
+# Windows with core.autocrlf=true, which would otherwise strip the CRLF.
+*.ps1 text eol=crlf
+
+# The vendored Qt trees are BUILD OUTPUT, not source we edit: a prefix layout of
+# DLLs, import libs, headers and the .conf/.prl files that `qmake` and
+# `windeployqt` parse on Windows. Marking them -text keeps git from rewriting
+# the line endings of those .conf/.prl on a checkout made from Windows with
+# core.autocrlf=true, which qmake would then fail to parse. Same treatment as
+# the vendored FFmpeg tree.
+third_party/qt-win64/** -text
+third_party/qt-win32/** -text
+third_party/ffmpeg-win32/** -text
