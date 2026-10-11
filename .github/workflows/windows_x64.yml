@@ -41,7 +41,7 @@ jobs:
       # rest of this workflow unchanged: CMake consumes it via CMAKE_PREFIX_PATH
       # and windeployqt is derived from it further down. Provenance (per-module
       # SHA256, compiler, configure flags) is in third_party/qt-win64/BOM.json.
-      Qt5_DIR: ${{ github.workspace }}\third_party\qt-win64\lib\cmake\Qt5
+      Qt5_DIR: ${{ github.workspace }}\third_party\qt-win64\lib\cmake
     steps:
       - uses: actions/checkout@v4
 

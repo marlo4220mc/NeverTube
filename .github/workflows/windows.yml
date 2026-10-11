@@ -41,7 +41,7 @@ jobs:
       # exactly like the 5.15.2 msvc2019 build it replaces.
       # Provenance: third_party/qt-win32/BOM.json (per-module SHA256, compiler,
       # SDK, configure flags).
-      Qt5_DIR: ${{ github.workspace }}\third_party\qt-win32\lib\cmake\Qt5
+      Qt5_DIR: ${{ github.workspace }}\third_party\qt-win32\lib\cmake
     steps:
       - uses: actions/checkout@v4
 
