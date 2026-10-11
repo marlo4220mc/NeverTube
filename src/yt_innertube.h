@@ -232,6 +232,11 @@ private:
     // returns compactVideoRenderer (no date).
     void requestRadioWeb(const QString &videoId);
     void handleRadioWeb(const QString &videoId, bool ok, const QByteArray &body);
+    // Launches the radio queued by fetchRadio() while another was in flight
+    // (single-flight). Called at the terminal points of a radio, BEFORE the
+    // finished radio is emitted: the player's request then takes the slot
+    // ahead of the Descubre generator's next seed (see fetchRadio).
+    void promoteQueuedRadio();
     void requestHome(const QString &continuation);
     void requestChannel();
     void requestTrending();
@@ -416,6 +421,10 @@ private:
     bool m_radioPending = false;
     bool m_radioInFlight = false;
     QString m_radioVideoId;
+    // Video whose fetchRadio arrived while another radio was in flight
+    // (single-flight) and is therefore queued instead of dropped: promoted by
+    // promoteQueuedRadio() at the next terminal point.
+    QString m_radioQueuedId;
     QString m_radioContinuation;
     // Recommendation mix from the first client without an RDAMVM panel (fallback).
     QVector<VideoInfo> m_radioFallback;

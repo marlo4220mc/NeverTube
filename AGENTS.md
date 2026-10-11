@@ -883,6 +883,19 @@ for "A continuación" (`MainWindow` with `DiscoverRepo::radioVideoIdsForSeed` +
 `WatchPage::triggerRadio` is called when there is no saved radio (or its metadata is not
 in the cache). For Descubre, `hasRadio` already avoided re-asking.
 
+**Radio single-flight is a QUEUE, not a drop**: `Innertube::fetchRadio` admits
+ONE request in flight; a request for a DIFFERENT video is queued
+(`m_radioQueuedId`, promoted by `promoteQueuedRadio()` at the terminal point
+of the current radio, BEFORE the finished radio is emitted so the player's
+request takes the slot ahead of the Descubre generator's next seed) instead of
+being dropped. Without it, the first click of a fresh session collided with the
+generator's in-flight seed — the previous grid video — and "A continuación"
+stayed EMPTY (verified live: `radio single-flight id=zZb26...` swallowed by the
+`radioWeb ok id=1YJJ...` that was already in flight). The generator is not
+starved: each promoted fetch frees the slot at its own terminal point, so its
+next seed simply becomes the new queue. Only a request for the SAME id already
+in flight (or already queued) is dropped.
+
 **Views and date of the queue (metadata)**: the `compactVideoRenderer` of the
 VISIONOS client (the recommendations mix of `/next`) brings the views
 as localized text (`"85.805 visualizaciones"`, `"1,2 M de vistas"`) and does NOT
@@ -1347,6 +1360,14 @@ The last two data items are written by the player, not the network:
   `HomePage::refreshContinueWatching` (connected to `HistoryRepo::changed`) does an
   early-return if the page is hidden: every flush with the app in the mini player
   must not rebuild a grid nobody sees.
+  `MainWindow::onRadioReadyDiscover` (a player radio that was just saved for
+  Descubre) calls `m_home->refreshDynamic()` ONLY with Home VISIBLE, with the
+  same guard: with the page hidden (playback on the Player), that refresh
+  re-read the history while the just-opened video still had `pos=0` (`start=0`
+  until the first 20 s flush) and CLEARED "Continuar viendo" for nothing — the
+  counter then stayed frozen at the empty result because the next `changed()`
+  skips the recalculation while hidden. Entering Home always re-runs
+  `refreshDynamic()` (`onNavButton`), so nothing is lost.
 - **When verifying in the DB, also copy `mini_tube.db-wal`**: the app uses WAL and
   copying only the `.db` gives an outdated snapshot (it looks like nothing is saved).
 

@@ -1335,12 +1335,29 @@ void Innertube::handleNext(const QString &videoId, bool ok,
 void Innertube::fetchRadio(const QString &videoId)
 {
     if (m_radioInFlight) {
-        NT_DEBUG("E2E innertube radio single-flight id=%s\n",
+        // Single-flight: only ONE radio request at a time. A request for the
+        // same video already in flight (or already queued) is dropped; a
+        // request for a DIFFERENT video is QUEUED instead of dropped, so that
+        // the player's triggerRadio ("A continuación") is not swallowed by the
+        // radios of the Descubre generator: the first click of a fresh session
+        // collided with the in-flight seed of the previous grid video and the
+        // queue stayed empty. The queue is promoted at the terminal point of
+        // the current radio (promoteQueuedRadio).
+        if (videoId == m_radioVideoId) {
+            NT_DEBUG("E2E innertube radio single-flight id=%s\n",
+                     videoId.toUtf8().constData());
+            return;
+        }
+        if (videoId == m_radioQueuedId)
+            return; // ya encolado para ese mismo id
+        m_radioQueuedId = videoId;
+        NT_DEBUG("E2E innertube radio single-flight encolado id=%s\n",
                  videoId.toUtf8().constData());
         return;
     }
     m_radioInFlight = true;
     m_radioVideoId = videoId;
+    m_radioQueuedId.clear(); // sin colas pendientes en un lanzamiento fresco
     m_radioContinuation.clear();
     m_radioFallback.clear();
     m_radioVisionFallback.clear();
@@ -1352,6 +1369,22 @@ void Innertube::fetchRadio(const QString &videoId)
         return;
     }
     requestRadio();
+}
+
+// Promotes the queued radio BEFORE the finished one is emitted: the player's
+// request then takes the slot ahead of the Descubre generator's next seed,
+// which re-arms fetchRadio synchronously inside its onRadioReady (during the
+// emit). Promoted after the emit, the generator's seed would win the slot on
+// every step and the player's radio would starve for the whole generation.
+void Innertube::promoteQueuedRadio()
+{
+    if (m_radioQueuedId.isEmpty())
+        return;
+    const QString id = m_radioQueuedId;
+    m_radioQueuedId.clear();
+    NT_DEBUG("E2E innertube radio promueve encolado id=%s\n",
+             id.toUtf8().constData());
+    fetchRadio(id);
 }
 
 void Innertube::fetchRadioMore()
@@ -1438,6 +1471,7 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
                  error.toUtf8().constData());
         if (tryNextClient())
             return;
+        promoteQueuedRadio();
         emit radioReady(videoId, QVector<VideoInfo>());
         return;
     }
@@ -1448,6 +1482,7 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
                  body.size(), body.left(120).constData());
         if (tryNextClient())
             return;
+        promoteQueuedRadio();
         emit radioReady(videoId, QVector<VideoInfo>());
         return;
     }
@@ -1487,12 +1522,17 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
             NT_DEBUG("E2E innertube radio final recomendaciones id=%s n=%d\n",
                      videoId.toUtf8().constData(),
                      m_radioFallback.size());
-            emit radioReady(videoId, m_radioFallback);
+            // Copied BEFORE the promote: the queued fetchRadio may reset
+            // m_radioFallback, and the emit must carry the finished mix.
+            const QVector<VideoInfo> fb = m_radioFallback;
             m_radioFallback.clear();
+            promoteQueuedRadio();
+            emit radioReady(videoId, fb);
             return;
         }
         NT_DEBUG("E2E innertube radio empty id=%s\n",
                  videoId.toUtf8().constData());
+        promoteQueuedRadio();
         emit radioReady(videoId, QVector<VideoInfo>());
         return;
     }
@@ -1502,6 +1542,7 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
     NT_DEBUG("E2E innertube radio ok id=%s cola=%d cont=%s\n",
              videoId.toUtf8().constData(), videos.size(),
              m_radioContinuation.isEmpty() ? "no" : "si");
+    promoteQueuedRadio();
     emit radioReady(videoId, videos);
 }
 
@@ -1555,6 +1596,7 @@ void Innertube::handleRadioWeb(const QString &videoId, bool ok,
     m_radioVisionFallback.clear();
     NT_DEBUG("E2E innertube radioWeb ok id=%s n=%d\n",
              videoId.toUtf8().constData(), out.size());
+    promoteQueuedRadio();
     emit radioReady(videoId, out);
 }
 

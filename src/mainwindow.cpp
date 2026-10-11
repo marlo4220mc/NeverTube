@@ -1773,7 +1773,14 @@ void MainWindow::onRadioReadyDiscover(const QString &videoId,
     NT_DEBUG("E2E discover radio guardada seed=%s n=%d total=%d\n",
              videoId.toUtf8().constData(), (int)valid.size(),
              m_discoverRadios.count());
-    if (m_home)
+    // Rebuild the Home sections only with the page VISIBLE: with playback on
+    // the Player page (Home hidden) this refresh re-reads the history while
+    // the just-opened video still has pos=0 (start=0 until the first 20 s
+    // flush) and would CLEAR "Continuar viendo" for nothing (m_continueVideos
+    // stays frozen at the empty result because the visibility guard of
+    // refreshContinueWatching skips the recalculation while hidden). Entering
+    // Home always re-runs refreshDynamic (onNavButton), so nothing is lost.
+    if (m_home && m_home->isVisible())
         m_home->refreshDynamic();
 }
 
