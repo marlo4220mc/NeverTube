@@ -856,6 +856,55 @@ the catalogs inside the binary.
   garbage keys). The key must be a string LITERAL in the call line; `nt::tr(variable)`
   is not scanned.
 
+### OPEN BUG: the hot language switch can interrupt playback (x64, real Win10)
+
+**Symptom**: with a video playing, switching the language to English in Ajustes
+made the video pause as if it were buffering. Switching was done in place
+(`SettingsPage` emits `languageChanged` → `MainWindow::applyLanguage`). The same
+build at the same commit runs clean on the dev VM.
+
+**What was measured, and what it RULES OUT.** Reproduced on the dev VM with the
+same build, with `NEVERTUBE_DEBUG=1`, and analysed from `E2E tick` (the
+per-position lines mpv emits through the Qt event queue, which is the direct
+probe of a busy main thread):
+
+| probe | result |
+|---|---|
+| position ticks in the session | 1594 |
+| **gaps >= 5000 ms** (the watchdog threshold) | **0** |
+| largest gap | 3303 ms, and it was at `pos=0.1` (start-up), not at the switch |
+| `E2E streamStalled` / `streamInterrupted` in the whole session | **none** |
+| `ui_lang` after the run | `en` — the switch DID happen |
+
+So the switch does **not** block the main thread past the watchdog threshold and
+does **not** trip `PlayerWidget::checkStall` on this machine. The only
+`reloadCurrent` in the log was at `+72918 ms` and its cause is printed on the
+line above it: `E2E qualityChanged index=5 -> 1080p` — a **quality** change
+(360p → 1080p, the software-cap ladder), not a stall. Do not chase that one.
+
+**What remains**: the machine where it reproduces is NOT the one measured. The
+dev VM has no GPU (`codec_profile=soft-all`, ANGLE over WARP, 360p, 940x800);
+the report is a real Win10 with hardware decoding at a larger size. The
+difference that plausibly matters is **hwdec and the render size**, not the
+text: the player sits in the mini bar (112x63) on both.
+
+**Suspect, unproven**: `MainWindow::applyLanguage` calls `update()` on every
+widget in the tree (`findChildren<QWidget*>()`), which includes the
+`QOpenGLWidget` — a forced repaint outside mpv's render-update callback. The
+alternative suspect is the **full `SettingsPage` rebuild** that
+`applyLanguage` defers with `singleShot(0)` (it deletes every direct child and
+re-runs `buildUI()`), which could resize or re-show things. Note that the pages
+live in a `QStackedWidget`, so only one is visible at a time and the repaint is
+bounded to it — which is why the "the event loop is flooded" theory is weak.
+
+**Evidence that would settle it** (not available yet): `NEVERTUBE_DEBUG=1` on the
+machine where it happens, plus the same tick-gap analysis. `applyLanguage` logs
+**nothing** on success today, so the switch is invisible in the log — an `NT_DEBUG`
+line with its duration (and the `PlayerWidget` geometry before/after) is the
+cheapest fix to the diagnostics and touches no protected code. Until then this is
+a report, not a fix: **do not "fix" it by guessing**, because the two suspects
+lead to different changes and only the measurement distinguishes them.
+
 ## "A continuación" mode (queue seeding)
 
 The seeding mode is chosen with `NEVERTUBE_NEXT_MODE`:
