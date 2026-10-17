@@ -12,13 +12,15 @@ and the rest stays the same (Qt5, OpenGL, SQLite). This section only runs if
 ## Requirements
 
 1. **Qt 5.15.x** (MSVC 2019 or MinGW) → in the end `windeployqt` takes care of the Qt DLLs.
-   **Vendored, do not install Qt.** `third_party/qt-win32` (x86/Win7) and
-   `third_party/qt-win64` (x64) are already in this repository and both
-   workflows consume them via `Qt5_DIR`. Provenance (per-module commit +
-   archive SHA256, configure flags, toolset, OpenSSL version) is in the
-   `BOM.json` inside each tree. The recipes that produced them live in a
-   separate, app-agnostic repository, so the trees can always be rebuilt;
-   see **Vendored Qt and OpenSSL** at the end of this document.
+   **Do not install Qt, and do not build it here.** Both Windows workflows
+   **download** the tree from a release of the build repository
+   (`marlo4220mc/qt5-kde-win-build`, tag `qt-5.15.19-kde-r96`), verify its
+   SHA-256 and point `Qt5_DIR` at it. The 177 MB of DLLs are deliberately not
+   committed to this repository. Provenance (per-module commit and archive
+   SHA256, configure flags, toolset, OpenSSL version) travels inside the
+   archive as `BOM.json`; the pinned sources and the recipe that produced it
+   live in that other repository, so the tree is reproducible and never a dead
+   end. See **Vendored Qt and OpenSSL** at the end of this document.
 2. **mpv dev for Windows** (the target is 32-bit Windows x86, so the WHOLE build is Win32).> **Phase 5 note**: this requirement applies to the **x64** build (mpv). The **x86** build does not use mpv: it links the FFmpeg i686 **vendored** in `third_party/ffmpeg-win32/` (there is nothing to download) — see "Phase 5" below. **Source: `mpv-player-windows` (sourceforge), `mpv-dev-i686-20210530-git-fd8c673.7z`** MinGW i686 build from 2021-05-30, EARLIER than mpv dropping support for Windows 7: its import table only uses DLLs and symbols that exist in Win7 SP1. The new builds (media-kit 20241021, shinchiro 2026) import STATICALLY W8+ symbols (`AdjustWindowRectExForDpi`, `GetSystemMetricsForDpi` from USER32 W10, `GetDpiForMonitor` from SHCORE, api-ms-win-core-winrt|path|synch) and on Win7 the loader dies at startup with *"The procedure entry point AdjustWindowRectExForDpi could not be located in the dynamic link library USER32.dll"*. Likewise do NOT use `shinchiro/mpv-winbuild-cmake` from May 2026 onward: they embed an OpenSSL 3 from master with the broken commit `1e1ea715` that aborts with `lock != NULL` when initializing mpv. This MinGW build compiles ffmpeg+OpenSSL INSIDE the DLL (it brings no separate dependencies), uses the system `msvcrt` and does not import vulkan-1.dll:
    - `libmpv-1.dll` → rename to `libmpv-2.dll` (the CMake/workflow look for it that way for compatibility with dist.iss and the import lib)
    - headers `include/*.h` → rearrange to `include/mpv/*.h` (the layout CMake expects)
@@ -27,10 +29,17 @@ and the rest stays the same (Qt5, OpenGL, SQLite). This section only runs if
 
 ## Steps (on Windows)
 
+The tree is not in the repository, so bring it first — that is the same thing
+the CI does, minus the automation:
+
+```sh
+# fetch the Qt tree (tag + sha256 pinned in .github/workflows/windows.yml)
+curl -L -o qt-win32.7z https://github.com/marlo4220mc/qt5-kde-win-build/releases/download/qt-5.15.19-kde-r96/qt-win32.7z
+7z x qt-win32.7z -othird_party -y && mv third_party/qt-win32/* third_party/ && rmdir third_party/qt-win32
+```
+
 ```sh
 # in the project folder
-# use the vendored Qt tree, NOT an installed C:/Qt/5.15.2 (that is the EOL
-# official build the vendor exists to replace)
 cmake -B build -DCMAKE_PREFIX_PATH="%CD%\third_party\qt-win32" -G "Visual Studio 17 2022" -A Win32
 cmake --build build --config Release
 
@@ -107,11 +116,27 @@ What changes in x86 with respect to the mpv sections of this document:
 ## Vendored Qt and OpenSSL
 
 Both Windows workflows get Qt from `third_party/qt-win32` (x86/Win7) and
-`third_party/qt-win64` (x64) through `Qt5_DIR`. **There is no `install-qt-action`
-any more and no Qt is downloaded**: `jurplel/install-qt-action@v4` only ever
+`third_party/qt-win64` (x64), **fetched from a release** of the build repository
+rather than committed here. **There is no `install-qt-action` any more and no Qt
+is built or downloaded from Qt**: `jurplel/install-qt-action@v4` only ever
 offered **5.15.2 (September 2021)**, and the official Windows binaries stop
-there — the 5.15.19 archive is source only. The vendored trees are what let the
-Windows packages run a Qt with the last four years of fixes instead.
+there — the 5.15.19 archive is source only. That tree is what lets the Windows
+packages run a Qt with the last four years of fixes instead.
+
+Two rules keep this honest, because a binary fetched from somewhere is exactly
+the thing that rots silently:
+
+- **Pinned tag, not "latest".** `QT_TAG` names one published release. A floating
+  tag would change the Qt of every run without anyone deciding it, which is the
+  same failure as a `BOM.json` that describes something other than what it
+  contains.
+- **Pinned SHA-256.** `QT_SHA32` is the digest of the exact `.7z`. The job fails
+  if the bytes differ, so a rebuilt or re-uploaded artifact cannot pass as the
+  one the app was tested against.
+
+To move forward, bump `QT_TAG` and `QT_SHA32` together (both are at the top of
+each Windows workflow) — the archive also carries its own `BOM.json` with the
+per-module commits behind it.
 
 | | x86 (`qt-win32`) | x64 (`qt-win64`) |
 |---|---|---|
@@ -131,7 +156,8 @@ Windows from the KDE maintenance branch, with pinned commits, a self-provisionin
 bootstrap and a watcher that re-triggers the build when upstream moves), so
 these trees are reproducible and are never a dead end. Provenance is verifiable
 in two independent directions: `BOM.json` records the commit and the
-`archiveSha256` of every module it actually consumed.
+`archiveSha256` of every module it actually consumed, and the workflow's
+`QT_SHA32` records the digest of the archive it actually downloaded.
 
 **OpenSSL is vendored too** (`third_party/openssl-win32|64`), the same
 precedent. `configure -openssl-runtime` bakes the OpenSSL DLL *name* into

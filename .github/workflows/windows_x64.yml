@@ -34,16 +34,60 @@ jobs:
       # two to an earlier build (tag + release asset name).
       MPV_TAG: '20260924'
       MPV_ASSET: 'mpv-dev-x86_64-20260924-git-2a4eb8067c.7z'
-      # Qt comes from the repository, not from a download. Qt stopped publishing
-      # Windows binaries at 5.15.2 and the 5.15.19 archive is source only, so the
-      # tree under third_party/qt-win64 is built ONCE and vendored (the same
-      # precedent as third_party/ffmpeg-win32). Setting Qt5_DIR here keeps the
-      # rest of this workflow unchanged: CMake consumes it via CMAKE_PREFIX_PATH
-      # and windeployqt is derived from it further down. Provenance (per-module
-      # SHA256, compiler, configure flags) is in third_party/qt-win64/BOM.json.
-      Qt5_DIR: ${{ github.workspace }}\third_party\qt-win64\lib\cmake
+      # Qt is DOWNLOADED from a release of a separate build repository, not read
+      # from this checkout and not compiled here. Qt stopped publishing Windows
+      # binaries at 5.15.2 (the 5.15.19 archive is source only), so the tree is
+      # built once from the KDE maintenance branch and published; this job fetches
+      # it by tag and verifies its SHA-256. The version, the pinned commits behind
+      # it and the recipe live in that repository (qt-sources.json); the provenance
+      # of the artifact itself travels inside it as BOM.json.
+      #
+      # Why a tag and not "latest": the tree must be the one the 5.15.19 security
+      # fixes were tested against. A floating tag would silently change the Qt of
+      # every run, which is the same class of bug as a BOM that lies about what it
+      # contains. Bump QT_TAG (and QT_SHA32) to move forward.
+      QT_TAG: qt-5.15.19-kde-r96
+      QT_SHA32: a52a89b7c0fc55415b4c0e15bec80799602356194265519957b42dd5c7de054a
+      QT_REPO: marlo4220mc/qt5-kde-win-build
     steps:
       - uses: actions/checkout@v4
+
+      # Qt tree from the build repository's release. Same precedent as the
+      # vendored FFmpeg package, except that this one is fetched rather than
+      # committed: 177 MB of DLLs have no business in an application repository.
+      - name: Fetch the prebuilt Qt tree
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = Join-Path $env:GITHUB_WORKSPACE 'third_party\qt-win64'
+          $url = "https://github.com/$env:QT_REPO/releases/download/$env:QT_TAG/qt-win64.7z"
+          $arc = Join-Path $env:RUNNER_TEMP 'qt-win64.7z'
+          "-> $url"
+          Invoke-WebRequest -Uri $url -OutFile $arc -UseBasicParsing
+          $got = (Get-FileHash -Algorithm SHA256 $arc).Hash.ToLowerInvariant()
+          if ($env:QT_SHA32 -notmatch '^[0-9a-f]{64}$' -or $got -ne $env:QT_SHA32) {
+            throw "sha256 mismatch for qt-win64.7z: got $got, pinned $env:QT_SHA32"
+          }
+          "sha256 OK: $got"
+          $sevenZip = "${env:ProgramFiles}\7-Zip\7z.exe"
+          if (-not (Test-Path $sevenZip)) { throw "7z.exe not found (expected at $sevenZip)" }
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          & $sevenZip x $arc "-o$dest" -y | Out-Null
+          # The archive carries the tree inside a top-level qt-win64/ folder, so
+          # flatten it BEFORE looking for anything. Checking first is the trap:
+          # the gate then fires on a perfectly good archive.
+          $inner = Join-Path $dest 'qt-win64'
+          if (Test-Path $inner) {
+            Get-ChildItem $inner -Force | Move-Item -Destination $dest -Force
+            Remove-Item $inner -Recurse -Force
+          }
+          if (-not (Test-Path (Join-Path $dest 'bin\Qt5Core.dll'))) {
+            throw "extracted tree has no bin\Qt5Core.dll: $dest"
+          }
+          "Qt tree ready: $((Get-ChildItem $dest -Recurse -File).Count) files"
+          # Every later step reads $env:Qt5_DIR; it was an env: entry before and
+          # cannot be one now, because the tree does not exist until this step.
+          "Qt5_DIR=$(Join-Path $dest 'lib\cmake')" >> $env:GITHUB_ENV
 
       # MODERN x64 libmpv. The package already brings `libmpv-2.dll` with the correct
       # name and `include/mpv/*.h` (unlike the 2021 i686, there is no need to
