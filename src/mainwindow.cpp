@@ -1,9 +1,11 @@
 #include "mainwindow.h"
 
 #include <QAbstractButton>
+#include <QApplication>
 #include <QButtonGroup>
 #include <QCursor>
 #include <QGuiApplication>
+#include <QHelpEvent>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
@@ -28,8 +30,10 @@
 #include <QDir>
 #include <QFile>
 #include <QFrame>
+#include <QPointer>
 #include <QProcess>
 #include <QTimer>
+#include <QToolTip>
 #include <functional>
 
 #include "models.h"
@@ -1001,8 +1005,161 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
         QMainWindow::keyPressEvent(event);
 }
 
+namespace {
+// Tooltip state for MainWindow::eventFilter. The text of every widget that has
+// one lives in a dynamic property (see the comment in the filter): QWidget's own
+// property is emptied so Qt does not show the tip by itself, which is what lets
+// the delay be driven from here.
+const char *const kTooltipText = "_nt_tip_text";
+
+QPointer<QWidget> g_tipArmed;   // widget whose tip is waiting to be shown
+QTimer *g_tipTimer = nullptr;
+
+// Gap between the anchor and its tip.
+constexpr int kTipGap = 10;
+
+// How long the pointer has to rest before the tip appears. Qt's own
+// SH_ToolTip_WakeUpDelay is around a second, which along the transport row feels
+// slow; this is what the rest of the UI is tuned against.
+constexpr int kTipWaitMs = 450;
+
+// Qt places the tip itself: QToolTip::showText() offsets whatever point it gets
+// by (2, cursor height) and flips it above when it does not fit below
+// (qtooltip.cpp, placeTip). Flipping "above the cursor" is what puts it ON the
+// player's control buttons, because the cursor is on the button.
+//
+// So the tip is shown and then placed exactly where it belongs: once Qt has built
+// it, its real size is known (it is the only thing that cannot be guessed, the
+// label wraps and the sheet sets the font), and the window is moved to sit below
+// the anchor, or above it when there is no room -- clear of the anchor either
+// way. The move happens in the same batch of events as the show, before the
+// frame is composited, so it is not seen as a jump.
+void tooltipShow()
+{
+    QWidget *w = g_tipArmed;
+    g_tipArmed = nullptr;
+    if (!w || !w->window()->isActiveWindow())
+        return;
+    const QString text = w->property(kTooltipText).toString();
+    if (text.isEmpty())
+        return;
+
+    QToolTip::showText(w->mapToGlobal(QPoint(w->width() / 2, 0)), text, w);
+
+    const QPoint anchorTopLeft = w->mapToGlobal(QPoint(0, 0));
+    const QRect anchor(anchorTopLeft, QSize(w->width(), w->height()));
+
+    QTimer::singleShot(0, w, [w, anchor] {
+        QWidget *tip = nullptr;
+        for (QObject *o : QApplication::topLevelWidgets()) {
+            auto *c = qobject_cast<QWidget *>(o);
+            if (c && c->objectName() == QLatin1String("qtooltip_label"))
+                tip = c;
+        }
+        if (!tip || !tip->isVisible())
+            return;
+        const QSize sz = tip->size();
+        QScreen *scr = QGuiApplication::screenAt(anchor.topLeft());
+        if (!scr)
+            scr = QGuiApplication::primaryScreen();
+        const QRect avail = scr ? scr->availableGeometry() : QRect(0, 0, 1920, 1080);
+
+        int x = anchor.left();
+        int y = anchor.bottom() + kTipGap;
+        if (y + sz.height() > avail.bottom())
+            y = anchor.top() - sz.height() - kTipGap;
+        x = qBound(avail.left(), x, avail.right() - sz.width());
+        y = qBound(avail.top(), y, avail.bottom() - sz.height());
+        tip->move(x, y);
+    });
+}
+
+void tooltipArm(QWidget *w)
+{
+    if (!w || w->property(kTooltipText).toString().isEmpty())
+        return;
+    if (g_tipArmed == w)
+        return;   // already waiting: do not restart the delay while moving
+    if (!g_tipTimer) {
+        g_tipTimer = new QTimer(qApp);
+        g_tipTimer->setSingleShot(true);
+        QObject::connect(g_tipTimer, &QTimer::timeout, &tooltipShow);
+    }
+    g_tipArmed = w;
+    g_tipTimer->start(kTipWaitMs);
+}
+
+void tooltipDisarm()
+{
+    g_tipArmed = nullptr;
+    if (g_tipTimer)
+        g_tipTimer->stop();
+}
+
+QWidget *tooltipArmed() { return g_tipArmed; }
+} // namespace
+
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
+    // TOOLTIP: Qt shows ONE box for the whole row of controls.
+    //
+    // Qt hides the tip on any Leave (QTipLabel installs itself as an app-wide
+    // event filter, qtooltip.cpp:188), but then the next one comes back almost
+    // immediately: while a tip has been showing, the wake-up delay drops from
+    // SH_ToolTip_WakeUpDelay to a hardcoded 20 ms, and that fast path stays
+    // armed for SH_ToolTip_FallAsleepDelay (~10 s) after the last show
+    // (qapplication.cpp:1904 and :3062). Going along the transport buttons
+    // therefore reads as a single box whose text changes.
+    //
+    // The delay is driven from the app instead, so leaving a button really closes
+    // its tip and the next one waits the normal time under the button it belongs
+    // to:
+    //   - the FIRST QEvent::ToolTip of a widget is consumed: the text moves to a
+    //     dynamic property and QWidget::toolTip is emptied, so Qt shows nothing by
+    //     itself (that property is also what carries the translated text);
+    //   - Enter arms a single-shot timer with the normal wake delay;
+    //   - Leave stops it and closes the tip;
+    //   - the timer calls QToolTip::showText(), so the tip is still Qt's own
+    //     window: styled by the sheet, positioned by Qt.
+    if (watched->isWidgetType()) {
+        auto *w = qobject_cast<QWidget *>(watched);
+        switch (event->type()) {
+        case QEvent::ToolTip:
+            if (!w->toolTip().isEmpty()) {
+                // First contact: take the text over and swallow the event, so Qt
+                // never puts its own window on screen by itself.
+                const QString text = w->toolTip();
+                w->setProperty(kTooltipText, text);
+                w->setToolTip(QString());
+                // Emptying toolTip() also drops what a screen reader used to get
+                // as this widget's description, so it is kept there.
+                if (w->accessibleDescription().isEmpty())
+                    w->setAccessibleDescription(text);
+                tooltipArm(w);
+                return true;
+            }
+            if (!w->property(kTooltipText).toString().isEmpty()) {
+                tooltipArm(w);
+                return true;
+            }
+            break;
+        case QEvent::Enter:
+            if (!w->property(kTooltipText).toString().isEmpty())
+                tooltipArm(w);
+            break;
+        case QEvent::Leave:
+            if (!w->property(kTooltipText).toString().isEmpty()) {
+                if (tooltipArmed() == w)
+                    tooltipDisarm();
+                // The tip goes away at once instead of lingering while the
+                // pointer crosses over to the next control.
+                QToolTip::hideText();
+            }
+            break;
+        default:
+            break;
+        }
+    }
     if (event->type() == QEvent::Resize && watched == m_miniTitle) {
         updateMiniTitleElide();
         return false;
