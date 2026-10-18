@@ -1017,6 +1017,9 @@ QTimer *g_tipTimer = nullptr;
 
 // Gap between the anchor and its tip.
 constexpr int kTipGap = 10;
+// The offset Qt adds to the point it is given, (2, cursor height), measured on
+// this session (qtooltip.cpp, placeTip).
+constexpr int kCursorH = 16;
 
 // How long the pointer has to rest before the tip appears. Qt's own
 // SH_ToolTip_WakeUpDelay is around a second, which along the transport row feels
@@ -1044,7 +1047,21 @@ void tooltipShow()
     if (text.isEmpty())
         return;
 
-    QToolTip::showText(w->mapToGlobal(QPoint(w->width() / 2, 0)), text, w);
+    // Qt builds the tip at the point it is given plus (2, cursor height), and
+    // repositions a REUSED tip from that same point (qtooltip.cpp, showText ->
+    // placeTip). So the point decides where the tip lands in BOTH cases, and
+    // giving it the TOP edge of the anchor -- which is what this used to do --
+    // is what left the tip sitting over the button when moving quickly from one
+    // control to the next, the case where the previous tip is still on screen
+    // and gets reused. It is given the bottom edge instead, so it lands just
+    // below the anchor.
+    //
+    // Hiding the tip before showing the new one is NOT the fix for that: Qt's
+    // hideText() only starts the fade, so the next tip was created while the
+    // previous one was still visible and two boxes showed at once.
+    const QPoint anchorTopLeft2 = w->mapToGlobal(QPoint(0, 0));
+    const int below = anchorTopLeft2.y() + w->height() + 1;
+    QToolTip::showText(QPoint(anchorTopLeft2.x() - 2, below - kCursorH), text, w);
 
     const QPoint anchorTopLeft = w->mapToGlobal(QPoint(0, 0));
     const QRect anchor(anchorTopLeft, QSize(w->width(), w->height()));
