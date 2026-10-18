@@ -768,6 +768,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     setCentralWidget(central);
     setStyleSheet(nt::styleSheet());
+    // A stylesheet set on a widget re-resolves its WHOLE subtree, so this line
+    // overwrites any rule that a page set on one of its own widgets while being
+    // built. WatchPage needs exactly one such rule -- the tooltips of its control
+    // bar do not receive the app sheet, see WatchPage::applyAccent -- so it is
+    // re-applied here, after this line, instead of in its constructor.
+    m_watch->applyAccent();
     // QMainWindow's status bar shows no message at all: it is hidden so the
     // bottom navigation bar touches the window's bottom edge (without the
     // empty bordered strip that stayed below).

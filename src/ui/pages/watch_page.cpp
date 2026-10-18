@@ -2302,6 +2302,24 @@ void WatchPage::onVolumeChanged()
 
 void WatchPage::applyAccent()
 {
+    // CONTROL BAR TOOLTIPS. The tooltips of this bar do NOT receive the app sheet,
+    // so they came out with a fully transparent background. Measured on the real
+    // Qt path (QEvent::ToolTip, after the fade-in), alpha of the tooltip
+    // background of the buttons of this bar: #00000000, alpha 0 -- against
+    // #202020, alpha 255 on a button of a normal page and on one of the mini bar.
+    // The ancestry is the reason: m_overlay is a QStackedWidget with
+    // WA_TranslucentBackground, and Qt resolves the tooltip window's palette down
+    // that chain, where Window and ToolTipBase are #00000000, so QSSStyle has no
+    // background-color to paint.
+    //
+    // It goes HERE and not in the constructor: MainWindow installs the app sheet
+    // on ITSELF at the end of its constructor, AFTER this page is built, and a
+    // sheet set on a parent re-resolves the whole subtree -- set from here it was
+    // simply overwritten and the tooltips stayed transparent. This method is
+    // called right after that line (mainwindow.cpp) and on every accent change.
+    if (m_ctrlBar)
+        m_ctrlBar->setStyleSheet(nt::tooltipRule());
+
     // Subscribe button: repaints with the state (subscribed / live accent) and the
     // current accent color.
     if (m_subscribeBtn)

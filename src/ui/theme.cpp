@@ -77,13 +77,13 @@ QMainWindow { background-color: #0F0F0F; }
    SYSTEM THEME palette (outside the app's control), so the text could come out
    unreadable depending on the desktop. App style: popover background,
    kText text and border, like the rest of the surfaces. QToolTip is a class,
-   not an id: Qt applies it to the tooltip automatically. */
+   not an id: Qt applies it to the tooltip automatically.
+
+   The declarations live in nt::tooltipRule() (theme.h) so that the control bar of
+   the player, which needs the rule on its own widget, uses the SAME values: see
+   the comment where m_ctrlBar sets its sheet. */
 QToolTip {
-    background-color: @POPOVER@;
-    color: @TEXT@;
-    border: 1px solid @BORDER@;
-    padding: 3px 7px;
-    font-size: 12px;
+@TOOLTIP_DECLS@
 }
 
 /* (No rules for shellPanel/contentHost: no setObjectName in the code used
@@ -725,6 +725,7 @@ QWidget#playerArea { background-color: #000000; }
     // kHover #242424, so the same role had two values depending on where it was
     // painted from. Now there is a single source.
     return qss.replace(QStringLiteral("@ACCENT@"), accentHex())
+              .replace(QStringLiteral("@TOOLTIP_DECLS@"), tooltipDeclarations())
               .replace(QStringLiteral("@ACCENT_PRESSED@"), accentPressedHex())
               .replace(QStringLiteral("@ACCENT_HOVER@"), accentHoverHex())
               .replace(QStringLiteral("@ACCENT_A10@"), accentAlpha(26))
@@ -1006,6 +1007,25 @@ bool themeSelfTest()
                 "el :focus de las pestanas del canal no pinta marco");
         }
     }
+
+    // The control bar of the player carries its OWN copy of the tooltip rule,
+    // because the tooltip windows under it do not receive the global sheet and
+    // came out with a transparent background (measured: alpha 0 against 255
+    // everywhere else). If the two copies drift, the tooltips of the bar change
+    // colour silently. These checks tie them together and pin the opaque value.
+    chk(qss.contains(QStringLiteral("QToolTip"))
+            && qss.contains(tooltipDeclarations()),
+        "la hoja global trae la regla del tooltip con las declaraciones compartidas");
+    chk(tooltipRule() == QStringLiteral("QToolTip { %1 }").arg(tooltipDeclarations()),
+        "tooltipRule() es la regla completa, con selector");
+    // The opacity is what the bug was about, and QColor::name() drops the alpha, so
+    // the token is checked as a value and not as text: a translucent kPopover
+    // would put back exactly the bug this guard exists for.
+    chk(kPopover.alpha() == 255, "kPopover es opaco (alpha 255)");
+    chk(tooltipDeclarations().contains(kPopover.name()),
+        "la regla del tooltip usa kPopover (opaco)");
+    chk(!tooltipDeclarations().contains(QStringLiteral("rgba")),
+        "la regla del tooltip no usa rgba (seria transparente otra vez)");
 
     std::fprintf(stderr, "THEME %s (%d reglas, %d selectores)\n",
                  fail == 0 ? "OK" : "FAIL", reglas, (int)veces.size());

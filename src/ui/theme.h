@@ -28,6 +28,30 @@ inline const QColor kHandle(0x2F, 0x2F, 0x2F);
 inline const QColor kHandleHover(0x3A, 0x3A, 0x3A);
 inline const QColor kPopover(0x20, 0x20, 0x20);
 
+// Declarations of the QToolTip rule, WITHOUT the selector and WITHOUT the
+// placeholders, so the single global sheet and the player's control bar can both
+// use them and cannot drift apart. The bar needs its own copy because the
+// tooltip windows of the bar do not receive the global sheet (measured: they come
+// out with a transparent background, see the comment where m_ctrlBar sets its
+// sheet).
+inline QString tooltipDeclarations()
+{
+    return QStringLiteral(
+        "background-color: %1;"
+        "color: %2;"
+        "border: 1px solid %3;"
+        "padding: 3px 7px;"
+        "font-size: 12px;")
+        .arg(kPopover.name(), kText.name(), kBorder.name());
+}
+
+// The same rule, ready to be used inside a QToolTip { } block: for the control
+// bar of the player, whose tooltips the global sheet does not reach.
+inline QString tooltipRule()
+{
+    return QStringLiteral("QToolTip { %1 }").arg(tooltipDeclarations());
+}
+
 // Secondary text, in two weights. kMuted (#8F8F8F, 5.9:1 on kBg) is the
 // dimmed one for short labels; these are for the long blocks, which are really
 // read and so are not left at kMuted:
