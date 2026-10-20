@@ -49,6 +49,8 @@
 #include "ui/pages/library_page.h"
 #include "ui/pages/playlist_page.h"
 #include "ui/pages/settings_page.h"
+#include "ui/pages/downloads_page.h"
+#include "downloader/download_manager.h"
 #include "ui/pages/history_page.h"
 #include "ui/pages/search_page.h"
 #include "ui/pages/watch_page.h"
@@ -567,6 +569,33 @@ MainWindow::MainWindow(QWidget *parent)
     m_historyPage = new HistoryPage(&m_history, &m_videoCache, m_libraryThumbs,
                                    &m_watchLater, &m_playlists, this);
     m_settingsPage = new SettingsPage(&m_settings, this);
+    // The downloads page and its manager. The manager is the one that asks
+    // for the master, plans the download and keeps the state.
+    m_downloadsPage = new DownloadsPage(&m_downloads, this);
+    m_downloadManager = new dl::DownloadManager(m_yt, &m_downloads, this);
+    connect(m_downloadManager, &dl::DownloadManager::changed, this, [this]() {
+        if (m_downloadsPage)
+            m_downloadsPage->reload();
+    });
+    connect(m_watch, &WatchPage::downloadRequested, this,
+            [this](const QString &videoId, const QString &title,
+                   const QString &channel) {
+        m_downloadManager->start(videoId, title, channel, m_player.maxHeight());
+    });
+    connect(m_downloadsPage, &DownloadsPage::removeRequested, this,
+            [this](const QString &videoId) {
+        m_downloadManager->remove(videoId);
+    });
+    connect(m_downloadsPage, &DownloadsPage::retryRequested, this,
+            [this](const QString &videoId) {
+        // The retry starts from scratch: the partials of a failed download
+        // may be half written.
+        m_downloadManager->remove(videoId);
+        DownloadInfo info;
+        if (m_downloads.get(videoId, info))
+            m_downloadManager->start(videoId, info.title, info.channel,
+                                     m_player.maxHeight());
+    });
     connect(m_settingsPage, &SettingsPage::qualityChanged,
             this, [this](const QString &val) {
                 if (val == QStringLiteral("auto")) {
@@ -680,6 +709,10 @@ MainWindow::MainWindow(QWidget *parent)
     m_pages->addWidget(m_settingsPage);
     m_pages->addWidget(m_playlist);
     m_pages->addWidget(m_historyPage);
+    // The downloads page goes LAST (index 8): inserting it in the middle
+    // would shift every index the app uses (the nav group, the inverse map
+    // of showPreviousTab, the "is the player open" check).
+    m_pages->addWidget(m_downloadsPage);
 
     connect(m_home, &HomePage::openRequested, this, &MainWindow::openWatch);
     connect(m_home, &HomePage::resumeRequested, this,
@@ -1240,6 +1273,8 @@ void MainWindow::setupNav()
         nt::bindText(b2, "nav.library");
         QToolButton *b3 = addBtn(QStringLiteral("settings"), 3);
         nt::bindText(b3, "nav.settings");
+        QToolButton *b4 = addBtn(QStringLiteral("downloads"), 4);
+        nt::bindText(b4, "nav.downloads");
     }
     lay->addStretch(1);
 
@@ -1269,6 +1304,9 @@ void MainWindow::onNavButton(int index)
     case 3:
         m_currentTab = 5;
         break;
+    case 4:
+        m_currentTab = 8;  // the downloads page is the last one
+        break;
     default:
         return;
     }
@@ -1277,6 +1315,8 @@ void MainWindow::onNavButton(int index)
         m_library->reload();
     else if (m_currentTab == 5) {
         m_settingsPage->setVisible(true);
+    } else if (m_currentTab == 8 && m_downloadsPage) {
+        m_downloadsPage->reload();
     }
 }
 
@@ -1667,6 +1707,43 @@ void MainWindow::goLibrary()
     m_library->reload();
 }
 
+// Queues a download by id.
+void MainWindow::queueDownload(const QString &videoId)
+{
+    if (!m_downloadManager)
+        return;
+    m_downloadManager->start(videoId, QString(), QString(), m_player.maxHeight());
+}
+
+// Queues the download of a video: it is what the button of the Player does.
+// The title and the channel are not known here (the download is planned from
+// the master), so the row is completed when the details arrive.
+void MainWindow::downloadVideo(const QString &videoId)
+{
+    if (!m_downloadManager)
+        return;
+    m_downloadManager->start(videoId, QString(), QString(), m_player.maxHeight());
+}
+
+QAbstractButton *MainWindow::downloadButton()
+{
+    if (!m_watch)
+        return nullptr;
+    return m_watch->findChild<QAbstractButton *>(
+        QStringLiteral("downloadButton"));
+}
+
+// Opens the "Descargas" tab: the nav button of the bottom bar (id 4).
+void MainWindow::openDownloads()
+{
+    m_currentTab = 8;
+    m_pages->setCurrentIndex(m_currentTab);
+    if (m_downloadsPage)
+        m_downloadsPage->reload();
+    if (m_navButtons.size() > 4)
+        m_navButtons[4]->setChecked(true);
+}
+
 void MainWindow::openLibrary()
 {
     goLibrary();
@@ -1766,7 +1843,8 @@ void MainWindow::showPreviousTab()
     // Channel (2) and player (3) have no nav button: mark none.
     if (m_currentTab == 2 || m_currentTab == 3)
         return;
-    const int nav = m_currentTab == 4 ? 2 : m_currentTab == 5 ? 3 : m_currentTab;
+    const int nav = m_currentTab == 4 ? 2 : m_currentTab == 5 ? 3
+                   : m_currentTab == 8 ? 4 : m_currentTab;
     if (nav < m_navButtons.size())
         m_navButtons[nav]->setChecked(true);
 }

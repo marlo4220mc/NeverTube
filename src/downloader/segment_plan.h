@@ -32,6 +32,16 @@ struct Segment
     qint64 size = 0;   // Content-Length when known, 0 otherwise
 };
 
+// The init segment of a media playlist (#EXT-X-MAP). It is the "moov" of an
+// fMP4: WITHOUT it the file has no header and nothing can read it (measured:
+// ffmpeg answers "trun track id unknown, no tfhd was found"). It is a
+// separate URL and it is NOT one of the segments.
+struct InitSegment
+{
+    QString url;
+    bool present = false;
+};
+
 // The video part of the plan: the chosen variant of the master.
 struct VideoPlan
 {
@@ -40,6 +50,7 @@ struct VideoPlan
     int height = 0;       // RESOLUTION of the variant
     QString codecs;       // CODECS attribute of the variant
     qint64 bandwidth = 0; // BANDWIDTH attribute (bits/s)
+    double duration = 0.0; // the sum of the EXTINF of the media playlist
     bool valid = false;
 };
 
@@ -62,6 +73,7 @@ struct Plan
     VideoPlan video;
     AudioPlan audio;
     qint64 estimatedBytes = 0;  // video + audio, from BANDWIDTH x duration
+    double videoDuration = 0.0;  // the real duration of the video track
     double durationSeconds = 0.0;
     bool valid = false;
     QString error;  // empty when valid
@@ -88,12 +100,22 @@ Plan planFromMaster(const QByteArray &masterBody, int maxHeight,
 // returns its segments in order, with their #EXTINF durations. A segment
 // that follows an #EXT-X-BYTERANGE is still one segment: the downloader
 // asks for the whole thing, so the byte range is only informational here.
-QVector<Segment> segmentsFromMediaPlaylist(const QByteArray &mediaBody);
+//
+// `initOut` receives the #EXT-X-MAP (the init segment) when the playlist has
+// one: an fMP4 variant NEEDS it at the front of the file, and a playlist
+// without it cannot be read at all.
+QVector<Segment> segmentsFromMediaPlaylist(const QByteArray &mediaBody,
+                                            InitSegment *initOut = nullptr);
 
 // Estimated size in bytes of a stream of `bandwidth` bits/s lasting
 // `durationSeconds`. The master carries BANDWIDTH, so the size of a download
 // is known BEFORE starting, with no extra request: measured, the estimate
 // for the 1080p master was 354.6 MB against 343 MB real (1.7 %).
 qint64 estimateBytes(qint64 bandwidth, double durationSeconds);
+
+// The total duration of a media playlist: the sum of its #EXTINF. It is
+// what gives the size of the download (BANDWIDTH x duration) before it
+// starts, with no extra request.
+double durationOfMediaPlaylist(const QByteArray &mediaBody);
 
 } // namespace dl

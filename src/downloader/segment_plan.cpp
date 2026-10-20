@@ -238,7 +238,8 @@ Plan planFromMaster(const QByteArray &masterBody, int maxHeight,
     return plan;
 }
 
-QVector<Segment> segmentsFromMediaPlaylist(const QByteArray &mediaBody)
+QVector<Segment> segmentsFromMediaPlaylist(const QByteArray &mediaBody,
+                                            InitSegment *initOut)
 {
     QVector<Segment> out;
     if (mediaBody.isEmpty())
@@ -249,7 +250,17 @@ QVector<Segment> segmentsFromMediaPlaylist(const QByteArray &mediaBody)
     bool havePending = false;
 
     for (const QString &line : lines) {
-        if (line.startsWith(QLatin1String("#EXTINF:"))) {
+        if (line.startsWith(QLatin1String("#EXT-X-MAP:"))) {
+            // The init segment ("moov") of an fMP4. It is NOT one of the
+            // segments: it goes once, at the front of the file.
+            if (initOut) {
+                const QString uri = attr(line, QStringLiteral("URI"));
+                if (!uri.isEmpty()) {
+                    initOut->url = uri;
+                    initOut->present = true;
+                }
+            }
+        } else if (line.startsWith(QLatin1String("#EXTINF:"))) {
             const QString rest = line.mid(int(QLatin1String("#EXTINF:").size()));
             const int comma = rest.indexOf(QLatin1Char(','));
             pendingDuration = rest.left(comma >= 0 ? comma : rest.size()).toDouble();
@@ -263,6 +274,14 @@ QVector<Segment> segmentsFromMediaPlaylist(const QByteArray &mediaBody)
         }
     }
     return out;
+}
+
+double durationOfMediaPlaylist(const QByteArray &mediaBody)
+{
+    double total = 0.0;
+    for (const Segment &s : segmentsFromMediaPlaylist(mediaBody))
+        total += s.duration;
+    return total;
 }
 
 qint64 estimateBytes(qint64 bandwidth, double durationSeconds)

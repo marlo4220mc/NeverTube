@@ -20,6 +20,7 @@ class ThumbnailCache;
 class Yt;
 
 class QFrame;
+class QAbstractButton;
 class QLabel;
 class QListWidget;
 class QMenu;
@@ -61,6 +62,9 @@ public:
     bool playerDetached() const { return m_playerDetached; }
 
 signals:
+    // The user wants to download the video that is on screen.
+    void downloadRequested(const QString &videoId, const QString &title,
+                           const QString &channel);
     void backRequested();
     void channelRequested(const QString &channelId, const QString &name);
     void fullscreenToggled(bool on);
@@ -205,6 +209,7 @@ private:
     QPushButton *m_starBtn = nullptr;
     QPushButton *m_watchLaterBtn = nullptr;
     QPushButton *m_playlistBtn = nullptr;
+    QPushButton *m_downloadBtn = nullptr;
     nt::Icon m_likeIcon = nt::Icon::Thumb;
     nt::Icon m_dislikeIcon = nt::Icon::ThumbDown;
     nt::Icon m_shareIcon = nt::Icon::Share;
@@ -212,6 +217,7 @@ private:
     nt::Icon m_starFilledIcon = nt::Icon::StarFilled;
     nt::Icon m_watchLaterIcon = nt::Icon::WatchLater;
     nt::Icon m_playlistIcon = nt::Icon::ListAdd;
+    nt::Icon m_downloadIcon = nt::Icon::Download;
     QPushButton *m_quality;
     QFrame *m_qualityMenu;
     QWidget *m_qualityMenuAnchor;

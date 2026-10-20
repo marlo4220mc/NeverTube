@@ -596,6 +596,23 @@ QPushButton#subscribe[subscribed="true"] {
 QPushButton#subscribe[subscribed="true"]:hover { background: @SELECTION@; }
 
 /* Compact channel rows (channel_row) */
+QWidget#downloadRow {
+  background-color: #181818;
+  border: 1px solid @BORDER@;
+  border-radius: 10px;
+}
+QLabel#downloadTitle { color: @TEXT@; background: transparent; }
+QLabel#downloadMeta { color: @MUTED@; background: transparent; }
+QProgressBar#downloadProgress {
+  background-color: #262626;
+  border: none;
+  border-radius: 2px;
+  height: 4px;
+}
+QProgressBar#downloadProgress::chunk {
+  background-color: @ACCENT@;
+  border-radius: 2px;
+}
 QLabel#channelRowTitle { color: @TEXT@; background: transparent; }
 QLabel#channelRowMeta  { color: @MUTED@; background: transparent; }
 

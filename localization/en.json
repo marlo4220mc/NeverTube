@@ -1,11 +1,13 @@
 {
-  "language": { "code": "en", "name": "English" },
+  "language": {
+    "code": "en",
+    "name": "English"
+  },
   "strings": {
     "nav.home": "Home",
     "nav.search": "Search",
     "nav.library": "Library",
     "nav.settings": "Settings",
-
     "mini.nothing": "Nothing playing",
     "mini.playPause": "Play / Pause\nK",
     "mini.next": "Next\nN",
@@ -13,7 +15,6 @@
     "mini.close": "Close and stop",
     "mini.noThumb": "no thumbnail",
     "mini.live": "LIVE",
-
     "common.cancel": "Cancel",
     "common.accept": "OK",
     "common.loading": "Loading…",
@@ -25,7 +26,6 @@
     "common.options": "Options",
     "common.showAll": "Show all",
     "common.showLess": "Show less",
-
     "home.title": "Home",
     "home.refresh": "  Refresh",
     "home.continue": "Continue watching",
@@ -37,13 +37,11 @@
     "home.emptyTitle": "No personalized content yet",
     "home.emptyBody": "Play a video or subscribe to a channel from the search page to fill your Continue watching, Discover and New from your subscriptions. In the meantime, Recommended and Trending are above.",
     "home.goSearch": "Go to Search",
-
     "history.title": "History",
     "history.clear": "Clear watch history",
     "history.clearBody": "The %1 videos in your history will be deleted. This action cannot be undone.",
     "history.empty": "You haven't watched any video yet. The ones you open will appear here.",
     "history.remove": "Remove from history",
-
     "search.title": "Search",
     "search.placeholder": "Search YouTube…",
     "search.button": "Search",
@@ -58,7 +56,6 @@
     "search.removeOne": "Delete this search",
     "search.suggestHistory": "Your searches",
     "search.tabHint": "Take this search with Tab",
-
     "channel.title": "Channel",
     "channel.copyTip": "Copy the channel link",
     "channel.shareA11y": "Share the channel",
@@ -76,9 +73,7 @@
     "channel.emptyShorts": "This channel has no Shorts.",
     "channel.emptyLive": "This channel has no live streams.",
     "channel.emptyVideos": "This channel has no videos.",
-
     "video.liveBadge": "Live",
-
     "library.title": "Library",
     "library.subscriptions": "Subscriptions",
     "library.manage": "Manage",
@@ -94,7 +89,6 @@
     "library.unfollow": "Unfollow",
     "library.removeLike": "Remove from Liked",
     "library.manageSubs": "Manage subscriptions",
-
     "playlist.newName": "New playlist",
     "playlist.nameField": "Name:",
     "playlist.create": "Create",
@@ -110,7 +104,6 @@
     "playlist.deleteBody": "%1 will be deleted along with its %2 videos. This action cannot be undone.",
     "playlist.this": "this playlist",
     "playlist.empty": "This playlist has no videos yet. Add them from a video's menu.",
-
     "row.watchLater.remove": "Remove from Watch later",
     "row.watchLater.add": "Save to Watch later",
     "row.addToPlaylist": "Add to playlist",
@@ -119,7 +112,6 @@
     "row.share": "Share",
     "row.linkCopied": "Link copied",
     "row.viewChannel": "View channel",
-
     "player.playPause": "Play / Pause\nK",
     "player.prev": "Previous\nP",
     "player.next": "Next\nN",
@@ -130,7 +122,6 @@
     "player.addToPlaylist": "Add to playlist",
     "player.quality": "Video quality",
     "player.fullscreen": "Fullscreen\nF",
-
     "watch.like": "Like",
     "watch.dislike": "Dislike",
     "watch.favorite": "Favorite",
@@ -144,7 +135,6 @@
     "watch.removeFromQueue": "Remove from queue",
     "watch.live": "LIVE",
     "watch.qualityTip": "Video quality: %1p",
-
     "fmt.views": "%1 views",
     "fmt.today": "today",
     "fmt.days": "%1 d ago",
@@ -152,7 +142,6 @@
     "fmt.months": "%1 mo ago",
     "fmt.years": "%1 y ago",
     "fmt.metaSep": "  •  ",
-
     "error.noStreamUrl": "No streaming URL was obtained.",
     "error.recoveryFailed": "Playback was interrupted and could not be recovered.",
     "error.network": "Playback was interrupted (network).",
@@ -169,9 +158,7 @@
     "error.playerInvalid": "invalid player response (different videoId)",
     "error.hlsMissing": "player OK but with no hlsManifestUrl",
     "error.masterEmpty": "empty master",
-
     "placeholder.soon": "Coming soon.",
-
     "accent.red": "Red (default)",
     "accent.blue": "Blue",
     "accent.green": "Green",
@@ -179,20 +166,17 @@
     "accent.purple": "Purple",
     "accent.cyan": "Cyan",
     "accent.pink": "Pink",
-
     "codec.av1": "AV1 hardware (optimal)",
     "codec.vp9": "VP9 hardware",
     "codec.h264": "H.264 hardware",
     "codec.soft": "No acceleration (CPU)",
     "codec.unknown": "Not detected",
     "codec.redetect": "Detect again",
-
     "settings.title": "Settings",
     "settings.section.playback": "PLAYBACK",
     "settings.section.interface": "INTERFACE",
     "settings.section.data": "DATA",
     "settings.section.about": "ABOUT",
-
     "settings.quality": "Playback quality",
     "settings.quality.auto": "Auto",
     "settings.nextMode": "\"Up next\" mode",
@@ -213,7 +197,6 @@
     "settings.volumeMaxTitle": "Volume above 100%",
     "settings.volumeMaxBody": "Raising the maximum volume to %1 can cause permanent hearing damage. Use it only with external speakers and at a comfortable level. When you close the app the volume will return to 100% even if you raise it higher. Continue?",
     "settings.volumeMaxNote": "For safety, the volume is only saved up to 100%. When you restart the app, even if the setting is higher, playback will start at 100%.",
-
     "settings.language": "Language",
     "settings.accent": "Accent color",
     "settings.accentNote": "Applied instantly: sliders, progress, highlighted buttons, text selection and active icons.",
@@ -222,18 +205,29 @@
     "settings.thumbSize.normal": "Normal",
     "settings.thumbSize.large": "Large",
     "settings.thumbSizeNote": "Small: 6 videos per row on Home and short rows in search, history and queue. Large: 4 per row and a bigger thumbnail.",
-
     "settings.clearThumbs": "Clear thumbnail cache",
     "settings.clearThumbsBody": "Delete all saved thumbnails? The images will be downloaded again.",
     "settings.delete": "Delete",
     "settings.resetApp": "Reset application",
     "settings.resetBody": "This action will erase the local database (history, searches, subscriptions and settings) and the thumbnail cache. No personal files or downloaded videos will be deleted. The application will restart with default values. Continue?",
     "settings.reset": "Reset",
-
     "settings.version": "Version 1.0 (nevertube_qt2)",
     "settings.aboutNote": "No telemetry: this application sends no usage, search or history data to any server. Everything stays local on your device.",
-
     "hw.detecting": "Detecting video hardware",
-    "hw.note": "Checking your device's video acceleration.\nPlayback will start when it finishes."
+    "hw.note": "Checking your device's video acceleration.\nPlayback will start when it finishes.",
+    "nav.downloads": "Downloads",
+    "watch.download": "Download",
+    "downloads.title": "Downloads",
+    "downloads.empty": "You have not downloaded anything yet. Use the download button on a video to start.",
+    "downloads.pending": "Waiting",
+    "downloads.downloading": "Downloading",
+    "downloads.muxing": "Joining tracks",
+    "downloads.paused": "Paused",
+    "downloads.done": "Ready",
+    "downloads.error": "Error",
+    "downloads.retry": "Retry",
+    "downloads.play": "Play",
+    "downloads.delete": "Delete download",
+    "downloads.openFolder": "Open folder"
   }
 }

@@ -71,7 +71,8 @@ int main(int argc, char **argv)
     // Bottom bar keys (setupNav in mainwindow.cpp).
     const QStringList keys = {QStringLiteral("home"), QStringLiteral("search"),
                               QStringLiteral("library"),
-                              QStringLiteral("settings")};
+                              QStringLiteral("settings"),
+                              QStringLiteral("downloads")};
     const QStringList states = {QStringLiteral("active"),
                                 QStringLiteral("hover"),
                                 QStringLiteral("pressed")};

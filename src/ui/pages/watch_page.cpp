@@ -939,6 +939,19 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
                &m_playlistBtn, &m_playlistIcon);
     connect(m_playlistBtn, &QPushButton::clicked, this,
             &WatchPage::showPlaylistMenu);
+    // The download button: it queues the video that is on screen. The
+    // icon-only button has no text, so its tooltip AND its accessible name
+    // ARE its label (both are bound to the same key).
+    makeAction(nt::Icon::Download, "watch.download",
+               &m_downloadBtn, &m_downloadIcon);
+    // The name is what the integration test looks for to press the button.
+    m_downloadBtn->setObjectName(QStringLiteral("downloadButton"));
+    connect(m_downloadBtn, &QPushButton::clicked, this, [this]() {
+        const VideoInfo v = m_player->current();
+        if (v.id.isEmpty())
+            return;
+        emit downloadRequested(v.id, v.title, v.channel);
+    });
     infoLay->addLayout(actionsRow);
 
     m_descLabel = new QLabel(this);
@@ -2241,6 +2254,7 @@ void WatchPage::hideOverlayControls()
         m_qualityMenuActive = false;
     }
 }
+
 
 void WatchPage::updateOverlayIcons()
 {

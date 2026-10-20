@@ -73,6 +73,33 @@
         <file>nav/settings_active_verde.png</file>
         <file>nav/settings_hover_verde.png</file>
         <file>nav/settings_pressed_verde.png</file>
+        <file>nav/downloads_active.png</file>
+        <file>nav/downloads_active_azul.png</file>
+        <file>nav/downloads_active_cian.png</file>
+        <file>nav/downloads_active_naranja.png</file>
+        <file>nav/downloads_active_purpura.png</file>
+        <file>nav/downloads_active_rojo.png</file>
+        <file>nav/downloads_active_rosa.png</file>
+        <file>nav/downloads_active_verde.png</file>
+        <file>nav/downloads_hover.png</file>
+        <file>nav/downloads_hover_azul.png</file>
+        <file>nav/downloads_hover_cian.png</file>
+        <file>nav/downloads_hover_naranja.png</file>
+        <file>nav/downloads_hover_purpura.png</file>
+        <file>nav/downloads_hover_rojo.png</file>
+        <file>nav/downloads_hover_rosa.png</file>
+        <file>nav/downloads_hover_verde.png</file>
+        <file>nav/downloads_pressed.png</file>
+        <file>nav/downloads_pressed_azul.png</file>
+        <file>nav/downloads_pressed_cian.png</file>
+        <file>nav/downloads_pressed_naranja.png</file>
+        <file>nav/downloads_pressed_purpura.png</file>
+        <file>nav/downloads_pressed_rojo.png</file>
+        <file>nav/downloads_pressed_rosa.png</file>
+        <file>nav/downloads_pressed_verde.png</file>
+        <file>nav/downloads_inactive.png</file>
+        <file>nav/downloads_disabled.png</file>
+        <file>nav/downloads_circular.png</file>
         <file>nav/home_active_naranja.png</file>
         <file>nav/home_hover_naranja.png</file>
         <file>nav/home_pressed_naranja.png</file>

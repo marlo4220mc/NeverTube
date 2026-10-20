@@ -23,6 +23,7 @@
 #include "yt.h"
 #include "yt_innertube.h"
 #include "downloader/download_selftest.h"
+#include "downloader/download_button_selftest.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -532,6 +533,14 @@ int main(int argc, char *argv[])
         return av1HlsSelfTest() ? 0 : 1;
     }
 
+    if (args.contains(QLatin1String("--selftest-download-button"))) {
+        // Integration test of the download BUTTON: it builds the real
+        // MainWindow, finds the button of the Player by its name and
+        // presses it, and checks that the download was queued. No network:
+        // the queue is what is checked.
+        return downloadButtonSelfTest() ? 0 : 1;
+    }
+
     if (args.contains(QLatin1String("--selftest-download"))) {
         // Offline: the download plan is a pure function of the master
         // playlist, so its cases are deterministic and run in CI.
@@ -722,6 +731,18 @@ int main(int argc, char *argv[])
             const QString channelId = args.at(++i);
             QTimer::singleShot(500, &window, [&window, channelId]() {
                 window.openChannel(channelId);
+            });
+        } else if (arg == QLatin1String("--download")
+                   && i + 1 < args.size()) {
+            // Queues the download of a video without touching the UI: it
+            // is how the downloader is driven from the command line.
+            const QString videoId = args.at(++i);
+            QTimer::singleShot(600, &window, [&window, videoId]() {
+                window.downloadVideo(videoId);
+            });
+        } else if (arg == QLatin1String("--downloads")) {
+            QTimer::singleShot(500, &window, [&window]() {
+                window.openDownloads();
             });
         } else if (arg == QLatin1String("--library")) {
             QTimer::singleShot(500, &window, [&window]() {

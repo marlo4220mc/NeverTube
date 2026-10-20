@@ -56,6 +56,15 @@ public:
     // session cache for the video (fresh signed URLs; see Innertube::fetchHls).
     void resolveStream(const QString &videoId, int maxHeight,
                        bool forceRefresh = false);
+
+    // Asks for the RAW master playlist of a video (the multivariant one)
+    // and emits it as masterBodyReady. It is what the downloader uses: it
+    // needs the master as it is, to pick the variant and the audio rendition
+    // itself, instead of the filtered one the player is served.
+    //
+    // It does NOT touch the player: it is a separate request path, and the
+    // signals of the playback are not emitted.
+    void requestMaster(const QString &videoId);
     // Rotates the Innertube session (visitorData + cached signed URLs): the
     // next resolveStream will use a NEW YouTube session. PlayerController uses
     // it in recovery after a gated session (403 mid-playback), where
@@ -147,6 +156,12 @@ signals:
     void playlistDetailReady(const PlaylistInfo &info,
                              const QVector<VideoInfo> &videos);
     void streamReady(const StreamInfo &stream);
+    // The RAW master playlist of a video, as YouTube serves it (the
+    // multivariant one, with the variants and the #EXT-X-MEDIA renditions).
+    // The downloader uses it to build its plan.
+    void masterBodyReady(const QString &videoId, const QByteArray &masterBody);
+    // The master could not be fetched.
+    void masterBodyFailed(const QString &videoId, const QString &reason);
     // Available video heights of the video (Innertube adaptiveFormats),
     // independent of the cap the profile asks for: the player's resolution menu
     // uses them to offer all the real qualities even if Auto asked for a low

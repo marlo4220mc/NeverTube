@@ -20,6 +20,11 @@ class WatchPage;
 class LibraryPage;
 class PlaylistPage;
 class HistoryPage;
+class DownloadsPage;
+
+namespace dl {
+class DownloadManager;
+}
 class SettingsPage;
 class PlayerWidget;
 class ThumbnailCache;
@@ -46,6 +51,19 @@ public:
     void playVideo(const QString &url);
     void openChannel(const QString &channelId);
     void openLibrary();
+    // Opens the "Descargas" tab.
+    void openDownloads();
+    // The download button of the Player, found by its name. It is how the
+    // integration test presses it (there is no other way to click in a
+    // headless test).
+    QAbstractButton *downloadButton();
+    // The repository of the downloads (the integration test reads it).
+    DownloadRepo *downloadsRepo() { return &m_downloads; }
+    // Queues a download by id (the same path the button of the Player uses).
+    void queueDownload(const QString &videoId);
+    // Queues the download of a video (the same path as the button of the
+    // Player). Exposed so it can be driven from the command line.
+    void downloadVideo(const QString &videoId);
     void openPlaylist(const QString &playlistId, const QString &title);
 
 protected:
@@ -141,6 +159,7 @@ private:
     PlaylistsRepo m_playlists{m_db};
     SettingsRepo m_settings{m_db};
     HomeCacheRepo m_homeCache{m_db};
+    DownloadRepo m_downloads{m_db};
 
     // Auto-restart for gated sessions: in-memory guard against double
     // restarts of the same episode, and position (ms) to resume at in the new
@@ -161,6 +180,8 @@ private:
     LibraryPage *m_library = nullptr;
     PlaylistPage *m_playlist = nullptr;
     HistoryPage *m_historyPage = nullptr;
+    DownloadsPage *m_downloadsPage = nullptr;
+    dl::DownloadManager *m_downloadManager = nullptr;
     SettingsPage *m_settingsPage = nullptr;
 
     QWidget *m_nav = nullptr;

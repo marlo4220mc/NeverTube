@@ -378,6 +378,54 @@ void Yt::rotateStreamSession()
     m_innertube.rotateSession();
 }
 
+// The RAW master playlist of a video, for the downloader.
+//
+// The player path (resolveStream) FILTERS the master: it keeps one variant
+// and rewrites the audio renditions, and it writes the result to a file for
+// the local HLS server. The downloader needs the master as it is: it has to
+// pick the variant AND the audio rendition itself, and it has to read the
+// media playlists of both (the player never fetches the second one, because
+// mpv follows the master by itself).
+//
+// So this is a separate request path that does NOT touch the player: it
+// asks the player for the hls url, asks for the master, and emits it raw.
+void Yt::requestMaster(const QString &videoId)
+{
+    auto *guard = new QObject(this);
+    auto *innTube = &m_innertube;
+
+    connect(innTube, &Innertube::failed, guard,
+            [this, guard, videoId](const QString &vid, const QString &reason) {
+                if (vid != videoId)
+                    return;
+                guard->deleteLater();
+                emit masterBodyFailed(videoId, reason);
+            });
+
+    connect(innTube, &Innertube::hlsReady, guard,
+            [this, guard, innTube, videoId](const QString &vid,
+                                           const QString &hlsUrl,
+                                           const QVector<int> &) {
+                if (vid != videoId)
+                    return;
+                // The master is fetched with the same transport: the request
+                // is on the absolute URL of the master.
+                connect(innTube, &Innertube::masterReady, guard,
+                        [this, guard, videoId](const QString &fid,
+                                               const QByteArray &masterBody) {
+                            if (fid != videoId)
+                                return;
+                            guard->deleteLater();
+                            emit masterBodyReady(videoId, masterBody);
+                        });
+                innTube->fetchMaster(videoId, hlsUrl);
+            });
+
+    // The player response gives the hls url; from there the master is
+    // fetched (the same chain the player uses).
+    innTube->fetchHls(videoId);
+}
+
 void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                              int preferredClient, bool forceRefresh)
 {

@@ -1050,6 +1050,15 @@ QVector<int> DownloadRepo::partsFromJson(const QString &json)
     return out;
 }
 
+// Binds a text that is never NULL: a null QString would become a NULL in
+// SQLite and the NOT NULL columns of `downloads` would reject it.
+static void bindText(QSqlQuery &q, const QString &value)
+{
+    // QString("") (empty) is NOT the same as QString() (null): the first
+    // is bound as an empty string, the second as a NULL.
+    q.addBindValue(value.isNull() ? QStringLiteral("") : value);
+}
+
 bool DownloadRepo::upsert(const DownloadInfo &d)
 {
     QSqlQuery q(m_db.db());
@@ -1059,21 +1068,21 @@ bool DownloadRepo::upsert(const DownloadInfo &d)
         " error, created_at, final_path, bytes_done, bytes_total, quality, "
         " parts, position_ms, updated_at) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
-    q.addBindValue(d.videoId);
-    q.addBindValue(d.videoId);
-    q.addBindValue(d.title);
-    q.addBindValue(d.channel);
-    q.addBindValue(QStringLiteral("video"));
-    q.addBindValue(d.status);
+    bindText(q, d.videoId);
+    bindText(q, d.videoId);
+    bindText(q, d.title);
+    bindText(q, d.channel);
+    bindText(q, QStringLiteral("video"));
+    bindText(q, d.status);
     q.addBindValue(d.progress);
-    q.addBindValue(d.filePath);
-    q.addBindValue(d.error);
+    bindText(q, d.filePath);
+    bindText(q, d.error);
     q.addBindValue(d.createdAt);
-    q.addBindValue(d.finalPath);
+    bindText(q, d.finalPath);
     q.addBindValue(d.bytesDone);
     q.addBindValue(d.bytesTotal);
-    q.addBindValue(d.quality);
-    q.addBindValue(partsToJson(d.parts));
+    bindText(q, d.quality);
+    bindText(q, partsToJson(d.parts));
     q.addBindValue(d.positionMs);
     q.addBindValue(d.updatedAt);
     return q.exec();

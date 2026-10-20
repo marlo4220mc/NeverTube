@@ -88,8 +88,16 @@ add_executable(nevertube_qt2
   src/downloader/segment_plan.h
   src/downloader/download_transport.cpp
   src/downloader/download_transport.h
+  src/downloader/download_job.cpp
+  src/downloader/download_job.h
+  src/downloader/muxer.cpp
+  src/downloader/muxer.h
+  src/downloader/download_manager.cpp
+  src/downloader/download_manager.h
   src/downloader/download_selftest.cpp
   src/downloader/download_selftest.h
+  src/downloader/download_button_selftest.cpp
+  src/downloader/download_button_selftest.h
   src/mainwindow.cpp
   src/mainwindow.h
   src/i18n.cpp
@@ -130,6 +138,8 @@ add_executable(nevertube_qt2
   src/ui/pages/playlist_page.h
   src/ui/pages/history_page.cpp
   src/ui/pages/history_page.h
+  src/ui/pages/downloads_page.cpp
+  src/ui/pages/downloads_page.h
   src/ui/pages/settings_page.cpp
   src/ui/pages/settings_page.h
   src/ui/pages/placeholder_page.cpp

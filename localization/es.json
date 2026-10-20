@@ -1,11 +1,13 @@
 {
-  "language": { "code": "es", "name": "Español" },
+  "language": {
+    "code": "es",
+    "name": "Español"
+  },
   "strings": {
     "nav.home": "Inicio",
     "nav.search": "Buscar",
     "nav.library": "Biblioteca",
     "nav.settings": "Ajustes",
-
     "mini.nothing": "Nada en reproducción",
     "mini.playPause": "Reproducir / Pausar\nK",
     "mini.next": "Siguiente\nN",
@@ -13,7 +15,6 @@
     "mini.close": "Cerrar y detener",
     "mini.noThumb": "sin miniatura",
     "mini.live": "EN VIVO",
-
     "common.cancel": "Cancelar",
     "common.accept": "Aceptar",
     "common.loading": "Cargando…",
@@ -25,7 +26,6 @@
     "common.options": "Opciones",
     "common.showAll": "Ver todo",
     "common.showLess": "Ver menos",
-
     "home.title": "Inicio",
     "home.refresh": "  Actualizar",
     "home.continue": "Continuar viendo",
@@ -37,13 +37,11 @@
     "home.emptyTitle": "Aún no hay contenido personalizado",
     "home.emptyBody": "Reproducí un vídeo o suscribite a un canal desde el buscador para llenar tu Continuar viendo, Descubre y Nuevos de tus suscripciones. Mientras tanto, arriba tenés Recomendado y Tendencias.",
     "home.goSearch": "Ir a Buscar",
-
     "history.title": "Historial",
     "history.clear": "Borrar historial de vídeos",
     "history.clearBody": "Se borrarán los %1 vídeos de tu historial. Esta acción no se puede deshacer.",
     "history.empty": "Todavía no has visto ningún vídeo. Los que abras aparecerán aquí.",
     "history.remove": "Quitar del historial",
-
     "search.title": "Buscar",
     "search.placeholder": "Buscar en YouTube…",
     "search.button": "Buscar",
@@ -58,7 +56,6 @@
     "search.removeOne": "Borrar esta búsqueda",
     "search.suggestHistory": "Tus búsquedas",
     "search.tabHint": "Toma esta búsqueda con Tab",
-
     "channel.title": "Canal",
     "channel.copyTip": "Copiar el enlace del canal",
     "channel.shareA11y": "Compartir el canal",
@@ -76,9 +73,7 @@
     "channel.emptyShorts": "Este canal no tiene Shorts.",
     "channel.emptyLive": "Este canal no tiene directos.",
     "channel.emptyVideos": "Este canal no tiene vídeos.",
-
     "video.liveBadge": "En directo",
-
     "library.title": "Biblioteca",
     "library.subscriptions": "Suscripciones",
     "library.manage": "Administrar",
@@ -94,7 +89,6 @@
     "library.unfollow": "Dejar de seguir",
     "library.removeLike": "Quitar de Me gusta",
     "library.manageSubs": "Gestionar suscripciones",
-
     "playlist.newName": "Nueva playlist",
     "playlist.nameField": "Nombre:",
     "playlist.create": "Crear",
@@ -110,7 +104,6 @@
     "playlist.deleteBody": "Se eliminará %1 con sus %2 vídeos. Esta acción no se puede deshacer.",
     "playlist.this": "esta playlist",
     "playlist.empty": "Esta playlist todavía no tiene vídeos. Añádelos desde el menú de cualquier vídeo.",
-
     "row.watchLater.remove": "Quitar de Ver más tarde",
     "row.watchLater.add": "Guardar en Ver más tarde",
     "row.addToPlaylist": "Añadir a playlist",
@@ -119,7 +112,6 @@
     "row.share": "Compartir",
     "row.linkCopied": "Enlace copiado",
     "row.viewChannel": "Ver canal",
-
     "player.playPause": "Reproducir/Pausa\nK",
     "player.prev": "Anterior\nP",
     "player.next": "Siguiente\nN",
@@ -130,7 +122,6 @@
     "player.addToPlaylist": "Añadir a playlist",
     "player.quality": "Calidad de vídeo",
     "player.fullscreen": "Pantalla completa\nF",
-
     "watch.like": "Me gusta",
     "watch.dislike": "No me gusta",
     "watch.favorite": "Favorito",
@@ -144,7 +135,6 @@
     "watch.removeFromQueue": "Quitar de la cola",
     "watch.live": "EN VIVO",
     "watch.qualityTip": "Calidad de vídeo: %1p",
-
     "fmt.views": "%1 vistas",
     "fmt.today": "hoy",
     "fmt.days": "hace %1 d",
@@ -152,7 +142,6 @@
     "fmt.months": "hace %1 mes",
     "fmt.years": "hace %1 año",
     "fmt.metaSep": "  •  ",
-
     "error.noStreamUrl": "No se obtuvo URL de streaming.",
     "error.recoveryFailed": "La reproducción se interrumpió y no se pudo recuperar.",
     "error.network": "La reproducción se interrumpió (red).",
@@ -169,9 +158,7 @@
     "error.playerInvalid": "respuesta player no válida (videoId distinto)",
     "error.hlsMissing": "player OK pero sin hlsManifestUrl",
     "error.masterEmpty": "master vacío",
-
     "placeholder.soon": "Próximamente.",
-
     "accent.red": "Rojo (por defecto)",
     "accent.blue": "Azul",
     "accent.green": "Verde",
@@ -179,20 +166,17 @@
     "accent.purple": "Púrpura",
     "accent.cyan": "Cian",
     "accent.pink": "Rosa",
-
     "codec.av1": "AV1 por hardware (óptima)",
     "codec.vp9": "VP9 por hardware",
     "codec.h264": "H.264 por hardware",
     "codec.soft": "Sin aceleración (CPU)",
     "codec.unknown": "Sin detectar",
     "codec.redetect": "Volver a detectar",
-
     "settings.title": "Ajustes",
     "settings.section.playback": "REPRODUCCIÓN",
     "settings.section.interface": "INTERFAZ",
     "settings.section.data": "DATOS",
     "settings.section.about": "ACERCA DE",
-
     "settings.quality": "Calidad de reproducción",
     "settings.quality.auto": "Auto",
     "settings.nextMode": "Modo \"A continuación\"",
@@ -213,7 +197,6 @@
     "settings.volumeMaxTitle": "Volumen por encima del 100%",
     "settings.volumeMaxBody": "Subir el volumen máximo a %1 puede causar daño auditivo permanente. Úsalo solo con altavoces externos y a un nivel cómodo. Al cerrar la app el volumen volverá a 100% aunque lo subas más alto. ¿Continuar?",
     "settings.volumeMaxNote": "Por seguridad, el volumen solo se guarda hasta el 100%. Al reiniciar la app, aunque el ajuste siga por encima, el reproductor empezará al 100%.",
-
     "settings.language": "Idioma",
     "settings.accent": "Color de acento",
     "settings.accentNote": "Se aplica al instante: sliders, progreso, botones resaltados, selección de texto e iconos activos.",
@@ -222,18 +205,29 @@
     "settings.thumbSize.normal": "Normales",
     "settings.thumbSize.large": "Grandes",
     "settings.thumbSizeNote": "Pequeñas: 6 vídeos por fila en el Inicio y filas cortas en búsqueda, historial y cola. Grandes: 4 por fila y miniatura más grande.",
-
     "settings.clearThumbs": "Limpiar caché de miniaturas",
     "settings.clearThumbsBody": "¿Eliminar todas las miniaturas guardadas? Las imágenes se volverán a descargar.",
     "settings.delete": "Eliminar",
     "settings.resetApp": "Restablecer aplicación",
     "settings.resetBody": "Esta acción borrará la base de datos local (historial, búsquedas, suscripciones y ajustes) y el caché de miniaturas. No se eliminarán archivos personales ni vídeos descargados. La aplicación se reiniciará con los valores por defecto. ¿Continuar?",
     "settings.reset": "Restablecer",
-
     "settings.version": "Versión 1.0 (nevertube_qt2)",
     "settings.aboutNote": "Sin telemetría: esta aplicación no envía datos de uso, búsquedas ni historial a ningún servidor. Todo permanece local en tu dispositivo.",
-
     "hw.detecting": "Detectando hardware de vídeo",
-    "hw.note": "Comprobando la aceleración de vídeo de tu equipo.\nLa reproducción comenzará al terminar."
+    "hw.note": "Comprobando la aceleración de vídeo de tu equipo.\nLa reproducción comenzará al terminar.",
+    "nav.downloads": "Descargas",
+    "watch.download": "Descargar",
+    "downloads.title": "Descargas",
+    "downloads.empty": "Todavía no descargaste nada. Usa el botón de descarga en un vídeo para empezar.",
+    "downloads.pending": "En espera",
+    "downloads.downloading": "Descargando",
+    "downloads.muxing": "Uniendo pistas",
+    "downloads.paused": "En pausa",
+    "downloads.done": "Listo",
+    "downloads.error": "Error",
+    "downloads.retry": "Reintentar",
+    "downloads.play": "Reproducir",
+    "downloads.delete": "Borrar descarga",
+    "downloads.openFolder": "Abrir carpeta"
   }
 }
