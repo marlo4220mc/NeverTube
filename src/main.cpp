@@ -22,6 +22,7 @@
 #include "ui/theme.h"
 #include "yt.h"
 #include "yt_innertube.h"
+#include "downloader/download_selftest.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -529,6 +530,12 @@ int main(int argc, char *argv[])
 
     if (args.contains(QLatin1String("--selftest-av1hls"))) {
         return av1HlsSelfTest() ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-download"))) {
+        // Offline: the download plan is a pure function of the master
+        // playlist, so its cases are deterministic and run in CI.
+        return downloadPlanSelfTest() ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-ffmpeg"))) {

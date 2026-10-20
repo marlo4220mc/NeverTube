@@ -84,6 +84,10 @@ add_executable(nevertube_qt2
   src/yt.h
   src/yt_innertube.cpp
   src/yt_innertube.h
+  src/downloader/segment_plan.cpp
+  src/downloader/segment_plan.h
+  src/downloader/download_selftest.cpp
+  src/downloader/download_selftest.h
   src/mainwindow.cpp
   src/mainwindow.h
   src/i18n.cpp
