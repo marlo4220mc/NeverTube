@@ -1069,8 +1069,8 @@ bool DownloadRepo::upsert(const DownloadInfo &d)
         "INSERT OR REPLACE INTO downloads "
         "(id, video_id, title, channel, type, status, progress, file_path, "
         " error, created_at, final_path, bytes_done, bytes_total, quality, "
-        " parts, position_ms, updated_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+        " parts, position_ms, updated_at, bytes_per_second) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
     bindText(q, d.videoId);
     bindText(q, d.videoId);
     bindText(q, d.title);
@@ -1088,6 +1088,7 @@ bool DownloadRepo::upsert(const DownloadInfo &d)
     bindText(q, partsToJson(d.parts));
     q.addBindValue(d.positionMs);
     q.addBindValue(d.updatedAt);
+    q.addBindValue(d.bytesPerSecond);
     return q.exec();
 }
 
@@ -1109,6 +1110,7 @@ DownloadInfo DownloadRepo::fromRow(const QSqlQuery &q) const
     d.parts = partsFromJson(q.value(12).toString());
     d.positionMs = q.value(13).toLongLong();
     d.updatedAt = q.value(14).toLongLong();
+    d.bytesPerSecond = q.value(15).toLongLong();
     return d;
 }
 
@@ -1118,7 +1120,7 @@ bool DownloadRepo::get(const QString &videoId, DownloadInfo &out) const
     q.prepare(QStringLiteral(
         "SELECT video_id, title, channel, status, progress, file_path, error, "
         "created_at, final_path, bytes_done, bytes_total, quality, parts, "
-        "position_ms, updated_at "
+        "position_ms, updated_at, bytes_per_second "
         "FROM downloads WHERE video_id=? LIMIT 1"));
     q.addBindValue(videoId);
     if (!q.exec() || !q.next())
@@ -1134,7 +1136,7 @@ QVector<DownloadInfo> DownloadRepo::all() const
     q.prepare(QStringLiteral(
         "SELECT video_id, title, channel, status, progress, file_path, error, "
         "created_at, final_path, bytes_done, bytes_total, quality, parts, "
-        "position_ms, updated_at "
+        "position_ms, updated_at, bytes_per_second "
         "FROM downloads ORDER BY created_at DESC"));
     if (!q.exec())
         return out;

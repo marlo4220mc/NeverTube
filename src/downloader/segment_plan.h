@@ -1,121 +1,130 @@
 #pragma once
 
+#include <QByteArray>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QString>
-#include <QStringList>
 #include <QVector>
 
-// Plan of a download: WHICH segments to fetch, from WHERE, and how big the
-// result will be. It is a PURE function of the master playlist (and the
-// preferences), so it can be tested offline with no network at all.
+// Plan of a download: WHICH bytes to fetch, from where, and how big the
+// result will be. It is a PURE function of the formats that the player
+// response gives (the adaptive ones), so it can be tested offline with no
+// network at all.
 //
-// Why a plan and not the download itself: the master playlist of YouTube
-// carries a video variant (the segments) and, separately, the audio
-// renditions in #EXT-X-MEDIA. The two are different playlists and the
-// downloader has to fetch BOTH. This module decides which ones, so the
-// network part only has to execute the plan.
-//
-// The unit of the plan is the SEGMENT, not a byte range. The master is
-// already fragmented by YouTube with segments of ~1.3 MB (measured), which is
-// well under the ~8 MB per-request budget that YouTube's throttle allows
-// (measured: a range of 8 MB runs at 14 MB/s, from 16 MB it drops to
-// 0.36 MB/s). So every segment fits in ONE request and no splitting
-// machinery is needed. Resume is then a set of segment indexes, not a set of
-// byte offsets.
+// WHY THE ADAPTIVE AND NOT THE HLS MASTER: the throttle of YouTube is per
+// request AND per size. Measured: a request of 2 MB runs at 14 MB/s, and the
+// SAME resource asked for whole (3.87 MB) runs at 0.011 MB/s, a thousand
+// times slower. The master hides that because its segments are already
+// small (1.3 MB), but the audio of the master is AAC in LATM, that the
+// FFmpeg of this system cannot mux ("Error applying bitstream filters to an
+// output packet for stream #1: Not yet implemented in FFmpeg"). The adaptive
+// gives both tracks as clean mp4/m4a, and it has the index (the sidx) that
+// says where every fragment starts, so it can be fetched in pieces.
 
 namespace dl {
 
-// One segment of a media playlist.
-struct Segment
+// One fragment of a resource: a range of bytes plus its duration.
+struct Range
 {
-    QString url;       // absolute URL of the segment
-    double duration = 0.0;  // #EXTINF, seconds
-    qint64 size = 0;   // Content-Length when known, 0 otherwise
+    qint64 start = 0;
+    qint64 end = 0;   // inclusive, like the Range header
+    double duration = 0.0;
+    qint64 size() const { return end - start + 1; }
 };
 
-// The init segment of a media playlist (#EXT-X-MAP). It is the "moov" of an
-// fMP4: WITHOUT it the file has no header and nothing can read it (measured:
-// ffmpeg answers "trun track id unknown, no tfhd was found"). It is a
-// separate URL and it is NOT one of the segments.
-struct InitSegment
+// One of the variants that can be downloaded: a height with its real size.
+// It is what the dialog of the download offers.
+struct VideoOption
 {
-    QString url;
-    bool present = false;
+    int height = 0;
+    qint64 contentLength = 0;  // the real size of the track
+    QString codecs;
+    QJsonObject format;  // the format it comes from
 };
 
-// The video part of the plan: the chosen variant of the master.
-struct VideoPlan
+// One TRACK of the download (the video or the audio).
+struct Track
 {
-    QString playlistUrl;  // the media playlist of the variant
-    QVector<Segment> segments;
-    int height = 0;       // RESOLUTION of the variant
-    QString codecs;       // CODECS attribute of the variant
-    qint64 bandwidth = 0; // BANDWIDTH attribute (bits/s)
-    double duration = 0.0; // the sum of the EXTINF of the media playlist
+    QString url;         // the signed URL of the resource
+    QJsonObject format;  // the format it comes from
+    qint64 initStart = 0;  // the init segment (the fMP4 header)
+    qint64 initEnd = 0;
+    qint64 indexStart = 0;  // the sidx (the index of the fragments)
+    qint64 indexEnd = 0;
+    qint64 contentLength = 0;  // the real size of the resource
     bool valid = false;
 };
 
-// The audio part of the plan: the chosen #EXT-X-MEDIA rendition and its
-// media playlist. YouTube puts the audio in its OWN playlist (the segment of
-// the video variant is video-only), so it is a second download.
-struct AudioPlan
+// What is being downloaded: the video with its audio, or only the audio
+// converted to mp3.
+enum class DownloadKind
 {
-    QString playlistUrl;  // the media playlist of the audio rendition
-    QString language;     // LANGUAGE attribute ("en", "es-419", ...)
-    QString name;         // NAME attribute
-    bool isOriginal = false;  // the original track, not a dub
-    QVector<Segment> segments;
-    bool valid = false;
+    Video,  // the file with both tracks
+    Audio,  // only the audio, as an mp3
 };
 
 // The whole plan of one download.
 struct Plan
 {
-    VideoPlan video;
-    AudioPlan audio;
-    qint64 estimatedBytes = 0;  // video + audio, from BANDWIDTH x duration
-    double videoDuration = 0.0;  // the real duration of the video track
+    Track video;
+    Track audio;
+
+    // Every variant of the video, from the highest to the lowest: the dialog
+    // offers them (with their size) and the user picks one.
+    QVector<VideoOption> options;
+
+    DownloadKind kind = DownloadKind::Video;
     double durationSeconds = 0.0;
+    // The REAL size of the download: the contentLength of the video plus the
+    // the one of the audio. It is known BEFORE it starts and it does not
+    // move.
+    qint64 estimatedBytes = 0;
     bool valid = false;
     QString error;  // empty when valid
 };
 
-// Parses a MASTER playlist (the multivariant one) and picks:
-//  - the video variant: the best by (rank, height), where the rank honours
-//    the codec profile the same way the PLAYER does (so the downloaded file
-//    is the codec the machine can decode), and never above maxHeight;
-//  - the audio rendition: the original track, or the dub in prefLang when
-//    there is one (the same rule the player uses, but here the URI of the
-//    CHOSEN track is kept, which the player discards because mpv resolves it
-//    by itself).
+// Builds the plan from the adaptive formats of the player response.
 //
-// codecRank is the same ranking the player uses, passed in as a function so
-// this module does not depend on the Yt class: a higher score wins.
-// Returns an empty plan (valid == false) with `error` set when the master
-// has nothing usable.
-Plan planFromMaster(const QByteArray &masterBody, int maxHeight,
-                    const QString &prefLang,
-                    int (*codecRank)(int height, const QString &codecs));
-
-// Parses a MEDIA playlist (the segments of one variant or rendition) and
-// returns its segments in order, with their #EXTINF durations. A segment
-// that follows an #EXT-X-BYTERANGE is still one segment: the downloader
-// asks for the whole thing, so the byte range is only informational here.
+// The video variants are offered by height, and the SMALLEST one of each
+// height wins: for a download the size is what matters (the VP9 of the
+// 1080p is 31 MB against the 80 of the h264, for the same picture).
 //
-// `initOut` receives the #EXT-X-MAP (the init segment) when the playlist has
-// one: an fMP4 variant NEEDS it at the front of the file, and a playlist
-// without it cannot be read at all.
-QVector<Segment> segmentsFromMediaPlaylist(const QByteArray &mediaBody,
-                                            InitSegment *initOut = nullptr);
+// The audio is the ORIGINAL track, or the one in the preferred language (the
+// same rule the player uses).
+Plan planFromFormats(const QJsonArray &adaptiveFormats, int maxHeight,
+                      const QString &prefLang,
+                      int (*codecRank)(int height, const QString &mimeOrCodecs));
 
-// Estimated size in bytes of a stream of `bandwidth` bits/s lasting
-// `durationSeconds`. The master carries BANDWIDTH, so the size of a download
-// is known BEFORE starting, with no extra request: measured, the estimate
-// for the 1080p master was 354.6 MB against 343 MB real (1.7 %).
-qint64 estimateBytes(qint64 bandwidth, double durationSeconds);
+// A copy of the plan with another variant of the video (the one the user
+// picked in the dialog). A height that is not in the plan leaves it
+// untouched.
+Plan planWithHeight(const Plan &plan, int height);
 
-// The total duration of a media playlist: the sum of its #EXTINF. It is
-// what gives the size of the download (BANDWIDTH x duration) before it
-// starts, with no extra request.
-double durationOfMediaPlaylist(const QByteArray &mediaBody);
+// The REAL size of a resource, from its URL: YouTube puts it there as
+// "clen%3D30846580" (percent-encoded). It is the size of the track, not an
+// estimate.
+qint64 contentLengthOf(const QString &url);
+
+// The fragments of a resource, from its sidx box (the index). `rangeStart` is
+// the position of the range that was asked for, in the file.
+//
+// The sidx is a box of ISO/IEC 14496-12: a list of subsegments with their
+// exact size and duration. It is the same index the synthetic AV1 HLS of the
+// player uses (Yt::av1ParseSidx), and it is what gives the DOWNLOAD its
+// fragments: without it the whole resource would be ONE request, and YouTube
+// throttles that (measured: 0.011 MB/s for 3.87 MB against 14 MB/s for
+// 2 MB).
+QVector<Range> rangesFromSidx(const QByteArray &box, qint64 rangeStart,
+                              double *totalDurationOut);
+
+// The fragments of a track that has NO index (a WebM/Opus one: its clusters
+// are not indexed). The resource is cut in pieces of `chunkBytes` and the
+// pieces are put back together in order.
+//
+// It is the same idea as the synthetic AV1 HLS of the player (fixed chunks
+// of ~2 MB), and it is needed because YouTube throttles a request by its
+// size: the same track asked for whole runs at 0.011 MB/s and a 2 MB range
+// of it runs at 14 MB/s (measured).
+QVector<Range> rangesWithoutIndex(qint64 contentLength, qint64 chunkBytes);
 
 } // namespace dl

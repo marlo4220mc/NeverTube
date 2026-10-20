@@ -37,13 +37,28 @@ QString findFfmpeg();
 
 // Muxes the two partial files into `outputPath`.
 //
-// The arguments are the plain ones: -i video -i audio -c copy, plus
-// -movflags +faststart so the moov is at the front of the file and the
-// player does not have to read it from the end.
+// The arguments are the plain ones: -i video -i audio -c copy.
+//
+// The container is decided by the EXTENSION of the output, and it is MKV:
+// the audio of the HLS master is AAC in ADTS, and an mp4 wants it in ASC.
+// The bitstream filter that does that conversion fails with "Not yet
+// implemented in FFmpeg" in the FFmpeg of this system, and the mp4 ends up
+// with the audio cut at the first second. Matroska takes the ADTS as it is
+// and needs no conversion at all.
 //
 // The partials are NOT deleted: if the mux fails, the bytes that were
 // downloaded are still there and the mux can be retried.
 MuxResult muxToMp4(const QString &videoPath, const QString &audioPath,
                    const QString &outputPath, const QString &ffmpegPath = QString());
+
+// Converts the audio track to an mp3. It is the "solo el audio" option of
+// the dialog: the segments of the audio rendition are MPEG-TS, and an mp3 is
+// what a person can put in a music player.
+//
+// The conversion is done with ffmpeg (-vn -acodec libmp3lame). The source
+// is the partial .ts of the audio, so the conversion happens after the
+// segments are downloaded (and it needs the audio to be there).
+MuxResult convertToMp3(const QString &audioPath, const QString &outputPath,
+                        const QString &ffmpegPath = QString());
 
 } // namespace dl

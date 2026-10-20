@@ -2,65 +2,43 @@
 
 #include "segment_plan.h"
 
+#include <QJsonArray>
+#include <QJsonObject>
+
 #include <cstdio>
 
 namespace {
 
-// A master as YouTube really serves it (trimmed): two video variants, an
-// original audio and a dub, plus the timedtext renditions that are also
-// there in the real thing (TYPE=SUBTITLES, which must be ignored).
-// The original audio is marked the way YouTube marks it: "acont=original"
-// inside its URI (that is the rule isOriginalAudio uses in the player).
-const char *const kMaster = R"M(#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-MEDIA:URI="https://x/googlevideo.com/audio_orig?acont=original",TYPE=AUDIO,GROUP-ID="a1",NAME="Default",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES
-#EXT-X-MEDIA:URI="https://x/googlevideo.com/audio_es",TYPE=AUDIO,GROUP-ID="a1",NAME="Default",LANGUAGE="es-419",AUTOSELECT=YES
-#EXT-X-MEDIA:URI="https://x/googlevideo.com/subs.vtt",TYPE=SUBTITLES,GROUP-ID="s1",NAME="English",LANGUAGE="en"
-#EXT-X-STREAM-INF:BANDWIDTH=1248435,CODECS="avc1.4D401F,mp4a.40.2",RESOLUTION=1280x720,FRAME-RATE=25
-https://x/googlevideo.com/v720.m3u8
-#EXT-X-STREAM-INF:BANDWIDTH=4688074,CODECS="vp09.00.41.08,mp4a.40.2",RESOLUTION=1920x1080,FRAME-RATE=25
-https://x/googlevideo.com/v1080.m3u8
-#EXT-X-STREAM-INF:BANDWIDTH=78539,CODECS="vp09.00.10.08,mp4a.40.5",RESOLUTION=256x144,FRAME-RATE=13
-https://x/googlevideo.com/v144.m3u8
-)M";
-
-// A master with a single language, as YouTube really serves it in that
-// case: TWO audio renditions of the same group, both named "Default", with
-// no LANGUAGE and no "acont=original" marker, distinguished only by the
-// itag in their URI (233 = 48 kbps, 234 = 128 kbps). Measured on a real
-// master, this is the case that broke the first version of the plan: it
-// picked the 48 kbps rendition for a 1080p video.
-const char *const kMasterNoLang = R"M(#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-MEDIA:URI="https://x/googlevideo.com/itag/233/playlist/index.m3u8",TYPE=AUDIO,GROUP-ID="233",NAME="Default",YT-EXT-ABSOLUTE-LOUDNESS=-13.010,DEFAULT=YES,AUTOSELECT=YES
-#EXT-X-MEDIA:URI="https://x/googlevideo.com/itag/234/playlist/index.m3u8",TYPE=AUDIO,GROUP-ID="234",NAME="Default",YT-EXT-ABSOLUTE-LOUDNESS=-13.010,DEFAULT=YES,AUTOSELECT=YES
-#EXT-X-STREAM-INF:BANDWIDTH=1763840,CODECS="vp09.00.40.08,mp4a.40.2",RESOLUTION=1920x1080,FRAME-RATE=25
-https://x/googlevideo.com/v1080.m3u8
-)M";
-
-const char *const kMedia = R"M(#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-TARGETDURATION:7
-#EXTINF:5.24,
-https://x/googlevideo.com/seg1.ts
-#EXTINF:6.96,
-https://x/googlevideo.com/seg2.ts
-#EXTINF:3.36,
-https://x/googlevideo.com/seg3.ts
-#EXT-X-ENDLIST
-)M";
-
-// The same ranking the player uses, in miniature: VP9 beats h264, the height
-// breaks the tie. It is passed in as a function so the plan does not depend
-// on the Yt class.
-int testRank(int height, const QString &codecs)
+// A format of the player response, as it comes: the URL, the initRange
+// (the header of the fMP4) and the indexRange (the sidx).
+QJsonObject fmt(const QString &mime, int height, qint64 clen,
+                const QString &url)
 {
-    int rank = 0;
-    if (codecs.contains(QLatin1String("vp09")))
-        rank = 2;
-    else if (codecs.contains(QLatin1String("avc1")))
-        rank = 1;
-    return rank * 100000 + height;
+    QJsonObject f;
+    f.insert(QStringLiteral("mimeType"), mime);
+    f.insert(QStringLiteral("height"), height);
+    f.insert(QStringLiteral("url"), url);
+    f.insert(QStringLiteral("contentLength"), QString::number(clen));
+    QJsonObject init;
+    init.insert(QStringLiteral("start"), QStringLiteral("0"));
+    init.insert(QStringLiteral("end"), QStringLiteral("700"));
+    f.insert(QStringLiteral("initRange"), init);
+    QJsonObject index;
+    index.insert(QStringLiteral("start"), QStringLiteral("701"));
+    index.insert(QStringLiteral("end"), QStringLiteral("2208"));
+    f.insert(QStringLiteral("indexRange"), index);
+    return f;
+}
+
+// The same ranking that the player uses, in miniature: VP9 beats h264.
+int testRank(int height, const QString &mime)
+{
+    int r = 0;
+    if (mime.contains(QLatin1String("vp09")) || mime.contains(QLatin1String("vp9")))
+        r = 2;
+    else if (mime.contains(QLatin1String("avc1")))
+        r = 1;
+    return r * 100000 + height;
 }
 
 } // namespace
@@ -74,95 +52,113 @@ bool downloadPlanSelfTest()
             ok = false;
     };
 
-    // --- the master ---
-    const dl::Plan p =
-        dl::planFromMaster(QByteArray(kMaster), 1080, QString(), &testRank);
-    check(p.valid, "el master se parsea");
-    check(p.video.valid, "hay variante de video");
-    check(p.video.playlistUrl == QLatin1String("https://x/googlevideo.com/v1080.m3u8"),
-          "elige la variante de 1080p");
-    check(p.video.height == 1080, "la altura de la variante es 1080");
-    check(p.video.bandwidth == 4688074, "lee el BANDWIDTH de la variante");
-    check(p.video.codecs.contains(QLatin1String("vp09")),
-          "lee el CODECS de la variante");
+    // --- the formats of a player response ---
+    QJsonArray formats;
+    formats.append(fmt(QStringLiteral("video/mp4; codecs=\"av01.0.13M.08\""),
+                       2160, 358608461,
+                       QStringLiteral("https://x/videoplayback?clen%3D358608461")));
+    formats.append(fmt(QStringLiteral("video/mp4; codecs=\"vp09.00.40.08\""),
+                       1080, 30846580,
+                       QStringLiteral("https://x/videoplayback?clen%3D30846580")));
+    formats.append(fmt(QStringLiteral("video/mp4; codecs=\"avc1.640028\""),
+                       1080, 80911999,
+                       QStringLiteral("https://x/videoplayback?clen%3D80911999")));
+    formats.append(fmt(QStringLiteral("video/mp4; codecs=\"avc1.4D401F\""),
+                       720, 26455880,
+                       QStringLiteral("https://x/videoplayback?clen%3D26455880")));
+    formats.append(fmt(QStringLiteral("audio/mp4; codecs=\"mp4a.40.2\""), 0,
+                       3449447,
+                       QStringLiteral("https://x/videoplayback?clen%3D3449447")));
 
-    // The master has no AV1 at all (measured: 9 VP9 + 7 h264, zero AV1), so
-    // the plan can never offer AV1 in this phase.
-    check(!p.video.codecs.contains(QLatin1String("av01")),
-          "el master no trae AV1 (eso es de la fase 2)");
-
-    // The URI of the CHOSEN audio is kept: the downloader has to fetch that
-    // playlist itself, the player does not (mpv resolves it).
+    const dl::Plan p = dl::planFromFormats(formats, 1080, QString(), &testRank);
+    check(p.valid, "el plan se arma");
+    check(p.video.valid, "hay pista de video");
+    check(p.video.url.contains(QLatin1String("clen%3D30846580")),
+          "el video elige el MAS PEQUEÑO de su altura (VP9 30,8 MB, no h264 80,9 MB)");
+    check(p.video.contentLength == 30846580,
+          "el tamaño real del video se lee");
+    check(p.video.initStart == 0 && p.video.initEnd == 700,
+          "el init del video se lee del initRange");
+    check(p.video.indexStart == 701 && p.video.indexEnd == 2208,
+          "el indice del video se lee del indexRange");
     check(p.audio.valid, "hay pista de audio");
-    check(p.audio.playlistUrl
-              == QLatin1String("https://x/googlevideo.com/audio_orig?acont=original"),
-          "elige el audio ORIGINAL (no el dub)");
-    check(p.audio.language == QLatin1String("en"), "el idioma del audio es en");
-    check(p.audio.isOriginal, "marca el audio como original");
+    check(p.audio.contentLength == 3449447,
+          "el tamaño real del audio se lee");
+    check(p.estimatedBytes == 30846580 + 3449447,
+          "el total es la suma de las dos pistas");
 
-    // With a language preference, the dub wins over the original.
-    const dl::Plan pEs =
-        dl::planFromMaster(QByteArray(kMaster), 1080, QStringLiteral("es"), &testRank);
-    check(pEs.audio.playlistUrl == QLatin1String("https://x/googlevideo.com/audio_es"),
-          "con preferencia es elige el dub en espanol");
-    check(!pEs.audio.isOriginal, "el dub no se marca como original");
+    // --- the options for the dialog ---
+    check(p.options.size() == 2, "hay una opcion por altura que cabe (1080p y 720p)");
+    check(p.options.first().height == 1080,
+          "la primera opcion es la mas alta que cabe");
+    check(p.options.first().contentLength == 30846580,
+          "la opcion lleva el tamaño real de su variante");
 
-    // The height cap works: asking for 720p picks the 720p variant.
-    const dl::Plan p720 =
-        dl::planFromMaster(QByteArray(kMaster), 720, QString(), &testRank);
-    check(p720.video.playlistUrl == QLatin1String("https://x/googlevideo.com/v720.m3u8"),
-          "el tope de altura se respeta (720p)");
+    // --- the height chosen in the dialog ---
+    const dl::Plan p720 = dl::planWithHeight(p, 720);
+    check(p720.video.url.contains(QLatin1String("clen%3D26455880")),
+          "se puede pedir otra resolucion");
+    check(p720.video.contentLength == 26455880,
+          "la resolucion elegida lleva su tamano");
+    check(p720.audio.contentLength == 3449447,
+          "el audio no cambia al cambiar la resolucion");
+    const dl::Plan pNo = dl::planWithHeight(p, 9999);
+    check(pNo.video.url == p.video.url,
+          "una resolucion que no existe deja el plan como estaba");
 
-    // The HEIGHT wins over the codec, which is the OPPOSITE of the player:
-    // the player ranks the codec first (it wants the one the GPU decodes),
-    // but a download wants the best picture. The codec only breaks the tie
-    // between two variants of the same height.
-    const dl::Plan pHeightFirst =
-        dl::planFromMaster(QByteArray(kMaster), 1080, QString(), &testRank);
-    check(pHeightFirst.video.height == 1080,
-          "la altura gana al codec (1080p sobre el 720p)");
+    // --- the index (sidx) ---
+    // A sidx with two fragments, built byte by byte, so the parser is
+    // checked against the real layout.
+    QByteArray sidx;
+    auto put32 = [&sidx](quint32 v) {
+        sidx.append(char((v >> 24) & 0xFF));
+        sidx.append(char((v >> 16) & 0xFF));
+        sidx.append(char((v >> 8) & 0xFF));
+        sidx.append(char(v & 0xFF));
+    };
+    auto put16 = [&sidx](quint16 v) {
+        sidx.append(char((v >> 8) & 0xFF));
+        sidx.append(char(v & 0xFF));
+    };
+    // The header of the box (up to the reference_count) is 32 bytes, and
+    // every reference is 12.
+    const int kBoxSize = 32 + 2 * 12;
+    put32(kBoxSize);
+    sidx.append("sidx");
+    put32(0);                       // version + flags
+    put32(1);                       // reference_ID
+    put32(1000);                    // timescale
+    put32(0);                       // earliest_presentation_time
+    put32(0);                       // first_offset
+    put16(0);                       // reserved
+    put16(2);                       // reference_count
+    put32(1000000); put32(5000); put32(1);   // fragment 1: 1 MB, 5 s
+    put32(2000000); put32(7000); put32(1);   // fragment 2: 2 MB, 7 s
 
-    // A master with nothing usable is an error, not a crash.
-    const dl::Plan pBad =
-        dl::planFromMaster(QByteArray("#EXTM3U\n"), 1080, QString(), &testRank);
-    check(!pBad.valid, "un master sin variantes no es valido");
-    check(!pBad.error.isEmpty(), "el error dice por que");
-    const dl::Plan pEmpty =
-        dl::planFromMaster(QByteArray(), 1080, QString(), &testRank);
-    check(!pEmpty.valid, "un master vacio no es valido");
-
-    // A master with ONE language and no marker: the two renditions are only
-    // told apart by their itag, and the HIGH one (234 = 128 kbps) has to be
-    // chosen. The first version of the plan took the 48 kbps one.
-    const dl::Plan pNoLang =
-        dl::planFromMaster(QByteArray(kMasterNoLang), 1080, QString(), &testRank);
-    check(pNoLang.valid, "un master sin idioma se parsea");
-    check(pNoLang.audio.playlistUrl.contains(QLatin1String("/itag/234/")),
-          "sin marcador ni idioma, elige el audio de mas bitrate (234, no 233)");
-
-    // --- the media playlist ---
-    const QVector<dl::Segment> segs =
-        dl::segmentsFromMediaPlaylist(QByteArray(kMedia));
-    check(segs.size() == 3, "la media playlist da 3 segmentos");
-    if (segs.size() == 3) {
-        check(segs[0].url == QLatin1String("https://x/googlevideo.com/seg1.ts"),
-              "el primer segmento es el primero");
-        check(qAbs(segs[0].duration - 5.24) < 0.01, "el EXTINF del primero es 5.24");
-        check(qAbs(segs[1].duration - 6.96) < 0.01, "el EXTINF del segundo es 6.96");
-        check(qAbs(segs[2].duration - 3.36) < 0.01, "el EXTINF del tercero es 3.36");
+    double total = 0.0;
+    const QVector<dl::Range> ranges = dl::rangesFromSidx(sidx, 701, &total);
+    check(ranges.size() == 2, "el sidx da los dos fragmentos");
+    if (ranges.size() == 2) {
+        check(ranges.at(0).start == 701 + kBoxSize,
+              "el primer fragmento empieza donde acaba el indice");
+        check(ranges.at(0).end == 701 + kBoxSize + 1000000 - 1,
+              "el primer fragmento tiene el tamaño del indice");
+        check(ranges.at(1).start == 701 + kBoxSize + 1000000,
+              "el segundo fragmento es contiguo al primero");
+        check(qAbs(ranges.at(0).duration - 5.0) < 0.01,
+              "la duracion del primer fragmento es 5 s (timescale 1000)");
+        check(qAbs(ranges.at(1).duration - 7.0) < 0.01,
+              "la duracion del segundo fragmento es 7 s");
+        check(qAbs(total - 12.0) < 0.01, "la duracion total es 12 s");
     }
-    check(dl::segmentsFromMediaPlaylist(QByteArray()).isEmpty(),
-          "una media playlist vacia no da segmentos");
+    check(dl::rangesFromSidx(QByteArray(), 0, nullptr).isEmpty(),
+          "un indice vacio no da fragmentos");
 
-    // --- the size estimate ---
-    // Measured on the real 1080p master: 354.6 MB estimated against 343 MB
-    // real, that is 1.7 %.
-    const qint64 est = dl::estimateBytes(4688074, 634.566);
-    const qint64 real = 343LL * 1024 * 1024;
-    const double err = 100.0 * qAbs(double(est - real)) / double(real);
-    check(err < 5.0, "el tamano estimado esta dentro del 5 % del real");
-    check(dl::estimateBytes(0, 634.0) == 0, "sin BANDWIDTH no hay estimacion");
-    check(dl::estimateBytes(4688074, 0.0) == 0, "sin duracion no hay estimacion");
+    // The size from the clen of the URL.
+    check(dl::contentLengthOf(QStringLiteral("https://x/v?clen%3D12345")) == 12345,
+          "el clen de la URL se lee");
+    check(dl::contentLengthOf(QStringLiteral("https://x/v")) == 0,
+          "una URL sin clen no tiene tamano");
 
     std::printf("DOWNLOAD SELFTEST %s\n", ok ? "OK" : "FAIL");
     return ok;

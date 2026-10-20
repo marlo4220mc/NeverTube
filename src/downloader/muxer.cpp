@@ -76,9 +76,59 @@ MuxResult muxToMp4(const QString &videoPath, const QString &audioPath,
     args << QStringLiteral("-c") << QStringLiteral("copy");
     if (!audioPath.isEmpty())
         args << QStringLiteral("-c:a") << QStringLiteral("copy");
-    // The moov at the front: a player does not have to read it from the end.
-    args << QStringLiteral("-movflags") << QStringLiteral("+faststart");
     args << outputPath;
+
+    QProcess process;
+    process.start(ffmpeg, args);
+    if (!process.waitForStarted(10000)) {
+        result.error = QStringLiteral("no se pudo ejecutar ffmpeg");
+        return result;
+    }
+    if (!process.waitForFinished(10 * 60 * 1000)) {
+        process.kill();
+        process.waitForFinished(2000);
+        result.error = QStringLiteral("ffmpeg tardo demasiado");
+        return result;
+    }
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        const QString out = QString::fromUtf8(process.readAllStandardError()).trimmed();
+        result.error = out.isEmpty() ? QStringLiteral("ffmpeg fallo") : out;
+        return result;
+    }
+    if (!QFileInfo::exists(outputPath)) {
+        result.error = QStringLiteral("ffmpeg no creo el archivo");
+        return result;
+    }
+    result.outputBytes = QFileInfo(outputPath).size();
+    result.ok = true;
+    return result;
+}
+
+MuxResult convertToMp3(const QString &audioPath, const QString &outputPath,
+                        const QString &ffmpegPath)
+{
+    MuxResult result;
+    const QString ffmpeg = ffmpegPath.isEmpty() ? findFfmpeg() : ffmpegPath;
+    result.ffmpegPath = ffmpeg;
+    if (ffmpeg.isEmpty()) {
+        result.error = QStringLiteral("ffmpeg no encontrado");
+        return result;
+    }
+    if (!QFileInfo::exists(audioPath)) {
+        result.error = QStringLiteral("falta el audio parcial");
+        return result;
+    }
+
+    QStringList args;
+    args << QStringLiteral("-hide_banner")
+         << QStringLiteral("-loglevel")
+         << QStringLiteral("error")
+         << QStringLiteral("-y")
+         << QStringLiteral("-i") << audioPath
+         << QStringLiteral("-vn")                    // only the audio
+         << QStringLiteral("-acodec") << QStringLiteral("libmp3lame")
+         << QStringLiteral("-q:a") << QStringLiteral("2")
+         << outputPath;
 
     QProcess process;
     process.start(ffmpeg, args);

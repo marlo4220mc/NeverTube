@@ -94,6 +94,8 @@ add_executable(nevertube_qt2
   src/downloader/muxer.h
   src/downloader/download_manager.cpp
   src/downloader/download_manager.h
+  src/downloader/download_dialog.cpp
+  src/downloader/download_dialog.h
   src/downloader/download_selftest.cpp
   src/downloader/download_selftest.h
   src/downloader/download_button_selftest.cpp

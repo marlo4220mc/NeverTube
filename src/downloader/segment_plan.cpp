@@ -1,294 +1,311 @@
 #include "segment_plan.h"
 
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QRegularExpression>
+
+#include <algorithm>
 
 namespace dl {
 
 namespace {
 
-// Reads an attribute of an #EXT-X-MEDIA or #EXT-X-STREAM-INF line:
-//   #EXT-X-MEDIA:URI="...",TYPE=AUDIO,GROUP-ID="x",NAME="en",LANGUAGE="en"
-// The value may be quoted or bare, and the attribute names are upper case.
-QString attr(const QString &line, const QString &name)
+// The size of a format: the URL of the adaptive does NOT carry the "clen"
+// (that is of the master), so it comes from the format itself.
+qint64 sizeOfFormat(const QJsonObject &f)
 {
-    const QRegularExpression re(
-        QStringLiteral("\\b%1=(\"([^\"]*)\"|[^,]*)").arg(name));
-    const QRegularExpressionMatch m = re.match(line);
-    if (!m.hasMatch())
-        return QString();
-    QString v = m.captured(2);
-    if (v.isNull())
-        v = m.captured(1);
-    return v;
+    qint64 n = contentLengthOf(f.value(QStringLiteral("url")).toString());
+    if (n <= 0)
+        n = f.value(QStringLiteral("contentLength")).toString().toLongLong();
+    return n;
 }
 
-// True when the rendition is the ORIGINAL track and not a dub. YouTube marks
-// the original with "acont=original" inside its URI (URL-encoded as
-// "acont%3Doriginal"); the dubs have their own itag and their own group.
-//
-// This is the SAME rule the player uses (isOriginalAudio in yt.cpp): the
-// downloader must pick the same track the player plays.
-bool isOriginalTrack(const QString &line)
+qint64 rangeStart(const QJsonObject &r)
 {
-    return line.contains(QLatin1String("acont=original"))
-        || line.contains(QLatin1String("acont%3Doriginal"));
+    return r.value(QStringLiteral("start")).toString().toLongLong();
 }
 
-// The audio itag inside the URI of a rendition: YouTube's HLS URIs carry
-// "/itag/233/" and friends.
-int audioItag(const QString &uri)
+qint64 rangeEnd(const QJsonObject &r)
 {
-    const int pos = uri.indexOf(QLatin1String("/itag/"));
-    if (pos < 0)
-        return 0;
-    const int start = pos + int(QLatin1String("/itag/").size());
-    int end = start;
-    while (end < uri.size() && uri.at(end).isDigit())
-        ++end;
-    if (end == start)
-        return 0;
-    return uri.mid(start, end - start).toInt();
+    return r.value(QStringLiteral("end")).toString().toLongLong();
 }
 
-// Quality of an audio rendition, from its itag.
-//
-// A master does NOT always mark the original with "acont=original": when the
-// video has a single language there is nothing to disambiguate and the
-// master just lists the renditions. What then distinguishes them is the
-// BITRATE, and the itag says which one is which (measured on a real master:
-// itag 233 = 48 kbps, itag 234 = 128 kbps, both with NAME="Default" and no
-// LANGUAGE).
-//
-// The rules, from YouTube's itag table:
-//   140, 234 -> m4a 128 kbps  (the original)
-//   139, 233 -> m4a 48/64 kbps (a lower rendition)
-//   249-251 -> Opus in WebM
-// A rendition whose itag is not recognised scores 0, and the `acont=original`
-// marker (checked apart) always wins.
-int audioQuality(const QString &uri)
+// The language of an audio track: the id of its track is prefixed with it
+// ("en.4" -> "en", "zh-Hant.3").
+QString audioLanguageOf(const QJsonObject &format)
 {
-    switch (audioItag(uri)) {
-    case 140:
-    case 234:
-        return 3;
-    case 139:
-    case 233:
-        return 2;
-    case 251:
-    case 250:
-    case 249:
-        return 1;
-    default:
-        return 0;
-    }
+    const QJsonObject track = format.value(QStringLiteral("audioTrack")).toObject();
+    QString id = track.value(QStringLiteral("id")).toString();
+    const int dot = id.indexOf(QLatin1Char('.'));
+    if (dot > 0)
+        id.truncate(dot);
+    if (!id.isEmpty())
+        return id;
+    return track.value(QStringLiteral("languageCode")).toString();
 }
 
-int resolutionHeight(const QString &line)
+// True when the track is the original one and not a dub: the display name
+// marks it ("Inglés original"), the same rule the player uses.
+bool isOriginalOf(const QJsonObject &format)
 {
-    const QString res = attr(line, QStringLiteral("RESOLUTION"));
-    const int x = res.indexOf(QLatin1Char('x'));
-    if (x <= 0)
-        return 0;
-    return res.mid(x + 1).toInt();
+    const QJsonObject track = format.value(QStringLiteral("audioTrack")).toObject();
+    const QString displayName =
+        track.value(QStringLiteral("displayName")).toString();
+    if (displayName.contains(QLatin1String("original"), Qt::CaseInsensitive))
+        return true;
+    const bool isDefault = track.value(QStringLiteral("audioIsDefault")).toBool();
+    const QString lang = track.value(QStringLiteral("languageCode")).toString();
+    if (isDefault && lang.isEmpty() && !displayName.isEmpty())
+        return true;
+    return lang.isEmpty() && displayName.isEmpty();
+}
+
+void fillTrack(Track &t, const QJsonObject &f)
+{
+    t.url = f.value(QStringLiteral("url")).toString();
+    t.format = f;
+    t.initStart = rangeStart(f.value(QStringLiteral("initRange")).toObject());
+    t.initEnd = rangeEnd(f.value(QStringLiteral("initRange")).toObject());
+    t.indexStart = rangeStart(f.value(QStringLiteral("indexRange")).toObject());
+    t.indexEnd = rangeEnd(f.value(QStringLiteral("indexRange")).toObject());
+    t.contentLength = sizeOfFormat(f);
+    t.valid = !t.url.isEmpty();
 }
 
 } // namespace
 
-Plan planFromMaster(const QByteArray &masterBody, int maxHeight,
-                    const QString &prefLang,
-                    int (*codecRank)(int height, const QString &codecs))
+qint64 contentLengthOf(const QString &url)
+{
+    const int pos = url.indexOf(QLatin1String("clen%3D"));
+    if (pos < 0)
+        return 0;
+    const int start = pos + int(QLatin1String("clen%3D").size());
+    int end = start;
+    while (end < url.size() && url.at(end).isDigit())
+        ++end;
+    if (end == start)
+        return 0;
+    return url.mid(start, end - start).toLongLong();
+}
+
+Plan planFromFormats(const QJsonArray &adaptiveFormats, int maxHeight,
+                      const QString &prefLang,
+                      int (*codecRank)(int height, const QString &mimeOrCodecs))
 {
     Plan plan;
-    if (masterBody.isEmpty()) {
-        plan.error = QStringLiteral("master vacio");
-        return plan;
-    }
 
-    const QStringList lines = QString::fromUtf8(masterBody).split(QLatin1Char('\n'));
+    // --- the video variants ---
+    for (const QJsonValue &val : adaptiveFormats) {
+        const QJsonObject f = val.toObject();
+        if (f.value(QStringLiteral("url")).toString().isEmpty())
+            continue;  // signed entries (signatureCipher) without decrypting
+        const QString mime = f.value(QStringLiteral("mimeType")).toString();
+        if (!mime.startsWith(QLatin1String("video/")))
+            continue;
+        const int h = f.value(QStringLiteral("height")).toInt();
+        if (h <= 0 || h > maxHeight)
+            continue;
+        if (f.value(QStringLiteral("initRange")).toObject().isEmpty())
+            continue;  // without an init it cannot be a playable fMP4
+        const qint64 size = sizeOfFormat(f);
 
-    // --- video variant ---
-    // The HEIGHT wins, not the codec. The player ranks the codec first
-    // (codecRankedScore) because it wants the one the GPU decodes, and that
-    // is right for playback. For a DOWNLOAD the order is inverted: the user
-    // asked for the file, so the best picture wins, and a VP9 1080p that
-    // only decodes in software is still a perfectly good file to keep.
-    // The codec only breaks the tie between two variants of the SAME height.
-    QString bestInf;
-    QString bestUrl;
-    int bestHeight = 0;
-    int bestScore = 0;
-    bool haveBest = false;
-    bool nextIsUrl = false;
-
-    // --- audio renditions ---
-    struct Rendition
-    {
-        QString line;
-        QString uri;
-        QString group;
-        bool original = true;
-    };
-    QVector<Rendition> renditions;
-
-    for (const QString &line : lines) {
-        if (line.startsWith(QLatin1String("#EXT-X-MEDIA:"))) {
-            if (line.contains(QLatin1String("TYPE=AUDIO"))) {
-                Rendition r;
-                r.line = line;
-                r.uri = attr(line, QStringLiteral("URI"));
-                r.group = attr(line, QStringLiteral("GROUP-ID"));
-                r.original = isOriginalTrack(line);
-                if (!r.uri.isEmpty())
-                    renditions.append(r);
+        int at = -1;
+        for (int i = 0; i < plan.options.size(); ++i) {
+            if (plan.options.at(i).height == h) {
+                at = i;
+                break;
             }
-            nextIsUrl = false;
-        } else if (line.startsWith(QLatin1String("#EXT-X-STREAM-INF:"))) {
-            const int height = resolutionHeight(line);
-            const int score = codecRank ? codecRank(height, line) : height;
-            if (height > 0 && height <= maxHeight) {
-                // Higher height wins. The codec (the score) only breaks the
-                // tie between two variants of the same height.
-                if (!haveBest || height > bestHeight
-                    || (height == bestHeight && score > bestScore)) {
-                    bestInf = line;
-                    bestUrl.clear();
-                    bestScore = score;
-                    bestHeight = height;
-                    haveBest = true;
-                    nextIsUrl = true;
-                } else {
-                    nextIsUrl = false;
-                }
-            } else {
-                nextIsUrl = false;
-            }
-        } else if (!line.isEmpty() && !line.startsWith(QLatin1Char('#'))) {
-            if (nextIsUrl) {
-                bestUrl = line;
-                nextIsUrl = false;
-            }
-        } else {
-            nextIsUrl = false;
         }
+        if (at >= 0) {
+            // The SMALLEST of the same height: for a download the size is
+            // what matters (the VP9 of the 1080p is 31 MB against the 80
+            // of the h264, for the same picture).
+            const qint64 current = plan.options.at(at).contentLength;
+            if (size > 0 && current > 0 && size >= current)
+                continue;
+        }
+        VideoOption opt;
+        opt.height = h;
+        opt.contentLength = size;
+        opt.codecs = mime;
+        opt.format = f;
+        if (at >= 0)
+            plan.options[at] = opt;
+        else
+            plan.options.append(opt);
     }
-
-    if (!haveBest || bestUrl.isEmpty()) {
-        plan.error = QStringLiteral("el master no tiene ninguna variante de video");
+    if (plan.options.isEmpty()) {
+        plan.error = QStringLiteral("no hay ningun formato de video");
         return plan;
     }
+    std::sort(plan.options.begin(), plan.options.end(),
+              [](const VideoOption &a, const VideoOption &b) {
+                  return a.height > b.height;
+              });
 
-    plan.video.playlistUrl = bestUrl;
-    plan.video.height = resolutionHeight(bestInf);
-    plan.video.codecs = attr(bestInf, QStringLiteral("CODECS"));
-    plan.video.bandwidth = attr(bestInf, QStringLiteral("BANDWIDTH")).toLongLong();
-    plan.video.valid = true;
+    // The chosen video: the highest one, and among the same height the
+    // smallest (the options already have one per height).
+    fillTrack(plan.video, plan.options.first().format);
 
-    // --- audio rendition ---
-    // The rule, in order:
-    //  1. the rendition the user asked for (a dub in prefLang) if there is
-    //     one;
-    //  2. the ORIGINAL track;
-    //  3. otherwise the best rendition by bitrate (a master that does not
-    //     mark the original still lists several, and picking the lowest
-    //     would download 48 kbps audio for a 1080p video).
+    // --- the audio ---
     //
-    // The difference with the player is that here the URI of the CHOSEN
-    // track is kept, because the downloader has to fetch that playlist
-    // itself (the player lets mpv resolve it).
-    const Rendition *chosen = nullptr;
-    if (!prefLang.isEmpty()) {
-        for (const Rendition &r : renditions) {
-            const QString lang = attr(r.line, QStringLiteral("LANGUAGE"));
-            if (!lang.isEmpty() && lang.startsWith(prefLang, Qt::CaseInsensitive)) {
-                chosen = &r;
-                break;
+    // The AAC of an mp4 is preferred over the Opus of a WebM, and it is not
+    // a whim: the mp4 one carries a sidx (it is fragmented, so it can be
+    // fetched in pieces) and the WebM one does not (it is a stream of
+    // clusters, and a track without index cannot be split).
+    //
+    // Among the tracks of the same kind the SMALLEST one wins: for a
+    // download the size is what matters.
+    QJsonObject bestAudio;
+    const QString pref = prefLang.trimmed().toLower();
+    for (const QJsonValue &val : adaptiveFormats) {
+        const QJsonObject f = val.toObject();
+        if (f.value(QStringLiteral("url")).toString().isEmpty())
+            continue;
+        const QString mime = f.value(QStringLiteral("mimeType")).toString();
+        if (!mime.startsWith(QLatin1String("audio/")))
+            continue;
+        const QString lang = audioLanguageOf(f);
+        bool match = false;
+        if (!pref.isEmpty())
+            match = !lang.isEmpty() && lang.toLower().startsWith(pref);
+        else
+            match = isOriginalOf(f);
+        if (!match)
+            continue;
+        // The mp4 (with a sidx) beats the WebM (without one).
+        const bool isMp4 = mime.startsWith(QLatin1String("audio/mp4"));
+        if (!bestAudio.isEmpty()) {
+            const QString bestMime = bestAudio.value(QStringLiteral("mimeType"))
+                                         .toString();
+            const bool bestIsMp4 = bestMime.startsWith(QLatin1String("audio/mp4"));
+            if (isMp4 != bestIsMp4) {
+                if (!isMp4)
+                    continue;
+            } else {
+                const qint64 current = sizeOfFormat(bestAudio);
+                const qint64 candidate = sizeOfFormat(f);
+                if (current > 0 && candidate > 0 && candidate >= current)
+                    continue;
             }
         }
+        bestAudio = f;
     }
-    if (!chosen) {
-        for (const Rendition &r : renditions) {
-            if (r.original) {
-                chosen = &r;
-                break;
-            }
-        }
-    }
-    if (!chosen) {
-        int bestQuality = -1;
-        for (const Rendition &r : renditions) {
-            const int q = audioQuality(r.uri);
-            if (q > bestQuality) {
-                bestQuality = q;
-                chosen = &r;
-            }
-        }
-    }
-    if (!chosen && !renditions.isEmpty()) {
-        chosen = &renditions.first();
-    }
-    if (chosen) {
-        plan.audio.playlistUrl = chosen->uri;
-        plan.audio.language = attr(chosen->line, QStringLiteral("LANGUAGE"));
-        plan.audio.name = attr(chosen->line, QStringLiteral("NAME"));
-        plan.audio.isOriginal = chosen->original;
-        plan.audio.valid = true;
-    }
+    if (!bestAudio.isEmpty())
+        fillTrack(plan.audio, bestAudio);
 
+    plan.estimatedBytes = plan.video.contentLength + plan.audio.contentLength;
     plan.valid = true;
     return plan;
 }
 
-QVector<Segment> segmentsFromMediaPlaylist(const QByteArray &mediaBody,
-                                            InitSegment *initOut)
+Plan planWithHeight(const Plan &plan, int height)
 {
-    QVector<Segment> out;
-    if (mediaBody.isEmpty())
+    if (height <= 0)
+        return plan;
+    for (const VideoOption &o : plan.options) {
+        if (o.height != height)
+            continue;
+        Plan out = plan;
+        fillTrack(out.video, o.format);
+        out.estimatedBytes = out.video.contentLength + out.audio.contentLength;
         return out;
+    }
+    return plan;
+}
 
-    const QStringList lines = QString::fromUtf8(mediaBody).split(QLatin1Char('\n'));
-    double pendingDuration = 0.0;
-    bool havePending = false;
-
-    for (const QString &line : lines) {
-        if (line.startsWith(QLatin1String("#EXT-X-MAP:"))) {
-            // The init segment ("moov") of an fMP4. It is NOT one of the
-            // segments: it goes once, at the front of the file.
-            if (initOut) {
-                const QString uri = attr(line, QStringLiteral("URI"));
-                if (!uri.isEmpty()) {
-                    initOut->url = uri;
-                    initOut->present = true;
-                }
-            }
-        } else if (line.startsWith(QLatin1String("#EXTINF:"))) {
-            const QString rest = line.mid(int(QLatin1String("#EXTINF:").size()));
-            const int comma = rest.indexOf(QLatin1Char(','));
-            pendingDuration = rest.left(comma >= 0 ? comma : rest.size()).toDouble();
-            havePending = true;
-        } else if (!line.isEmpty() && !line.startsWith(QLatin1Char('#'))) {
-            Segment s;
-            s.url = line.trimmed();
-            s.duration = havePending ? pendingDuration : 0.0;
-            out.append(s);
-            havePending = false;
-        }
+QVector<Range> rangesWithoutIndex(qint64 contentLength, qint64 chunkBytes)
+{
+    QVector<Range> out;
+    if (contentLength <= 0 || chunkBytes <= 0)
+        return out;
+    qint64 pos = 0;
+    while (pos < contentLength) {
+        Range r;
+        r.start = pos;
+        r.end = qMin(contentLength - 1, pos + chunkBytes - 1);
+        out.append(r);
+        pos = r.end + 1;
     }
     return out;
 }
 
-double durationOfMediaPlaylist(const QByteArray &mediaBody)
+QVector<Range> rangesFromSidx(const QByteArray &box, qint64 rangeStart,
+                              double *totalDurationOut)
 {
-    double total = 0.0;
-    for (const Segment &s : segmentsFromMediaPlaylist(mediaBody))
-        total += s.duration;
-    return total;
-}
+    QVector<Range> out;
+    if (totalDurationOut)
+        *totalDurationOut = 0.0;
+    if (box.size() < 32)
+        return out;
 
-qint64 estimateBytes(qint64 bandwidth, double durationSeconds)
-{
-    if (bandwidth <= 0 || durationSeconds <= 0.0)
-        return 0;
-    return static_cast<qint64>(static_cast<double>(bandwidth) * durationSeconds / 8.0);
+    // The sidx is found by its type: the range that was asked for does NOT
+    // start at it (YouTube puts a box of its own in front of it), and the
+    // box does not fill the range either.
+    const int at = box.indexOf("sidx");
+    if (at < 4)
+        return out;
+    const int boxStart = at - 4;
+
+    auto rd32 = [&box](int o) -> quint32 {
+        if (o + 4 > box.size())
+            return 0;
+        return (quint32(quint8(box.at(o))) << 24)
+               | (quint32(quint8(box.at(o + 1))) << 16)
+               | (quint32(quint8(box.at(o + 2))) << 8)
+               | quint32(quint8(box.at(o + 3)));
+    };
+    const quint32 boxSize = rd32(boxStart);
+    if (boxSize < 32)
+        return out;
+
+    int p = boxStart + 8;
+    const quint32 verFlags = rd32(p);
+    p += 4;  // version + flags
+    p += 4;  // reference_ID
+    const quint32 timescale = rd32(p);
+    p += 4;
+    qint64 firstOffset = 0;
+    if ((verFlags >> 24) == 0) {
+        p += 4;  // earliest_presentation_time
+        firstOffset = qint64(rd32(p));
+        p += 4;
+    } else {
+        p += 8;
+        firstOffset = (qint64(rd32(p)) << 32) | rd32(p + 4);
+        p += 8;
+    }
+    if (timescale == 0)
+        return out;
+    p += 2;  // reserved
+    const int count = int((quint32(quint8(box.at(p))) << 8)
+                          | quint32(quint8(box.at(p + 1))));
+    p += 2;
+    if (p + count * 12 > box.size())
+        return out;
+
+    // The first fragment starts where the box ends (plus the offset that the
+    // box says). The position of the box inside the range is added, because
+    // the range does not start at the box.
+    qint64 offset = rangeStart + boxStart + boxSize + firstOffset;
+    double total = 0.0;
+    for (int i = 0; i < count; ++i) {
+        const qint64 size = qint64(rd32(p) & 0x7fffffffu);
+        const quint32 dur = rd32(p + 4);
+        p += 12;
+        if (size <= 0)
+            break;  // the "no more fragments" marker
+        Range r;
+        r.start = offset;
+        r.end = offset + size - 1;
+        r.duration = double(dur) / double(timescale);
+        total += r.duration;
+        out.append(r);
+        offset += size;
+    }
+    if (totalDurationOut)
+        *totalDurationOut = total;
+    return out;
 }
 
 } // namespace dl

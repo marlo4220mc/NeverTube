@@ -205,6 +205,7 @@ public:
     QString error;
     QVector<int> parts;     // indexes of the segments already downloaded
     qlonglong positionMs = 0;  // where the local playback stopped
+    qint64 bytesPerSecond = 0;  // the speed of the download, while it runs
     qlonglong createdAt = 0;
     qlonglong updatedAt = 0;
 

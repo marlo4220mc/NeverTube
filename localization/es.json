@@ -228,6 +228,12 @@
     "downloads.retry": "Reintentar",
     "downloads.play": "Reproducir",
     "downloads.delete": "Borrar descarga",
-    "downloads.openFolder": "Abrir carpeta"
+    "downloads.openFolder": "Abrir carpeta",
+    "downloads.chooseTitle": "Descargar",
+    "downloads.kindVideo": "Vídeo (mp4 con audio)",
+    "downloads.kindAudio": "Solo el audio (mp3)",
+    "downloads.audioNeedsFfmpeg": "El mp3 se convierte con ffmpeg: si no está instalado, el audio se queda sin convertir.",
+    "downloads.bestQuality": "Mejor calidad",
+    "common.ok": "Aceptar"
   }
 }

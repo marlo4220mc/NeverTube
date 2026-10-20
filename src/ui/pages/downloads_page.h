@@ -1,11 +1,13 @@
 #pragma once
 
+#include <QHash>
 #include <QVector>
 #include <QWidget>
 
 #include "../../db/repositories.h"
 
 class QLabel;
+class QProgressBar;
 class QPushButton;
 class QVBoxLayout;
 
@@ -39,10 +41,25 @@ signals:
     void removeRequested(const QString &videoId);
 
 private:
+    // The widgets of one row, so it can be UPDATED in place (rebuilding it
+    // would restart the progress bar from zero on every tick, and the bar
+    // would never look like it was moving).
+    struct Row
+    {
+        QLabel *title = nullptr;
+        QLabel *meta = nullptr;
+        QProgressBar *bar = nullptr;
+        QPushButton *play = nullptr;
+        QPushButton *retry = nullptr;
+        QPushButton *remove = nullptr;
+    };
+
     QWidget *buildRow(const DownloadInfo &info);
+    void updateRow(const DownloadInfo &info, const Row &row);
     QString stateText(const DownloadInfo &info) const;
 
     DownloadRepo *m_repo;
+    QHash<QString, Row> m_rowParts;
     QVBoxLayout *m_listLayout = nullptr;
     QLabel *m_title = nullptr;
     QLabel *m_meta = nullptr;

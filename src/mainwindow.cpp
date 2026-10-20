@@ -574,7 +574,7 @@ MainWindow::MainWindow(QWidget *parent)
     // The downloads page and its manager. The manager is the one that asks
     // for the master, plans the download and keeps the state.
     m_downloadsPage = new DownloadsPage(&m_downloads, this);
-    m_downloadManager = new dl::DownloadManager(m_yt, &m_downloads, this);
+    m_downloadManager = new dl::DownloadManager(m_yt, &m_downloads, this, this);
     connect(m_downloadManager, &dl::DownloadManager::changed, this, [this]() {
         if (m_downloadsPage)
             m_downloadsPage->reload();
@@ -582,7 +582,14 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_watch, &WatchPage::downloadRequested, this,
             [this](const QString &videoId, const QString &title,
                    const QString &channel) {
-        m_downloadManager->start(videoId, title, channel, m_player.maxHeight());
+        // The duration: with it the dialog of the download can show the size
+        // of every resolution before anything is downloaded.
+        int duration = 0;
+        VideoInfo cached;
+        if (m_videoCache.get(videoId, cached))
+            duration = cached.durationSeconds;
+        m_downloadManager->start(videoId, title, channel, m_player.maxHeight(),
+                                 duration);
     });
     connect(m_downloadsPage, &DownloadsPage::playRequested, this,
             [this](const QString &videoId, const QString &filePath) {
@@ -1741,13 +1748,20 @@ void MainWindow::queueDownload(const QString &videoId)
 }
 
 // Queues the download of a video: it is what the button of the Player does.
-// The title and the channel are not known here (the download is planned from
-// the master), so the row is completed when the details arrive.
-void MainWindow::downloadVideo(const QString &videoId)
+//
+// With a height (or audioOnly) the dialog of the download is SKIPPED and
+// that is what is downloaded: that is how it is driven from the command
+// line, where there is nobody to ask.
+void MainWindow::downloadVideo(const QString &videoId, int height,
+                                bool audioOnly)
 {
     if (!m_downloadManager)
         return;
-    m_downloadManager->start(videoId, QString(), QString(), m_player.maxHeight());
+    m_downloadManager->start(videoId, QString(), QString(), m_player.maxHeight(),
+                             0, height, audioOnly);
+    // The tab of the downloads is opened: the progress is there, and the
+    // person asked for a download.
+    openDownloads();
 }
 
 QAbstractButton *MainWindow::downloadButton()

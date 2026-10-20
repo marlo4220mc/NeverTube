@@ -253,6 +253,7 @@ void AppDatabase::createSchema(QSqlDatabase &db)
             {"parts", "TEXT"},
             {"position_ms", "INTEGER NOT NULL DEFAULT 0"},
             {"updated_at", "INTEGER NOT NULL DEFAULT 0"},
+            {"bytes_per_second", "INTEGER NOT NULL DEFAULT 0"},
         };
         for (const Column &col : kNewColumns) {
             QSqlQuery pv(db);

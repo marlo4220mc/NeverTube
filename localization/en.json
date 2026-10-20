@@ -228,6 +228,12 @@
     "downloads.retry": "Retry",
     "downloads.play": "Play",
     "downloads.delete": "Delete download",
-    "downloads.openFolder": "Open folder"
+    "downloads.openFolder": "Open folder",
+    "downloads.chooseTitle": "Download",
+    "downloads.kindVideo": "Video (mp4 with audio)",
+    "downloads.kindAudio": "Audio only (mp3)",
+    "downloads.audioNeedsFfmpeg": "The mp3 is converted with ffmpeg: without it the audio is not converted.",
+    "downloads.bestQuality": "Best quality",
+    "common.ok": "OK"
   }
 }

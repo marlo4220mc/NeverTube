@@ -54,6 +54,16 @@ public:
     };
 
     using DoneFn = std::function<void(const Response &)>;
+    // Called with the NEW bytes, while the response is still arriving. It is
+    // what makes the progress bar of a download MOVE: the whole response of
+    // a segment is ~1.3 MB, so waiting for it to finish would make the bar
+    // jump every 1.3 MB instead of advancing smoothly.
+    //
+    // The chunk is the raw body (the chunked transfer is NOT decoded here:
+    // the decoding happens when the response is complete, because a chunk
+    // can be split in the middle). The bytes counted with it are therefore
+    // an approximation until the response ends, which is enough for a bar.
+    using ProgressFn = std::function<void(const QByteArray &chunk)>;
 
     explicit DownloadTransport(QObject *parent = nullptr);
     ~DownloadTransport() override;
@@ -65,7 +75,7 @@ public:
     // rangeStart/rangeEnd are inclusive byte offsets, or -1 for a whole
     // resource. A ranged request answers 206 with a Content-Range header.
     void get(const QUrl &url, qint64 rangeStart, qint64 rangeEnd,
-             const QString &ua, DoneFn done);
+             const QString &ua, DoneFn done, ProgressFn progress = nullptr);
 
     // Aborts the request in progress (if any). The callback is NOT called.
     void abort();
@@ -102,7 +112,9 @@ private:
     qint64 m_rangeEnd = -1;
     QString m_userAgent;
     DoneFn m_done;
+    ProgressFn m_progress;
     QByteArray m_response;   // everything received, header included
+    int m_reportedBytes = 0; // how much of the body was already reported
     QByteArray m_decoded;    // the body, without the chunk headers
     DownloadTransport::Headers m_headers;
     int m_status = 0;

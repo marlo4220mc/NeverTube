@@ -66,7 +66,12 @@ public:
     void queueDownload(const QString &videoId);
     // Queues the download of a video (the same path as the button of the
     // Player). Exposed so it can be driven from the command line.
-    void downloadVideo(const QString &videoId);
+    //
+    // `height` (0 = the best) and `audioOnly` are what the dialog of the
+    // download would ask for; with them the dialog is skipped, which is how
+    // the download is driven from the command line.
+    void downloadVideo(const QString &videoId, int height = 0,
+                       bool audioOnly = false);
     void openPlaylist(const QString &playlistId, const QString &title);
 
 protected:

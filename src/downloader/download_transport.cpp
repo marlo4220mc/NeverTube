@@ -44,7 +44,7 @@ QString DownloadTransport::userAgent()
 }
 
 void DownloadTransport::get(const QUrl &url, qint64 rangeStart, qint64 rangeEnd,
-                            const QString &ua, DoneFn done)
+                            const QString &ua, DoneFn done, ProgressFn progress)
 {
     abort();
     m_url = url;
@@ -52,6 +52,7 @@ void DownloadTransport::get(const QUrl &url, qint64 rangeStart, qint64 rangeEnd,
     m_rangeEnd = rangeEnd;
     m_userAgent = ua.isEmpty() ? userAgent() : ua;
     m_done = std::move(done);
+    m_progress = std::move(progress);
     m_inFlight = true;
     m_finished = false;
     m_response.clear();
@@ -67,6 +68,7 @@ void DownloadTransport::get(const QUrl &url, qint64 rangeStart, qint64 rangeEnd,
 void DownloadTransport::abort()
 {
     m_done = nullptr;
+    m_progress = nullptr;
     m_inFlight = false;
     m_finished = true;
     if (m_timeout)
@@ -180,11 +182,23 @@ void DownloadTransport::onReadyRead()
         if (headerEnd >= 0) {
             m_headerSize = headerEnd + 4;
             m_bodyPos = m_headerSize;
+            m_reportedBytes = 0;
             parseHeaders();
         }
     }
     if (m_headerSize < 0)
         return;
+
+    // The new bytes of the body, so the bar moves while the segment is
+    // coming. The chunked transfer is NOT decoded here (a chunk can be
+    // split in the middle): the count is an approximation until the
+    // response ends, which is enough for a bar.
+    if (m_progress && m_response.size() > m_headerSize + m_reportedBytes) {
+        const QByteArray chunk =
+            m_response.mid(m_headerSize + m_reportedBytes);
+        m_reportedBytes += chunk.size();
+        m_progress(chunk);
+    }
 
     if (m_chunked) {
         // The body is a stream of chunks: "size\r\nDATA\r\n" and it ends

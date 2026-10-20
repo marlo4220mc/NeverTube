@@ -65,6 +65,11 @@ public:
     // It does NOT touch the player: it is a separate request path, and the
     // signals of the playback are not emitted.
     void requestMaster(const QString &videoId);
+    // Asks for the ADAPTIVE FORMATS of a video (the ones with a direct URL,
+    // the initRange and the indexRange of each one) and emits them as
+    // adaptiveFormatsReady. It is what the downloader uses: it downloads the
+    // resources by byte range, and it needs the index of each one.
+    void requestAdaptiveFormats(const QString &videoId);
     // Rotates the Innertube session (visitorData + cached signed URLs): the
     // next resolveStream will use a NEW YouTube session. PlayerController uses
     // it in recovery after a gated session (403 mid-playback), where
@@ -160,6 +165,14 @@ signals:
     // multivariant one, with the variants and the #EXT-X-MEDIA renditions).
     // The downloader uses it to build its plan.
     void masterBodyReady(const QString &videoId, const QByteArray &masterBody);
+    // The ADAPTIVE FORMATS of a video (the ones with a direct URL), as the
+    // player response gives them. The downloader takes the AUDIO from here
+    // and not from the master: the audio of the master is AAC in LATM (its
+    // segments carry a PRIV box of Apple that says so) and the FFmpeg of
+    // this system cannot mux that ("Error applying bitstream filters to an
+    // output packet for stream #1: Not yet implemented in FFmpeg"). The
+    // adaptive gives the same track as a clean m4a.
+    void adaptiveFormatsReady(const QString &videoId, const QJsonArray &formats);
     // The master could not be fetched.
     void masterBodyFailed(const QString &videoId, const QString &reason);
     // Available video heights of the video (Innertube adaptiveFormats),

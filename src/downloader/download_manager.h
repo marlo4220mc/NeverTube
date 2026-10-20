@@ -1,11 +1,14 @@
 #pragma once
 
 #include <QObject>
+#include <QJsonArray>
 #include <QString>
 #include <QVector>
 
 #include "../db/repositories.h"
+#include "segment_plan.h"
 
+class QWidget;
 class Yt;
 
 namespace dl {
@@ -28,13 +31,21 @@ class DownloadManager : public QObject
     Q_OBJECT
 
 public:
-    DownloadManager(Yt *yt, DownloadRepo *repo, QObject *parent = nullptr);
+    DownloadManager(Yt *yt, DownloadRepo *repo, QWidget *window,
+                    QObject *parent = nullptr);
     ~DownloadManager() override;
 
     // Starts the download of a video. When it is already in the list it is
     // NOT queued again: the state is shown instead.
+    //
+    // The master is asked for first: the dialog of the download needs the
+    // variants it has (and their size), so the user picks the resolution
+    // BEFORE anything is downloaded.
     void start(const QString &videoId, const QString &title,
-               const QString &channel, int maxHeight);
+               const QString &channel, int maxHeight,
+               int durationSeconds = 0, int forcedHeight = 0,
+               bool forcedAudioOnly = false);
+
 
     // The download in progress, if any.
     bool isBusy() const { return m_job != nullptr; }
@@ -74,19 +85,41 @@ signals:
 
 private:
     void onMasterReady(const QString &videoId, const QByteArray &masterBody);
+    // The adaptive formats: the AUDIO comes from here (a clean m4a), because
+    // the audio of the master is AAC in LATM and the FFmpeg of this system
+    // cannot mux that.
+    void onAdaptiveFormats(const QString &videoId, const QJsonArray &formats);
+    void onFormatsReady(const QString &videoId, const QJsonArray &formats);
+    // Builds the plan and starts the download. It waits for the master AND
+    // the adaptive formats: they arrive in any order.
+    void buildPlan();
     void onJobFinished(const QString &path);
     void onJobFailed(const QString &reason);
     void saveProgress();
 
     Yt *m_yt = nullptr;
+    // The window: the dialog of the download is an overlay child of it (a
+    // window of its own would steal the pointer from the user).
+    QWidget *m_window = nullptr;
     DownloadRepo *m_repo = nullptr;
     DownloadJob *m_job = nullptr;
     QString m_currentId;
     QString m_dir;
+    QString m_audioLang;
+    // The adaptive formats of the video: the audio comes from here.
+    QJsonArray m_adaptiveFormats;
+    QByteArray m_masterBody;
     QString m_title;
     QString m_channel;
     int m_maxHeight = 1080;
+    int m_durationSeconds = 0;  // of the video being downloaded
+    // What the command line asked for (0 = ask the user).
+    int m_forcedHeight = 0;
+    bool m_forcedAudioOnly = false;
     bool m_masterConnected = false;
+    // When the page was last updated (the progress is reported several
+    // times per second and the page is repainted at most every 250 ms).
+    qint64 m_lastUiUpdateMs = 0;
 };
 
 } // namespace dl

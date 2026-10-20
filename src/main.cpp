@@ -737,8 +737,26 @@ int main(int argc, char *argv[])
             // Queues the download of a video without touching the UI: it
             // is how the downloader is driven from the command line.
             const QString videoId = args.at(++i);
-            QTimer::singleShot(600, &window, [&window, videoId]() {
-                window.downloadVideo(videoId);
+            // The options of the dialog, so the download can be driven
+            // without it: --download <id> [height] [audio]
+            int height = 0;
+            bool audioOnly = false;
+            if (i + 1 < args.size()) {
+                const QString next = args.at(i + 1);
+                if (next == QLatin1String("audio")) {
+                    audioOnly = true;
+                    ++i;
+                } else {
+                    bool ok = false;
+                    const int h = next.toInt(&ok);
+                    if (ok && h > 0) {
+                        height = h;
+                        ++i;
+                    }
+                }
+            }
+            QTimer::singleShot(600, &window, [&window, videoId, height, audioOnly]() {
+                window.downloadVideo(videoId, height, audioOnly);
             });
         } else if (arg == QLatin1String("--play-local")
                    && i + 1 < args.size()) {

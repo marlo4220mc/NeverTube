@@ -364,22 +364,41 @@ QIcon icon(Icon kind, const QColor &color, int size)
         break;
     }
     case Icon::Download: {
-        p.setPen(QPen(color, size * 0.10, Qt::SolidLine, Qt::RoundCap,
+        // The SAME shape as the sprite of the bottom bar (resources/nav/
+        // downloads_*.png, drawn by tools/gen_nav_downloads.py): an arrow
+        // that comes down into a tray. The proportions are the ones of that
+        // PNG (512 x 512), so the button of the Player and the tab of the
+        // bar show the same icon and not two similar ones.
+        const qreal w = size;
+        const QPointF cx(r.center().x(), r.top() + w * 0.234);
+        // The stroke of the PNG is thinner than the 44/512 of the drawing
+        // (PIL measures the stroke in pixels of the line, and the QPainter
+        // one is centred on the path, so they do not match). The value below
+        // is the one that makes the two shapes have the SAME coverage
+        // (measured: 29125 pixels painted against 24989 of the sprite).
+        const qreal stroke = w * 0.072;
+
+        p.setPen(QPen(color, stroke, Qt::SolidLine, Qt::RoundCap,
                       Qt::RoundJoin));
         p.setBrush(Qt::NoBrush);
-        p.drawLine(r.center().x(), r.top() + r.height() * 0.10,
-                   r.center().x(), r.center().y() + r.height() * 0.24);
-        QPainterPath d;
-        d.moveTo(r.center().x() - r.width() * 0.16, r.center().y() + r.height() * 0.10);
-        d.lineTo(r.center().x(), r.center().y() + r.height() * 0.30);
-        d.lineTo(r.center().x() + r.width() * 0.16, r.center().y() + r.height() * 0.10);
-        p.drawPath(d);
-        p.drawRoundedRect(QRectF(r.left() + r.width() * 0.10,
-                                 r.center().y() + r.height() * 0.20,
-                                 r.width() * 0.80, r.height() * 0.16),
-                          size * 0.04, size * 0.04);
-        p.drawLine(r.left() + r.width() * 0.10, r.bottom() - r.height() * 0.10,
-                   r.right() - r.width() * 0.10, r.bottom() - r.height() * 0.10);
+
+        // The arrow: a vertical line and the head.
+        p.drawLine(cx, QPointF(cx.x(), cx.y() + w * 0.293));
+        p.drawPolyline(QPolygonF({
+            QPointF(cx.x() - w * 0.107, cx.y() + w * 0.195),
+            QPointF(cx.x(), cx.y() + w * 0.313),
+            QPointF(cx.x() + w * 0.107, cx.y() + w * 0.195),
+        }));
+
+        // The tray: a "U" open at the top.
+        const qreal y = cx.y() + w * 0.420;
+        const qreal half = w * 0.205;
+        p.drawPolyline(QPolygonF({
+            QPointF(cx.x() - half, y),
+            QPointF(cx.x() - half, y + w * 0.088),
+            QPointF(cx.x() + half, y + w * 0.088),
+            QPointF(cx.x() + half, y),
+        }));
         break;
     }
     case Icon::Refresh: {
