@@ -1010,14 +1010,139 @@ bring a date. That is why:
     "sem" row the 4 weeks cases fail. It goes in the smoke of BOTH CIs.
   - It is the function used by the 6 network `publishedAt` assignments.
 
+## The three playback paths (and the one that is only a backup)
+
+There are three ways a video reaches the screen, and they are NOT equivalent.
+Measured on a real day with a fresh quota (2026-10-19):
+
+| path | when | container | who fragments it | seek |
+|---|---|---|---|---|
+| **synthetic HLS** (AV1) | profile `av1-hw` | fMP4 + `sidx` | **we** do, with the real index | **32 ms, measured** |
+| **YouTube's master** | profile `vp9-hw` / `h264-hw` | YouTube's own | **YouTube** does | works (it is a normal HLS) |
+| **edge** (direct adaptive) | ONLY when the master fails | adaptive | nobody | works |
+
+Verified live, one profile at a time, with the master reachable:
+
+| profile | route used | decoded |
+|---|---|---|
+| `av1-hw` | `av1-hls emit 1080p` | av1 |
+| `vp9-hw` | `hls filtrado a 1080p` | **vp9** |
+| `h264-hw` | `hls filtrado a 1080p` | **h264** (QSV) |
+
+The master filter honours the profile: `buildFilteredMaster` scores each
+`#EXT-X-STREAM-INF` line with `codecRankedScore` (the line carries the `CODECS=`
+attribute, so the codec is really read). YouTube's master offers **9 VP9
+variants** (`vp09.00.10.08` … `vp09.00.51.08`) and 7 h264 ones, and **no AV1**,
+which is exactly why AV1 needs the synthetic HLS at all.
+
+**The master is the primary path and it is already fragmented by YouTube.**
+That is why the master measures −0 % of quota, and why the "VP9 cannot be
+fragmented" question only ever concerned the adaptive/DASH form, which reaches
+the edge and nothing else.
+
+### The throttle is a PER-REQUEST budget of ~8 MB, not a quota on the IP
+
+This is the mechanism that explains every path above. Measured with `curl` over
+the same keep-alive connection, same video, fresh URLs:
+
+| requested range | speed |
+|---|---|
+| 2 MB | 5,18 MB/s |
+| 4 MB | 5,62 MB/s |
+| **8 MB** | **14,30 MB/s** |
+| **16 MB** | **0,36 MB/s** |
+| 32 MB | 0,37 MB/s |
+| **no `Range` (sustained)** | **0,36 MB/s from the first byte** |
+
+So a request transfers ~8 MB at full speed and **then** drops to 0,36 MB/s, and
+a sustained read never gets a fast stretch at all. The synthetic HLS works
+because its fragments are ~2 MB and never reach the ceiling; that is also why
+it needs a different `&nt=<n>` per segment (without it ffmpeg merges the
+contiguous ranges into ONE request and the throttle returns).
+
+**None of the three paths burns the IP.** Each arm ran 60 s and the health was
+measured before and after with the same probe (8 MB ranges, median of 4):
+
+| arm | moved in 60 s | health before | health after |
+|---|---|---|---|
+| control (idle) | — | 11,45 MB/s | 16,43 MB/s |
+| master (YouTube's segments) | 200 MB | 16,43 | 11,58 |
+| synthetic HLS (2 MB ranges) | 206 MB | 11,58 | 16,36 |
+| **edge direct (sustained)** | 21 MB | 16,36 | 9,62 |
+| h264 sustained | 45 MB | 6,03 | 6,69 |
+| h264 2 MB ranges | 114 MB | 6,69 | 6,05 |
+
+(MB/s. The probe's own noise floor is 8,4 – 17,2 MB/s with occasional failed
+probes, so only a drop **to 0,36** would be meaningful. None of the arms
+reached it.)
+
+And the app itself, on the edge, with **its own** URLs (master unreachable,
+`vp9-hw`): 2048 ticks, largest gap between ticks **786 ms** (the watchdog cuts
+at 5000), zero gaps ≥3 s, **0** `streamStalled`, **0** `streamInterrupted`,
+`paused-for-cache=0`, audio `48000Hz stereo`, vp9 1920x1080, 132 s of content
+played. mpv asks by range, so the sustained-read throttle of a raw `curl` does
+not touch it.
+
+**NOT attributed:** YouTube's serving rate fell from ~16 MB/s (08:49) to a
+**stable 6,3 MB/s** (09:22) and did NOT come back after 60 s idle, against
+21 – 67 MB/s from a neutral host (Cloudflare). 6,3 MB/s is 17× above the 0,36
+floor and does not affect playback, but **whether the tests caused it or the
+server allocation did could not be decided with that evidence**. Do not claim
+it either way.
+
+### The edge is a backup and it never fires on its own
+
+The edge (direct adaptive URL) is entered ONLY when the master is not
+filterable or the master fetch fails. **In every real session it has never
+triggered by itself** — the only times it was seen were when the master was
+broken on purpose to force it. It is unconditional (no env switch): when the
+chosen format cannot be fragmented at all it is the only thing that can play
+it.
+
+That is the whole trade: the edge reads the adaptive URL as **one sustained
+download**, which is what the throttle punishes (0,36 MB/s), but it is a path
+that almost never runs, and **the seek works** (which is why the fragmented
+edge was dropped: it traded the seek for bounded requests).
+
+**Rule for a future change:** do not "improve" the edge by fragmenting it.
+A fallback that plays and cannot be seeked is worse than one that plays in a
+different codec, and the whole point of the edge is that it is the last thing
+that still works. If a fragmented edge is ever revisited, it must select a
+format that carries a real index (mp4 with `sidx`), and the seek must be
+measured on the app — not inferred.
+
+### The rule that was missing: look at the CONTROL when it fails
+
+Four measurements in a row were wrong, and the last three failed for the same
+reason: **the control was not looked at when it failed too.**
+
+1. "37 % of the requests are throttled" — the IP was already degraded; "slow"
+   was the dead IP, not the requests.
+2. "VP9 has no box in its indexRange" — there IS a `Cues` box, of 13 bytes:
+   it exists and it is empty.
+3. "WebM cannot be fragmented" — the test playlist was served over `file://`,
+   so the demuxer refused the https; **the h264 control failed identically**
+   and that was read as a format limit.
+4. "the seek measurably fails on fixed chunks" — those were HTTP 403 from
+   expired URLs, detected by grepping for the word "Failed".
+
+The corrected reading: WebM **can** be served as a playlist (mpv decodes a WebM
+init section as `#EXT-X-MAP` plus fixed `BYTERANGE` chunks without complaint),
+but it carries no usable index, so a playlist built over it plays and refuses
+to seek. **Serviceable ≠ seekable** are two different questions and need two
+different checks. Before believing a "the format cannot" or "it measurably
+fails" conclusion, run the control **and read what the control did**.
+
 ## AV1 over HLS (synthetic)
 
 YouTube **does not publish AV1 in its HLS master** (`hlsManifestUrl`): only VP9/h264
 (verified: every `av01` of YouTube is `https`/DASH, it does not appear in the HLS master). In
-addition, the direct adaptive AV1 URL ("edge" mode) is **throttled** (~150 KB/s)
-because the throttle is **per request** and a continuous download exhausts its
-budget. On the other hand, each short `Range` request (~2 MB) is not throttled, even over
-the same keep-alive connection (≈14 MB/s).
+addition, the direct adaptive AV1 URL ("edge" mode) is **throttled** (~0,36 MB/s
+measured) because the throttle is **per request** and a continuous download
+exhausts its budget on the first byte. On the other hand, each short `Range`
+request (~2 MB) is not throttled, even over the same keep-alive connection
+(≈14 MB/s). The full mechanism, with the numbers, is in "The three playback
+paths" below.
 
 `Yt::buildAv1Hls` (profile `Modern`) synthesizes a local HLS over the
 `adaptiveFormat` AV1: fMP4 media playlist with `#EXT-X-MAP` (from `initRange`) and
