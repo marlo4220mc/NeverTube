@@ -3,6 +3,7 @@
 #include "../db/app_database.h"
 #include "../db/repositories.h"
 #include "../mainwindow.h"
+#include "../ui/pages/watch_page.h"
 
 #include <QAbstractButton>
 #include <QDir>
@@ -48,6 +49,28 @@ bool downloadButtonSelfTest()
     // Pressing it with NO video on screen must not queue anything: there is
     // no video to download. It has to be harmless.
     button->click();
+
+    // The signal of the button carries the choice of the menu: the height
+    // and whether only the audio is wanted.
+    QString gotId;
+    int gotHeight = -1;
+    bool gotAudio = false;
+    QObject::connect(window.findChild<WatchPage *>(),
+                     &WatchPage::downloadRequested,
+                     [&gotId, &gotHeight, &gotAudio](const QString &id,
+                                                    const QString &, const QString &,
+                                                    int height, bool audio) {
+        gotId = id;
+        gotHeight = height;
+        gotAudio = audio;
+    });
+    emit window.findChild<WatchPage *>()->downloadRequested(
+        QStringLiteral("vidDePrueba"), QStringLiteral("t"), QStringLiteral("c"),
+        1080, true);
+    check(gotId == QLatin1String("vidDePrueba"),
+          "el signal lleva el id del video");
+    check(gotHeight == 1080, "el signal lleva la resolucion elegida");
+    check(gotAudio, "el signal lleva la opcion de solo el audio");
 
     // --- the queue path (the same one the button uses) ---
     // The row has to appear in the repository with the state "pending": that

@@ -45,6 +45,8 @@ public:
                const QString &channel, int maxHeight,
                int durationSeconds = 0, int forcedHeight = 0,
                bool forcedAudioOnly = false);
+    // The resolutions the dialog offers (the ones of the player).
+    void setAvailableHeights(const QVector<int> &heights) { m_availableHeights = heights; }
 
 
     // The download in progress, if any.
@@ -109,6 +111,9 @@ private:
     // The adaptive formats of the video: the audio comes from here.
     QJsonArray m_adaptiveFormats;
     QByteArray m_masterBody;
+    // The resolutions the dialog offers: the ones the player already knows
+    // this video has (it hides the ones that are not available).
+    QVector<int> m_availableHeights;
     QString m_title;
     QString m_channel;
     int m_maxHeight = 1080;

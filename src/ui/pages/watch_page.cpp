@@ -31,6 +31,7 @@
 
 #include "../../db/repositories.h"
 #include "../../debug.h"
+#include "../../downloader/download_dialog.h"
 #include "../../i18n.h"
 #include "../../models.h"
 #include "../../player_controller.h"
@@ -946,12 +947,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
                &m_downloadBtn, &m_downloadIcon);
     // The name is what the integration test looks for to press the button.
     m_downloadBtn->setObjectName(QStringLiteral("downloadButton"));
-    connect(m_downloadBtn, &QPushButton::clicked, this, [this]() {
-        const VideoInfo v = m_player->current();
-        if (v.id.isEmpty())
-            return;
-        emit downloadRequested(v.id, v.title, v.channel);
-    });
+    connect(m_downloadBtn, &QPushButton::clicked, this,
+            &WatchPage::showDownloadMenu);
     infoLay->addLayout(actionsRow);
 
     m_descLabel = new QLabel(this);
@@ -1910,6 +1907,48 @@ void WatchPage::onStreamHeights(const QString &videoId,
 // idxToQuality(); a value <= 0 (failed query or FILE_LOADED with no tracks) does not
 // touch the menu. For sub-360p clips all stay hidden and the button shows the
 // real height (see onVideoSizeChanged).
+// The menu of the download: the resolutions of this video and the option of
+// only the audio (an mp3). It is a QMenu like the one of the three dots of a
+// row: it appears where the button is and it is dismissed with Escape.
+//
+// It asks for NOTHING: the resolutions are the ones the quality menu already
+// offers, with the ones this video does not have already hidden. So clicking
+// the download button does not have to ask YouTube for anything.
+void WatchPage::showDownloadMenu()
+{
+    const VideoInfo v = m_player->current();
+    if (v.id.isEmpty())
+        return;
+    const QVector<int> heights = availableHeights();
+    if (heights.isEmpty())
+        return;
+    // Where the menu appears: the corner of the button.
+    const QPoint pos = m_downloadBtn->mapToGlobal(
+        QPoint(0, m_downloadBtn->height()));
+    dl::DownloadChoice choice;
+    if (!dl::askDownloadOptions(this, heights, pos, &choice))
+        return;
+    emit downloadRequested(v.id, v.title, v.channel, choice.height,
+                          choice.audioOnly);
+}
+
+// The resolutions this video has, from the highest to the lowest: the same
+// list the quality menu offers, with the ones that are not available already
+// hidden (applyQualityLimits hides them).
+QVector<int> WatchPage::availableHeights() const
+{
+    QVector<int> out;
+    for (int i = 0; i < int(m_qualityItems.size()); ++i) {
+        if (m_qualityItems.at(i) && m_qualityItems.at(i)->isVisible())
+            out.append(kQualityHeights[i]);
+    }
+    if (out.isEmpty()) {
+        for (int i = kQualityCount - 1; i >= 0; --i)
+            out.append(kQualityHeights[i]);
+    }
+    return out;
+}
+
 void WatchPage::applyQualityLimits(int maxVideoHeight)
 {
     if (m_availableMaxH > 0)

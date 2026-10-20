@@ -192,6 +192,14 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
         }
     };
 
+    // The choice (the resolution and whether only the audio is wanted) comes
+    // from the menu of the Player, which knows the resolutions of this video
+    // without asking YouTube for anything.
+    DownloadChoice choice;
+    choice.height = m_forcedHeight;
+    choice.audioOnly = m_forcedAudioOnly;
+
+    // Now the plan, with the resolution that was chosen.
     Plan plan = planFromFormats(formats, m_maxHeight, QString(), &Rank::of);
     if (!plan.valid) {
         if (m_repo)
@@ -199,25 +207,6 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
         emit changed();
         emit failed(videoId, plan.error);
         m_currentId.clear();
-        return;
-    }
-
-    // The DIALOG: the user picks the resolution and whether only the audio
-    // is wanted (as an mp3). It needs the variants, so it comes before
-    // anything is downloaded.
-    DownloadChoice choice;
-    if (m_forcedHeight > 0 || m_forcedAudioOnly) {
-        // From the command line: what was asked for is used.
-        choice.height = m_forcedHeight;
-        choice.audioOnly = m_forcedAudioOnly;
-    } else if (!askDownloadOptions(m_window, plan.options,
-                                  nt::tr("downloads.chooseTitle"),
-                                  QString(), &choice)) {
-        // The user cancelled: the row goes away (nothing was downloaded).
-        if (m_repo)
-            m_repo->remove(videoId);
-        m_currentId.clear();
-        emit changed();
         return;
     }
 

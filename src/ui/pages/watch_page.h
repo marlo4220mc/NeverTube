@@ -63,8 +63,11 @@ public:
 
 signals:
     // The user wants to download the video that is on screen.
+    // The user chose in the menu of the download: the height (0 = the best
+    // one) and whether only the audio is wanted (as an mp3).
     void downloadRequested(const QString &videoId, const QString &title,
-                           const QString &channel);
+                           const QString &channel, int height,
+                           bool audioOnly);
     void backRequested();
     void channelRequested(const QString &channelId, const QString &name);
     void fullscreenToggled(bool on);
@@ -111,6 +114,17 @@ public slots:
     // queue counter, quality tooltip) in the active language. Called by MainWindow
     // when the language changes; the static chrome is live-bound.
     void retranslate();
+
+    // The resolutions this video has, from the highest to the lowest: the
+    // same list the quality menu offers, with the ones that are not
+    // available already hidden. The menu of the download uses it, so that
+    // clicking the button does not have to ask YouTube for anything.
+    QVector<int> availableHeights() const;
+
+    // Opens the menu of the download (the resolutions and the option of only
+    // the audio) and asks for it. It is the same kind of menu as the one of
+    // the three dots of a row.
+    void showDownloadMenu();
 
 private:
     void updateQueue();

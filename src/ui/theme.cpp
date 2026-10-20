@@ -601,19 +601,6 @@ QWidget#downloadRow {
   border: 1px solid @BORDER@;
   border-radius: 10px;
 }
-QRadioButton#downloadKindVideo, QRadioButton#downloadKindAudio {
-  color: @TEXT@;
-  background: transparent;
-  spacing: 8px;
-}
-QComboBox#downloadHeight {
-  background-color: #1F1F1F;
-  border: 1px solid @BORDER@;
-  border-radius: 6px;
-  padding: 5px 8px;
-  color: @TEXT@;
-}
-QComboBox#downloadHeight:disabled { color: @MUTED@; }
 QLabel#downloadTitle { color: @TEXT@; background: transparent; }
 QLabel#downloadMeta { color: @MUTED@; background: transparent; }
 QProgressBar#downloadProgress {

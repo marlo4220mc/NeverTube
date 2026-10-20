@@ -581,15 +581,18 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_watch, &WatchPage::downloadRequested, this,
             [this](const QString &videoId, const QString &title,
-                   const QString &channel) {
-        // The duration: with it the dialog of the download can show the size
-        // of every resolution before anything is downloaded.
+                   const QString &channel, int height, bool audioOnly) {
+        // The duration: with it the size of the download is known before it
+        // starts.
         int duration = 0;
         VideoInfo cached;
         if (m_videoCache.get(videoId, cached))
             duration = cached.durationSeconds;
         m_downloadManager->start(videoId, title, channel, m_player.maxHeight(),
-                                 duration);
+                                 duration, height, audioOnly);
+        // The tab of the downloads is opened: the progress is there, and the
+        // person asked for a download.
+        openDownloads();
     });
     connect(m_downloadsPage, &DownloadsPage::playRequested, this,
             [this](const QString &videoId, const QString &filePath) {
@@ -982,6 +985,13 @@ bool MainWindow::handleShortcut(QKeyEvent *event)
             return false;
         m_player.playPause();
         return true;
+      case Qt::Key_D:
+          // The menu of the download: the same one the button of the
+          // Player opens.
+          if (!m_player.isActive())
+              return false;
+          m_watch->showDownloadMenu();
+          return true;
     case Qt::Key_Left:
         if (!m_player.isActive())
             return false;
