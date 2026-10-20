@@ -1043,8 +1043,11 @@ QVector<int> DownloadRepo::partsFromJson(const QString &json)
         return out;
     const QJsonArray arr = doc.array();
     for (const QJsonValue &v : arr) {
-        const int n = v.toInt(-1);
-        if (n >= 0)
+        // The video indexes are their own index (0, 1, 2...) and the audio
+        // ones are -(index + 2), so the 0 of the video and the 0 of the
+        // audio do not collide and neither of them is lost.
+        const int n = v.toInt(0);
+        if (n >= 0 || n <= -2)
             out.append(n);
     }
     return out;

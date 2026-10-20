@@ -20,7 +20,9 @@ DownloadTransport::DownloadTransport(QObject *parent)
     , m_timeout(new QTimer(this))
 {
     m_timeout->setSingleShot(true);
-    m_timeout->setInterval(30000);
+    // 60 s: the media playlists are small, but the network can be slow and
+    // a timeout here would fail the whole download for a moment of slowness.
+    m_timeout->setInterval(60000);
     connect(m_timeout, &QTimer::timeout, this, &DownloadTransport::onTimeout);
 }
 

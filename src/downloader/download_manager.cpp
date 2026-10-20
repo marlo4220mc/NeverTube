@@ -23,12 +23,18 @@ DownloadManager::DownloadManager(Yt *yt, DownloadRepo *repo, QObject *parent)
                 &DownloadManager::onMasterReady);
         connect(m_yt, &Yt::masterBodyFailed, this,
                 [this](const QString &vid, const QString &reason) {
-            if (vid != m_currentId || !m_job)
+            if (vid != m_currentId)
                 return;
+            // There is NO job yet when the master fails: the job is created
+            // AFTER the master arrives. Without this the row would stay in
+            // "pending" forever (measured: a video that YouTube refuses
+            // left the list as "pending" and nothing happened).
             if (m_repo)
                 m_repo->setStatus(vid, QStringLiteral("error"), reason);
-            delete m_job;
-            m_job = nullptr;
+            if (m_job) {
+                m_job->deleteLater();
+                m_job = nullptr;
+            }
             m_currentId.clear();
             emit changed();
             emit failed(vid, reason);
@@ -105,9 +111,13 @@ void DownloadManager::start(const QString &videoId, const QString &title,
     }
     DownloadInfo existing;
     if (m_repo && m_repo->get(videoId, existing)) {
-        // Already known: the state is shown, it is not queued again.
-        emit changed();
-        return;
+        // Already known: the state is shown, it is not queued again. BUT a
+        // download that was interrupted (or that failed) is RESUMED: the
+        // segments that are already on disk are not fetched again.
+        if (existing.status == QLatin1String("done")) {
+            emit changed();
+            return;
+        }
     }
 
     m_currentId = videoId;
@@ -164,6 +174,10 @@ void DownloadManager::onMasterReady(const QString &videoId,
         saveProgress();
         emit progressChanged(videoId, done, total);
     });
+    // The indexes of the segments that are already on disk: they are what
+    // the resume reads.
+    connect(m_job, &DownloadJob::segmentDone, this,
+            [this, videoId](int) { saveProgress(); });
     connect(m_job, &DownloadJob::finished, this,
             [this, videoId](const QString &path) {
         if (m_repo) {
@@ -197,7 +211,15 @@ void DownloadManager::onMasterReady(const QString &videoId,
         m_repo->upsert(info);
     }
 
-    m_job->start(plan, videoId);
+    // The segments that are already on disk from a previous attempt: they
+    // are not fetched again (that is what makes the download resumable).
+    QVector<int> already;
+    if (m_repo) {
+        DownloadInfo info;
+        if (m_repo->get(videoId, info))
+            already = info.parts;
+    }
+    m_job->start(plan, videoId, already);
     emit changed();
 }
 
@@ -214,6 +236,7 @@ void DownloadManager::saveProgress()
         ? qBound(0.0, double(info.bytesDone) / double(info.bytesTotal), 1.0)
         : 0.0;
     info.status = m_job->status();
+    info.parts = m_job->doneSegments();
     info.updatedAt = QDateTime::currentMSecsSinceEpoch();
     m_repo->upsert(info);
 }

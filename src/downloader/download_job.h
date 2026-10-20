@@ -35,7 +35,12 @@ public:
     // The plan carries the URL of the media playlists but not their
     // segments: those live in a second playlist (the media one), which the
     // job fetches first. The plan then is completed with the real segments.
-    void start(const Plan &plan, const QString &videoId);
+    //
+    // `alreadyDone` are the indexes of the segments that are already on disk
+    // from a previous attempt: they are not fetched again, which is what
+    // makes the download resumable.
+    void start(const Plan &plan, const QString &videoId,
+               const QVector<int> &alreadyDone = QVector<int>());
 
     // Stops the download. What is already on disk stays there.
     void stop();
@@ -46,8 +51,14 @@ public:
     qint64 bytesDone() const { return m_bytesDone; }
     // The expected size, from the BANDWIDTH of the master.
     qint64 bytesTotal() const { return m_bytesTotal; }
-    // The indexes of the segments already downloaded (video and audio).
+    // The indexes of the segments already downloaded (video and audio), in
+    // the same encoding the resume uses.
     QVector<int> doneSegments() const;
+    // The indexes of the segments that are already on disk from a previous
+    // attempt (the resume). The video ones are their own index (0, 1, 2...)
+    // and the audio ones are -(index + 2), so the 0 of the video and the 0 of
+    // the audio do not collide and neither of them is lost.
+    QVector<int> m_alreadyDone;
 
     // Where the partials and the final file are.
     QString videoPartialPath() const { return m_videoPath; }
@@ -80,6 +91,11 @@ private:
     void onSegment(const QString &track, int index,
                    const QByteArray &data);
     void writeSegment(const QString &track, int index, const QByteArray &data);
+    // The file of one segment inside the temporary folder of the download.
+    QString segmentPath(const QString &track, int index) const;
+    // Writes the segments that are on disk, in order, into the partial.
+    bool assemblePartial(const QString &path, const QString &track,
+                         const QByteArray &initData);
     void maybeFinishSegments();
     void startMux();
     void setStatus(const QString &status, const QString &error = QString());
@@ -108,6 +124,7 @@ private:
 
     QString m_videoPath;
     QString m_audioPath;
+    QString m_tempDir;
     QString m_outputPath;
     QString m_status;
     QString m_error;
