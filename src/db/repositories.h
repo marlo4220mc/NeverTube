@@ -183,6 +183,67 @@ private:
     AppDatabase &m_db;
 };
 
+// One download: the state of a file that is being fetched (or that was).
+//
+// The `status` is a FIXED vocabulary in code, never a translated text (the
+// rule of AGENTS.md): pending, downloading, paused, muxing, done, error. The
+// UI translates it for display, but nothing ever compares a translated
+// string.
+class DownloadInfo
+{
+public:
+    QString videoId;
+    QString title;
+    QString channel;
+    QString quality;        // "1080p", "vp9", ... (label only)
+    QString status;         // the fixed vocabulary above
+    double progress = 0.0;  // 0..1
+    qint64 bytesDone = 0;
+    qint64 bytesTotal = 0;
+    QString filePath;       // the PARTIAL (a .ts per track): where the bytes are
+    QString finalPath;      // the finished mp4
+    QString error;
+    QVector<int> parts;     // indexes of the segments already downloaded
+    qlonglong positionMs = 0;  // where the local playback stopped
+    qlonglong createdAt = 0;
+    qlonglong updatedAt = 0;
+
+    bool isActive() const;  // downloading / paused / muxing
+    bool isDone() const;     // the mp4 is there and usable
+};
+
+// Persists the downloads. The table has been in the database since the
+// beginning of the app (empty, nobody used it) and the downloader extends it
+// with the state it needs to RESUME: the bytes already on disk and the
+// indexes of the segments already downloaded.
+//
+// The unit of resume is the SEGMENT (the master is already fragmented by
+// YouTube with segments of ~1.3 MB, so each one fits in a single request),
+// so the state is a set of segment indexes, not a set of byte offsets.
+class DownloadRepo
+{
+public:
+    explicit DownloadRepo(AppDatabase &db);
+
+    bool upsert(const DownloadInfo &d);
+    bool get(const QString &videoId, DownloadInfo &out) const;
+    QVector<DownloadInfo> all() const;  // newest first
+    bool remove(const QString &videoId);
+    bool setStatus(const QString &videoId, const QString &status,
+                   const QString &error = QString());
+    bool setProgress(const QString &videoId, qint64 bytesDone,
+                     qint64 bytesTotal);
+    bool setParts(const QString &videoId, const QVector<int> &parts);
+    bool setPosition(const QString &videoId, qlonglong positionMs);
+
+private:
+    DownloadInfo fromRow(const QSqlQuery &q) const;
+    static QString partsToJson(const QVector<int> &parts);
+    static QVector<int> partsFromJson(const QString &json);
+
+    AppDatabase &m_db;
+};
+
 // Persistent Home cache per network section (Recomendado/Feed/Tendencias).
 // Stores only ordered ids + fetched_at; the metadata lives in "videos"
 // (VideoCacheRepo). saveSection REPLACES the whole section: each network

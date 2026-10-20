@@ -7,6 +7,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QRandomGenerator>
 #include <QSet>
 #include <QSqlError>
@@ -329,6 +331,92 @@ bool databaseSelfTest(const QString &dbPath)
                   && homeCache.sectionFetchedAt(QStringLiteral("recommended"))
                          == savedAt,
               "home cache empty save keeps ids and fetchedAt");
+
+    // --- the downloads repo ---
+    // It has to survive a round trip with the state a RESUMED download
+    // needs: the bytes on disk and the indexes of the segments already
+    // fetched (the unit of resume is the segment, not a byte offset).
+    DownloadRepo downloads(db);
+    {
+        DownloadInfo d;
+        d.videoId = QLatin1String("dlVid1");
+        d.title = QLatin1String("Video de prueba");
+        d.channel = QLatin1String("Canal");
+        d.quality = QLatin1String("1080p");
+        d.status = QLatin1String("downloading");
+        d.progress = 0.25;
+        d.bytesDone = 25;
+        d.bytesTotal = 100;
+        d.filePath = QLatin1String("/tmp/dl/v.ts");
+        d.createdAt = 1000;
+        d.updatedAt = 2000;
+        d.parts = {0, 1, 2, 5};
+        ok &= yes(downloads.upsert(d), "download upsert");
+
+        DownloadInfo got;
+        ok &= yes(downloads.get(QLatin1String("dlVid1"), got),
+                  "download get");
+        ok &= yes(got.title == QLatin1String("Video de prueba")
+                      && got.channel == QLatin1String("Canal")
+                      && got.quality == QLatin1String("1080p")
+                      && got.status == QLatin1String("downloading")
+                      && got.bytesDone == 25 && got.bytesTotal == 100
+                      && got.filePath == QLatin1String("/tmp/dl/v.ts")
+                      && got.parts.size() == 4 && got.parts.at(0) == 0
+                      && got.parts.at(3) == 5,
+                  "download round trip (estado y partes)");
+        ok &= yes(got.isActive() && !got.isDone(),
+                  "un download en curso esta activo y no terminado");
+
+        // The progress is stored as a fraction AND as bytes: the bar needs
+        // the bytes and the resume needs to know what is missing.
+        ok &= yes(downloads.setProgress(QLatin1String("dlVid1"), 50, 200),
+                  "download setProgress");
+        ok &= yes(downloads.get(QLatin1String("dlVid1"), got)
+                      && got.bytesDone == 50 && got.bytesTotal == 200
+                      && qAbs(got.progress - 0.25) < 0.001,
+                  "download progress (bytes y fraccion)");
+        // A total of zero must not divide by zero.
+        ok &= yes(downloads.setProgress(QLatin1String("dlVid1"), 10, 0),
+                  "download setProgress sin total");
+        ok &= yes(downloads.get(QLatin1String("dlVid1"), got)
+                      && got.progress == 0.0,
+                  "download progress sin total no revienta");
+
+        ok &= yes(downloads.setParts(QLatin1String("dlVid1"), {1, 3, 4}),
+                  "download setParts");
+        ok &= yes(downloads.get(QLatin1String("dlVid1"), got)
+                      && got.parts.size() == 3 && got.parts.at(1) == 3,
+                  "download partes (los indices de los segmentos hechos)");
+
+        ok &= yes(downloads.setStatus(QLatin1String("dlVid1"),
+                                      QLatin1String("error"),
+                                      QLatin1String("sin ffmpeg")),
+                  "download setStatus");
+        ok &= yes(downloads.get(QLatin1String("dlVid1"), got)
+                      && got.status == QLatin1String("error")
+                      && got.error == QLatin1String("sin ffmpeg"),
+                  "download error guardado");
+        ok &= yes(!got.isActive() && !got.isDone(),
+                  "un download con error no esta activo ni terminado");
+
+        // The list is newest first.
+        DownloadInfo d2;
+        d2.videoId = QLatin1String("dlVid2");
+        d2.title = QLatin1String("Otro");
+        d2.status = QLatin1String("done");
+        d2.createdAt = 5000;
+        ok &= yes(downloads.upsert(d2), "download upsert 2");
+        const QVector<DownloadInfo> list = downloads.all();
+        ok &= yes(list.size() == 2 && list.at(0).videoId == QLatin1String("dlVid2"),
+                  "download list (mas nuevo primero)");
+
+        ok &= yes(downloads.remove(QLatin1String("dlVid1")),
+                  "download remove");
+        ok &= yes(downloads.all().size() == 1, "download remove (queda uno)");
+        ok &= yes(!downloads.get(QLatin1String("dlVid1"), got),
+                  "download get de uno borrado");
+    }
 
     db.close();
     if (ok)
@@ -918,6 +1006,190 @@ QString SettingsRepo::getString(const QString &key, const QString &def) const
     if (!get(key, v))
         return def;
     return v;
+}
+
+DownloadRepo::DownloadRepo(AppDatabase &db)
+    : m_db(db)
+{
+}
+
+bool DownloadInfo::isActive() const
+{
+    return status == QLatin1String("downloading")
+        || status == QLatin1String("paused")
+        || status == QLatin1String("muxing");
+}
+
+bool DownloadInfo::isDone() const
+{
+    return status == QLatin1String("done");
+}
+
+QString DownloadRepo::partsToJson(const QVector<int> &parts)
+{
+    QJsonArray arr;
+    for (int p : parts)
+        arr.append(p);
+    return QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact));
+}
+
+QVector<int> DownloadRepo::partsFromJson(const QString &json)
+{
+    QVector<int> out;
+    if (json.isEmpty())
+        return out;
+    const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
+    if (!doc.isArray())
+        return out;
+    const QJsonArray arr = doc.array();
+    for (const QJsonValue &v : arr) {
+        const int n = v.toInt(-1);
+        if (n >= 0)
+            out.append(n);
+    }
+    return out;
+}
+
+bool DownloadRepo::upsert(const DownloadInfo &d)
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "INSERT OR REPLACE INTO downloads "
+        "(id, video_id, title, channel, type, status, progress, file_path, "
+        " error, created_at, final_path, bytes_done, bytes_total, quality, "
+        " parts, position_ms, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+    q.addBindValue(d.videoId);
+    q.addBindValue(d.videoId);
+    q.addBindValue(d.title);
+    q.addBindValue(d.channel);
+    q.addBindValue(QStringLiteral("video"));
+    q.addBindValue(d.status);
+    q.addBindValue(d.progress);
+    q.addBindValue(d.filePath);
+    q.addBindValue(d.error);
+    q.addBindValue(d.createdAt);
+    q.addBindValue(d.finalPath);
+    q.addBindValue(d.bytesDone);
+    q.addBindValue(d.bytesTotal);
+    q.addBindValue(d.quality);
+    q.addBindValue(partsToJson(d.parts));
+    q.addBindValue(d.positionMs);
+    q.addBindValue(d.updatedAt);
+    return q.exec();
+}
+
+DownloadInfo DownloadRepo::fromRow(const QSqlQuery &q) const
+{
+    DownloadInfo d;
+    d.videoId = q.value(0).toString();
+    d.title = q.value(1).toString();
+    d.channel = q.value(2).toString();
+    d.status = q.value(3).toString();
+    d.progress = q.value(4).toDouble();
+    d.filePath = q.value(5).toString();
+    d.error = q.value(6).toString();
+    d.createdAt = q.value(7).toLongLong();
+    d.finalPath = q.value(8).toString();
+    d.bytesDone = q.value(9).toLongLong();
+    d.bytesTotal = q.value(10).toLongLong();
+    d.quality = q.value(11).toString();
+    d.parts = partsFromJson(q.value(12).toString());
+    d.positionMs = q.value(13).toLongLong();
+    d.updatedAt = q.value(14).toLongLong();
+    return d;
+}
+
+bool DownloadRepo::get(const QString &videoId, DownloadInfo &out) const
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "SELECT video_id, title, channel, status, progress, file_path, error, "
+        "created_at, final_path, bytes_done, bytes_total, quality, parts, "
+        "position_ms, updated_at "
+        "FROM downloads WHERE video_id=? LIMIT 1"));
+    q.addBindValue(videoId);
+    if (!q.exec() || !q.next())
+        return false;
+    out = fromRow(q);
+    return true;
+}
+
+QVector<DownloadInfo> DownloadRepo::all() const
+{
+    QVector<DownloadInfo> out;
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "SELECT video_id, title, channel, status, progress, file_path, error, "
+        "created_at, final_path, bytes_done, bytes_total, quality, parts, "
+        "position_ms, updated_at "
+        "FROM downloads ORDER BY created_at DESC"));
+    if (!q.exec())
+        return out;
+    while (q.next())
+        out.append(fromRow(q));
+    return out;
+}
+
+bool DownloadRepo::remove(const QString &videoId)
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral("DELETE FROM downloads WHERE video_id=?"));
+    q.addBindValue(videoId);
+    return q.exec();
+}
+
+bool DownloadRepo::setStatus(const QString &videoId, const QString &status,
+                             const QString &error)
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "UPDATE downloads SET status=?, error=?, updated_at=? WHERE video_id=?"));
+    q.addBindValue(status);
+    q.addBindValue(error);
+    q.addBindValue(QDateTime::currentMSecsSinceEpoch());
+    q.addBindValue(videoId);
+    return q.exec();
+}
+
+bool DownloadRepo::setProgress(const QString &videoId, qint64 bytesDone,
+                               qint64 bytesTotal)
+{
+    const double frac = bytesTotal > 0
+        ? qBound(0.0, double(bytesDone) / double(bytesTotal), 1.0)
+        : 0.0;
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "UPDATE downloads SET bytes_done=?, bytes_total=?, progress=?, "
+        "updated_at=? WHERE video_id=?"));
+    q.addBindValue(bytesDone);
+    q.addBindValue(bytesTotal);
+    q.addBindValue(frac);
+    q.addBindValue(QDateTime::currentMSecsSinceEpoch());
+    q.addBindValue(videoId);
+    return q.exec();
+}
+
+bool DownloadRepo::setParts(const QString &videoId, const QVector<int> &parts)
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "UPDATE downloads SET parts=?, updated_at=? WHERE video_id=?"));
+    q.addBindValue(partsToJson(parts));
+    q.addBindValue(QDateTime::currentMSecsSinceEpoch());
+    q.addBindValue(videoId);
+    return q.exec();
+}
+
+bool DownloadRepo::setPosition(const QString &videoId, qlonglong positionMs)
+{
+    QSqlQuery q(m_db.db());
+    q.prepare(QStringLiteral(
+        "UPDATE downloads SET position_ms=?, updated_at=? WHERE video_id=?"));
+    q.addBindValue(positionMs);
+    q.addBindValue(QDateTime::currentMSecsSinceEpoch());
+    q.addBindValue(videoId);
+    return q.exec();
 }
 
 HomeCacheRepo::HomeCacheRepo(AppDatabase &db)

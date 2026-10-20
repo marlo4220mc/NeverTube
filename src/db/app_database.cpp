@@ -220,6 +220,58 @@ void AppDatabase::createSchema(QSqlDatabase &db)
         "  error TEXT,"
         "  created_at INTEGER NOT NULL"
         ")"));
+    // Migration of the downloads table: it was created empty (with the
+    // downloader not built yet) and the downloader needs to persist the
+    // state of a download that is NOT just a fraction.
+    //
+    //  final_path   the finished mp4 (file_path is the PARTIAL, a .ts per
+    //                track, that the mux reads)
+    //  bytes_done   how many bytes are already on disk (the progress bar
+    //                needs a real number, and a resumed download needs to
+    //                know what is missing)
+    //  bytes_total  the expected size, known BEFORE starting from the
+    //                BANDWIDTH attribute of the master
+    //  quality      "1080p", "vp9", ... for the row label
+    //  parts        JSON with the indexes of the segments already
+    //                downloaded: the unit of resume is the SEGMENT, so this
+    //                is what makes "continue where it stopped" possible
+    //  position_ms  where the local playback stopped (the local playback
+    //                does NOT go through the history, which is about
+    //                YouTube videos)
+    //  updated_at   last change, to order the list
+    if (tableExists(db, QStringLiteral("downloads"))) {
+        struct Column
+        {
+            const char *name;
+            const char *definition;
+        };
+        static const Column kNewColumns[] = {
+            {"final_path", "TEXT"},
+            {"bytes_done", "INTEGER NOT NULL DEFAULT 0"},
+            {"bytes_total", "INTEGER NOT NULL DEFAULT 0"},
+            {"quality", "TEXT"},
+            {"parts", "TEXT"},
+            {"position_ms", "INTEGER NOT NULL DEFAULT 0"},
+            {"updated_at", "INTEGER NOT NULL DEFAULT 0"},
+        };
+        for (const Column &col : kNewColumns) {
+            QSqlQuery pv(db);
+            bool has = false;
+            if (pv.exec(QStringLiteral("PRAGMA table_info(downloads)"))) {
+                while (pv.next()) {
+                    if (pv.value(1).toString() == QLatin1String(col.name)) {
+                        has = true;
+                        break;
+                    }
+                }
+            }
+            if (!has) {
+                exec(QStringLiteral("ALTER TABLE downloads ADD COLUMN %1 %2")
+                         .arg(QLatin1String(col.name),
+                              QLatin1String(col.definition)));
+            }
+        }
+    }
     exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS settings ("
         "  key TEXT PRIMARY KEY,"
