@@ -740,6 +740,14 @@ int main(int argc, char *argv[])
             QTimer::singleShot(600, &window, [&window, videoId]() {
                 window.downloadVideo(videoId);
             });
+        } else if (arg == QLatin1String("--play-local")
+                   && i + 1 < args.size()) {
+            // Plays a local file (a download): how the button of the
+            // Downloads page is tested.
+            const QString path = args.at(++i);
+            QTimer::singleShot(600, &window, [&window, path]() {
+                window.playLocal(path);
+            });
         } else if (arg == QLatin1String("--downloads")) {
             QTimer::singleShot(500, &window, [&window]() {
                 window.openDownloads();

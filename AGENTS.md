@@ -1133,6 +1133,129 @@ to seek. **Serviceable ≠ seekable** are two different questions and need two
 different checks. Before believing a "the format cannot" or "it measurably
 fails" conclusion, run the control **and read what the control did**.
 
+## The downloader (button on the Player, tab in the bottom bar)
+
+The app can now **fetch** a video, not only watch it: the Player has a
+download button and the bottom bar a "Descargas" tab with the list, the
+progress and the state. The design is in
+`docs/superpowers/specs/2026-10-19-downloader-design.md`.
+
+### Where the bytes come from
+
+The **master HLS of YouTube**, downloaded in parallel. The unit is the
+**SEGMENT**, not a byte range: the master is already fragmented by YouTube
+with segments of ~1.3 MB, well under the ~8 MB per-request budget of the
+throttle (§2.1), so each segment fits in ONE request and no splitting
+machinery is needed. Measured against the real master:
+
+| connections | speed |
+|---|---|
+| 1 | 9,44 MB/s |
+| **4** | **43,12 MB/s** |
+| 8 | 48,99 MB/s |
+
+against 0,37 MB/s for a sustained read of the same resource. A whole
+1080p video (171 MB) lands in **9 – 15 s**.
+
+The **height wins over the codec** for a download, the OPPOSITE of the
+player: the player ranks the codec first because it wants the one the GPU
+decodes, but a download wants the best picture.
+
+### The four things the real master taught (each was a bug first)
+
+- **The response is CHUNKED.** YouTube answers the segments with
+  `Transfer-Encoding: chunked` and NO `Content-Length`, so the chunks have
+  to be decoded, and the decoding has to be **INCREMENTAL**: the response
+  arrives in many pieces and decoding it again from the start duplicates
+  the bytes.
+- **The server closing the connection is not an error.** With
+  `Connection: close` Qt reports the close as an error, and failing there
+  threw away the bytes that had already arrived.
+- **An fMP4 variant has an `#EXT-X-MAP`**: the init segment ("moov") is a
+  separate URL and it goes ONCE at the front of the file. Without it
+  nothing can read the file (`ffmpeg`: *"trun track id unknown, no tfhd
+  was found"*).
+- **The master does not always mark the original audio.** When the video
+  has a single language there is no `acont=original`, and the two
+  renditions (itag 233 = 48 kbps, itag 234 = 128 kbps) are only told
+  apart by the bitrate. Picking the wrong one downloads 48 kbps audio for
+  a 1080p video.
+
+And two that are not about the master:
+
+- **The `BANDWIDTH` of the master is the PEAK** of the variant, not its
+  average: the estimate was 380 MB against 179 MB real. The real total
+  comes from the segments that are on disk.
+- **A null `QString` is bound as a NULL in SQLite**, and the NOT NULL
+  columns of `downloads` rejected the row: the download finished and the
+  list stayed empty. The text is bound as an empty string.
+
+### The muxing is the ffmpeg of the SYSTEM
+
+The vendored FFmpeg has **no muxer**: it is built with `--disable-everything`
+and only demuxers, and `avformat_write_frame` is not even exported, so it
+can read an mp4 but not write one. The mux is done with the `ffmpeg` found
+at runtime (`QStandardPaths::findExecutable`, plus `NEVERTUBE_FFMPEG`).
+**Without ffmpeg the download still works**: the segments are downloaded
+and kept, and the mux is a separate step that can be retried. The mux
+itself is a stream copy (`-c copy`, plus `-movflags +faststart` so the
+moov is at the front): 0,05 s for 30 s of video, no re-encoding.
+
+### The resume, and the cleanup
+
+Each segment goes into its own file inside a temporary folder **as it
+arrives**, so an interrupted download keeps the bytes and the index of the
+segments that are done is saved in the repository. Starting again skips
+them (measured: with 77 of the 246 segments already on disk, the resume
+fetched **1** and finished the file).
+
+The encoding of that index had a bug: the video segments are their own
+index (0, 1, 2...) and the audio ones `-(index + 2)`, so the 0 of the
+video and the 0 of the audio do not collide and **neither is lost**.
+
+The partials and the temporary folder are deleted when the mux works (they
+are twice the size of the file: 171 MB of partials for a 171 MB mp4).
+When the mux FAILS they are NOT deleted: the bytes that were downloaded
+are still there.
+
+### Where the files are
+
+`QStandardPaths::DownloadLocation` (the folder of downloads of the
+SYSTEM, which comes already translated: "Descargas", "Downloads") plus a
+`NeverTube` subfolder, so the files are not mixed with the ones of the
+user. It is the default; the path can be changed in Ajustes.
+
+### The local playback does NOT go to the history
+
+`PlayerController::playLocalFile()` plays a file that is already on the
+disk, without the resolver (asking YouTube for a video that is already
+downloaded is wrong, and it fails when the video is not available any
+more). The position lives in the `downloads` table, not in the history:
+that is about YouTube videos, and `HistoryRepo`/`onDurationKnown` assume a
+YouTube id.
+
+### The transport is its own
+
+`Ipv4Https` (the transport of the app) is a single socket with a FIFO
+queue: it cannot download in parallel, and its callback is (status, body),
+so it exposes no response header and cannot send a Range. The downloader
+has its own (`src/downloader/download_transport.*`), with N simultaneous
+connections, the headers exposed and the IPv4 forced (the same reason
+`Ipv4Https` does it: YouTube blocks some videos over IPv6 from this
+network).
+
+### The selftests
+
+- `--selftest-download`: the plan is a pure function of the master
+  (27 cases, offline).
+- `--selftest-download-button`: the button of the REAL window (11 cases):
+  it exists, it has a tooltip AND an accessible name (an icon-only button
+  has no text: those two ARE its label), and the row it queues lands in
+  the repository with the state "pending".
+
+The two CLI entries `--download <id>` and `--play-local <file>` are how
+the downloader is driven without touching the UI.
+
 ## AV1 over HLS (synthetic)
 
 YouTube **does not publish AV1 in its HLS master** (`hlsManifestUrl`): only VP9/h264

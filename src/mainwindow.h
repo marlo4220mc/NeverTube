@@ -53,6 +53,9 @@ public:
     void openLibrary();
     // Opens the "Descargas" tab.
     void openDownloads();
+    // Plays a local file (a download), the same path as the button of the
+    // Downloads page.
+    void playLocal(const QString &path);
     // The download button of the Player, found by its name. It is how the
     // integration test presses it (there is no other way to click in a
     // headless test).

@@ -43,6 +43,14 @@ public:
     // removed.
     bool removeFromQueue(int index);
     void playIndex(int index);
+    // Plays a LOCAL file (a downloaded video). It does NOT go through the
+    // resolver: the file is already on the disk. The queue is replaced with
+    // the single item, so the controls of the Player work as usual.
+    //
+    // The position is NOT saved in the history (that is about YouTube
+    // videos): the caller keeps it in the downloads table.
+    void playLocalFile(const QString &path, const VideoInfo &info,
+                       qlonglong startPositionMs = 0);
     void next();
     // "Anterior" with YouTube's behavior: if the current video is already
     // advanced (more than kPrevRestartThreshold), it goes back to the start;
@@ -225,6 +233,9 @@ private:
     // consumed a single time: when advancing in the queue (end of video /
     // next) the following ones ALWAYS start from the beginning.
     QHash<int, qlonglong> m_indexStartMs;
+    // True when what is playing is a local file (a download): it does NOT
+    // go to the history.
+    bool m_isLocalFile = false;
     qlonglong m_pendingStartMs = 0;
     QTimer *m_flushTimer = nullptr;
     // Stall recovery: avoids loops (few, spaced attempts) and resets when

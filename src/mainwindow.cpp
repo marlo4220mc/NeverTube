@@ -4,6 +4,7 @@
 #include <QApplication>
 #include <QButtonGroup>
 #include <QCursor>
+#include <QDesktopServices>
 #include <QGuiApplication>
 #include <QHelpEvent>
 #include <QHBoxLayout>
@@ -28,6 +29,7 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QFileInfo>
 #include <QFile>
 #include <QFrame>
 #include <QPointer>
@@ -581,6 +583,29 @@ MainWindow::MainWindow(QWidget *parent)
             [this](const QString &videoId, const QString &title,
                    const QString &channel) {
         m_downloadManager->start(videoId, title, channel, m_player.maxHeight());
+    });
+    connect(m_downloadsPage, &DownloadsPage::playRequested, this,
+            [this](const QString &videoId, const QString &filePath) {
+        if (filePath.isEmpty())
+            return;
+        // The local file: the queue is replaced with it and the history is
+        // NOT touched (a downloaded file is not a YouTube video).
+        VideoInfo info;
+        info.id = videoId;
+        info.title = videoId;
+        // The position of the local playback lives in the downloads table,
+        // NOT in the history (that is about YouTube videos).
+        DownloadInfo d;
+        qlonglong pos = 0;
+        if (m_downloads.get(videoId, d))
+            pos = d.positionMs;
+        m_player.playLocalFile(filePath, info, pos);
+        goToPlayerPage();
+    });
+    connect(m_downloadsPage, &DownloadsPage::openFolderRequested, this,
+            [](const QString &path) {
+        if (!path.isEmpty())
+            QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     });
     connect(m_downloadsPage, &DownloadsPage::removeRequested, this,
             [this](const QString &videoId) {
@@ -1731,6 +1756,18 @@ QAbstractButton *MainWindow::downloadButton()
         return nullptr;
     return m_watch->findChild<QAbstractButton *>(
         QStringLiteral("downloadButton"));
+}
+
+// Plays a local file (a download).
+void MainWindow::playLocal(const QString &path)
+{
+    if (path.isEmpty() || !QFileInfo::exists(path))
+        return;
+    VideoInfo info;
+    info.id = QFileInfo(path).completeBaseName();
+    info.title = info.id;
+    m_player.playLocalFile(path, info, 0);
+    goToPlayerPage();
 }
 
 // Opens the "Descargas" tab: the nav button of the bottom bar (id 4).

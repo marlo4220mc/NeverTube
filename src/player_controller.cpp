@@ -166,6 +166,45 @@ bool PlayerController::removeFromQueue(int index)
     return true;
 }
 
+// Plays a file that is already on the disk (a download). The resolver is
+// NOT involved: there is nothing to resolve, and asking YouTube for a
+// video that is already downloaded would be wrong (and it would fail when
+// the video is not available any more).
+void PlayerController::playLocalFile(const QString &path, const VideoInfo &info,
+                                    qlonglong startPositionMs)
+{
+    if (path.isEmpty())
+        return;
+    savePosition();
+    // The queue is the single item: the Player controls (next, previous,
+    // the quality menu) work on it as usual.
+    m_queue.clear();
+    m_queue.append(info);
+    m_index = 0;
+    // A local file is not written to the history: the caller (the downloads
+    // table) keeps its position.
+    m_isLocalFile = true;
+    m_indexStartMs.clear();
+    if (startPositionMs > 0)
+        m_indexStartMs.insert(0, startPositionMs);
+    m_pendingStartMs = startPositionMs;
+    m_reportedDuration = -1.0;
+    m_seekBack = 0.0;
+    m_errorMessage.clear();
+    m_recoverAttempts = 0;
+    m_lastRecoverMs = 0;
+    // A local file is not a live stream and it cannot be recovered by
+    // resolving again: there is nothing to re-resolve.
+    m_streamCanBeLive = false;
+    m_streamIsLive = false;
+    setPhase(QStringLiteral("loading"));
+    emit currentChanged();
+    emit queueChanged();
+    // The file is played by the engine as it is (mpv does loadfile with the
+    // path; the FfmpegBackend opens it with the file protocol).
+    m_player->playUrl(path, m_pendingStartMs / 1000.0);
+}
+
 void PlayerController::playIndex(int index)
 {
     if (index < 0 || index >= m_queue.size())
@@ -473,7 +512,9 @@ void PlayerController::savePosition()
     const VideoInfo cur = current();
     const bool active = m_phase == QLatin1String("playing")
                         || m_phase == QLatin1String("paused");
-    if (!m_history || !active || cur.id.isEmpty())
+    // A LOCAL file (a download) does not go to the history: that is about
+    // YouTube videos, and the downloads table keeps its own position.
+    if (!m_history || !active || cur.id.isEmpty() || m_isLocalFile)
         return;
     const qlonglong posMs = qRound(m_position * 1000.0);
     // Discards the write if it is the SAME video and the position barely
