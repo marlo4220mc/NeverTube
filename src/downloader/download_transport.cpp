@@ -31,9 +31,29 @@ DownloadTransport::~DownloadTransport()
     abort();
 }
 
+// How many connections the downloader opens at the same time.
+//
+// The speed of a download is limited by TWO things, and they are different:
+//
+//  1. The pacing that YouTube signs into the URL (initcwndbps, measured
+//     here: 2117625 bytes/s = 2,1 MB/s). It is PER CONNECTION, so more
+//     connections means more speed, up to the point where the connection
+//     itself becomes the limit.
+//  2. The throttle by the size of the request: a request of more than ~8 MB
+//     drops to 0,36 MB/s (measured on two different IPs). Every fragment
+//     of a download is well under that, so this one is avoided by
+//     construction.
+//
+// With a fresh IP, 8 connections gave 15 - 24 MB/s and 4 gave 15 MB/s;
+// with 12 the connection itself became the limit (and it was not
+// reliable). 8 is the measured optimum.
+//
+// The absolute number depends on the state of the IP: the same
+// configuration gave 17 MB/s on a fresh IP and 2 - 4 MB/s after a long
+// run of downloads, so the speed is NOT a property of the app.
 int DownloadTransport::defaultConcurrency()
 {
-    return 4;
+    return 8;
 }
 
 QString DownloadTransport::userAgent()
