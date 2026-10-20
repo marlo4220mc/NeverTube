@@ -1142,20 +1142,49 @@ progress and the state. The design is in
 
 ### Where the bytes come from
 
-The **master HLS of YouTube**, downloaded in parallel. The unit is the
-**SEGMENT**, not a byte range: the master is already fragmented by YouTube
-with segments of ~1.3 MB, well under the ~8 MB per-request budget of the
-throttle (§2.1), so each segment fits in ONE request and no splitting
-machinery is needed. Measured against the real master:
+The **adaptive formats** of the player response, fetched **by byte range**
+and in parallel.
 
-| connections | speed |
-|---|---|
-| 1 | 9,44 MB/s |
-| **4** | **43,12 MB/s** |
-| 8 | 48,99 MB/s |
+The reason is the throttle: YouTube throttles a request **by its size**.
+Measured on the same audio resource, asked for whole (3,87 MB) it runs at
+**0,011 MB/s**, and a 2 MB range of the very same resource runs at
+**14 MB/s**. A thousand times. So nothing is ever asked for whole: the
+sidx of each resource (the same index the synthetic AV1 HLS of the player
+already reads) gives the exact boundary of every fragment, and the
+fragments are fetched in parallel. A track with **no** index (a WebM/Opus
+one: its clusters are not indexed) is cut in pieces of 2 MB instead.
 
-against 0,37 MB/s for a sustained read of the same resource. A whole
-1080p video (171 MB) lands in **9 – 15 s**.
+The unit is the **FRAGMENT**, and the progress is by fragments: the sizes
+of the fragments of a resource are not uniform, so a fraction of the bytes
+would make the bar jump backwards.
+
+The size of the download is known **before** it starts and it does not
+move: it is the `contentLength` of each resource (the sum of the two
+tracks). The estimate of the `BANDWIDTH` (which is the PEAK of the
+variant) was about five times the real size, and it made the bar jump
+backwards as it was corrected.
+
+The **HLS master is not used**: its audio arrives as AAC in LATM (its
+segments carry a PRIV box of Apple that says so) and the FFmpeg of this
+system refuses to mux it ("Error applying bitstream filters to an output
+packet for stream #1: Not yet implemented in FFmpeg"). The adaptive gives
+both tracks as clean mp4.
+
+The consequence is that the file is an **MKV** and not an mp4: Matroska
+takes the track as it is, and an mp4 would need the conversion that does
+not work here. It plays everywhere (measured with mpv and with ffmpeg).
+
+Measured, against YouTube, on a fresh quota:
+
+| | | |
+|---|---|---|
+| 1080p | av1 1920x1080 + aac | 122,2 MB in 10 s |
+| 720p | av1 1280x720 + aac | 18,0 MB in 6 s |
+| solo audio | mp3 173 kbps | 13,1 MB in 10 s |
+| 240p | av1 320x240 + aac | 0,3 MB in 2 s |
+
+The fragments of the master arrived at 9,44 MB/s with one connection and
+43,12 MB/s with four, against 0,37 MB/s for a sustained read.
 
 The **height wins over the codec** for a download, the OPPOSITE of the
 player: the player ranks the codec first because it wants the one the GPU
