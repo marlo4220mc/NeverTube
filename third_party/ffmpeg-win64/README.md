@@ -30,18 +30,20 @@ with llvm-mingw. Same licence as the rest (LGPL v2.1+, see
 - **No external dependencies**: `--enable-w32threads` and a static
   llvm-mingw runtime (there is no `libgcc_s_*.dll` nor `libunwind.dll`).
 
-## The mp3 encoder is NOT there
+## The mp3 encoder IS there
 
-`libmp3lame` is GPL and this build is LGPL, so there is **no mp3 encoder**:
-the "solo el audio" download falls back to an **M4A** with the audio copied
-(not re-encoded: it is the same AAC). See the AGENTS.md.
+**LAME is LGPL v2, not GPL** (FFmpeg's own list of the GPL libraries does
+not carry `libmp3lame`), so the LGPL build links it: the recipe compiles
+LAME as a DLL (`libmp3lame-0.dll`) and FFmpeg links it against it. The
+"solo el audio" download is an mp3.
 
 ## Contents
 
 ```
 bin/       ffmpeg.exe + avcodec-63.dll, avformat-63.dll, avutil-61.dll,
-           swscale-10.dll, swresample-7.dll, avfilter-12.dll
-LICENSE.LGPLv2.1
+           swscale-10.dll, swresample-7.dll, avfilter-12.dll, libmp3lame-0.dll
+LICENSE.LGPLv2.1        (FFmpeg)
+LICENSE.LGPLv2-LAME.txt  (LAME, the mp3 encoder)
 ```
 
 ## How it was built

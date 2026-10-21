@@ -1306,11 +1306,18 @@ x86 build); the mux is a separate step that launches the CLI.
   collide with `libmpv-2.dll` (it has libav inside, statically) because
   the CLI is a separate process.
 
-**The LGPL build has NO mp3 encoder** (`libmp3lame` is GPL and the build
-is `--disable-gpl`): the "solo el audio" download falls back to an **M4A**
-with the audio COPIED (not re-encoded: it is the same AAC). The fallback
-is decided by `hasMp3Encoder()` (`ffmpeg -encoders`), so it is one call
-and not two runs.
+**The mp3 encoder IS there**: LAME (`libmp3lame`) is **LGPL v2**, NOT
+GPL, and FFmpeg's own list of the GPL libraries does not carry it, so the
+LGPL build can use it. The recipe compiles it as a DLL
+(`libmp3lame-0.dll`) and FFmpeg links it: the "solo el audio" download
+is an mp3, as it was. (I had it wrong at first and believed LAME was GPL:
+it is not.)
+
+**The fall-back to an M4A** is still there, for the case of an ffmpeg of
+the SYSTEM that has no mp3 encoder (a very trimmed one): the audio is
+then COPIED into an M4A (the same AAC, no re-encoding). It is decided by
+`hasMp3Encoder()` (`ffmpeg -encoders`), so it is one call and not two
+runs, and the failed attempt does not leave a corrupt `.mp3` behind.
 
 **The search of the ffmpeg**: the env var (`NEVERTUBE_FFMPEG`), the PATH,
 **the directory of the app** (a build that SHIPS its own ffmpeg has it

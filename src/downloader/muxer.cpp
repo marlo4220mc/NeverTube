@@ -105,6 +105,10 @@ MuxResult convertToMp3(const QString &audioPath, const QString &outputPath,
     // of the download is already an AAC in an m4a).
     if (!hasMp3Encoder(ffmpeg)) {
         const QString m4a = fallbackAudioPath(outputPath);
+        // The failed attempt can leave a file BEHIND (ffmpeg writes it
+        // before it fails): it is removed, or there would be a corrupt
+        // "x.mp3" next to the good "x.m4a".
+        QFile::remove(outputPath);
         QStringList args2;
         args2 << QStringLiteral("-hide_banner")
               << QStringLiteral("-loglevel")

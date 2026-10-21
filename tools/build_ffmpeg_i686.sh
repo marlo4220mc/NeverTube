@@ -37,6 +37,11 @@ LLVM_MINGW_URL="https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_
 NASM_VER="2.16.03"
 NASM_URL="https://www.nasm.us/pub/nasm/releasebuilds/${NASM_VER}/nasm-${NASM_VER}.tar.xz"
 FFMPEG_URL="https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VER}.tar.xz"
+# LAME (the mp3 encoder). It is LGPL v2 (NOT GPL: FFmpeg's own list of the
+# GPL libraries does not carry it), so the LGPL build of FFmpeg can use it
+# and the "solo el audio" download can be an mp3 again.
+LAME_VER="3.101"
+LAME_URL="https://downloads.sourceforge.net/project/lame/lame/${LAME_VER}/lame-${LAME_VER}.tar.gz"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -71,20 +76,39 @@ echo "==> destino:  ${DEST}"
 mkdir -p "${WORK}"
 cd "${WORK}"
 
-echo "==> descargando llvm-mingw ${LLVM_MINGW_VER}, nasm ${NASM_VER}, FFmpeg ${FFMPEG_VER}"
+echo "==> descargando llvm-mingw ${LLVM_MINGW_VER}, nasm ${NASM_VER}, FFmpeg ${FFMPEG_VER}, LAME ${LAME_VER}"
 curl -fsSL -o llvm-mingw.tar.xz "${LLVM_MINGW_URL}"
 curl -fsSL -o nasm.tar.xz "${NASM_URL}"
 curl -fsSL -o ffmpeg.tar.xz "${FFMPEG_URL}"
+curl -fsSL -o lame.tar.gz "${LAME_URL}"
 tar xf llvm-mingw.tar.xz
 tar xf nasm.tar.xz
 tar xf ffmpeg.tar.xz
+tar xf lame.tar.gz
 LLVM_DIR="${WORK}/llvm-mingw-${LLVM_MINGW_VER}-msvcrt-ubuntu-22.04-x86_64"
 
 echo "==> compilando nasm (host)"
 ( cd "nasm-${NASM_VER}" && ./configure --prefix="${WORK}/nasm" >/dev/null && make -j"$(nproc)" >/dev/null && make install >/dev/null )
 export PATH="${WORK}/nasm/bin:${LLVM_DIR}/bin:${PATH}"
 
-echo "==> configurando FFmpeg ${FFMPEG_VER} (${ARCH}, LGPL, schannel, dxva2)"
+echo "==> compilando LAME ${LAME_VER} (el encoder mp3, LGPL v2)"
+# LAME is LGPL v2, so it does NOT turn the LGPL build of FFmpeg into a GPL
+# one (FFmpeg's own list of the GPL libraries does not carry libmp3lame).
+# It is built as a SHARED library (a DLL) because the FFmpeg CLI links it.
+(
+  cd "lame-${LAME_VER}"
+  CC=${TRIPLET}-clang \
+  CFLAGS="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -Wno-incompatible-pointer-types" \
+  CPPFLAGS="-I${LLVM_DIR}/include" \
+  LDFLAGS="-L${LLVM_DIR}/${TRIPLET}/lib" \
+  ./configure --host=${TRIPLET} --enable-shared --disable-static \
+    --disable-frontend --disable-decoder --disable-gtktest \
+    --prefix="${WORK}/lame-install" --libdir="${WORK}/lame-install/lib" > /dev/null
+  make -j"$(nproc)" > /dev/null
+  make install > /dev/null
+)
+
+echo "==> configurando FFmpeg ${FFMPEG_VER} (${ARCH}, LGPL, schannel, dxva2, libmp3lame)"
 mkdir -p build && cd build
 "../ffmpeg-${FFMPEG_VER}/configure" \
   --target-os=mingw32 ${FFCONF} \
@@ -102,11 +126,14 @@ mkdir -p build && cd build
   --enable-decoder=h264,vp9,av1,aac,opus,mp3,vorbis,flac,pcm_s16le,pcm_f32le \
   --enable-parser=h264,aac,av1,opus,mpegaudio,vorbis \
   --enable-bsf=h264_mp4toannexb,aac_adtstoasc,extract_extradata,vp9_superframe,vp9_superframe_split,av1_frame_merge,av1_frame_split \
-  --enable-muxer=matroska,mp4,ipod \
-  --enable-encoder=aac \
+  --enable-muxer=matroska,mp4,mp3 \
+  --enable-encoder=aac,libmp3lame \
+  --enable-libmp3lame \
   --enable-filter=aformat,anull,atrim,crop,format,hflip,null,rotate,transpose,trim,vflip \
   --enable-ffmpeg \
-  --extra-cflags="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601"
+  --extra-cflags="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -I${WORK}/lame-install/include" \
+  --extra-ldflags="-L${WORK}/lame-install/lib -L${LLVM_DIR}/${TRIPLET}/lib" \
+  --extra-libs="-lmp3lame"
 
 echo "==> compilando e instalando"
 make -j"$(nproc)"
@@ -133,6 +160,10 @@ done
 # above), so it is kept apart: the packagers copy it only if they want the
 # downloader to work out of the box.
 cp "${WORK}/install/bin/ffmpeg.exe" "${DEST}/bin/"
+# LAME (the mp3 encoder): the CLI needs it for the mp3 of the "solo el
+# audio". It is LGPL v2 (see LAME's COPYING) and it is NOT linked by the
+# app: only the CLI uses it.
+cp "${WORK}/lame-install/bin/libmp3lame-0.dll" "${DEST}/bin/"
 cp "${WORK}/ffmpeg-${FFMPEG_VER}/COPYING.LGPLv2.1" "${DEST}/LICENSE.LGPLv2.1"
 if [ -n "${keep_readme}" ]; then
   cp "${keep_readme}" "${DEST}/README.md"

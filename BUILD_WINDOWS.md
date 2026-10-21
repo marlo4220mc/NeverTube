@@ -90,8 +90,9 @@ the installer carries it. The **x64** build gets its own from the same
 script (`tools/build_ffmpeg_i686.sh <dest> x86_64`) into
 `third_party/ffmpeg-win64/`: the x64 build plays with mpv and does not link
 libav, so those DLLs are the ones the CLI needs and not the ones the app
-uses. There is **no mp3 encoder** in either build (the LGPL one cannot
-carry libmp3lame), so the "solo el audio" download falls back to an M4A.
+uses. Both builds carry the **mp3 encoder** (LAME, which is LGPL v2 and
+NOT GPL, so the LGPL build can link it: the recipe compiles it as
+`libmp3lame-0.dll`).
 
 ```sh
 cmake -B build -DCMAKE_PREFIX_PATH="%CD%\third_party\qt-win32" \

@@ -305,7 +305,7 @@ jobs:
           $need = @('nevertube_qt2.exe', 'qwindows.dll', 'libmpv-2.dll',
             'vulkan-1.dll', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll',
             'libEGL.dll', 'libGLESv2.dll', 'VC_redist.x64.exe', 'nt.ico',
-            'ffmpeg.exe', 'avformat-63.dll')
+            'ffmpeg.exe', 'avformat-63.dll', 'libmp3lame-0.dll')
           $missing = $need | Where-Object { $packed -notcontains $_ }
           if ($missing) { Write-Host "el setup NO lleva: $missing"; exit 1 }
           Write-Host "gate del setup x64 OK: el instalador lleva los $($need.Count) ficheros clave"

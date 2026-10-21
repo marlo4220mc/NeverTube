@@ -230,7 +230,7 @@ jobs:
           Copy-Item libcrypto-3.dll dist\
           $missing = @('avcodec-63.dll','avformat-63.dll','avutil-61.dll',
             'swscale-10.dll','swresample-7.dll','avfilter-12.dll',
-            'libssl-3.dll',
+            'libmp3lame-0.dll','libssl-3.dll',
             'libcrypto-3.dll','VC_redist.x86.exe','ffmpeg.exe') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
           if ($missing) {

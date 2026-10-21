@@ -44,8 +44,9 @@ compiles FFmpeg: it uses this package directly.
 include/   public headers (libavcodec, libavformat, libavutil, libswscale, libswresample, libavfilter)
 lib/       MSVC import-libs (avcodec.lib, avformat.lib, avutil.lib, swscale.lib, swresample.lib)
 bin/       runtime DLLs (avcodec-63.dll, avformat-63.dll, avutil-61.dll, swscale-10.dll, swresample-7.dll,
-           avfilter-12.dll) AND the CLI (ffmpeg.exe)
-LICENSE.LGPLv2.1
+           avfilter-12.dll, libmp3lame-0.dll) AND the CLI (ffmpeg.exe)
+LICENSE.LGPLv2.1        (FFmpeg)
+LICENSE.LGPLv2-LAME.txt  (LAME, the mp3 encoder)
 ```
 
 `CMakeLists.txt` uses `include/` + `lib/`; the workflow copies `bin/*.dll` into
@@ -63,13 +64,10 @@ It is **our own build**, not a downloaded binary: the same cross-compile,
 with the muxers and the CLI enabled. It is 405 KB and it uses the DLLs that
 are already next to it (there is nothing extra to install).
 
-Two consequences of the LGPL build (measured, not assumed):
-
-- **There is no mp3 encoder**: `libmp3lame` is GPL and the build is LGPL
-  (`--disable-gpl`). The "solo el audio" download therefore falls back to an
-  **M4A** (the audio is copied, not re-encoded: it is the same AAC).
-- The muxers that the downloader needs are `matroska` (the video) and
-  `ipod`/`mp4` (the M4A of the audio).
+The mp3 encoder IS there: **LAME is LGPL v2, not GPL** (FFmpeg's own list
+of the GPL libraries does not carry `libmp3lame`), so the LGPL build links it
+and the "solo el audio" download is an mp3. The recipe compiles LAME as a
+DLL (`libmp3lame-0.dll`) and FFmpeg links it against it.
 
 ## Exact configuration
 
@@ -81,12 +79,13 @@ Trimmed to what the app uses:
 - protocols: file, http, https, tcp, tls, crypto, data, cache, httpproxy, concat, pipe
 - parsers: h264, aac, av1, opus, mpegaudio, vorbis
 - bsfs: h264_mp4toannexb, aac_adtstoasc, extract_extradata, vp9_superframe(_split), av1_frame_merge/split
-- muxers: matroska, mp4, ipod (the downloader joins the tracks with them)
-- encoders: aac (the M4A of the audio only; there is NO mp3 encoder: libmp3lame is GPL)
+- muxers: matroska, mp4, mp3, ipod (the downloader joins the tracks with them)
+- encoders: aac, libmp3lame (the mp3 of the "solo el audio"; LAME is LGPL v2
+  and it is compiled by the recipe as libmp3lame-0.dll)
 - filters: the eleven that the CLI needs (aformat, anull, atrim, crop, format, hflip, null, rotate, transpose, trim, vflip): the CLI of FFmpeg requires avfilter
 - no avdevice (the CLI does not open devices)
 
-Result: ~7 MB of DLLs (versus ~15 MB with the full FFmpeg set and the
+Result: ~9 MB of DLLs (versus ~15 MB with the full FFmpeg set and the
 64.7 MB of `libmpv-2.dll`).
 
 ## Verification performed
