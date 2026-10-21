@@ -537,10 +537,18 @@ bool downloadPlanSelfTest()
               "el audio se codifica con libmp3lame");
         check(a.last() == QLatin1String("/o.mp3"),
               "la salida del audio es el ULTIMO argumento");
-        // The fall-back: the same name with the other extension.
-        check(dl::fallbackAudioPath(QStringLiteral("/tmp/x.mp3"))
-                  == QLatin1String("/tmp/x.m4a"),
-              "el fallback del audio es el M4A del mismo nombre");
+        // The fall-back: the same name with the other extension. The
+        // comparison is on the NAME and on the DIRECTORY, and not on the
+        // whole path: on Windows the absolute path carries the drive
+        // ("C:/tmp/x.m4a") and the test would not be the same there.
+        {
+            const QString fb = dl::fallbackAudioPath(QStringLiteral("/tmp/x.mp3"));
+            check(fb.endsWith(QStringLiteral("x.m4a")),
+                  "el fallback del audio es el M4A del mismo nombre");
+            check(QFileInfo(fb).absolutePath()
+                      == QFileInfo(QStringLiteral("/tmp/x.mp3")).absolutePath(),
+                  "el fallback del audio esta en el mismo directorio");
+        }
     }
 
     // --- the mux, for real (with the ffmpeg of the system) ---
