@@ -9,7 +9,8 @@
 # does (cross-compile from Linux with llvm-mingw, without installing anything on the system).
 #
 # Properties of the resulting binary (all verified):
-#   - i686 (PE32, Windows 7+): _WIN32_WINNT=0x0601.
+#   - i686 (PE32, Windows 7+): _WIN32_WINNT=0x0601. The same recipe builds
+#     the x86_64 one (the x64 build) with the arch as the second argument.
 #   - LGPL v2.1+ (--disable-gpl --disable-nonfree): redistributable with the app
 #     by linking it dynamically.
 #   - TLS via schannel (--enable-schannel): no OpenSSL DLLs for FFmpeg.
@@ -21,8 +22,9 @@
 #     GetDpiForMonitor, api-ms-win-*, WaitOnAddress, etc.).
 #
 # Usage:
-#   tools/build_ffmpeg_i686.sh [destination]
+#   tools/build_ffmpeg_i686.sh [destination] [arch]
 #   (default destination: third_party/ffmpeg-win32)
+#   (default arch: i686; "x86_64" builds the same thing for the x64 build)
 #
 # Network requirements: downloads llvm-mingw, nasm and the FFmpeg source.
 # ---------------------------------------------------------------------------
@@ -38,8 +40,30 @@ FFMPEG_URL="https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VER}.tar.xz"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# The architecture: i686 (the Win7 x86 build) or x86_64 (the x64 build).
+# It is the SAME recipe: the only thing that changes is the triplet, the
+# cpu and the DLL names (the SONAME of the libraries carries the ABI).
+ARCH="${2:-i686}"
+case "${ARCH}" in
+  i686)
+    TRIPLET="i686-w64-mingw32"
+    FFCPU="i686"
+    FFCONF="--arch=x86 --cpu=i686"
+    SONAME="avcodec-63 avformat-63 avutil-61 swscale-10 swresample-7 avfilter-12"
+    ;;
+  x86_64)
+    TRIPLET="x86_64-w64-mingw32"
+    FFCPU="x86-64"
+    FFCONF="--arch=x86_64 --cpu=x86-64"
+    SONAME="avcodec-63 avformat-63 avutil-61 swscale-10 swresample-7 avfilter-12"
+    ;;
+  *)
+    echo "ERROR: arquitectura no soportada: ${ARCH} (i686 | x86_64)" >&2; exit 1 ;;
+esac
+
 DEST="${1:-${REPO_ROOT}/third_party/ffmpeg-win32}"
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/ffmpeg-i686.XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ffmpeg-build.XXXXXX")"
 trap 'rm -rf "${WORK}"' EXIT
 
 echo "==> work dir: ${WORK}"
@@ -60,11 +84,11 @@ echo "==> compilando nasm (host)"
 ( cd "nasm-${NASM_VER}" && ./configure --prefix="${WORK}/nasm" >/dev/null && make -j"$(nproc)" >/dev/null && make install >/dev/null )
 export PATH="${WORK}/nasm/bin:${LLVM_DIR}/bin:${PATH}"
 
-echo "==> configurando FFmpeg ${FFMPEG_VER} (i686, LGPL, schannel, dxva2)"
+echo "==> configurando FFmpeg ${FFMPEG_VER} (${ARCH}, LGPL, schannel, dxva2)"
 mkdir -p build && cd build
 "../ffmpeg-${FFMPEG_VER}/configure" \
-  --target-os=mingw32 --arch=x86 --cpu=i686 \
-  --cross-prefix=i686-w64-mingw32- --cc=i686-w64-mingw32-clang \
+  --target-os=mingw32 ${FFCONF} \
+  --cross-prefix=${TRIPLET}- --cc=${TRIPLET}-clang \
   --enable-cross-compile \
   --enable-shared --disable-static \
   --disable-doc --disable-avdevice \
@@ -101,7 +125,7 @@ cp -r "${WORK}/install/include/"* "${DEST}/include/"
 for l in avcodec avformat avutil swscale swresample; do
   cp "${WORK}/install/bin/${l}.lib" "${DEST}/lib/"
 done
-for d in avcodec-63 avformat-63 avutil-61 swscale-10 swresample-7 avfilter-12; do
+for d in ${SONAME}; do
   cp "${WORK}/install/bin/${d}.dll" "${DEST}/bin/"
 done
 # The CLI (ffmpeg.exe): it is what the DOWNLOADER runs to join the two
@@ -122,7 +146,7 @@ fail=0
 # The gate covers the DLLs AND the CLI: both are loaded on the Win7 machine
 # (the CLI is launched by the downloader).
 for d in "${DEST}"/bin/*.dll "${DEST}"/bin/*.exe; do
-  if i686-w64-mingw32-objdump -p "$d" | grep -qE "${poison}"; then
+  if ${TRIPLET}-objdump -p "$d" | grep -qE "${poison}"; then
     echo "  ¡POISON en $(basename "$d")!"; fail=1
   fi
 done

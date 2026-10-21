@@ -227,6 +227,13 @@ jobs:
           Copy-Item vulkan-1.dll dist\
           Copy-Item libssl-3-x64.dll dist\
           Copy-Item libcrypto-3-x64.dll dist\
+          # The ffmpeg of OUR build (third_party/ffmpeg-win64/, the same
+          # recipe as the x86 one). It is NOT needed to play (this build
+          # uses mpv): it is what the DOWNLOADER runs to join the two
+          # tracks of a downloaded video. Without it the download finishes
+          # but the mux fails ("ffmpeg was not found").
+          Copy-Item third_party\ffmpeg-win64\bin\*.dll dist\
+          Copy-Item third_party\ffmpeg-win64\bin\ffmpeg.exe dist\
           curl.exe -sL -o dist\VC_redist.x64.exe `
             https://aka.ms/vs/17/release/vc_redist.x64.exe
           if ($LASTEXITCODE -ne 0) { Write-Host 'VC_redist.x64 no bajó'; exit 1 }
@@ -297,7 +304,8 @@ jobs:
           # the default Windows icon and nobody notices locally.
           $need = @('nevertube_qt2.exe', 'qwindows.dll', 'libmpv-2.dll',
             'vulkan-1.dll', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll',
-            'libEGL.dll', 'libGLESv2.dll', 'VC_redist.x64.exe', 'nt.ico')
+            'libEGL.dll', 'libGLESv2.dll', 'VC_redist.x64.exe', 'nt.ico',
+            'ffmpeg.exe', 'avformat-63.dll')
           $missing = $need | Where-Object { $packed -notcontains $_ }
           if ($missing) { Write-Host "el setup NO lleva: $missing"; exit 1 }
           Write-Host "gate del setup x64 OK: el instalador lleva los $($need.Count) ficheros clave"
