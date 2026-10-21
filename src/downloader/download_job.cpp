@@ -383,7 +383,7 @@ void DownloadJob::startNext()
                        filePtr->write(chunk);
                    m_bytesDone += chunk.size();
                    emit progressChanged(m_bytesDone, m_bytesTotal);
-               });
+               }, range.size());
     }
 
     if (m_inFlight == 0 && m_extraPending == 0)

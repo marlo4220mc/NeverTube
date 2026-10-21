@@ -1,5 +1,7 @@
 #include "download_transport.h"
 
+#include "../i18n.h"
+
 #include <QHostAddress>
 #include <QFile>
 #include <QHostInfo>
@@ -65,9 +67,12 @@ QString DownloadTransport::userAgent()
 }
 
 void DownloadTransport::get(const QUrl &url, qint64 rangeStart, qint64 rangeEnd,
-                            const QString &ua, DoneFn done, ProgressFn progress)
+                            const QString &ua, DoneFn done, ProgressFn progress,
+                            qint64 expectedBytes)
 {
     abort();
+    m_expectedBytes = expectedBytes;
+    m_receivedBytes = 0;
     m_url = url;
     m_rangeStart = rangeStart;
     m_rangeEnd = rangeEnd;
@@ -94,6 +99,8 @@ void DownloadTransport::abort()
     m_finished = true;
     if (m_timeout)
         m_timeout->stop();
+    if (m_stallTimer)
+        m_stallTimer->stop();
     if (m_socket) {
         m_socket->abort();
         m_socket->deleteLater();
@@ -130,6 +137,8 @@ void DownloadTransport::start()
             });
 
     m_timeout->start();
+    if (m_stallTimer)
+        m_stallTimer->start();
 
     // Resolve the host to an IPv4 address, like Ipv4Https does: YouTube
     // blocks some videos over IPv6 from this network, and the TLS
@@ -198,6 +207,7 @@ void DownloadTransport::onReadyRead()
     if (!m_socket)
         return;
     m_response += m_socket->readAll();
+    m_receivedBytes += m_socket->bytesAvailable();
     if (m_headerSize < 0) {
         const int headerEnd = m_response.indexOf("\r\n\r\n");
         if (headerEnd >= 0) {
@@ -330,6 +340,22 @@ void DownloadTransport::onSocketError()
         return;
     }
     fail(m_socket->errorString());
+}
+
+// The request is not advancing: it is killed and the fragment is asked
+// again (that is what keeps the speed when the CDN serves some of the
+// requests at a crawl).
+void DownloadTransport::onStall()
+{
+    if (m_finished)
+        return;
+    m_stallTimer->stop();
+    // Only when the size of the range is known: without it there is no
+    // threshold to compare with.
+    if (m_expectedBytes > 0
+        && m_receivedBytes * 10 >= m_expectedBytes * int(stallMinRatio()))
+        return;  // it IS advancing (slowly): it is left alone
+    fail(nt::tr("error.dlStalled"));
 }
 
 void DownloadTransport::onTimeout()

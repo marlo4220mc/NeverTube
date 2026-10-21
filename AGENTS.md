@@ -1513,6 +1513,24 @@ the same thing the app does with a gated session of the player.
 `DownloadJob::kFragmentRetries` = 3): with a saturated IP some requests do
 not answer at all, and one of them used to abort hundreds of megabytes.
 
+### A fragment that does not advance is discarded and asked again
+
+The CDN serves **some** of the requests at a crawl (a few KB/s). Those
+hold a connection of the pool for the whole request (the timeout total is
+60 s) and the speed of the download falls: it was measured starting at
+**45 MB/s and settling at 20**.
+
+The transport now **discards** a request that does not advance and the job
+asks that fragment again (it is the same rule that ABDM uses). The rule is
+**not** "not one byte in N seconds" (that also killed the fragments that
+were arriving fine but with a gap in the middle): it is "**not even the
+10% of the expected bytes in 12 s**" (`DownloadTransport::stallTimeoutMs()`
+and `stallMinRatio()`). A fragment that advances, even slowly, is left
+alone.
+
+The size that is expected is the one of the range that is asked
+(`range.size()`), so the threshold is proportional to each fragment.
+
 ### The button of "Abrir carpeta" (two bugs, one button)
 
 The button of the "Descargas" page did **nothing at all**, for TWO reasons

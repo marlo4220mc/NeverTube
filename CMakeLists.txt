@@ -87,6 +87,8 @@ add_executable(nevertube_qt2
   src/downloader/segment_plan.cpp
   src/downloader/segment_plan.h
   src/downloader/download_transport.cpp
+  src/downloader/download_transport_selftest.cpp
+  src/downloader/download_transport_selftest.h
   src/downloader/download_transport.h
   src/downloader/download_job.cpp
   src/downloader/download_job.h

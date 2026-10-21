@@ -31,6 +31,7 @@
 #include "downloader/download_button_selftest.h"
 #include "downloader/download_folder_selftest.h"
 #include "downloader/download_settings_selftest.h"
+#include "downloader/download_transport_selftest.h"
 #include "reels_filter_selftest.h"
 #include "video_variant_selftest.h"
 
@@ -643,6 +644,12 @@ int main(int argc, char *argv[])
         // Offline: the download plan is a pure function of the master
         // playlist, so its cases are deterministic and run in CI.
         return downloadPlanSelfTest() ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-download-transport"))) {
+        // Offline: the rules of the transport (the discard of the fragments
+        // that do not advance).
+        return downloadTransportSelfTest() ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-download-settings"))) {

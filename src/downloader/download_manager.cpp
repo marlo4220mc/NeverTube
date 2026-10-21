@@ -266,6 +266,9 @@ void DownloadManager::start(const QString &videoId, const QString &title,
 void DownloadManager::onAdaptiveFormats(const QString &videoId,
                                        const QJsonArray &formats)
 {
+    NT_DEBUG("E2E dl formatos id=%s n=%d current=%s\n",
+             videoId.toUtf8().constData(), int(formats.size()),
+             m_currentId.toUtf8().constData());
     if (videoId != m_currentId)
         return;
 

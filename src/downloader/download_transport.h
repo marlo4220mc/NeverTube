@@ -74,13 +74,32 @@ public:
     //
     // rangeStart/rangeEnd are inclusive byte offsets, or -1 for a whole
     // resource. A ranged request answers 206 with a Content-Range header.
+    // `expectedBytes` is the size of the range that is asked (0 = unknown).
+    // It is what the rule of the discard of a slow fragment compares with
+    // (the transport knows how many bytes were asked for).
     void get(const QUrl &url, qint64 rangeStart, qint64 rangeEnd,
-             const QString &ua, DoneFn done, ProgressFn progress = nullptr);
+             const QString &ua, DoneFn done, ProgressFn progress = nullptr,
+             qint64 expectedBytes = 0);
 
     // Aborts the request in progress (if any). The callback is NOT called.
     void abort();
 
     bool isBusy() const { return m_inFlight; }
+
+    // The rules of the discard of a fragment that does not advance.
+    //
+    // The CDN serves SOME of the requests at a crawl (a few KB/s). Those
+    // hold a connection of the pool for the whole request and the speed of
+    // the download falls (measured: it started at 45 MB/s and settled at
+    // 20). The fragment is discarded and asked again.
+    //
+    // The rule is NOT "not one byte in N seconds" (that killed the
+    // fragments that were arriving fine but with a gap in the middle): it is
+    // "not even the stallMinRatio() of the expected bytes in
+    // stallTimeoutMs()". A fragment that advances, even slowly, is left
+    // alone.
+    static constexpr int stallTimeoutMs() { return 12000; }
+    static constexpr double stallMinRatio() { return 0.10; }
 
     // How many connections the downloader should open at the same time.
     // The measurement behind it: the segments of the master are ~1.3 MB, and
@@ -99,6 +118,9 @@ private:
     void onDisconnected();
     void onSocketError();
     void onTimeout();
+    // The request is not advancing: it is killed (the job asks the fragment
+    // again).
+    void onStall();
     void finish();
     void fail(const QString &reason);
     void parseHeaders();
@@ -107,6 +129,12 @@ private:
 
     QSslSocket *m_socket = nullptr;
     QTimer *m_timeout = nullptr;
+    // The timer of the discard: it checks that the request advances.
+    QTimer *m_stallTimer = nullptr;
+    // The size of the range that was asked (0 = unknown).
+    qint64 m_expectedBytes = 0;
+    // The bytes that arrived since the request started.
+    qint64 m_receivedBytes = 0;
     QUrl m_url;
     qint64 m_rangeStart = -1;
     qint64 m_rangeEnd = -1;

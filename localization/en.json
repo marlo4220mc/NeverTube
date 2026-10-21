@@ -264,6 +264,7 @@
     "settings.downloadConnections": "Simultaneous connections",
     "settings.downloadConnectionsNote": "How many parts the app downloads at the same time. 8 is the fastest (measured), but on a slow line or with mobile data it is better to lower it.",
     "downloads.pause": "Pause",
-    "downloads.resume": "Continue"
+    "downloads.resume": "Continue",
+    "error.dlStalled": "The fragment stopped advancing and was cancelled"
   }
 }

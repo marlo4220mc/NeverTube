@@ -264,6 +264,7 @@
     "settings.downloadConnections": "Conexiones simultáneas",
     "settings.downloadConnectionsNote": "Cuántas descargas en paralelo hace la app. Con 8 es lo más rápido (medido), pero en una línea lenta o con datos móviles conviene bajarlo.",
     "downloads.pause": "Pausar",
-    "downloads.resume": "Continuar"
+    "downloads.resume": "Continuar",
+    "error.dlStalled": "El fragmento no avanzaba y se canceló"
   }
 }
