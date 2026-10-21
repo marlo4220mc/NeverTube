@@ -1267,16 +1267,48 @@ And two that are not about the master:
   columns of `downloads` rejected the row: the download finished and the
   list stayed empty. The text is bound as an empty string.
 
-### The muxing is the ffmpeg of the SYSTEM
+### The muxing is the ffmpeg of the SYSTEM (and on Windows, of OUR build)
 
-The vendored FFmpeg has **no muxer**: it is built with `--disable-everything`
-and only demuxers, and `avformat_write_frame` is not even exported, so it
-can read an mp4 but not write one. The mux is done with the `ffmpeg` found
+The vendored FFmpeg had **no muxer**: it was built with `--disable-everything`
+and only demuxers, and `avformat_write_frame` was not even exported, so it
+could read an mp4 but not write one. The mux is done with the `ffmpeg` found
 at runtime (`QStandardPaths::findExecutable`, plus `NEVERTUBE_FFMPEG`).
 **Without ffmpeg the download still works**: the segments are downloaded
 and kept, and the mux is a separate step that can be retried. The mux
 itself is a stream copy (`-c copy`, plus `-movflags +faststart` so the
 moov is at the front): 0,05 s for 30 s of video, no re-encoding.
+
+**The CLI, not the libraries.** The app links libav for the DECODER (the
+x86 build); the mux is a separate step that launches the CLI.
+
+- **Linux**: the packages declare the CLI as a dependency OF ITS OWN,
+  because `dpkg-shlibdeps` and rpm's automatic generator only see the
+  SONAMES the binary links (`libavformat.so`), never the `/usr/bin/ffmpeg`
+  that the downloader runs. The .deb declares `ffmpeg`, the .rpm declares
+  `/usr/bin/ffmpeg` (BY PATH: Fedora's `ffmpeg-free` and RPM Fusion's
+  `ffmpeg` both provide it and they CONFLICT with each other, so requiring
+  one by name would break the install of the people who have the other) and
+  the PKGBUILD already had `ffmpeg`.
+- **Windows**: there is no public ffmpeg for 32-bit Windows (gyan and
+  BtbN are x64 only and MSYS2 retired i686), so the vendored package
+  (`third_party/ffmpeg-win32/`, cross-compiled by
+  `tools/build_ffmpeg_i686.sh`) is compiled **with the muxers and the CLI
+  enabled**: `bin/ffmpeg.exe` (405 KB) next to the DLLs that were already
+  there (no new binary to download and no new licence: it is the same
+  LGPL build). The workflow copies it into `dist` and the setup gate
+  requires it. The gate of imports Win7 covers the EXE too (it also runs
+  on that machine).
+
+**The LGPL build has NO mp3 encoder** (`libmp3lame` is GPL and the build
+is `--disable-gpl`): the "solo el audio" download falls back to an **M4A**
+with the audio COPIED (not re-encoded: it is the same AAC). The fallback
+is decided by `hasMp3Encoder()` (`ffmpeg -encoders`), so it is one call
+and not two runs.
+
+**The search of the ffmpeg**: the env var (`NEVERTUBE_FFMPEG`), the PATH,
+**the directory of the app** (a build that SHIPS its own ffmpeg has it
+right next to the exe and the PATH of a desktop session does not include
+the install directory) and the usual places.
 
 ### The resume, and the cleanup
 
