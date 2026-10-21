@@ -242,7 +242,7 @@
     "settings.downloadFolderChoose": "Change",
     "settings.downloadFolderReset": "Reset",
     "error.dlNoFormat": "No video format was found.",
-    "error.dlFfmpegMissing": "ffmpeg was not found.",
+    "error.dlFfmpegMissing": "ffmpeg was not found. The fragments are already downloaded: install ffmpeg and try again.",
     "error.dlNoVideoPart": "The partial video is missing.",
     "error.dlNoAudioPart": "The partial audio is missing.",
     "error.dlFfmpegRun": "ffmpeg could not be run.",

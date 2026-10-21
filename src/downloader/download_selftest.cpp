@@ -1,6 +1,7 @@
 #include "download_selftest.h"
 
 #include "download_dialog.h"
+#include "muxer.h"
 #include "segment_plan.h"
 
 #include "../i18n.h"
@@ -477,6 +478,31 @@ bool downloadPlanSelfTest()
           "el clen de la URL se lee");
     check(dl::contentLengthOf(QStringLiteral("https://x/v")) == 0,
           "una URL sin clen no tiene tamano");
+
+    // --- the ffmpeg that is looked for ---
+    //
+    // The downloader runs the ffmpeg of the SYSTEM to join the two tracks.
+    // The order is: the env var, the PATH, the directory of the app (a
+    // build that SHIPS its own ffmpeg), the usual places.
+    {
+        const QString found = dl::findFfmpeg();
+        check(!found.isEmpty(),
+              "hay un ffmpeg (si el sistema lo tiene)");
+        if (!found.isEmpty()) {
+            check(QFileInfo::exists(found),
+                  "el ffmpeg que se encontro existe de verdad");
+        }
+        // The env var wins over everything: it is the explicit one.
+        {
+            const QByteArray before = qgetenv("NEVERTUBE_FFMPEG");
+            const QByteArray fake = "/nonexistent/ffmpeg-fake";
+            qputenv("NEVERTUBE_FFMPEG", fake);
+            const QString withBadEnv = dl::findFfmpeg();
+            qputenv("NEVERTUBE_FFMPEG", before);
+            check(withBadEnv != fake,
+                  "un NEVERTUBE_FFMPEG que no existe se ignora");
+        }
+    }
 
     // --- the menu, DRAWN (what the person really sees) ---
     //

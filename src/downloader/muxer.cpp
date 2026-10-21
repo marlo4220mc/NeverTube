@@ -2,6 +2,7 @@
 
 #include "../i18n.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <QProcess>
@@ -21,6 +22,19 @@ QString findFfmpeg()
     const QString found = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
     if (!found.isEmpty())
         return found;
+
+    // The directory of the app: a build that SHIPS its own ffmpeg has it
+    // right next to the exe, and the PATH of a desktop session does not
+    // include the install directory.
+    {
+        const QString dir = QCoreApplication::applicationDirPath();
+        const QString ownExe = QDir(dir).filePath(QStringLiteral("ffmpeg.exe"));
+        if (QFileInfo::exists(ownExe))
+            return ownExe;
+        const QString own = QDir(dir).filePath(QStringLiteral("ffmpeg"));
+        if (QFileInfo::exists(own))
+            return own;
+    }
 
     // The usual places, for the systems where the PATH of a desktop session
     // does not include them.
