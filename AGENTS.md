@@ -1298,6 +1298,13 @@ x86 build); the mux is a separate step that launches the CLI.
   LGPL build). The workflow copies it into `dist` and the setup gate
   requires it. The gate of imports Win7 covers the EXE too (it also runs
   on that machine).
+  The **x64** build gets the same thing from the same recipe
+  (`tools/build_ffmpeg_i686.sh <dest> x86_64`, the arch is the second
+  argument): `third_party/ffmpeg-win64/`, whose CLI is 431 KB. The x64
+  build plays with mpv and does NOT link libav: the DLLs of that package
+  are the ones the CLI needs, not the ones the app uses. The names do not
+  collide with `libmpv-2.dll` (it has libav inside, statically) because
+  the CLI is a separate process.
 
 **The LGPL build has NO mp3 encoder** (`libmp3lame` is GPL and the build
 is `--disable-gpl`): the "solo el audio" download falls back to an **M4A**
