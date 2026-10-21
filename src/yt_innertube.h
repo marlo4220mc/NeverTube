@@ -84,7 +84,9 @@ public slots:
     //
     // The formats come from the session cache when there are any, and the
     // POST /player is repeated when there are not.
-    void fetchAdaptiveFormats(const QString &videoId);
+    // `forceRefresh` drops the cached formats (their URLs have a per-request
+    // budget: when they run out the server answers 401/403).
+    void fetchAdaptiveFormats(const QString &videoId, bool forceRefresh = false);
     void fetchMaster(const QString &videoId, const QString &masterUrl);
 
     // Downloads the related videos ("A continuación" / recommendations) of the video

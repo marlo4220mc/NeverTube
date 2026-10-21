@@ -348,9 +348,6 @@ void DownloadJob::startNext()
                        const int tries =
                            ++m_fragmentTries[markOf(track, index)];
                        if (m_running && tries < kFragmentRetries) {
-                           NT_DEBUG("E2E dl reintenta %s idx=%d intento=%d (%s)\n",
-                                    track.toUtf8().constData(), index, tries,
-                                    r.error.toUtf8().constData());
                            if (track == QLatin1String("video"))
                                m_nextVideo = index;
                            else
@@ -359,6 +356,16 @@ void DownloadJob::startNext()
                            return;
                        }
                        if (m_running) {
+                           // The signed URL ran out of its budget (the
+                           // server answers 401/403): the download has to
+                           // ask for the formats again. It is NOT an error
+                           // of the video: it is an expired URL.
+                           if (r.status == 401 || r.status == 403) {
+                               setStatus(QStringLiteral("expired"));
+                               m_running = false;
+                               emit urlExpired();
+                               return;
+                           }
                            const QString msg = r.error.isEmpty()
                                ? nt::tr("error.dlPartFetch")
                                : r.error;

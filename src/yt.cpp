@@ -395,7 +395,7 @@ void Yt::rotateStreamSession()
 // starts).
 //
 // So this is a separate request path that does NOT touch the player.
-void Yt::requestAdaptiveFormats(const QString &videoId)
+void Yt::requestAdaptiveFormats(const QString &videoId, bool forceRefresh)
 {
     auto *guard = new QObject(this);
     auto *innTube = &m_innertube;
@@ -428,7 +428,7 @@ void Yt::requestAdaptiveFormats(const QString &videoId)
     // downloader (not the fetchHls of the player): the player may have a
     // request in flight and the single-flight of fetchHls would then do
     // nothing, leaving the downloader waiting forever.
-    innTube->fetchAdaptiveFormats(videoId);
+    innTube->fetchAdaptiveFormats(videoId, forceRefresh);
 }
 
 void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,

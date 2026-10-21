@@ -86,6 +86,9 @@ signals:
     void statusChanged(const QString &status, const QString &error);
     void finished(const QString &outputPath);
     void failed(const QString &error);
+    // The signed URL ran out of its budget (the server answered 401/403):
+    // the formats have to be asked again.
+    void urlExpired();
 
 private:
     void buildTransportPool();

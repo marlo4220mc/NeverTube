@@ -70,7 +70,9 @@ public:
     // the initRange and the indexRange of each one) and emits them as
     // adaptiveFormatsReady. It is what the downloader uses: it downloads the
     // resources by byte range, and it needs the index of each one.
-    void requestAdaptiveFormats(const QString &videoId);
+    // `forceRefresh` asks for the formats again (the URLs of the previous
+    // answer have run out of their budget).
+    void requestAdaptiveFormats(const QString &videoId, bool forceRefresh = false);
     // Rotates the Innertube session (visitorData + cached signed URLs): the
     // next resolveStream will use a NEW YouTube session. PlayerController uses
     // it in recovery after a gated session (403 mid-playback), where

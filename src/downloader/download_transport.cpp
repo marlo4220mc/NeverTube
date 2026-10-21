@@ -1,6 +1,7 @@
 #include "download_transport.h"
 
 #include <QHostAddress>
+#include <QFile>
 #include <QHostInfo>
 #include <QSslSocket>
 #include <QTimer>

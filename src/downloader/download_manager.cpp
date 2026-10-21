@@ -370,6 +370,35 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
         }
         onJobFinished(path);
     });
+    // The signed URL ran out of its budget (401/403): the formats are
+    // asked again (with new URLs) and the download continues from the
+    // fragments that are already on the disk. It is NOT an error of the
+    // video: the URLs of the player response last a while and a long
+    // download outlives them.
+    connect(m_job, &DownloadJob::urlExpired, this,
+            [this, videoId]() {
+                NT_DEBUG("E2E dl url expirada id=%s -> pedir formatos\n",
+                         videoId.toUtf8().constData());
+                if (m_job) {
+                    m_job->deleteLater();
+                    m_job = nullptr;
+                }
+                // The row goes back to "downloading" (it was not a
+                // failure) and the formats are asked again.
+                if (m_repo) {
+                    DownloadInfo info;
+                    if (m_repo->get(videoId, info)) {
+                        info.status = QStringLiteral("downloading");
+                        info.updatedAt =
+                            QDateTime::currentMSecsSinceEpoch();
+                        m_repo->upsert(info);
+                    }
+                }
+                m_currentId = videoId;
+                // With forceRefresh: the cached URLs are the dead ones.
+                m_yt->requestAdaptiveFormats(videoId, true);
+                emit changed();
+            });
     connect(m_job, &DownloadJob::failed, this,
             [this, videoId](const QString &reason) {
         if (m_repo)

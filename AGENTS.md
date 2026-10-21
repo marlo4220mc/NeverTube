@@ -1496,6 +1496,23 @@ download really fails.
 paused a 720p and it is not a 4K what they get when they continue (it was
 the highest one of the video, because the resume did not pass any height).
 
+### The signed URL runs out (HTTP 401) and the download died
+
+The URLs of the player response carry a **per-request budget**: after a
+while the CDN answers **401/403** and every fragment fails. The download
+used to die there (and it was the most common failure: it is what the
+"fallo al bajar un fragmento" of the log was).
+
+Now a 401/403 is **not an error of the video**: the job emits `urlExpired()`,
+the manager drops the cached formats (`requestAdaptiveFormats(id, true)`)
+and asks the player response again, which brings **new URLs**, and the
+download continues from the fragments that are already on the disk. It is
+the same thing the app does with a gated session of the player.
+
+**The fragment that fails is asked again** too (up to
+`DownloadJob::kFragmentRetries` = 3): with a saturated IP some requests do
+not answer at all, and one of them used to abort hundreds of megabytes.
+
 ### The button of "Abrir carpeta" (two bugs, one button)
 
 The button of the "Descargas" page did **nothing at all**, for TWO reasons

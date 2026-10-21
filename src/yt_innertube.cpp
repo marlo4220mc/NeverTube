@@ -886,8 +886,16 @@ void Innertube::fetchHls(const QString &videoId, int preferredClient,
 // The adaptiveFormats for the downloader: the session cache first (it is
 // memory: it does not need the transport), and the POST /player when there
 // are none.
-void Innertube::fetchAdaptiveFormats(const QString &videoId)
+void Innertube::fetchAdaptiveFormats(const QString &videoId, bool forceRefresh)
 {
+    // The cached URLs have a per-request budget: when they run out the
+    // server answers 401/403 and the cache has to be dropped, or the
+    // download would ask for the same dead URL forever.
+    if (forceRefresh && m_hlsCache.remove(videoId) > 0) {
+        saveHlsCacheToDisk();
+        NT_DEBUG("E2E innertube formatos caché invalidada id=%s\n",
+                 videoId.toUtf8().constData());
+    }
     const auto it = m_hlsCache.constFind(videoId);
     if (it != m_hlsCache.constEnd() && !it->adaptiveFormats.isEmpty()
         && !(it->expiresAt > 0
