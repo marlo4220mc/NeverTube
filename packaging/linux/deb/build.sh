@@ -49,7 +49,7 @@ for t in --selftest-db --selftest-discover --selftest-ssl \
          --selftest-av1hls --selftest-variants --selftest-reels \
          --selftest-download --selftest-download-button \
          --selftest-download-folder --selftest-download-settings \
-         --selftest-settings-page; do
+         --selftest-download-transport --selftest-settings-page; do
   echo "SELFTEST $t"
   ./build-deb/nevertube_qt2 "$t"
 done
@@ -88,10 +88,16 @@ shlibs="$( cd "$tmp" && dpkg-shlibdeps -O -e"$repo/build-deb/nevertube_qt2" \
             | sed 's/^shlibs:Depends=//' )"
 # libqt5sql5-sqlite is the SQLite driver plugin: Qt dlopen()s it, so it does
 # not show up as a linked library but the app is unusable without it.
-depends="$shlibs, libqt5sql5-sqlite"
+#
+# ffmpeg (the CLI) is a DEPENDENCY OF ITS OWN: dpkg-shlibdeps only sees the
+# sonames the binary links (libavformat/libavcodec/libavutil), NOT the
+# /usr/bin/ffmpeg that the DOWNLOADER runs to join the two tracks. Without
+# the CLI the download finishes but the mux fails ("ffmpeg was not found"),
+# so the package has to declare it by name.
+depends="$shlibs, libqt5sql5-sqlite, ffmpeg"
 echo "Depends: $depends"
 
-for needle in libmpv libavformat libpulse libopengl libqt5 libqt5sql5; do
+for needle in libmpv libavformat libpulse libopengl libqt5 libqt5sql5 ffmpeg; do
   case "$depends" in
     *"$needle"*) : ;;
     *) echo "ERROR: Depends does not carry $needle: $depends" >&2; exit 1 ;;
@@ -122,6 +128,13 @@ test -x "$chk/usr/bin/nevertube_qt2"
 # package and run the offline selftests from the INSTALLED path (not the build
 # tree). apt pulls the declared Depends, so nothing is assumed about the system.
 $SUDO apt-get install -y "$repo/$deb"
+# The CLI of ffmpeg must be THERE after the install: it is what the
+# downloader runs to join the two tracks, and it is a dependency of its own
+# (the sonames of the binary do not cover it).
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "ERROR: ffmpeg (the CLI) is not installed and the package does not bring it" >&2
+  exit 1
+fi
 # ldd catches a package whose Depends do not cover a NEEDED library. grep WITHOUT
 # -q: with pipefail, -q closes the pipe early and ldd dies with SIGPIPE (141).
 if ldd /usr/bin/nevertube_qt2 | grep 'not found' >/dev/null; then

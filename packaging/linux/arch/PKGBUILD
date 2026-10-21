@@ -35,7 +35,8 @@ check() {
            --selftest-i18n --selftest-dates --selftest-av1hls \
            --selftest-variants --selftest-reels --selftest-download \
            --selftest-download-button --selftest-download-folder \
-           --selftest-download-settings --selftest-settings-page; do
+           --selftest-download-settings --selftest-download-transport \
+           --selftest-settings-page; do
     echo "SELFTEST $t"
     ./build/nevertube_qt2 "$t"
   done

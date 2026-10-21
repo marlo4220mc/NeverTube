@@ -542,7 +542,7 @@ void DownloadJob::startMux()
     if (ffmpeg.isEmpty()) {
         // The fragments are already on the disk: the mux can be retried
         // later when an ffmpeg shows up. The download is NOT lost.
-        const QString msg = QStringLiteral("falta ffmpeg para unir las pistas");
+        const QString msg = nt::tr("error.dlFfmpegMissing");
         setStatus(QStringLiteral("error"), msg);
         m_running = false;
         emit failed(msg);

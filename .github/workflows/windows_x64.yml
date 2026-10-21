@@ -333,6 +333,7 @@ jobs:
                            '--selftest-download', '--selftest-download-button',
                            '--selftest-download-folder',
                            '--selftest-download-settings',
+                           '--selftest-download-transport',
                            '--selftest-settings-page')) {
             $rc = Invoke-Selftest $t
             if ($rc -ne 0) {

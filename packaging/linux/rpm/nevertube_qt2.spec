@@ -24,6 +24,19 @@ Group: Applications/Multimedia
 # explicit list below is only for the packages we want by name.
 Requires: mpv-libs, qt5-qtbase, pulseaudio-libs, mesa-libGL, openssl-libs
 Requires: hicolor-icon-theme
+# ffmpeg (the CLI, NOT the libraries) is a dependency of its own: the
+# automatic generator only sees the sonames the exe links (libavformat.so.62
+# and friends), not the /usr/bin/ffmpeg that the DOWNLOADER runs to join the
+# two tracks. Without the CLI the download finishes but the mux fails
+# ("ffmpeg was not found").
+#
+# It is a dependency BY PATH and not by name on purpose: Fedora's own
+# "ffmpeg-free" and RPM Fusion's "ffmpeg" both provide /usr/bin/ffmpeg, and
+# they CONFLICT with each other. Requiring "ffmpeg-free" by name would
+# break the installation of the people who already have RPM Fusion (dnf
+# would want to remove their ffmpeg). The path is satisfied by whichever of
+# the two the user has, and it forces nobody to enable RPM Fusion.
+Requires: /usr/bin/ffmpeg
 # Wayland session (Fedora Workstation's default): without this plugin Qt falls
 # back to xcb through XWayland. Recommends, not Requires: on a pure X11 desktop
 # (or with XWayland present) the app works without it.

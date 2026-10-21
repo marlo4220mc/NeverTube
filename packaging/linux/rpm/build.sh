@@ -40,7 +40,8 @@ for t in --selftest-db --selftest-discover --selftest-ssl \
          --selftest-i18n --selftest-dates --selftest-av1hls \
          --selftest-variants --selftest-reels --selftest-download \
          --selftest-download-button --selftest-download-folder \
-         --selftest-download-settings --selftest-settings-page; do
+         --selftest-download-settings --selftest-download-transport \
+         --selftest-settings-page; do
   echo "SELFTEST $t"
   ./build-rpm/nevertube_qt2 "$t"
 done
@@ -83,6 +84,11 @@ grep -q '^qt5-qtbase' "$rpmtop/requires.txt"
 grep -q '^libavformat\.so' "$rpmtop/requires.txt"
 grep -q '^libQt5Gui\.so' "$rpmtop/requires.txt"
 grep -q '^libQt5Widgets\.so' "$rpmtop/requires.txt"
+# The CLI of ffmpeg (NOT the libraries): it is what the downloader runs to
+# join the two tracks. The soname requires above do NOT cover it. It is a
+# dependency by PATH (Fedora's ffmpeg-free and RPM Fusion's ffmpeg both
+# provide /usr/bin/ffmpeg and they conflict with each other).
+grep -q '/usr/bin/ffmpeg' "$rpmtop/requires.txt"
 
 # Installability: install the package in the container and run offline
 # selftests from the INSTALLED path (not the build tree): catches a package
