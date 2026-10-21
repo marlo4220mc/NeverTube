@@ -74,6 +74,59 @@ MuxResult muxToMp4(const QString &videoPath, const QString &audioPath,
         return result;
     }
 
+    return runFfmpeg(ffmpeg, muxArgs(videoPath, audioPath, outputPath),
+                     outputPath);
+}
+
+MuxResult convertToMp3(const QString &audioPath, const QString &outputPath,
+                        const QString &ffmpegPath)
+{
+    MuxResult result;
+    const QString ffmpeg = ffmpegPath.isEmpty() ? findFfmpeg() : ffmpegPath;
+    result.ffmpegPath = ffmpeg;
+    if (ffmpeg.isEmpty()) {
+        result.error = nt::tr("error.dlFfmpegMissing");
+        return result;
+    }
+    if (!QFileInfo::exists(audioPath)) {
+        result.error = nt::tr("error.dlNoAudioPart");
+        return result;
+    }
+
+    MuxResult res = runFfmpeg(ffmpeg, audioArgs(audioPath, outputPath),
+                               outputPath);
+    if (res.ok)
+        return res;
+
+    // The ffmpeg of the system may NOT have an mp3 encoder: the LGPL build
+    // that ships with the app (and the ffmpeg-free of Fedora) do not carry
+    // libmp3lame (it is GPL and they are LGPL). The audio is then copied
+    // into an M4A, which is the SAME audio without re-encoding (the source
+    // of the download is already an AAC in an m4a).
+    if (!hasMp3Encoder(ffmpeg)) {
+        const QString m4a = fallbackAudioPath(outputPath);
+        QStringList args2;
+        args2 << QStringLiteral("-hide_banner")
+              << QStringLiteral("-loglevel")
+              << QStringLiteral("error")
+              << QStringLiteral("-y")
+              << QStringLiteral("-i") << audioPath
+              << QStringLiteral("-vn")
+              << QStringLiteral("-c:a") << QStringLiteral("copy")
+              << m4a;
+        MuxResult res2 = runFfmpeg(ffmpeg, args2, m4a);
+        if (res2.ok) {
+            // The name of the file changed: the caller has to know it.
+            res2.outputPath = m4a;
+            return res2;
+        }
+    }
+    return res;
+}
+
+QStringList muxArgs(const QString &videoPath, const QString &audioPath,
+                    const QString &outputPath)
+{
     QStringList args;
     args << QStringLiteral("-hide_banner")
          << QStringLiteral("-loglevel")
@@ -93,25 +146,11 @@ MuxResult muxToMp4(const QString &videoPath, const QString &audioPath,
     if (!audioPath.isEmpty())
         args << QStringLiteral("-c:a") << QStringLiteral("copy");
     args << outputPath;
-
-    return runFfmpeg(ffmpeg, args, outputPath);
+    return args;
 }
 
-MuxResult convertToMp3(const QString &audioPath, const QString &outputPath,
-                        const QString &ffmpegPath)
+QStringList audioArgs(const QString &audioPath, const QString &outputPath)
 {
-    MuxResult result;
-    const QString ffmpeg = ffmpegPath.isEmpty() ? findFfmpeg() : ffmpegPath;
-    result.ffmpegPath = ffmpeg;
-    if (ffmpeg.isEmpty()) {
-        result.error = nt::tr("error.dlFfmpegMissing");
-        return result;
-    }
-    if (!QFileInfo::exists(audioPath)) {
-        result.error = nt::tr("error.dlNoAudioPart");
-        return result;
-    }
-
     QStringList args;
     args << QStringLiteral("-hide_banner")
          << QStringLiteral("-loglevel")
@@ -122,38 +161,32 @@ MuxResult convertToMp3(const QString &audioPath, const QString &outputPath,
          << QStringLiteral("-acodec") << QStringLiteral("libmp3lame")
          << QStringLiteral("-q:a") << QStringLiteral("2")
          << outputPath;
+    return args;
+}
 
-    MuxResult res = runFfmpeg(ffmpeg, args, outputPath);
-    if (res.ok)
-        return res;
+QString fallbackAudioPath(const QString &mp3Path)
+{
+    return QFileInfo(mp3Path).absolutePath() + QLatin1Char('/')
+           + QFileInfo(mp3Path).completeBaseName() + QStringLiteral(".m4a");
+}
 
-    // The ffmpeg of the system may NOT have an mp3 encoder: the LGPL build
-    // that ships with the app (and the ffmpeg-free of Fedora) do not carry
-    // libmp3lame (it is GPL and they are LGPL). The audio is then copied
-    // into an M4A, which is the SAME audio without re-encoding (the source
-    // of the download is already an AAC in an m4a).
-    if (!hasMp3Encoder(ffmpeg)) {
-        const QString m4a = QFileInfo(outputPath).absolutePath()
-                            + QLatin1Char('/')
-                            + QFileInfo(outputPath).completeBaseName()
-                            + QStringLiteral(".m4a");
-        QStringList args2;
-        args2 << QStringLiteral("-hide_banner")
-              << QStringLiteral("-loglevel")
-              << QStringLiteral("error")
-              << QStringLiteral("-y")
-              << QStringLiteral("-i") << audioPath
-              << QStringLiteral("-vn")
-              << QStringLiteral("-c:a") << QStringLiteral("copy")
-              << m4a;
-        MuxResult res2 = runFfmpeg(ffmpeg, args2, m4a);
-        if (res2.ok) {
-            // The name of the file changed: the caller has to know it.
-            res2.outputPath = m4a;
-            return res2;
-        }
+bool hasLavfi(const QString &ffmpegPath)
+{
+    const QString path = ffmpegPath.isEmpty() ? findFfmpeg() : ffmpegPath;
+    if (path.isEmpty())
+        return false;
+    QProcess process;
+    process.start(path, QStringList() << QStringLiteral("-hide_banner")
+                                      << QStringLiteral("-demuxers"));
+    if (!process.waitForStarted(10000))
+        return false;
+    if (!process.waitForFinished(20000)) {
+        process.kill();
+        process.waitForFinished(1000);
+        return false;
     }
-    return res;
+    const QString out = QString::fromUtf8(process.readAllStandardOutput());
+    return out.contains(QStringLiteral("lavfi"));
 }
 
 bool hasMp3Encoder(const QString &ffmpegPath)

@@ -41,6 +41,10 @@ struct MuxResult
 // ffmpeg has it right next to the exe).
 QString findFfmpeg();
 
+// Whether the ffmpeg has the lavfi INPUT (the trimmed builds that ship
+// with the app do NOT have it: they cannot synthesize a track).
+bool hasLavfi(const QString &ffmpegPath = QString());
+
 // Whether the ffmpeg has an mp3 encoder. The LGPL builds (the one that
 // ships with the app, the ffmpeg-free of Fedora) do NOT carry libmp3lame
 // (it is GPL), and then the audio falls back to an M4A.
@@ -49,6 +53,21 @@ bool hasMp3Encoder(const QString &ffmpegPath = QString());
 // Runs the ffmpeg with `args` and checks that it wrote `outputPath`.
 MuxResult runFfmpeg(const QString &ffmpeg, const QStringList &args,
                      const QString &outputPath);
+
+// The arguments of the two commands, as PURE functions (so the selftest can
+// check them without running an ffmpeg).
+//
+// The mux of the video: `-i video -i audio -map 0:v:0 -map 1:a:0 -c copy`.
+// The audio only: `-i audio -vn -acodec libmp3lame -q:a 2` (and the
+// fall-back that copies the audio into an M4A when there is no mp3
+// encoder).
+QStringList muxArgs(const QString &videoPath, const QString &audioPath,
+                    const QString &outputPath);
+QStringList audioArgs(const QString &audioPath, const QString &outputPath);
+
+// The M4A that the fall-back writes when the ffmpeg has no mp3 encoder:
+// the same name with the other extension.
+QString fallbackAudioPath(const QString &mp3Path);
 
 // Muxes the two partial files into `outputPath`.
 //

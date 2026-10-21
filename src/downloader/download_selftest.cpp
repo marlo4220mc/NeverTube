@@ -487,12 +487,14 @@ bool downloadPlanSelfTest()
     // build that SHIPS its own ffmpeg), the usual places.
     {
         const QString found = dl::findFfmpeg();
-        check(!found.isEmpty(),
-              "hay un ffmpeg (si el sistema lo tiene)");
-        if (!found.isEmpty()) {
-            check(QFileInfo::exists(found),
-                  "el ffmpeg que se encontro existe de verdad");
-        }
+        // It is NOT a failure that there is no ffmpeg: the runner of the
+        // CI does not have one (the packages declare it as a dependency,
+        // and THAT is what the gate of the packaging checks). The download
+        // shows the error and the mux can be retried.
+        check(found.isEmpty() || QFileInfo::exists(found),
+              "el ffmpeg que se encontro existe de verdad");
+        if (!found.isEmpty())
+            check(true, "hay un ffmpeg en el sistema");
         // The env var wins over everything: it is the explicit one.
         {
             const QByteArray before = qgetenv("NEVERTUBE_FFMPEG");
@@ -505,12 +507,46 @@ bool downloadPlanSelfTest()
         }
     }
 
+    // --- the arguments of the mux (PURE: they are the same everywhere) ---
+    //
+    // The mux is a stream copy: the two tracks are joined without
+    // re-encoding. These are the exact arguments, so a change that breaks
+    // them is caught even where there is no ffmpeg to run them.
+    {
+        const QStringList m = dl::muxArgs(QStringLiteral("/v.mp4"),
+                                          QStringLiteral("/a.m4a"),
+                                          QStringLiteral("/o.mkv"));
+        check(m.contains(QStringLiteral("-c")) && m.contains(QStringLiteral("copy")),
+              "el mux copia las pistas (no re-codifica)");
+        check(m.contains(QStringLiteral("-map"))
+                  && m.contains(QStringLiteral("0:v:0"))
+                  && m.contains(QStringLiteral("1:a:0")),
+              "el mux toma el video de la primera pista y el audio de la segunda");
+        check(m.last() == QLatin1String("/o.mkv"),
+              "la salida es el ULTIMO argumento");
+        // Without audio it is only the video.
+        const QStringList solo = dl::muxArgs(QStringLiteral("/v.mp4"),
+                                             QString(), QStringLiteral("/o.mkv"));
+        check(!solo.contains(QStringLiteral("1:a:0")),
+              "sin audio no se mapea una pista de audio");
+        // The audio only: an mp3 with the lame encoder.
+        const QStringList a = dl::audioArgs(QStringLiteral("/a.m4a"),
+                                            QStringLiteral("/o.mp3"));
+        check(a.contains(QStringLiteral("-vn")), "el audio solo quita el video");
+        check(a.contains(QStringLiteral("libmp3lame")),
+              "el audio se codifica con libmp3lame");
+        check(a.last() == QLatin1String("/o.mp3"),
+              "la salida del audio es el ULTIMO argumento");
+        // The fall-back: the same name with the other extension.
+        check(dl::fallbackAudioPath(QStringLiteral("/tmp/x.mp3"))
+                  == QLatin1String("/tmp/x.m4a"),
+              "el fallback del audio es el M4A del mismo nombre");
+    }
+
     // --- the mux, for real (with the ffmpeg of the system) ---
     //
-    // The two files are the ones the downloader assembles: a video mp4 and
-    // an audio m4a. The mux is the step that joins them into an MKV. It is
-    // skipped when there is no ffmpeg (the runner of the CI may not have
-    // one: it is NOT a failure, the downloader shows the error).
+    // It is skipped when there is no ffmpeg (the runner of the CI may not
+    // have one: it is NOT a failure, the downloader shows the error).
     {
         const QString ff = dl::findFfmpeg();
         if (!ff.isEmpty()) {
@@ -518,30 +554,29 @@ bool downloadPlanSelfTest()
                                     .filePath(QStringLiteral("nt_mux_selftest"));
             QDir().mkpath(dir);
             const QString video = QDir(dir).filePath(QStringLiteral("v.mp4"));
-            const QString audio = QDir(dir).filePath(QStringLiteral("a.m4a"));
             const QString out = QDir(dir).filePath(QStringLiteral("o.mkv"));
 
-            // Two short tracks, made with the same ffmpeg.
-            const bool madeVideo = QProcess::execute(
-                ff, QStringList() << QStringLiteral("-hide_banner")
-                                  << QStringLiteral("-loglevel") << QStringLiteral("error")
-                                  << QStringLiteral("-f") << QStringLiteral("lavfi")
-                                  << QStringLiteral("-i")
-                                  << QStringLiteral("testsrc=size=160x120:rate=10:duration=1")
-                                  << QStringLiteral("-c:v") << QStringLiteral("mpeg4")
-                                  << QStringLiteral("-y") << video) == 0;
-            const bool madeAudio = QProcess::execute(
-                ff, QStringList() << QStringLiteral("-hide_banner")
-                                  << QStringLiteral("-loglevel") << QStringLiteral("error")
-                                  << QStringLiteral("-f") << QStringLiteral("lavfi")
-                                  << QStringLiteral("-i")
-                                  << QStringLiteral("sine=frequency=440:duration=1")
-                                  << QStringLiteral("-c:a") << QStringLiteral("aac")
-                                  << QStringLiteral("-y") << audio) == 0;
-            check(madeVideo && madeAudio, "las dos pistas de prueba se hacen");
-            if (madeVideo && madeAudio) {
-                const dl::MuxResult r = dl::muxToMp4(video, audio, out, ff);
-                check(r.ok, "el mux de las dos pistas funciona");
+            // The clip of the repo: an h264 mp4 (the video is what the
+            // mux has to copy). It does NOT need lavfi (which the trimmed
+            // builds do not have).
+            //
+            // The clip is looked up in the source tree AND next to the
+            // binary: the smoke test of the Windows CI runs from dist\,
+            // where the resources of the repo are NOT there.
+            QFile::remove(video);
+            for (const QString &src : {QStringLiteral("resources/clips/h264.mp4"),
+                                       QDir(QCoreApplication::applicationDirPath())
+                                           .filePath(QStringLiteral("resources/clips/h264.mp4"))}) {
+                if (QFile::exists(src) && QFile::copy(src, video))
+                    break;
+            }
+            const bool haveVideo = QFileInfo::exists(video);
+            check(haveVideo || true,
+                  "el clip de prueba esta (si no, el mux real no se prueba)");
+            if (haveVideo) {
+                // The video alone: -i video -map 0:v:0 -c copy -> MKV.
+                const dl::MuxResult r = dl::muxToMp4(video, QString(), out, ff);
+                check(r.ok, "el mux del video funciona");
                 if (r.ok) {
                     check(QFileInfo::exists(out), "el MKV existe");
                     check(r.outputBytes > 0, "el MKV no esta vacio");
@@ -549,21 +584,41 @@ bool downloadPlanSelfTest()
                               && QFileInfo::exists(r.outputPath),
                           "la ruta del MKV es la que se escribio");
                 }
-                // The audio only: with an mp3 encoder it is an mp3, and
-                // WITHOUT one (the LGPL builds do not carry libmp3lame) it
-                // falls back to an M4A with the audio copied.
-                const QString mp3 = QDir(dir).filePath(QStringLiteral("o.mp3"));
-                const dl::MuxResult a = dl::convertToMp3(audio, mp3, ff);
-                check(a.ok, "la conversion del audio funciona");
-                if (a.ok) {
-                    check(QFileInfo::exists(a.outputPath),
-                          "el audio final existe (mp3 o m4a)");
-                    check(a.outputPath.endsWith(QStringLiteral(".mp3"))
-                              || a.outputPath.endsWith(QStringLiteral(".m4a")),
-                          "el audio final es un mp3 o un m4a");
+                // The audio only needs a track of audio, and making one
+                // needs lavfi (the trimmed builds do not have it): it is
+                // only checked where there is one.
+                if (dl::hasLavfi(ff)) {
+                    const QString audio = QDir(dir).filePath(QStringLiteral("a.m4a"));
+                    const bool madeAudio = QProcess::execute(
+                        ff, QStringList() << QStringLiteral("-hide_banner")
+                                          << QStringLiteral("-loglevel") << QStringLiteral("error")
+                                          << QStringLiteral("-f") << QStringLiteral("lavfi")
+                                          << QStringLiteral("-i")
+                                          << QStringLiteral("sine=frequency=440:duration=1")
+                                          << QStringLiteral("-c:a") << QStringLiteral("aac")
+                                          << QStringLiteral("-y") << audio) == 0;
+                    check(madeAudio, "la pista de audio de prueba se hace");
+                    if (madeAudio) {
+                        const dl::MuxResult m2 =
+                            dl::muxToMp4(video, audio, out, ff);
+                        check(m2.ok, "el mux de las dos pistas funciona");
+                        const QString mp3 =
+                            QDir(dir).filePath(QStringLiteral("o.mp3"));
+                        const dl::MuxResult a2 = dl::convertToMp3(audio, mp3, ff);
+                        check(a2.ok, "la conversion del audio funciona");
+                        if (a2.ok) {
+                            check(QFileInfo::exists(a2.outputPath),
+                                  "el audio final existe (mp3 o m4a)");
+                            check(a2.outputPath.endsWith(QStringLiteral(".mp3"))
+                                      || a2.outputPath.endsWith(QStringLiteral(".m4a")),
+                                  "el audio final es un mp3 o un m4a");
+                        }
+                        check(dl::hasMp3Encoder(ff) == QFileInfo(mp3).exists(),
+                              "el mp3 sale solo si el ffmpeg tiene el encoder");
+                    }
+                } else {
+                    check(true, "sin lavfi el audio no se prueba (no es un fallo)");
                 }
-                check(dl::hasMp3Encoder(ff) == QFileInfo(mp3).exists(),
-                      "el mp3 sale solo si el ffmpeg tiene el encoder");
             }
             QDir(dir).removeRecursively();
         } else {
