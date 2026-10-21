@@ -14,6 +14,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
+#include <QProcess>
 #include <QPixmap>
 #include <QPoint>
 
@@ -501,6 +502,72 @@ bool downloadPlanSelfTest()
             qputenv("NEVERTUBE_FFMPEG", before);
             check(withBadEnv != fake,
                   "un NEVERTUBE_FFMPEG que no existe se ignora");
+        }
+    }
+
+    // --- the mux, for real (with the ffmpeg of the system) ---
+    //
+    // The two files are the ones the downloader assembles: a video mp4 and
+    // an audio m4a. The mux is the step that joins them into an MKV. It is
+    // skipped when there is no ffmpeg (the runner of the CI may not have
+    // one: it is NOT a failure, the downloader shows the error).
+    {
+        const QString ff = dl::findFfmpeg();
+        if (!ff.isEmpty()) {
+            const QString dir = QDir(QDir::tempPath())
+                                    .filePath(QStringLiteral("nt_mux_selftest"));
+            QDir().mkpath(dir);
+            const QString video = QDir(dir).filePath(QStringLiteral("v.mp4"));
+            const QString audio = QDir(dir).filePath(QStringLiteral("a.m4a"));
+            const QString out = QDir(dir).filePath(QStringLiteral("o.mkv"));
+
+            // Two short tracks, made with the same ffmpeg.
+            const bool madeVideo = QProcess::execute(
+                ff, QStringList() << QStringLiteral("-hide_banner")
+                                  << QStringLiteral("-loglevel") << QStringLiteral("error")
+                                  << QStringLiteral("-f") << QStringLiteral("lavfi")
+                                  << QStringLiteral("-i")
+                                  << QStringLiteral("testsrc=size=160x120:rate=10:duration=1")
+                                  << QStringLiteral("-c:v") << QStringLiteral("mpeg4")
+                                  << QStringLiteral("-y") << video) == 0;
+            const bool madeAudio = QProcess::execute(
+                ff, QStringList() << QStringLiteral("-hide_banner")
+                                  << QStringLiteral("-loglevel") << QStringLiteral("error")
+                                  << QStringLiteral("-f") << QStringLiteral("lavfi")
+                                  << QStringLiteral("-i")
+                                  << QStringLiteral("sine=frequency=440:duration=1")
+                                  << QStringLiteral("-c:a") << QStringLiteral("aac")
+                                  << QStringLiteral("-y") << audio) == 0;
+            check(madeVideo && madeAudio, "las dos pistas de prueba se hacen");
+            if (madeVideo && madeAudio) {
+                const dl::MuxResult r = dl::muxToMp4(video, audio, out, ff);
+                check(r.ok, "el mux de las dos pistas funciona");
+                if (r.ok) {
+                    check(QFileInfo::exists(out), "el MKV existe");
+                    check(r.outputBytes > 0, "el MKV no esta vacio");
+                    check(!r.outputPath.isEmpty()
+                              && QFileInfo::exists(r.outputPath),
+                          "la ruta del MKV es la que se escribio");
+                }
+                // The audio only: with an mp3 encoder it is an mp3, and
+                // WITHOUT one (the LGPL builds do not carry libmp3lame) it
+                // falls back to an M4A with the audio copied.
+                const QString mp3 = QDir(dir).filePath(QStringLiteral("o.mp3"));
+                const dl::MuxResult a = dl::convertToMp3(audio, mp3, ff);
+                check(a.ok, "la conversion del audio funciona");
+                if (a.ok) {
+                    check(QFileInfo::exists(a.outputPath),
+                          "el audio final existe (mp3 o m4a)");
+                    check(a.outputPath.endsWith(QStringLiteral(".mp3"))
+                              || a.outputPath.endsWith(QStringLiteral(".m4a")),
+                          "el audio final es un mp3 o un m4a");
+                }
+                check(dl::hasMp3Encoder(ff) == QFileInfo(mp3).exists(),
+                      "el mp3 sale solo si el ffmpeg tiene el encoder");
+            }
+            QDir(dir).removeRecursively();
+        } else {
+            check(true, "sin ffmpeg el mux no se prueba (no es un fallo)");
         }
     }
 

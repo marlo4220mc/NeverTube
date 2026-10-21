@@ -216,6 +216,12 @@ jobs:
           # DLLs of the engine; with no external dependencies (no
           # libwinpthread/libgcc/libunwind), so there is nothing else to copy.
           Copy-Item third_party\ffmpeg-win32\bin\*.dll dist\
+          # The CLI of ffmpeg (the SAME vendored build, compiled by
+          # tools/build_ffmpeg_i686.sh with the muxers and the CLI enabled).
+          # It is NOT needed to play: it is what the DOWNLOADER runs to join
+          # the two tracks of a downloaded video. Without it the download
+          # finishes but the mux fails ("ffmpeg was not found").
+          Copy-Item third_party\ffmpeg-win32\bin\ffmpeg.exe dist\
           Copy-Item $exe dist\nevertube_qt2.exe
           # OpenSSL 1.1.1 = Qt5Network TLS backend. windeployqt does NOT deploy it:
           # without these DLLs next to the exe, all HTTPS fails on the test machine with
@@ -223,8 +229,9 @@ jobs:
           Copy-Item libssl-3.dll dist\
           Copy-Item libcrypto-3.dll dist\
           $missing = @('avcodec-63.dll','avformat-63.dll','avutil-61.dll',
-            'swscale-10.dll','swresample-7.dll','libssl-3.dll',
-            'libcrypto-3.dll','VC_redist.x86.exe') |
+            'swscale-10.dll','swresample-7.dll','avfilter-12.dll',
+            'libssl-3.dll',
+            'libcrypto-3.dll','VC_redist.x86.exe','ffmpeg.exe') |
             Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
           if ($missing) {
             Write-Host "dist incompleto: faltan $missing"
@@ -279,6 +286,22 @@ jobs:
               }
             }
           }
+          # The ffmpeg.exe (the vendored i686 one) is an EXE and not a DLL, but
+          # it also runs on the Win7 machine (the downloader launches it), so
+          # it goes through the same gate. The app's own exe is NOT checked
+          # here: it is built with the v142 toolset against the Win7 SDK.
+          $ff = 'dist\ffmpeg.exe'
+          if (Test-Path $ff) {
+            $imp = & $dumpbin /imports $ff
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "dumpbin falló en $ff"; exit $LASTEXITCODE }
+            foreach ($sym in $win7poison) {
+              if ($imp | Select-String -SimpleMatch $sym) {
+                Write-Host "¡ffmpeg.exe importa $sym (W8+): rompe Win7!"
+                exit 1
+              }
+            }
+          }
           Write-Host "gate Win7 OK: ninguna DLL de dist importa símbolos W8+ ($($win7poison -join ', '))"
           # choco installs Inno in ProgramFiles(x86); locate ISCC.exe in either of the two
           $iscc = Get-ChildItem "$env:ProgramFiles\Inno Setup*\ISCC.exe",
@@ -316,7 +339,7 @@ jobs:
             Write-Host "no se pudo leer el manifiesto de iscc (¿cambió su formato?)"
             exit 1 }
           $need = @('nevertube_qt2.exe', 'qwindows.dll', 'nt.ico',
-            'VC_redist.x86.exe')
+            'VC_redist.x86.exe', 'ffmpeg.exe')
           $missing = $need | Where-Object { $packed -notcontains $_ }
           if ($missing) { Write-Host "el setup NO lleva: $missing"; exit 1 }
           Write-Host "gate del setup x86 OK: el instalador lleva los $($need.Count) ficheros clave"

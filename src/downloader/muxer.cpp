@@ -94,30 +94,7 @@ MuxResult muxToMp4(const QString &videoPath, const QString &audioPath,
         args << QStringLiteral("-c:a") << QStringLiteral("copy");
     args << outputPath;
 
-    QProcess process;
-    process.start(ffmpeg, args);
-    if (!process.waitForStarted(10000)) {
-        result.error = nt::tr("error.dlFfmpegRun");
-        return result;
-    }
-    if (!process.waitForFinished(10 * 60 * 1000)) {
-        process.kill();
-        process.waitForFinished(2000);
-        result.error = nt::tr("error.dlFfmpegTimeout");
-        return result;
-    }
-    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
-        const QString out = QString::fromUtf8(process.readAllStandardError()).trimmed();
-        result.error = out.isEmpty() ? nt::tr("error.dlFfmpegFailed") : out;
-        return result;
-    }
-    if (!QFileInfo::exists(outputPath)) {
-        result.error = nt::tr("error.dlFfmpegNoFile");
-        return result;
-    }
-    result.outputBytes = QFileInfo(outputPath).size();
-    result.ok = true;
-    return result;
+    return runFfmpeg(ffmpeg, args, outputPath);
 }
 
 MuxResult convertToMp3(const QString &audioPath, const QString &outputPath,
@@ -146,6 +123,66 @@ MuxResult convertToMp3(const QString &audioPath, const QString &outputPath,
          << QStringLiteral("-q:a") << QStringLiteral("2")
          << outputPath;
 
+    MuxResult res = runFfmpeg(ffmpeg, args, outputPath);
+    if (res.ok)
+        return res;
+
+    // The ffmpeg of the system may NOT have an mp3 encoder: the LGPL build
+    // that ships with the app (and the ffmpeg-free of Fedora) do not carry
+    // libmp3lame (it is GPL and they are LGPL). The audio is then copied
+    // into an M4A, which is the SAME audio without re-encoding (the source
+    // of the download is already an AAC in an m4a).
+    if (!hasMp3Encoder(ffmpeg)) {
+        const QString m4a = QFileInfo(outputPath).absolutePath()
+                            + QLatin1Char('/')
+                            + QFileInfo(outputPath).completeBaseName()
+                            + QStringLiteral(".m4a");
+        QStringList args2;
+        args2 << QStringLiteral("-hide_banner")
+              << QStringLiteral("-loglevel")
+              << QStringLiteral("error")
+              << QStringLiteral("-y")
+              << QStringLiteral("-i") << audioPath
+              << QStringLiteral("-vn")
+              << QStringLiteral("-c:a") << QStringLiteral("copy")
+              << m4a;
+        MuxResult res2 = runFfmpeg(ffmpeg, args2, m4a);
+        if (res2.ok) {
+            // The name of the file changed: the caller has to know it.
+            res2.outputPath = m4a;
+            return res2;
+        }
+    }
+    return res;
+}
+
+bool hasMp3Encoder(const QString &ffmpegPath)
+{
+    // `ffmpeg -encoders` lists the encoders that the build has: the mp3 one
+    // is "libmp3lame" (or "mp3" in the builds that have the native one).
+    const QString path = ffmpegPath.isEmpty() ? findFfmpeg() : ffmpegPath;
+    if (path.isEmpty())
+        return false;
+    QProcess process;
+    process.start(path, QStringList() << QStringLiteral("-hide_banner")
+                                      << QStringLiteral("-encoders"));
+    if (!process.waitForStarted(10000))
+        return false;
+    if (!process.waitForFinished(20000)) {
+        process.kill();
+        process.waitForFinished(1000);
+        return false;
+    }
+    const QString out = QString::fromUtf8(process.readAllStandardOutput());
+    return out.contains(QStringLiteral("libmp3lame"))
+           || out.contains(QStringLiteral("mp3 "));
+}
+
+MuxResult runFfmpeg(const QString &ffmpeg, const QStringList &args,
+                     const QString &outputPath)
+{
+    MuxResult result;
+    result.ffmpegPath = ffmpeg;
     QProcess process;
     process.start(ffmpeg, args);
     if (!process.waitForStarted(10000)) {
@@ -168,6 +205,7 @@ MuxResult convertToMp3(const QString &audioPath, const QString &outputPath,
         return result;
     }
     result.outputBytes = QFileInfo(outputPath).size();
+    result.outputPath = outputPath;
     result.ok = true;
     return result;
 }

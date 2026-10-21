@@ -67,7 +67,7 @@ mkdir -p build && cd build
   --cross-prefix=i686-w64-mingw32- --cc=i686-w64-mingw32-clang \
   --enable-cross-compile \
   --enable-shared --disable-static \
-  --disable-doc --disable-avdevice --disable-avfilter \
+  --disable-doc --disable-avdevice \
   --disable-everything \
   --disable-gpl --disable-nonfree --disable-autodetect \
   --enable-w32threads --disable-pthreads \
@@ -78,6 +78,10 @@ mkdir -p build && cd build
   --enable-decoder=h264,vp9,av1,aac,opus,mp3,vorbis,flac,pcm_s16le,pcm_f32le \
   --enable-parser=h264,aac,av1,opus,mpegaudio,vorbis \
   --enable-bsf=h264_mp4toannexb,aac_adtstoasc,extract_extradata,vp9_superframe,vp9_superframe_split,av1_frame_merge,av1_frame_split \
+  --enable-muxer=matroska,mp4,ipod \
+  --enable-encoder=aac \
+  --enable-filter=aformat,anull,atrim,crop,format,hflip,null,rotate,transpose,trim,vflip \
+  --enable-ffmpeg \
   --extra-cflags="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601"
 
 echo "==> compilando e instalando"
@@ -85,25 +89,43 @@ make -j"$(nproc)"
 make install prefix="${WORK}/install"
 
 echo "==> ensamblando ${DEST}"
+# The README is written by hand and is NOT part of the build: it is kept.
+keep_readme=""
+if [ -f "${DEST}/README.md" ]; then
+  keep_readme="$(mktemp)"
+  cp "${DEST}/README.md" "${keep_readme}"
+fi
 rm -rf "${DEST}"
 mkdir -p "${DEST}/include" "${DEST}/lib" "${DEST}/bin"
 cp -r "${WORK}/install/include/"* "${DEST}/include/"
 for l in avcodec avformat avutil swscale swresample; do
   cp "${WORK}/install/bin/${l}.lib" "${DEST}/lib/"
 done
-for d in avcodec-63 avformat-63 avutil-61 swscale-10 swresample-7; do
+for d in avcodec-63 avformat-63 avutil-61 swscale-10 swresample-7 avfilter-12; do
   cp "${WORK}/install/bin/${d}.dll" "${DEST}/bin/"
 done
+# The CLI (ffmpeg.exe): it is what the DOWNLOADER runs to join the two
+# tracks. It is NOT a dependency of the app itself (the app links the DLLs
+# above), so it is kept apart: the packagers copy it only if they want the
+# downloader to work out of the box.
+cp "${WORK}/install/bin/ffmpeg.exe" "${DEST}/bin/"
 cp "${WORK}/ffmpeg-${FFMPEG_VER}/COPYING.LGPLv2.1" "${DEST}/LICENSE.LGPLv2.1"
+if [ -n "${keep_readme}" ]; then
+  cp "${keep_readme}" "${DEST}/README.md"
+  rm -f "${keep_readme}"
+fi
+ls -la "${DEST}/bin/"
 
 echo "==> gate de imports Win7 (objdump)"
 poison='GetSystemTimePreciseAsFileTime|AdjustWindowRectExForDpi|GetSystemMetricsForDpi|GetDpiForMonitor|PathCchCanonicalizeEx|SetThreadDpiAwarenessContext|SetProcessDpiAwarenessContext|WaitOnAddress|WakeByAddressAll|WakeByAddressSingle|RoGetActivationFactory|RoOriginateLanguageException|AddDllDirectory|SetDefaultDllDirectories'
 fail=0
-for d in "${DEST}"/bin/*.dll; do
+# The gate covers the DLLs AND the CLI: both are loaded on the Win7 machine
+# (the CLI is launched by the downloader).
+for d in "${DEST}"/bin/*.dll "${DEST}"/bin/*.exe; do
   if i686-w64-mingw32-objdump -p "$d" | grep -qE "${poison}"; then
     echo "  ¡POISON en $(basename "$d")!"; fail=1
   fi
 done
-[ "${fail}" -eq 0 ] && echo "  OK: ninguna DLL importa símbolos W8+"
+[ "${fail}" -eq 0 ] && echo "  OK: ninguna DLL ni EXE importa símbolos W8+"
 
 echo "==> listo: ${DEST}"

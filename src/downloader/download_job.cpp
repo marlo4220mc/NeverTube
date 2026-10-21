@@ -563,6 +563,11 @@ void DownloadJob::startMux()
         emit failed(result.error);
         return;
     }
+    // The name of the file can change (the audio falls back to an M4A when
+    // the ffmpeg has no mp3 encoder): the one that was really written is
+    // the one that is moved and the one that is announced.
+    if (!result.outputPath.isEmpty() && result.outputPath != m_outputPath)
+        m_outputPath = result.outputPath;
 
     // The mux worked: the fragments are not needed any more. They are the
     // same size as the file, so leaving them would double what a download

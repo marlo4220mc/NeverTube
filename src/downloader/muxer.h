@@ -28,12 +28,27 @@ struct MuxResult
     QString error;         // empty when ok
     QString ffmpegPath;     // where ffmpeg was found (empty when not)
     qint64 outputBytes = 0;
+    // The file that was written. It is NOT always `outputPath`: the audio
+    // only falls back to an M4A when the ffmpeg has no mp3 encoder (the
+    // LGPL builds do not carry libmp3lame), and then the name changes.
+    QString outputPath;
 };
 
 // Where ffmpeg is, or an empty string when it is not installed. It looks in
 // the PATH and in the usual places; the environment variable
 // NEVERTUBE_FFMPEG overrides it (useful for a build that ships its own).
+// The directory of the app is also looked at (a build that SHIPS its own
+// ffmpeg has it right next to the exe).
 QString findFfmpeg();
+
+// Whether the ffmpeg has an mp3 encoder. The LGPL builds (the one that
+// ships with the app, the ffmpeg-free of Fedora) do NOT carry libmp3lame
+// (it is GPL), and then the audio falls back to an M4A.
+bool hasMp3Encoder(const QString &ffmpegPath = QString());
+
+// Runs the ffmpeg with `args` and checks that it wrote `outputPath`.
+MuxResult runFfmpeg(const QString &ffmpeg, const QStringList &args,
+                     const QString &outputPath);
 
 // Muxes the two partial files into `outputPath`.
 //
