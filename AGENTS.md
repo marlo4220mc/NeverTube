@@ -650,13 +650,18 @@ the player.
 
 | workflow | triggers |
 |---|---|
-| `linux.yml` (2x `.deb` + `.rpm` + pacman; the `online-report` job in the same file is report only) | **manual**, or a push that touches **the workflow file itself** (filter `paths:`). It does NOT run on every push to `main`; the online job runs only on manual dispatch with the `online_selftests` box ticked. |
+| `linux.yml` (2x `.deb` + `.rpm` + pacman; the `online-report` job in the same file is report only) | **manual** (`gh workflow run linux.yml --ref main`), or a push that touches **the workflow file itself** (filter `paths:`). It does NOT run on every push to `main`; the online job runs only on manual dispatch with the `online_selftests` box ticked. |
 | `windows.yml` (x86 / Win7) | **manual** (`gh workflow run windows.yml --ref main`) or if the push touches **the workflow file itself** (filter `paths:`). It does NOT run on every push to `main`. |
 | `windows_x64.yml` (Win10+) | only if the push touches **the workflow file itself** (filter `paths:`), or manually with `gh workflow run windows_x64.yml --ref main` |
 
 That is, a push to `main` normally starts **no** CI job; all of them are opt-in. The
 x86 one is the heavy Win7 gate (Qt + FFmpeg + Inno + full smoke) and running it
 per commit only burned CI time.
+
+**Measured (2026-10-21):** the two Windows workflows DID run on their own with
+the push of the ffmpeg packages, because that push edited their own `paths:`
+(the gates of the setup). That is the exception, not the rule: a push that
+does not touch a workflow file starts no job.
 
 **NO workflow runs a selftest that needs the network as a GATE.** Two families, and
 the distinction is a hard rule:
