@@ -1529,8 +1529,28 @@ connections. It is the route that the URL comes from, and there are two:
 for the download as it is: **its audio does not mux** (it is AAC in ADTS
 without timestamps, and the ffmpeg 9 refuses it: "Can't write packet with
 unknown timestamp"). The video of the master would be fine (its segments are
-fMP4). A hybrid (the video of the master + the audio of the adaptive) is
-the way to get the 91 MB/s; it is NOT implemented.
+fMP4).
+
+**BUT the master is the one that BURNS the IP, and that is why the hybrid
+is NOT worth it.** Measured with the same video, the same host and the same
+connections (48-96):
+
+| what was downloaded just before | the direct route (master) right after |
+|---|---|
+| **615 MB with the ADAPTIVE** (the app) | **9,0 - 9,6 MB/s** (untouched) |
+| **612 MB with the DIRECT route** (the master) | **0,3 MB/s** (strangled) |
+
+The direct route asks for a lot of volume at once (96 connections of
+0,18 MB) and the CDN punishes it; the adaptive asks for 1 MB pieces with a
+signed pacing and it is left alone. **The adaptive is the POLITE route, and
+the polite one is the one that keeps the IP healthy** (it is also the
+reason the AV1 "looks" faster: it is smaller, so it spends less time in
+the part where the CDN has already squeezed the IP).
+
+So the 91 MB/s of the master is a loan: it is paid back with an IP that
+does not work for the player nor for the next download. **The adaptive
+(the one the app uses) is the right choice**, and its ceiling (~50 MB/s
+with 16 connections) is the real one.
 
 **The codec does NOT change the speed.** Measured with the app, the same
 video at 1080p:
