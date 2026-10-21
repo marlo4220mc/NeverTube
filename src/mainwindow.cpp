@@ -658,9 +658,6 @@ MainWindow::MainWindow(QWidget *parent)
             [this](const QString &videoId) {
                 m_downloadManager->resume(videoId);
             });
-    // A debug helper: it opens the dialog of the delete with a row of
-    // every state, so the texts can be seen without a download (it is what
-    // --selftest-download-dialog uses).
     connect(m_downloadsPage, &DownloadsPage::removeRequested, this,
             [this](const QString &videoId) {
         // The delete asks BEFORE: what it deletes depends on the state of
