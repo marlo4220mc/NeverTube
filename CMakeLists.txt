@@ -95,11 +95,27 @@ add_executable(nevertube_qt2
   src/downloader/download_manager.cpp
   src/downloader/download_manager.h
   src/downloader/download_dialog.cpp
+  src/downloader/download_folder.cpp
+  src/downloader/download_settings.cpp
+  src/downloader/download_settings.h
+  src/downloader/download_settings_selftest.cpp
+  src/downloader/download_settings_selftest.h
+  src/downloader/download_folder_selftest.cpp
+  src/downloader/download_folder_selftest.h
+  src/downloader/download_folder.h
   src/downloader/download_dialog.h
   src/downloader/download_selftest.cpp
   src/downloader/download_selftest.h
   src/downloader/download_button_selftest.cpp
   src/downloader/download_button_selftest.h
+  src/reels_filter.cpp
+  src/reels_filter.h
+  src/reels_filter_selftest.cpp
+  src/reels_filter_selftest.h
+  src/video_variant.cpp
+  src/video_variant.h
+  src/video_variant_selftest.cpp
+  src/video_variant_selftest.h
   src/mainwindow.cpp
   src/mainwindow.h
   src/i18n.cpp

@@ -1,3 +1,4 @@
+#include "reels_filter.h"
 #include "yt_innertube.h"
 
 #include <QCoreApplication>
@@ -28,6 +29,21 @@
 #include "debug.h"
 
 #include "i18n.h"
+
+// El tamaño de la MAYOR miniatura: es el que dice si el video es vertical
+// (un Short) o no. La última del array es la más grande, y es la que trae
+// la proporción real.
+void setThumbSize(VideoInfo &v, const QJsonArray &thumbs)
+{
+    if (thumbs.isEmpty())
+        return;
+    const QJsonObject last = thumbs.last().toObject();
+    v.thumbWidth = last.value(QStringLiteral("width")).toInt();
+    v.thumbHeight = last.value(QStringLiteral("height")).toInt();
+    // A vertical video is a Short (a reel): it is marked so that the lists
+    // leave it out (the app does not play the vertical ones well).
+    v.isShort = reels::thumbnailIsVertical(v.thumbWidth, v.thumbHeight);
+}
 
 namespace {
 
@@ -867,6 +883,84 @@ void Innertube::fetchHls(const QString &videoId, int preferredClient,
         requestPlayer();
 }
 
+// The adaptiveFormats for the downloader: the session cache first (it is
+// memory: it does not need the transport), and the POST /player when there
+// are none.
+void Innertube::fetchAdaptiveFormats(const QString &videoId)
+{
+    const auto it = m_hlsCache.constFind(videoId);
+    if (it != m_hlsCache.constEnd() && !it->adaptiveFormats.isEmpty()
+        && !(it->expiresAt > 0
+             && QDateTime::currentSecsSinceEpoch() >= it->expiresAt)) {
+        NT_DEBUG("E2E innertube formatos caché id=%s n=%d\n",
+                 videoId.toUtf8().constData(),
+                 int(it->adaptiveFormats.size()));
+        emit formatsReady(videoId, it->adaptiveFormats, it->durationSeconds);
+        return;
+    }
+    // No cache: the POST /player is repeated. It is NOT the fetchHls of the
+    // player (that one has the single-flight and would do nothing when the
+    // player already has a request in flight).
+    NT_DEBUG("E2E innertube formatos POST id=%s\n",
+             videoId.toUtf8().constData());
+    m_http->setResult([this, videoId](int status, const QByteArray &body) {
+        NT_DEBUG("E2E innertube formatos HTTP status=%d size=%d\n", status,
+                 body.size());
+        handleFormatsForDownloader(videoId, status == 200, body);
+    });
+    m_http->setError([this, videoId](const QString &reason) {
+        handleFormatsForDownloader(videoId, false, reason.toUtf8());
+    });
+    m_http->setTimeoutMs(kPlayerTimeoutMs);
+    m_http->setVisitorId(m_visitorData);
+
+    const PlayerClient &pc = kPlayerClients[0];
+    const QJsonObject client = clientContext(pc, m_visitorData, m_hl);
+    const QJsonObject body{
+        {QStringLiteral("context"),
+         QJsonObject{{QStringLiteral("client"), client}}},
+        {QStringLiteral("videoId"), videoId},
+        {QStringLiteral("racyCheckOk"), true},
+        {QStringLiteral("contentCheckOk"), true},
+    };
+    const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    m_http->post(kPlayerEndpoint, json, pc.ua, pc.clientId, pc.version,
+                 nullptr, nullptr, nullptr);
+}
+
+void Innertube::handleFormatsForDownloader(const QString &videoId, bool ok,
+                                           const QByteArray &body)
+{
+    if (!ok) {
+        emit formatsFailed(videoId);
+        return;
+    }
+    QJsonObject root;
+    if (!parseJsonObject(body, &root)) {
+        emit formatsFailed(videoId);
+        return;
+    }
+    const QJsonArray formats =
+        root.value(QStringLiteral("streamingData"))
+            .toObject().value(QStringLiteral("adaptiveFormats")).toArray();
+    if (formats.isEmpty()) {
+        emit formatsFailed(videoId);
+        return;
+    }
+    const int duration = root.value(QStringLiteral("videoDetails"))
+                             .toObject().value(QStringLiteral("lengthSeconds"))
+                             .toInt();
+    // The cache is filled so that the next request (the player, or the
+    // downloader again) does not repeat the POST.
+    HlsCacheEntry entry;
+    entry.adaptiveFormats = formats;
+    entry.durationSeconds = duration;
+    entry.expiresAt = QDateTime::currentSecsSinceEpoch() + 6 * 3600;
+    entry.clientIndex = 0;
+    m_hlsCache.insert(videoId, entry);
+    emit formatsReady(videoId, formats, duration);
+}
+
 void Innertube::fetchMaster(const QString &videoId, const QString &masterUrl)
 {
     // Session cache of the master body (same videoId and valid signature).
@@ -1362,6 +1456,9 @@ void Innertube::fetchRadio(const QString &videoId)
     m_radioFallback.clear();
     m_radioVisionFallback.clear();
     m_radioClientIndex = 0;
+    m_radioAccum.clear();
+    m_radioNextContinuation.clear();
+    m_radioBatches = 0;
     NT_DEBUG("E2E innertube fetchRadio id=%s\n", videoId.toUtf8().constData());
     if (!hasFreshVisitor()) {
         m_radioPending = true;
@@ -1524,7 +1621,8 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
                      m_radioFallback.size());
             // Copied BEFORE the promote: the queued fetchRadio may reset
             // m_radioFallback, and the emit must carry the finished mix.
-            const QVector<VideoInfo> fb = m_radioFallback;
+            const QVector<VideoInfo> fb =
+                reels::withoutShorts(m_radioFallback);
             m_radioFallback.clear();
             promoteQueuedRadio();
             emit radioReady(videoId, fb);
@@ -1539,6 +1637,9 @@ void Innertube::handleRadio(const QString &videoId, bool ok,
     m_radioFallback.clear();
     if (!continuation.isEmpty())
         m_radioContinuation = continuation;
+    // The Shorts (the vertical ones) are left out: "A continuación" is a
+    // queue of videos, not a reel feed.
+    videos = reels::withoutShorts(videos);
     NT_DEBUG("E2E innertube radio ok id=%s cola=%d cont=%s\n",
              videoId.toUtf8().constData(), videos.size(),
              m_radioContinuation.isEmpty() ? "no" : "si");
@@ -1579,25 +1680,79 @@ void Innertube::requestRadioWeb(const QString &videoId)
                  nullptr, nullptr, nullptr);
 }
 
+// The next batch of the mix, with the continuation token: it is asked when
+// the list came short of videos (the reels took their place).
+void Innertube::requestRadioWebMore(const QString &videoId,
+                                     const QString &continuation)
+{
+    m_http->setResult([this, videoId](int status, const QByteArray &body) {
+        NT_DEBUG("E2E innertube radioWebMore HTTP status=%d size=%d\n", status,
+                 body.size());
+        handleRadioWeb(videoId, status == 200, body);
+    });
+    m_http->setError([this, videoId](const QString &reason) {
+        handleRadioWeb(videoId, false, reason.toUtf8());
+    });
+    m_http->setTimeoutMs(kPlayerTimeoutMs);
+    m_http->setVisitorId(m_visitorData);
+
+    const QJsonObject client = webClientContext(m_visitorData, m_hl);
+    const QJsonObject body{
+        {QStringLiteral("context"),
+         QJsonObject{{QStringLiteral("client"), client}}},
+        {QStringLiteral("continuation"), continuation},
+    };
+    const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    m_http->post(kNextEndpoint, json, kChromeUA, kWebClientId, kWebClientVersion,
+                 nullptr, nullptr, nullptr);
+}
+
 void Innertube::handleRadioWeb(const QString &videoId, bool ok,
                                const QByteArray &body)
 {
     m_radioInFlight = false;
     QVector<VideoInfo> out;
+    QString continuation;
     if (ok) {
         QJsonObject root;
-        if (parseJsonObject(body, &root))
+        if (parseJsonObject(body, &root)) {
             out = parseRelated(root); // lockupViewModel -> visitas + fecha
+            continuation = firstContinuationToken(root);
+        }
     }
     // If WEB did not yield a usable list, use the one VISIONOS already
     // brought: the queue is served the same way, only without the date.
     if (out.isEmpty())
         out = m_radioVisionFallback;
     m_radioVisionFallback.clear();
+    // The Shorts (the vertical ones) are left out: "A continuación" is a
+    // queue of videos, not a reel feed.
+    out = reels::withoutShorts(out);
+
+    // The list came SHORT of videos (the reels took their place): the next
+    // batch is asked with the continuation, and what is already gathered is
+    // kept.
+    m_radioAccum.append(out);
+    ++m_radioBatches;
+    if (m_radioAccum.size() < kRadioWantVideos && !continuation.isEmpty()
+        && m_radioBatches < 4) {
+        m_radioNextContinuation = continuation;
+        m_radioInFlight = true;
+        NT_DEBUG("E2E innertube radioWeb pide mas id=%s n=%d cont=%s\n",
+                 videoId.toUtf8().constData(), int(m_radioAccum.size()),
+                 continuation.left(20).toUtf8().constData());
+        requestRadioWebMore(videoId, continuation);
+        return;
+    }
+
+    QVector<VideoInfo> final = m_radioAccum;
+    m_radioAccum.clear();
+    if (final.size() > kRadioWantVideos)
+        final = final.mid(0, kRadioWantVideos);
     NT_DEBUG("E2E innertube radioWeb ok id=%s n=%d\n",
-             videoId.toUtf8().constData(), out.size());
+             videoId.toUtf8().constData(), final.size());
     promoteQueuedRadio();
-    emit radioReady(videoId, out);
+    emit radioReady(videoId, final);
 }
 
 // Home feed limits (browse FEwhat_to_watch): up to kHomeShelfCap shelves
@@ -1731,8 +1886,9 @@ void Innertube::handleHome(bool ok, const QString &error,
         return;
     }
     QString continuation;
+    // The Shorts (the vertical ones) are left out of the shelves.
     const QVector<VideoInfo> videos =
-        parseHomeBrowse(jsonRoot, &continuation);
+        reels::withoutShorts(parseHomeBrowse(jsonRoot, &continuation));
     m_homeContinuation = continuation;
     NT_DEBUG("E2E innertube home ok videos=%d cont=%s\n", videos.size(),
              continuation.isEmpty() ? "no" : "si");
@@ -1891,8 +2047,9 @@ void Innertube::handleTrending(bool ok, const QString &error,
         emit trendingReady(QVector<VideoInfo>());
         return;
     }
+    // The Shorts (the vertical ones) are left out.
     QVector<VideoInfo> videos =
-        collectVideoRenderers(jsonRoot, kTrendingTake);
+        reels::withoutShorts(collectVideoRenderers(jsonRoot, kTrendingTake));
     if (videos.isEmpty()
         && retryBrowseWithFreshVisitor(&m_trendVisitorRetried,
                                        &m_trendPending))
@@ -2752,6 +2909,7 @@ VideoInfo Innertube::videoFromHomeRenderer(const QJsonObject &item) const
     if (!thumbs.isEmpty())
         v.thumbnailUrl = thumbs.last().toObject()
                              .value(QStringLiteral("url")).toString();
+    setThumbSize(v, thumbs);
     v.durationSeconds = homeDurationOf(
         r->value(QStringLiteral("thumbnailOverlays")).toArray());
     v.isLive = rendererIsLive(*r);
@@ -2934,13 +3092,18 @@ QVector<VideoInfo> Innertube::parseHomeBrowse(const QJsonObject &root,
 
 namespace {
 
+QJsonArray webLockupSources(const QJsonObject &contentImage)
+{
+    return contentImage
+        .value(QStringLiteral("thumbnailViewModel"))
+        .toObject().value(QStringLiteral("image"))
+        .toObject().value(QStringLiteral("sources"))
+        .toArray();
+}
+
 QString webLockupThumb(const QJsonObject &contentImage)
 {
-    const QJsonArray sources = contentImage
-                                   .value(QStringLiteral("thumbnailViewModel"))
-                                   .toObject().value(QStringLiteral("image"))
-                                   .toObject().value(QStringLiteral("sources"))
-                                   .toArray();
+    const QJsonArray sources = webLockupSources(contentImage);
     return sources.isEmpty()
         ? QString()
         : sources.last().toObject().value(QStringLiteral("url")).toString();
@@ -3001,9 +3164,11 @@ VideoInfo videoFromWebShorts(const QJsonObject &sl)
                                    .toObject().value(QStringLiteral("image"))
                                    .toObject().value(QStringLiteral("sources"))
                                    .toArray();
-    if (!sources.isEmpty())
+    if (!sources.isEmpty()) {
         v.thumbnailUrl = sources.last().toObject()
                              .value(QStringLiteral("url")).toString();
+        setThumbSize(v, sources);
+    }
     if (v.thumbnailUrl.isEmpty())
         v.thumbnailUrl = fallbackThumbnailUrl(v.id);
     return v;
@@ -3083,6 +3248,7 @@ VideoInfo videoFromWebLockup(const QJsonObject &lv)
         v.channelId = channelEndpoint.value(QStringLiteral("browseId")).toString();
     const QJsonObject contentImage = lv.value(QStringLiteral("contentImage")).toObject();
     v.thumbnailUrl = webLockupThumb(contentImage);
+    setThumbSize(v, webLockupSources(contentImage));
     v.durationSeconds = webLockupMeta(contentImage, nullptr, &v.isLive);
     if (v.thumbnailUrl.isEmpty())
         v.thumbnailUrl = fallbackThumbnailUrl(v.id);
@@ -3152,11 +3318,18 @@ QVector<VideoInfo> Innertube::collectWebLockups(const QJsonObject &root,
         if (!val.isObject())
             return;
         const QJsonObject o = val.toObject();
+        // The SHELF of the Shorts (reelShelfRenderer): the vertical videos
+        // come in their own shelf, and the branch is NOT walked. It is the
+        // only reliable signal in the WEB layout: its thumbnails are always
+        // horizontal (336x188) even for a Short.
+        if (o.contains(QStringLiteral("reelShelfRenderer")))
+            return;
         VideoInfo v;
-        if (o.contains(QStringLiteral("shortsLockupViewModel")))
-            v = videoFromWebShorts(
-                o.value(QStringLiteral("shortsLockupViewModel")).toObject());
-        else if (o.contains(QStringLiteral("lockupViewModel")))
+        if (o.contains(QStringLiteral("shortsLockupViewModel"))) {
+            // A Short outside its shelf: it is left out (the entityId says
+            // "shorts-shelf-item-<id>").
+            return;
+        } else if (o.contains(QStringLiteral("lockupViewModel")))
             v = videoFromWebLockup(
                 o.value(QStringLiteral("lockupViewModel")).toObject());
         if (!v.id.isEmpty()) {
@@ -3326,6 +3499,7 @@ void Innertube::parsePlaylistBrowse(const QJsonObject &root, PlaylistInfo *info,
             if (!thumbs.isEmpty())
                 v.thumbnailUrl = thumbs.last().toObject()
                                      .value(QStringLiteral("url")).toString();
+            setThumbSize(v, thumbs);
             if (v.thumbnailUrl.isEmpty())
                 v.thumbnailUrl = fallbackThumbnailUrl(v.id);
             if (!v.id.isEmpty())
@@ -3421,6 +3595,7 @@ void Innertube::parseWatchQueue(const QJsonObject &root, QVector<VideoInfo> *out
             if (!thumbs.isEmpty())
                 v.thumbnailUrl = thumbs.last().toObject()
                                      .value(QStringLiteral("url")).toString();
+            setThumbSize(v, thumbs);
             QString durationText =
                 homeTextOf(pvr.value(QStringLiteral("lengthText")));
             if (durationText.isEmpty()) {
@@ -3588,6 +3763,7 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
         if (!thumbs.isEmpty())
             v.thumbnailUrl = thumbs.last().toObject()
                                  .value(QStringLiteral("url")).toString();
+        setThumbSize(v, thumbs);
         v.durationSeconds = durationSecondsOf(
             r->value(QStringLiteral("thumbnailOverlays")).toArray());
         v.isLive = rendererIsLive(*r);
@@ -3673,8 +3849,13 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
     // branch a WEB client /next came out empty and "A continuación" was left
     // without those two fields (which is what the VISIONOS client does, whose
     // compactVideoRenderer has no date).
-    if (out.isEmpty())
-        out = collectWebLockups(root, 20);
+    if (out.isEmpty()) {
+        // MORE than 20 are collected: the Shorts (the vertical ones) are
+        // left out below, and they came IN the list (the reelShelf is in
+        // the tree). Cutting at 20 BEFORE the filter would leave the list
+        // short of videos: 6 reels would take the place of 6 videos.
+        out = collectWebLockups(root, 40);
+    }
 
     // Dedupe by id (a same recommendation can appear in both containers).
     QVector<VideoInfo> unique;
@@ -3689,7 +3870,17 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
         if (!seen)
             unique.append(v);
     }
-    return unique;
+    // The Shorts (the vertical ones) are left out, and the list is cut at
+    // 20: the person asked for 20 videos, not 20 rows of which some are
+    // reels.
+    const QVector<VideoInfo> clean = reels::withoutShorts(unique);
+    QVector<VideoInfo> out20;
+    for (const VideoInfo &v : clean) {
+        if (out20.size() >= 20)
+            break;
+        out20.append(v);
+    }
+    return out20;
 }
 
 void Innertube::requestPlayer()

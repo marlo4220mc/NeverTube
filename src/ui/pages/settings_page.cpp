@@ -1,9 +1,13 @@
 #include "settings_page.h"
 
+#include "../../downloader/download_folder.h"
+#include "../../downloader/download_settings.h"
+
 #include <QActionGroup>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QFileDialog>
 #include <QMenu>
 #include <QPushButton>
 #include <QScrollArea>
@@ -404,7 +408,8 @@ void SettingsPage::buildUI()
                             const QString &saved,
                             const std::function<QString(const QString &)> &display,
                             const std::function<void(const QString &)> &onPick,
-                            const QString &note = QString()) {
+                            const QString &note = QString(),
+                            const QString &mark = QString()) {
         // "Row + note" block: the note stays glued to its setting (spacing 4);
         // scrollLay's 24 spacing separates whole blocks, not row-note.
         auto *block = new QVBoxLayout;
@@ -415,6 +420,10 @@ void SettingsPage::buildUI()
         lbl->setObjectName(QStringLiteral("settingsRowLabel"));
         row->addWidget(lbl);
         QPushButton *btn = makeValueButton(display(saved));
+        // The mark is what the selftest of the page looks for (it says what
+        // the setting is, and it is not a text that can change).
+        if (!mark.isEmpty())
+            btn->setProperty("downloadSetting", mark);
         row->addWidget(btn, 1, Qt::AlignRight);
         block->addLayout(row);
         if (!note.isEmpty())
@@ -638,6 +647,95 @@ void SettingsPage::buildUI()
                 m_settings->set(QStringLiteral("ui_lang"), code);
                 emit languageChanged(code);
             });
+    }
+
+    // --- DOWNLOADS ---
+    addSectionTitle(nt::tr("settings.section.downloads"));
+
+    // The folder where the files are written. It is a PATH and not a code,
+    // because it is a place of the file system: the default one (the folder
+    // of downloads of the system plus the subfolder "NeverTube") until it is
+    // changed here.
+    //
+    // The row shows the FOLDER (not a code): the identity of the option is
+    // the path itself.
+    {
+        const QString saved = m_settings->getString(
+            QString::fromLatin1(downloadsettings::kFolderKey), QString());
+        auto *block = new QVBoxLayout;
+        block->setSpacing(4);
+        auto *row = new QHBoxLayout;
+        row->setSpacing(8);
+        auto *lbl = new QLabel(nt::tr("settings.downloadFolder"));
+        lbl->setObjectName(QStringLiteral("settingsRowLabel"));
+        row->addWidget(lbl);
+        auto *btn = makeValueButton(saved.isEmpty()
+                                        ? nt::tr("settings.downloadFolderDefault")
+                                        : saved);
+        btn->setProperty("downloadSetting", QStringLiteral("folder"));
+        btn->setToolTip(saved.isEmpty() ? downloads::folderOf(QString()) : saved);
+        row->addWidget(btn, 1, Qt::AlignRight);
+        block->addLayout(row);
+        block->addWidget(addNote(nt::tr("settings.downloadFolderNote")));
+        cardLay->addLayout(block);
+
+        // The menu of the row: the current folder, the default one and the
+        // two actions (choose a folder, go back to the default).
+        auto *menu = new QMenu(btn);
+        QAction *current = menu->addAction(
+            saved.isEmpty() ? nt::tr("settings.downloadFolderDefault") : saved);
+        current->setCheckable(true);
+        current->setChecked(true);
+        menu->addSeparator();
+        QAction *choose = menu->addAction(nt::tr("settings.downloadFolderChoose"));
+        QAction *reset = menu->addAction(nt::tr("settings.downloadFolderReset"));
+        connect(btn, &QPushButton::clicked, btn,
+                [btn, menu]() { menu->popup(btn->mapToGlobal(QPoint(0, btn->height()))); });
+        connect(choose, &QAction::triggered, this, [this, btn, saved]() {
+            // The dialog of the system to choose a folder: it is the ONLY
+            // place where a QDialog is right (choosing a place of the file
+            // system cannot be invented).
+            const QString dir = QFileDialog::getExistingDirectory(
+                this, nt::tr("settings.downloadFolder"),
+                saved.isEmpty() ? downloads::folderOf(QString()) : saved);
+            if (dir.isEmpty())
+                return;
+            m_settings->set(QString::fromLatin1(downloadsettings::kFolderKey), dir);
+            btn->setText(dir);
+            btn->setToolTip(dir);
+            emit downloadFolderChanged(dir);
+        });
+        connect(reset, &QAction::triggered, this, [this, btn]() {
+            m_settings->set(QString::fromLatin1(downloadsettings::kFolderKey), QString());
+            btn->setText(nt::tr("settings.downloadFolderDefault"));
+            btn->setToolTip(downloads::folderOf(QString()));
+            emit downloadFolderChanged(QString());
+        });
+    }
+
+    // The number of connections of the downloader: it is what the person
+    // NOTICES (the speed) and there is no menu for it.
+    {
+        QStringList options;
+        for (int n = downloadsettings::kMinConnections;
+             n <= downloadsettings::kMaxConnections; ++n)
+            options << QString::number(n);
+        const QString saved = m_settings->getString(
+            QString::fromLatin1(downloadsettings::kConnectionsKey), QString());
+        const QString current = downloadsettings::valueForConnections(
+            saved.isEmpty() ? downloadsettings::kDefaultConnections
+                            : saved.toInt());
+        addOptionRow(
+            nt::tr("settings.downloadConnections"), options, current,
+            [](const QString &code) {
+                return QStringLiteral("%1").arg(code);
+            },
+            [this](const QString &code) {
+                m_settings->set(QString::fromLatin1(downloadsettings::kConnectionsKey),
+                                code);
+                emit downloadConnectionsChanged(code);
+            },
+            nt::tr("settings.downloadConnectionsNote"), QStringLiteral("connections"));
     }
 
     // --- DATA ---

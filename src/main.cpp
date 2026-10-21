@@ -1,6 +1,11 @@
 #include "mainwindow.h"
+#include "downloader/download_dialog.h"
+#include "downloader/download_settings.h"
+#include "ui/pages/settings_page.h"
 
 #include <QApplication>
+#include <QMenu>
+#include <QPushButton>
 #include <QDir>
 #include <QEventLoop>
 #include <QGuiApplication>
@@ -24,6 +29,10 @@
 #include "yt_innertube.h"
 #include "downloader/download_selftest.h"
 #include "downloader/download_button_selftest.h"
+#include "downloader/download_folder_selftest.h"
+#include "downloader/download_settings_selftest.h"
+#include "reels_filter_selftest.h"
+#include "video_variant_selftest.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -533,6 +542,95 @@ int main(int argc, char *argv[])
         return av1HlsSelfTest() ? 0 : 1;
     }
 
+    if (args.contains(QLatin1String("--selftest-settings-page"))) {
+        // The page of Settings with the REAL window: the new section of the
+        // downloads (the folder and the codec) is there.
+        MainWindow window;
+        window.show();
+        SettingsPage *page = window.findChild<SettingsPage *>();
+        bool ok = page != nullptr;
+        std::fprintf(stderr, "SETTINGS-PAGE %s: la pagina de ajustes existe\n",
+                     ok ? "OK" : "FAIL");
+        if (ok) {
+            bool sawFolder = false;
+            bool sawConnections = false;
+            for (QPushButton *b : page->findChildren<QPushButton *>()) {
+                const QString kind =
+                    b->property("downloadSetting").toString();
+                if (kind == QLatin1String("folder"))
+                    sawFolder = true;
+                if (kind == QLatin1String("connections"))
+                    sawConnections = true;
+            }
+            std::fprintf(stderr, "SETTINGS-PAGE %s: hay fila de carpeta\n",
+                         sawFolder ? "OK" : "FAIL");
+            std::fprintf(stderr, "SETTINGS-PAGE %s: hay fila de conexiones\n",
+                         sawConnections ? "OK" : "FAIL");
+            ok = sawFolder && sawConnections;
+        }
+        // The menu of the download with the codec of the REAL setting: the
+        // one that is marked is the default.
+        if (page) {
+            SettingsRepo *set = window.settingsRepo();
+            const QString code = set
+                ? set->getString(
+                      QString::fromLatin1(downloadsettings::kConnectionsKey),
+                      QString())
+                : QString();
+            QVector<VideoVariant> variants;
+            auto add = [&variants](int h, const char *c, qint64 bytes) {
+                VideoVariant v;
+                v.height = h;
+                v.codec = QString::fromLatin1(c);
+                v.sizeBytes = bytes;
+                variants.append(v);
+            };
+            add(1080, "vp9", 761100000);
+            add(1080, "av1", 874400000);
+            add(1080, "h264", 1001900000);
+            QMenu menu;
+            dl::buildDownloadMenu(&menu, variants, code);
+            menu.popup(QPoint(20, 20));
+            QApplication::processEvents();
+            QApplication::processEvents();
+            QAction *res = nullptr;
+            for (QAction *a : menu.actions()) {
+                if (a->isSeparator() || !a->menu())
+                    continue;
+                res = a;
+                break;
+            }
+            if (res && res->menu()) {
+                res->menu()->popup(QPoint(180, 80));
+                QApplication::processEvents();
+                QApplication::processEvents();
+                res->menu()->grab().save(QStringLiteral(
+                    "/tmp/opencode/menu_default.png"));
+            }
+        }
+
+        // The section of the downloads, drawn: it is what the person sees.
+        if (page) {
+            for (QWidget *w : page->findChildren<QWidget *>()) {
+                if (w->property("downloadSetting").toString()
+                    == QLatin1String("folder")) {
+                    // The card that holds the two rows of the downloads.
+                    QWidget *card = w->parentWidget();
+                    while (card && card->objectName()
+                                  != QLatin1String("settingsCard"))
+                        card = card->parentWidget();
+                    if (card)
+                        card->grab().save(QStringLiteral(
+                            "/tmp/opencode/ajustes_descargas.png"));
+                    break;
+                }
+            }
+        }
+        std::fprintf(stderr, "SETTINGS-PAGE SELFTEST %s\n",
+                     ok ? "OK" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
     if (args.contains(QLatin1String("--selftest-download-button"))) {
         // Integration test of the download BUTTON: it builds the real
         // MainWindow, finds the button of the Player by its name and
@@ -545,6 +643,29 @@ int main(int argc, char *argv[])
         // Offline: the download plan is a pure function of the master
         // playlist, so its cases are deterministic and run in CI.
         return downloadPlanSelfTest() ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-download-settings"))) {
+        // Offline: the codes of the settings of the downloader.
+        return downloadSettingsSelfTest() ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-download-folder"))) {
+        // Offline: the folder of the downloads and the command that opens
+        // it are pure functions.
+        return downloadFolderSelfTest() ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-reels"))) {
+        // Offline: the filter of the Shorts (the vertical videos) is a pure
+        // function of the list.
+        return reelFilterSelfTest() ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-variants"))) {
+        // Offline: the variants of a video (height, codec and real size) are
+        // a pure function of the player response.
+        return videoVariantSelfTest() ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-ffmpeg"))) {
@@ -731,6 +852,21 @@ int main(int argc, char *argv[])
             const QString channelId = args.at(++i);
             QTimer::singleShot(500, &window, [&window, channelId]() {
                 window.openChannel(channelId);
+            });
+        } else if (arg == QLatin1String("--pause-download")
+                   && i + 1 < args.size()) {
+            // Pauses the download in progress (how the downloader is driven
+            // from the command line, like --download).
+            const QString videoId = args.at(++i);
+            QTimer::singleShot(600, &window, [&window, videoId]() {
+                window.pauseDownload(videoId);
+            });
+        } else if (arg == QLatin1String("--resume-download")
+                   && i + 1 < args.size()) {
+            // Continues a paused download.
+            const QString videoId = args.at(++i);
+            QTimer::singleShot(600, &window, [&window, videoId]() {
+                window.resumeDownload(videoId);
             });
         } else if (arg == QLatin1String("--download")
                    && i + 1 < args.size()) {

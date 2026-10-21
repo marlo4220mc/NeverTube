@@ -1,5 +1,7 @@
 #include "muxer.h"
 
+#include "../i18n.h"
+
 #include <QDir>
 #include <QFileInfo>
 #include <QProcess>
@@ -46,15 +48,15 @@ MuxResult muxToMp4(const QString &videoPath, const QString &audioPath,
     const QString ffmpeg = ffmpegPath.isEmpty() ? findFfmpeg() : ffmpegPath;
     result.ffmpegPath = ffmpeg;
     if (ffmpeg.isEmpty()) {
-        result.error = QStringLiteral("ffmpeg no encontrado");
+        result.error = nt::tr("error.dlFfmpegMissing");
         return result;
     }
     if (!QFileInfo::exists(videoPath)) {
-        result.error = QStringLiteral("falta el video parcial");
+        result.error = nt::tr("error.dlNoVideoPart");
         return result;
     }
     if (!audioPath.isEmpty() && !QFileInfo::exists(audioPath)) {
-        result.error = QStringLiteral("falta el audio parcial");
+        result.error = nt::tr("error.dlNoAudioPart");
         return result;
     }
 
@@ -81,22 +83,22 @@ MuxResult muxToMp4(const QString &videoPath, const QString &audioPath,
     QProcess process;
     process.start(ffmpeg, args);
     if (!process.waitForStarted(10000)) {
-        result.error = QStringLiteral("no se pudo ejecutar ffmpeg");
+        result.error = nt::tr("error.dlFfmpegRun");
         return result;
     }
     if (!process.waitForFinished(10 * 60 * 1000)) {
         process.kill();
         process.waitForFinished(2000);
-        result.error = QStringLiteral("ffmpeg tardo demasiado");
+        result.error = nt::tr("error.dlFfmpegTimeout");
         return result;
     }
     if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
         const QString out = QString::fromUtf8(process.readAllStandardError()).trimmed();
-        result.error = out.isEmpty() ? QStringLiteral("ffmpeg fallo") : out;
+        result.error = out.isEmpty() ? nt::tr("error.dlFfmpegFailed") : out;
         return result;
     }
     if (!QFileInfo::exists(outputPath)) {
-        result.error = QStringLiteral("ffmpeg no creo el archivo");
+        result.error = nt::tr("error.dlFfmpegNoFile");
         return result;
     }
     result.outputBytes = QFileInfo(outputPath).size();
@@ -111,11 +113,11 @@ MuxResult convertToMp3(const QString &audioPath, const QString &outputPath,
     const QString ffmpeg = ffmpegPath.isEmpty() ? findFfmpeg() : ffmpegPath;
     result.ffmpegPath = ffmpeg;
     if (ffmpeg.isEmpty()) {
-        result.error = QStringLiteral("ffmpeg no encontrado");
+        result.error = nt::tr("error.dlFfmpegMissing");
         return result;
     }
     if (!QFileInfo::exists(audioPath)) {
-        result.error = QStringLiteral("falta el audio parcial");
+        result.error = nt::tr("error.dlNoAudioPart");
         return result;
     }
 
@@ -133,22 +135,22 @@ MuxResult convertToMp3(const QString &audioPath, const QString &outputPath,
     QProcess process;
     process.start(ffmpeg, args);
     if (!process.waitForStarted(10000)) {
-        result.error = QStringLiteral("no se pudo ejecutar ffmpeg");
+        result.error = nt::tr("error.dlFfmpegRun");
         return result;
     }
     if (!process.waitForFinished(10 * 60 * 1000)) {
         process.kill();
         process.waitForFinished(2000);
-        result.error = QStringLiteral("ffmpeg tardo demasiado");
+        result.error = nt::tr("error.dlFfmpegTimeout");
         return result;
     }
     if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
         const QString out = QString::fromUtf8(process.readAllStandardError()).trimmed();
-        result.error = out.isEmpty() ? QStringLiteral("ffmpeg fallo") : out;
+        result.error = out.isEmpty() ? nt::tr("error.dlFfmpegFailed") : out;
         return result;
     }
     if (!QFileInfo::exists(outputPath)) {
-        result.error = QStringLiteral("ffmpeg no creo el archivo");
+        result.error = nt::tr("error.dlFfmpegNoFile");
         return result;
     }
     result.outputBytes = QFileInfo(outputPath).size();

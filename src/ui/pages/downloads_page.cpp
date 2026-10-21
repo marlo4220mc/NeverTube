@@ -1,5 +1,9 @@
 #include "downloads_page.h"
 
+#include "../format.h"
+
+#include "../../downloader/download_folder.h"
+
 #include "../../i18n.h"
 #include "../../ui/icons.h"
 #include "../../ui/format.h"
@@ -12,27 +16,10 @@
 #include <QLabel>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QVariant>
 #include <QScrollArea>
 #include <QUrl>
 #include <QVBoxLayout>
-
-namespace {
-
-// The bytes of a download in a form a person can read.
-QString humanBytes(qint64 bytes)
-{
-    if (bytes <= 0)
-        return QString();
-    if (bytes < 1024 * 1024)
-        return QString::number(bytes / 1024) + QStringLiteral(" KB");
-    if (bytes < 1024LL * 1024 * 1024)
-        return QString::number(double(bytes) / (1024 * 1024), 'f', 1)
-               + QStringLiteral(" MB");
-    return QString::number(double(bytes) / (1024.0 * 1024.0 * 1024.0), 'f', 2)
-           + QStringLiteral(" GB");
-}
-
-} // namespace
 
 DownloadsPage::DownloadsPage(DownloadRepo *repo, QWidget *parent)
     : QWidget(parent)
@@ -54,16 +41,15 @@ DownloadsPage::DownloadsPage(DownloadRepo *repo, QWidget *parent)
     m_openFolder->setCursor(Qt::PointingHandCursor);
     nt::bindText(m_openFolder, "downloads.openFolder");
     connect(m_openFolder, &QPushButton::clicked, this, [this]() {
-        if (m_repo) {
-            DownloadInfo any;
-            for (const DownloadInfo &info : m_repo->all()) {
-                any = info;
-                break;
-            }
-            const QString dir = QFileInfo(any.filePath).absolutePath();
-            if (!dir.isEmpty() && QFileInfo::exists(dir))
-                emit openFolderRequested(dir);
-        }
+        // The folder of the DOWNLOADER (the one where the files are
+        // written). It used to be taken from the path of the first row, but
+        // that path is the PARTIAL file of a download in progress (and it
+        // is empty in the new downloader, which does not use a .ts per
+        // track): the button did nothing at all.
+        const QString dir = m_folder.isEmpty() ? downloads::folderOf(QString())
+                                              : m_folder;
+        if (!dir.isEmpty())
+            emit openFolderRequested(dir);
     });
     header->addWidget(m_openFolder);
     root->addLayout(header);
@@ -115,10 +101,34 @@ QString DownloadsPage::stateText(const DownloadInfo &info) const
 // progress) are kept in members so they can be UPDATED in place: rebuilding
 // the row on every tick would restart the progress bar from zero and the
 // bar would never look like it was moving.
+bool DownloadsPage::rowIsPaused(const QString &videoId) const
+{
+    if (!m_repo)
+        return false;
+    DownloadInfo info;
+    if (!m_repo->get(videoId, info))
+        return false;
+    return info.status == QLatin1String("paused");
+}
+
+QString DownloadsPage::finalPathOf(const QString &videoId) const
+{
+    if (!m_repo)
+        return QString();
+    DownloadInfo info;
+    if (!m_repo->get(videoId, info))
+        return QString();
+    return info.finalPath;
+}
+
 QWidget *DownloadsPage::buildRow(const DownloadInfo &info)
 {
+    const QString videoId = info.videoId;
     auto *row = new QWidget(this);
     row->setObjectName(QStringLiteral("downloadRow"));
+    // The id of the video, so that a button of THIS row can be found (the
+    // rows are updated in place and there is one row per download).
+    row->setProperty("downloadVideoId", info.videoId);
     auto *lay = new QHBoxLayout(row);
     lay->setContentsMargins(12, 10, 12, 10);
     lay->setSpacing(12);
@@ -156,14 +166,37 @@ QWidget *DownloadsPage::buildRow(const DownloadInfo &info)
     nt::bindTooltip(play, "downloads.play");
     nt::bindAccessibleName(play, "downloads.play");
     connect(play, &QPushButton::clicked, this,
-            [this, info]() { emit playRequested(info.videoId, info.finalPath); });
+            [this, videoId]() { emit playRequested(videoId, finalPathOf(videoId)); });
 
     auto *retry = new QPushButton(row);
     retry->setObjectName(QStringLiteral("ghost"));
     retry->setCursor(Qt::PointingHandCursor);
     nt::bindText(retry, "downloads.retry");
     connect(retry, &QPushButton::clicked, this,
-            [this, info]() { emit retryRequested(info.videoId); });
+            [this, videoId]() { emit retryRequested(videoId); });
+
+    // The pause: while the download runs it PAUSES it, and while it is
+    // paused it CONTINUES it. The same button with the icon of the state.
+    auto *pause = new QPushButton(row);
+    pause->setObjectName(QStringLiteral("ghost"));
+    pause->setCursor(Qt::PointingHandCursor);
+    pause->setIcon(nt::icon(nt::Icon::Pause, nt::kMuted, 16));
+    pause->setIconSize(QSize(16, 16));
+    pause->setProperty("downloadAction", QVariant(QStringLiteral("pause")));
+    nt::bindTooltip(pause, "downloads.pause");
+    nt::bindAccessibleName(pause, "downloads.pause");
+    connect(pause, &QPushButton::clicked, this, [this, videoId]() {
+        // The state of the row is ASKED FOR, not taken from the copy that
+        // was captured when the row was built: the rows are updated in
+        // place (the same widget), so the captured copy was the OLD one and
+        // the button paused a download that was already paused (and never
+        // continued it).
+        const bool isPaused = rowIsPaused(videoId);
+        if (isPaused)
+            emit resumeRequested(videoId);
+        else
+            emit pauseRequested(videoId);
+    });
 
     auto *remove = new QPushButton(row);
     remove->setObjectName(QStringLiteral("ghost"));
@@ -173,9 +206,10 @@ QWidget *DownloadsPage::buildRow(const DownloadInfo &info)
     nt::bindTooltip(remove, "downloads.delete");
     nt::bindAccessibleName(remove, "downloads.delete");
     connect(remove, &QPushButton::clicked, this,
-            [this, info]() { emit removeRequested(info.videoId); });
+            [this, videoId]() { emit removeRequested(videoId); });
 
     lay->addWidget(play);
+    lay->addWidget(pause);
     lay->addWidget(retry);
     lay->addWidget(remove);
 
@@ -184,6 +218,7 @@ QWidget *DownloadsPage::buildRow(const DownloadInfo &info)
     rowInfo.meta = metaLabel;
     rowInfo.bar = bar;
     rowInfo.play = play;
+    rowInfo.pause = pause;
     rowInfo.retry = retry;
     rowInfo.remove = remove;
     m_rowParts.insert(info.videoId, rowInfo);
@@ -228,9 +263,22 @@ void DownloadsPage::updateRow(const DownloadInfo &info, const Row &row)
 
     const bool done = info.status == QLatin1String("done");
     const bool failed = info.status == QLatin1String("error");
+    const bool paused = info.status == QLatin1String("paused");
     row.play->setVisible(done);
     row.retry->setVisible(failed);
     row.remove->setVisible(true);
+    // The pause button: it is there while the download runs and while it is
+    // paused, and its icon says what it does (pause or continue).
+    row.pause->setVisible(working || paused);
+    if (paused) {
+        row.pause->setIcon(nt::icon(nt::Icon::Play, nt::kMuted, 16));
+        row.pause->setToolTip(nt::tr("downloads.resume"));
+        row.pause->setAccessibleName(nt::tr("downloads.resume"));
+    } else {
+        row.pause->setIcon(nt::icon(nt::Icon::Pause, nt::kMuted, 16));
+        row.pause->setToolTip(nt::tr("downloads.pause"));
+        row.pause->setAccessibleName(nt::tr("downloads.pause"));
+    }
 }
 
 void DownloadsPage::reload()
@@ -250,10 +298,26 @@ void DownloadsPage::reload()
                 break;
             }
         }
-        if (!found)
+        if (!found) {
+            // The row goes: the WIDGET with it, not only the map. Erasing
+            // the entry of the map left the widget in the layout: the
+            // download was gone from the data but it stayed on the screen
+            // (the X did not remove the row from the page).
+            //
+            // The value is COPIED before the erase: the erase invalidates
+            // the iterator (and the value that it points to).
+            const Row row = it.value();
+            QWidget *w = row.title ? row.title->parentWidget() : nullptr;
+            if (!w && row.pause)
+                w = row.pause->parentWidget();
             it = m_rowParts.erase(it);
-        else
+            if (w) {
+                m_listLayout->removeWidget(w);
+                w->deleteLater();
+            }
+        } else {
             ++it;
+        }
     }
 
     // The rows that are new are added at the end (the list is newest first,

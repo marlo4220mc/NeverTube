@@ -2,6 +2,8 @@
 
 #include <QWidget>
 
+#include "../../downloader/download_settings.h"
+
 #include <functional>
 
 class QMenu;
@@ -50,6 +52,10 @@ signals:
     void nextModeChanged(const QString &mode);
     void miniVideoModeChanged(const QString &mode);
     void audioLanguageChanged(const QString &code);
+    // The folder of the downloads changed (empty = the default one).
+    void downloadFolderChanged(const QString &folder);
+    // The number of connections of the downloader changed.
+    void downloadConnectionsChanged(const QString &connections);
     void volumeMaxChanged(const QString &value);
     void thumbSizeChanged(const QString &value);
     void accentChanged(const QString &hex);

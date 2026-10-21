@@ -4,6 +4,7 @@
 #include <QVector>
 
 #include "../../models.h"
+#include "../../video_variant.h"
 #include "../icons.h"
 #include "../live_detect.h"
 
@@ -64,10 +65,11 @@ public:
 signals:
     // The user wants to download the video that is on screen.
     // The user chose in the menu of the download: the height (0 = the best
-    // one) and whether only the audio is wanted (as an mp3).
+    // one), the codec (empty = the default one, the smallest) and whether
+    // only the audio is wanted (as an mp3).
     void downloadRequested(const QString &videoId, const QString &title,
                            const QString &channel, int height,
-                           bool audioOnly);
+                           const QString &codec, bool audioOnly);
     void backRequested();
     void channelRequested(const QString &channelId, const QString &name);
     void fullscreenToggled(bool on);
@@ -120,6 +122,11 @@ public slots:
     // available already hidden. The menu of the download uses it, so that
     // clicking the button does not have to ask YouTube for anything.
     QVector<int> availableHeights() const;
+    // The codec that this PC can reproduce: the one of the hardware
+    // profile ("av1-hw" -> av1, "vp9-hw" -> vp9, "h264-hw" or "soft-all" ->
+    // h264). It is the one that the menu of the download marks as
+    // "recommended".
+    QString recommendedCodec() const;
 
     // Opens the menu of the download (the resolutions and the option of only
     // the audio) and asks for it. It is the same kind of menu as the one of
@@ -153,6 +160,10 @@ private:
     // offers (adaptiveFormats) so Auto does not hide real qualities the
     // loaded stream lacks (e.g. Auto asks 360 for a 1080 video).
     void onStreamHeights(const QString &videoId, const QVector<int> &heights);
+    // Connected to Yt::streamVariantsReady: stores the variants of the
+    // video (height, codec and real size) for the menu of the download.
+    void onStreamVariants(const QString &videoId,
+                          const QVector<VideoVariant> &variants);
     // Paints the video description as rich HTML (links + line
     // breaks) and stores the plain text. Empty = hides the description. It is
     // ALWAYS shown complete (no collapse, no "…más").
@@ -251,6 +262,10 @@ private:
     // The menu offers all real qualities even if Auto asked for a
     // low one. 0 = unknown (falls back to the loaded stream's ceiling).
     int m_availableMaxH = 0;
+    // The variants of the video (height, codec and real size), for the
+    // menu of the download. Empty = the player does not know them yet (the
+    // menu offers the resolutions alone).
+    QVector<VideoVariant> m_variants;
     QLabel *m_descLabel;
     // Card grouping the description. The text is ALWAYS shown complete:
     // the 3-line collapse and the "…más"/"…menos" control were removed.

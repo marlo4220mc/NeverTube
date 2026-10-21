@@ -23,6 +23,12 @@ class DownloadsPage : public QWidget
 public:
     explicit DownloadsPage(DownloadRepo *repo, QWidget *parent = nullptr);
 
+    // The folder where the files are written: the one of the downloader.
+    // The button of "Abrir carpeta" opens THIS one (not the path of a
+    // row: the file of a download in progress is a partial one, and the
+    // path of a finished one is not known until it finishes).
+    void setFolder(const QString &folder) { m_folder = folder; }
+
     // Rebuilds the list from the repository.
     void reload();
 
@@ -39,6 +45,10 @@ signals:
     void retryRequested(const QString &videoId);
     // The user wants a download removed (the file goes with it).
     void removeRequested(const QString &videoId);
+    // The user wants to pause a download (or to continue it).
+    void pauseRequested(const QString &videoId);
+    // The user wants to continue a paused download.
+    void resumeRequested(const QString &videoId);
 
 private:
     // The widgets of one row, so it can be UPDATED in place (rebuilding it
@@ -52,9 +62,18 @@ private:
         QPushButton *play = nullptr;
         QPushButton *retry = nullptr;
         QPushButton *remove = nullptr;
+        // The one that pauses the download and the one that continues it:
+        // the SAME button, with the icon of the state (the row is updated
+        // in place, so the button is not rebuilt).
+        QPushButton *pause = nullptr;
     };
 
     QWidget *buildRow(const DownloadInfo &info);
+    // The CURRENT state of a row: the rows are updated in place (the same
+    // widget), so the buttons cannot decide with the copy that was
+    // captured when the row was built (it is the old one).
+    bool rowIsPaused(const QString &videoId) const;
+    QString finalPathOf(const QString &videoId) const;
     void updateRow(const DownloadInfo &info, const Row &row);
     QString stateText(const DownloadInfo &info) const;
 
@@ -66,4 +85,6 @@ private:
     QLabel *m_empty = nullptr;
     QWidget *m_rows = nullptr;
     QPushButton *m_openFolder = nullptr;
+    // The folder of the downloads (the one of the downloader).
+    QString m_folder;
 };

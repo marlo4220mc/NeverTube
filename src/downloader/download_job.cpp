@@ -1,5 +1,7 @@
 #include "download_job.h"
 
+#include "../i18n.h"
+
 #include "download_transport.h"
 #include "muxer.h"
 
@@ -240,6 +242,14 @@ QVector<int> DownloadJob::doneSegments() const
     return out;
 }
 
+// The mark of a fragment: the video ones are 0, 1, 2... and the audio ones
+// are -(2), -(3)... (the same encoding that the index of the repository
+// uses).
+int DownloadJob::markOf(const QString &track, int index)
+{
+    return track == QLatin1String("video") ? index : -(index + 2);
+}
+
 void DownloadJob::startNext()
 {
     if (!m_running || m_extraPending > 0)
@@ -249,52 +259,65 @@ void DownloadJob::startNext()
         if (!t || t->isBusy())
             continue;
 
+        // The next fragment that is NOT on the disk yet. The ones that ARE
+        // on the disk are not asked again (that is what makes the download
+        // resumable) and the transport takes the next one: the old code
+        // went to the next transport with `continue`, so with the first
+        // eight fragments already downloaded it asked for NOTHING and the
+        // download stayed still FOREVER (nothing was in flight, so nothing
+        // called startNext again).
         bool isVideo = false;
         int index = -1;
         Range range;
-        if (m_kind == dl::DownloadKind::Audio) {
-            if (m_nextAudio < m_audioRanges.size()) {
+        bool found = false;
+        for (int guard = 0;
+             guard < m_videoRanges.size() + m_audioRanges.size(); ++guard) {
+            if (m_kind == dl::DownloadKind::Audio) {
+                if (m_nextAudio >= m_audioRanges.size())
+                    break;
+                isVideo = false;
+                index = m_nextAudio;
+                range = m_audioRanges.at(index);
+            } else if (m_nextVideo < m_videoRanges.size()) {
+                isVideo = true;
+                index = m_nextVideo;
+                range = m_videoRanges.at(index);
+            } else if (m_nextAudio < m_audioRanges.size()) {
                 isVideo = false;
                 index = m_nextAudio;
                 range = m_audioRanges.at(index);
             } else {
                 break;
             }
-        } else if (m_nextVideo < m_videoRanges.size()) {
-            isVideo = true;
-            index = m_nextVideo;
-            range = m_videoRanges.at(index);
-        } else if (m_nextAudio < m_audioRanges.size()) {
-            isVideo = false;
-            index = m_nextAudio;
-            range = m_audioRanges.at(index);
-        } else {
+            ++(isVideo ? m_nextVideo : m_nextAudio);
+
+            const QString track = isVideo ? QStringLiteral("video")
+                                          : QStringLiteral("audio");
+            const int mark = isVideo ? index : -(index + 2);
+            if (m_alreadyDone.contains(mark)) {
+                // It is on the disk: it is not asked again, and the
+                // transport takes the next fragment.
+                QVector<bool> *flags = isVideo ? &m_videoDone : &m_audioDone;
+                if (index < flags->size()) {
+                    (*flags)[index] = true;
+                    QVector<qint64> *sizes =
+                        isVideo ? &m_videoSizes : &m_audioSizes;
+                    if (index < sizes->size())
+                        (*sizes)[index] =
+                            QFileInfo(fragmentPath(track, index)).size();
+                }
+                m_bytesDone = bytesOnDisk();
+                emit progressChanged(m_bytesDone, m_bytesTotal);
+                continue;
+            }
+            found = true;
             break;
         }
+        if (!found)
+            break;
 
-        if (isVideo)
-            ++m_nextVideo;
-        else
-            ++m_nextAudio;
-
-        // A fragment that is already on the disk from a previous attempt is
-        // not fetched again: that is what makes the download resumable.
-        const QString track = isVideo ? QStringLiteral("video") : QStringLiteral("audio");
-        const int mark = isVideo ? index : -(index + 2);
-        if (m_alreadyDone.contains(mark)) {
-            QVector<bool> *flags = isVideo ? &m_videoDone : &m_audioDone;
-            if (index < flags->size()) {
-                (*flags)[index] = true;
-                QVector<qint64> *sizes = isVideo ? &m_videoSizes : &m_audioSizes;
-                if (index < sizes->size())
-                    (*sizes)[index] =
-                        QFileInfo(fragmentPath(track, index)).size();
-            }
-            m_bytesDone = bytesOnDisk();
-            emit progressChanged(m_bytesDone, m_bytesTotal);
-            continue;
-        }
-
+        const QString track = isVideo ? QStringLiteral("video")
+                                      : QStringLiteral("audio");
         ++m_inFlight;
         // The file of the fragment is opened HERE and the bytes are written
         // to it as they arrive: that is what makes the bar advance smoothly
@@ -318,9 +341,26 @@ void DownloadJob::startNext()
                    filePtr->close();
                    delete filePtr;
                    if (!r.isOk()) {
+                       // The fragment is asked AGAIN: with a saturated IP
+                       // some requests do not answer at all (a timeout),
+                       // and the whole download used to fail for ONE of
+                       // them. After a few tries it really fails.
+                       const int tries =
+                           ++m_fragmentTries[markOf(track, index)];
+                       if (m_running && tries < kFragmentRetries) {
+                           NT_DEBUG("E2E dl reintenta %s idx=%d intento=%d (%s)\n",
+                                    track.toUtf8().constData(), index, tries,
+                                    r.error.toUtf8().constData());
+                           if (track == QLatin1String("video"))
+                               m_nextVideo = index;
+                           else
+                               m_nextAudio = index;
+                           startNext();
+                           return;
+                       }
                        if (m_running) {
                            const QString msg = r.error.isEmpty()
-                               ? QStringLiteral("fallo al bajar un fragmento")
+                               ? nt::tr("error.dlPartFetch")
                                : r.error;
                            setStatus(QStringLiteral("error"), msg);
                            m_running = false;
@@ -328,6 +368,7 @@ void DownloadJob::startNext()
                        }
                        return;
                    }
+                   m_fragmentTries.remove(markOf(track, index));
                    onFragmentDone(track, index, r.body.size());
                },
                [this, filePtr](const QByteArray &chunk) {

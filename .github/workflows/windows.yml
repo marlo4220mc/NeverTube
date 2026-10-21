@@ -400,6 +400,19 @@ jobs:
           # regression of "hace N semanas" -> seconds -> "hoy".
           $rc = Invoke-Selftest '--selftest-dates'
           if ($rc -ne 0) { exit $rc }
+          # The variants of a video (height, codec and real size) and the
+          # filter of the Shorts (the vertical videos): both are pure
+          # functions, with no network and no GPU.
+          $rc = Invoke-Selftest '--selftest-variants'
+          if ($rc -ne 0) { exit $rc }
+          $rc = Invoke-Selftest '--selftest-reels'
+          if ($rc -ne 0) { exit $rc }
+          $rc = Invoke-Selftest '--selftest-download-folder'
+          if ($rc -ne 0) { exit $rc }
+          $rc = Invoke-Selftest '--selftest-download-settings'
+          if ($rc -ne 0) { exit $rc }
+          $rc = Invoke-Selftest '--selftest-settings-page'
+          if ($rc -ne 0) { exit $rc }
           # Search suggestions dropdown (offline, no network): the
           # two groups, the history filtering, the discarding of late
           # responses and the panel height cap.

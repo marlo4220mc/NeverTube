@@ -128,7 +128,8 @@ void AppDatabase::createSchema(QSqlDatabase &db)
         "  published TEXT,"
         "  thumb_url TEXT,"
         "  description TEXT NOT NULL DEFAULT '',"
-        "  is_live INTEGER NOT NULL DEFAULT 0"
+        "  is_live INTEGER NOT NULL DEFAULT 0,"
+        "  is_short INTEGER NOT NULL DEFAULT 0"
         ")"));
     // Migration of the video cache from before is_live (live streams): the
     // new column is added with ALTER (cache with data, it is not dropped).
@@ -146,6 +147,21 @@ void AppDatabase::createSchema(QSqlDatabase &db)
         if (!hasIsLive)
             exec(QStringLiteral(
                 "ALTER TABLE videos ADD COLUMN is_live INTEGER NOT NULL DEFAULT 0"));
+        // The same for the Shorts (the vertical videos): the lists that come
+        // from the database leave them out.
+        bool hasIsShort = false;
+        QSqlQuery ps(db);
+        if (ps.exec(QStringLiteral("PRAGMA table_info(videos)"))) {
+            while (ps.next()) {
+                if (ps.value(1).toString() == QLatin1String("is_short")) {
+                    hasIsShort = true;
+                    break;
+                }
+            }
+        }
+        if (!hasIsShort)
+            exec(QStringLiteral(
+                "ALTER TABLE videos ADD COLUMN is_short INTEGER NOT NULL DEFAULT 0"));
     }
     exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS history ("

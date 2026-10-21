@@ -188,6 +188,13 @@ Yt::Yt(QObject *parent)
                 std::sort(heights.begin(), heights.end());
                 if (!heights.isEmpty())
                     emit streamHeightsReady(videoId, heights);
+                // The VARIANTS (height, codec and real size): the menu of
+                // the download offers them. They come with the player
+                // response, so nothing is asked for a second time.
+                const QVector<VideoVariant> variants =
+                    videoVariantsOf(formats);
+                if (!variants.isEmpty())
+                    emit streamVariantsReady(videoId, variants);
             });
 }
 
@@ -409,9 +416,19 @@ void Yt::requestAdaptiveFormats(const QString &videoId)
                 guard->deleteLater();
                 emit adaptiveFormatsReady(videoId, formats);
             });
+    connect(innTube, &Innertube::formatsFailed, guard,
+            [this, guard, videoId](const QString &vid) {
+                if (vid != videoId)
+                    return;
+                guard->deleteLater();
+                emit masterBodyFailed(videoId, QStringLiteral("formats"));
+            });
 
-    // The player response gives the formats; the hls url comes with them.
-    innTube->fetchHls(videoId);
+    // The player response gives the formats. It is the OWN path of the
+    // downloader (not the fetchHls of the player): the player may have a
+    // request in flight and the single-flight of fetchHls would then do
+    // nothing, leaving the downloader waiting forever.
+    innTube->fetchAdaptiveFormats(videoId);
 }
 
 void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,

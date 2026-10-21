@@ -1,5 +1,7 @@
 #include "home_page.h"
 
+#include "../../reels_filter.h"
+
 #include <QDateTime>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -497,6 +499,10 @@ void HomePage::loadContinueWatching()
             continue;
         VideoInfo v;
         if (!m_videoCache->get(id, v))
+            continue;
+        // The Shorts (the vertical ones) are left out: they are not what
+        // "Continuar viendo" is for.
+        if (v.isShort)
             continue;
         const double frac = HistoryRepo::progressFraction(v, pos);
         // A live stream is included even without a fraction (zero duration or

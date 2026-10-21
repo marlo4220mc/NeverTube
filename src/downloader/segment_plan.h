@@ -32,13 +32,19 @@ struct Range
     qint64 size() const { return end - start + 1; }
 };
 
-// One of the variants that can be downloaded: a height with its real size.
-// It is what the dialog of the download offers.
+// One of the variants that can be downloaded: a height, a codec and its real
+// size. It is what the dialog of the download offers.
+//
+// There is ONE per (height, codec): a video has several variants per height
+// (AV1, VP9 and H264), and they are not the same picture (the AV1 is
+// smaller for the same quality, but the H264 opens anywhere).
 struct VideoOption
 {
     int height = 0;
+    // The family of the codec: "av1", "vp9" or "h264".
+    QString codec;
     qint64 contentLength = 0;  // the real size of the track
-    QString codecs;
+    QString codecs;  // the mimeType of the format, with its codecs=
     QJsonObject format;  // the format it comes from
 };
 
@@ -85,12 +91,16 @@ struct Plan
 
 // Builds the plan from the adaptive formats of the player response.
 //
-// The video variants are offered by height, and the SMALLEST one of each
-// height wins: for a download the size is what matters (the VP9 of the
-// 1080p is 31 MB against the 80 of the h264, for the same picture).
+// The video variants are offered ONE PER (height, codec): the dialog lets
+// the user pick the codec of each resolution. When the user does NOT pick
+// one, the SMALLEST variant of the highest resolution wins: for a download
+// the size is what matters (the AV1 of the 1080p is 916 MB against the
+// 1050 of the h264, for the same picture).
 //
 // The audio is the ORIGINAL track, or the one in the preferred language (the
 // same rule the player uses).
+// `maxHeight` is the cap of the resolution (0 = NO cap: the download is
+// not the playback, and the person asked for a file).
 Plan planFromFormats(const QJsonArray &adaptiveFormats, int maxHeight,
                       const QString &prefLang,
                       int (*codecRank)(int height, const QString &mimeOrCodecs));
@@ -99,6 +109,11 @@ Plan planFromFormats(const QJsonArray &adaptiveFormats, int maxHeight,
 // picked in the dialog). A height that is not in the plan leaves it
 // untouched.
 Plan planWithHeight(const Plan &plan, int height);
+
+// A copy of the plan with a concrete (height, codec): the variant the user
+// picked in the submenu of the dialog. A height or a codec that is not in
+// the plan leaves it untouched.
+Plan planWithVariant(const Plan &plan, int height, const QString &codec);
 
 // The REAL size of a resource, from its URL: YouTube puts it there as
 // "clen%3D30846580" (percent-encoded). It is the size of the track, not an

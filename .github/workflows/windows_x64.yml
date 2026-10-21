@@ -328,7 +328,12 @@ jobs:
                            '--selftest-theme', '--selftest-glyphs',
                            '--selftest-i18n',
                            '--selftest-suggest-parse', '--selftest-suggest-panel',
-                           '--selftest-suggest-gestures', '--selftest-dates')) {
+                           '--selftest-suggest-gestures', '--selftest-dates',
+                           '--selftest-variants', '--selftest-reels',
+                           '--selftest-download', '--selftest-download-button',
+                           '--selftest-download-folder',
+                           '--selftest-download-settings',
+                           '--selftest-settings-page')) {
             $rc = Invoke-Selftest $t
             if ($rc -ne 0) {
               Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue

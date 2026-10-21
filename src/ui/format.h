@@ -9,6 +9,12 @@ QString durationLabel(int seconds);
 QString compactCount(qint64 count);
 QString publishedLabel(const QString &publishedAt);
 QString viewsLabel(qint64 count);
+// The bytes in a form a person can read: "916,8 MB". Empty when the amount
+// is zero (there is nothing to show).
+QString humanBytes(qint64 bytes);
+// The label of a resolution, like the quality menu of the player: "720p HD",
+// "2160p 4K".
+QString resolutionLabel(int height);
 
 // Meta line of a video: "canal  •  N vistas  •  hace N d", with whatever is
 // available (the three fields are not always there: a cached video may have no

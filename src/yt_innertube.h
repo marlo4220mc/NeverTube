@@ -73,6 +73,18 @@ public slots:
     // budget and a second playback with the same URL gives 403.
     void fetchHls(const QString &videoId, int preferredClient = -1,
                   bool forceRefresh = false);
+    // The adaptiveFormats of the /player, for the DOWNLOADER.
+    //
+    // It is a separate path because the downloader must not depend on the
+    // player: the player may have a request in flight (the single-flight
+    // of fetchHls then does nothing and the downloader waited FOREVER), and
+    // the cached ones are not served while the transport is busy (the
+    // comment of serveCachedHls: emitting hlsReady would trigger a real
+    // GET of the master and abort the POST in flight).
+    //
+    // The formats come from the session cache when there are any, and the
+    // POST /player is repeated when there are not.
+    void fetchAdaptiveFormats(const QString &videoId);
     void fetchMaster(const QString &videoId, const QString &masterUrl);
 
     // Downloads the related videos ("A continuación" / recommendations) of the video
@@ -176,6 +188,8 @@ signals:
     // /player response. Yt consumes it to build the single-video "edge" master
     // + audio from Innertube; if empty (or its entries bring no
     // url), Yt falls back to the classic hlsManifestUrl → fetchMaster mode.
+    // The POST /player for the downloader failed.
+    void formatsFailed(const QString &videoId);
     void formatsReady(const QString &videoId, const QJsonArray &adaptiveFormats,
                       int durationSeconds);
     void failed(const QString &videoId, const QString &reason);
@@ -231,6 +245,10 @@ private:
     // client, which returns lockupViewModel (with views and date) where VISIONOS
     // returns compactVideoRenderer (no date).
     void requestRadioWeb(const QString &videoId);
+    // The next batch of the mix (with the continuation token): it is asked
+    // when the list came short of videos (the reels took their place).
+    void requestRadioWebMore(const QString &videoId,
+                             const QString &continuation);
     void handleRadioWeb(const QString &videoId, bool ok, const QByteArray &body);
     // Launches the radio queued by fetchRadio() while another was in flight
     // (single-flight). Called at the terminal points of a radio, BEFORE the
@@ -278,6 +296,8 @@ private:
     // fetchVisitorData() and return: the dispatcher will relaunch it.
     bool hasFreshVisitor() const;
     void dispatchPending();
+    void handleFormatsForDownloader(const QString &videoId, bool ok,
+                                   const QByteArray &body);
     void handlePlayer(bool ok, const QString &error, const QByteArray &body);
     void handleMaster(bool ok, const QString &error, const QByteArray &body);
     void fail(const QString &reason);
@@ -432,6 +452,20 @@ private:
     // WEB version (with views and date) is requested and is the backup if that one fails.
     QVector<VideoInfo> m_radioVisionFallback;
     int m_radioClientIndex = 0;
+    // The radio is asked for MORE when the list comes SHORT of videos: the
+    // Shorts (the vertical ones) are left out, so 20 rows can be only 14
+    // videos. The next batch is asked with the continuation token until
+    // there are 20 videos or YouTube does not give a continuation.
+    //
+    // kRadioWantVideos is how many videos the queue wants (the person asked
+    // for 20).
+    static constexpr int kRadioWantVideos = 20;
+    // The accumulation of the batches (the videos already gathered).
+    QVector<VideoInfo> m_radioAccum;
+    // The continuation of the LAST batch (for the next request).
+    QString m_radioNextContinuation;
+    // How many batches have been asked (the guard against a loop).
+    int m_radioBatches = 0;
 
     // Translated detail of the current video (normal /next): title and description in
     // the requested "hl". Independent of the queue: never emits

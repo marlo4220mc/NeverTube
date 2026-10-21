@@ -1,5 +1,9 @@
 #include "segment_plan.h"
 
+#include "../i18n.h"
+
+#include "../video_variant.h"
+
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QRegularExpression>
@@ -17,6 +21,15 @@ qint64 sizeOfFormat(const QJsonObject &f)
     qint64 n = contentLengthOf(f.value(QStringLiteral("url")).toString());
     if (n <= 0)
         n = f.value(QStringLiteral("contentLength")).toString().toLongLong();
+    // A NEGATIVE size is not a size: it comes from a format whose
+    // contentLength is a sentinel (the server sends -1 for the tracks whose
+    // size it does not know) or from a truncated read. The size that is
+    // used is the one of the URL (the "clen"), and when there is none the
+    // track is left without size (0) instead of with a negative one: a
+    // negative total made the progress bar go backwards and the download
+    // look like it was finished.
+    if (n < 0)
+        n = 0;
     return n;
 }
 
@@ -31,34 +44,7 @@ qint64 rangeEnd(const QJsonObject &r)
 }
 
 // The language of an audio track: the id of its track is prefixed with it
-// ("en.4" -> "en", "zh-Hant.3").
-QString audioLanguageOf(const QJsonObject &format)
-{
-    const QJsonObject track = format.value(QStringLiteral("audioTrack")).toObject();
-    QString id = track.value(QStringLiteral("id")).toString();
-    const int dot = id.indexOf(QLatin1Char('.'));
-    if (dot > 0)
-        id.truncate(dot);
-    if (!id.isEmpty())
-        return id;
-    return track.value(QStringLiteral("languageCode")).toString();
-}
 
-// True when the track is the original one and not a dub: the display name
-// marks it ("Inglés original"), the same rule the player uses.
-bool isOriginalOf(const QJsonObject &format)
-{
-    const QJsonObject track = format.value(QStringLiteral("audioTrack")).toObject();
-    const QString displayName =
-        track.value(QStringLiteral("displayName")).toString();
-    if (displayName.contains(QLatin1String("original"), Qt::CaseInsensitive))
-        return true;
-    const bool isDefault = track.value(QStringLiteral("audioIsDefault")).toBool();
-    const QString lang = track.value(QStringLiteral("languageCode")).toString();
-    if (isDefault && lang.isEmpty() && !displayName.isEmpty())
-        return true;
-    return lang.isEmpty() && displayName.isEmpty();
-}
 
 void fillTrack(Track &t, const QJsonObject &f)
 {
@@ -93,8 +79,13 @@ Plan planFromFormats(const QJsonArray &adaptiveFormats, int maxHeight,
                       int (*codecRank)(int height, const QString &mimeOrCodecs))
 {
     Plan plan;
+    Q_UNUSED(codecRank);
 
     // --- the video variants ---
+    //
+    // ONE per (height, codec): the dialog offers the codec of each
+    // resolution, so the user can pick the AV1 (smaller) or the H264 (the
+    // one that opens anywhere).
     for (const QJsonValue &val : adaptiveFormats) {
         const QJsonObject f = val.toObject();
         if (f.value(QStringLiteral("url")).toString().isEmpty())
@@ -103,29 +94,36 @@ Plan planFromFormats(const QJsonArray &adaptiveFormats, int maxHeight,
         if (!mime.startsWith(QLatin1String("video/")))
             continue;
         const int h = f.value(QStringLiteral("height")).toInt();
-        if (h <= 0 || h > maxHeight)
+        // maxHeight <= 0 means NO cap: the download is not the playback,
+        // and the person asked for a file (the menu offers the resolutions
+        // the video really has).
+        if (h <= 0 || (maxHeight > 0 && h > maxHeight))
             continue;
         if (f.value(QStringLiteral("initRange")).toObject().isEmpty())
             continue;  // without an init it cannot be a playable fMP4
+        const QString codec = videoCodecFamily(mime);
+        if (codec.isEmpty())
+            continue;
         const qint64 size = sizeOfFormat(f);
 
         int at = -1;
         for (int i = 0; i < plan.options.size(); ++i) {
-            if (plan.options.at(i).height == h) {
+            if (plan.options.at(i).height == h
+                && plan.options.at(i).codec == codec) {
                 at = i;
                 break;
             }
         }
         if (at >= 0) {
-            // The SMALLEST of the same height: for a download the size is
-            // what matters (the VP9 of the 1080p is 31 MB against the 80
-            // of the h264, for the same picture).
+            // The SMALLEST of the same (height, codec): for a download the
+            // size is what matters.
             const qint64 current = plan.options.at(at).contentLength;
             if (size > 0 && current > 0 && size >= current)
                 continue;
         }
         VideoOption opt;
         opt.height = h;
+        opt.codec = codec;
         opt.contentLength = size;
         opt.codecs = mime;
         opt.format = f;
@@ -135,17 +133,37 @@ Plan planFromFormats(const QJsonArray &adaptiveFormats, int maxHeight,
             plan.options.append(opt);
     }
     if (plan.options.isEmpty()) {
-        plan.error = QStringLiteral("no hay ningun formato de video");
+        plan.error = nt::tr("error.dlNoFormat");
         return plan;
     }
     std::sort(plan.options.begin(), plan.options.end(),
               [](const VideoOption &a, const VideoOption &b) {
-                  return a.height > b.height;
+                  if (a.height != b.height)
+                      return a.height > b.height;
+                  // Inside a height: AV1 first (the smallest one for the
+                  // same picture), then VP9, then H264.
+                  const int ra = a.codec == QLatin1String("av1")
+                                     ? 0
+                                     : (a.codec == QLatin1String("vp9") ? 1 : 2);
+                  const int rb = b.codec == QLatin1String("av1")
+                                     ? 0
+                                     : (b.codec == QLatin1String("vp9") ? 1 : 2);
+                  if (ra != rb)
+                      return ra < rb;
+                  return a.contentLength < b.contentLength;
               });
 
     // The chosen video: the highest one, and among the same height the
-    // smallest (the options already have one per height).
-    fillTrack(plan.video, plan.options.first().format);
+    // SMALLEST (the AV1 usually wins: for a download the size is what
+    // matters).
+    VideoOption *chosen = &plan.options.first();
+    for (VideoOption &o : plan.options) {
+        if (o.height == chosen->height && o.contentLength < chosen->contentLength
+            && chosen->contentLength > 0) {
+            chosen = &o;
+        }
+    }
+    fillTrack(plan.video, chosen->format);
 
     // --- the audio ---
     //
@@ -154,47 +172,15 @@ Plan planFromFormats(const QJsonArray &adaptiveFormats, int maxHeight,
     // fetched in pieces) and the WebM one does not (it is a stream of
     // clusters, and a track without index cannot be split).
     //
-    // Among the tracks of the same kind the SMALLEST one wins: for a
-    // download the size is what matters.
-    QJsonObject bestAudio;
-    const QString pref = prefLang.trimmed().toLower();
-    for (const QJsonValue &val : adaptiveFormats) {
-        const QJsonObject f = val.toObject();
-        if (f.value(QStringLiteral("url")).toString().isEmpty())
-            continue;
-        const QString mime = f.value(QStringLiteral("mimeType")).toString();
-        if (!mime.startsWith(QLatin1String("audio/")))
-            continue;
-        const QString lang = audioLanguageOf(f);
-        bool match = false;
-        if (!pref.isEmpty())
-            match = !lang.isEmpty() && lang.toLower().startsWith(pref);
-        else
-            match = isOriginalOf(f);
-        if (!match)
-            continue;
-        // The mp4 (with a sidx) beats the WebM (without one).
-        const bool isMp4 = mime.startsWith(QLatin1String("audio/mp4"));
-        if (!bestAudio.isEmpty()) {
-            const QString bestMime = bestAudio.value(QStringLiteral("mimeType"))
-                                         .toString();
-            const bool bestIsMp4 = bestMime.startsWith(QLatin1String("audio/mp4"));
-            if (isMp4 != bestIsMp4) {
-                if (!isMp4)
-                    continue;
-            } else {
-                const qint64 current = sizeOfFormat(bestAudio);
-                const qint64 candidate = sizeOfFormat(f);
-                if (current > 0 && candidate > 0 && candidate >= current)
-                    continue;
-            }
-        }
-        bestAudio = f;
-    }
+    // It is the SAME rule the player uses (preferredAudioFormat): one copy,
+    // so the size that the menu shows is the one that gets downloaded.
+    const QJsonObject bestAudio = preferredAudioFormat(adaptiveFormats, prefLang);
     if (!bestAudio.isEmpty())
         fillTrack(plan.audio, bestAudio);
 
     plan.estimatedBytes = plan.video.contentLength + plan.audio.contentLength;
+    if (plan.estimatedBytes < 0)
+        plan.estimatedBytes = 0;
     plan.valid = true;
     return plan;
 }
@@ -205,6 +191,21 @@ Plan planWithHeight(const Plan &plan, int height)
         return plan;
     for (const VideoOption &o : plan.options) {
         if (o.height != height)
+            continue;
+        Plan out = plan;
+        fillTrack(out.video, o.format);
+        out.estimatedBytes = out.video.contentLength + out.audio.contentLength;
+        return out;
+    }
+    return plan;
+}
+
+Plan planWithVariant(const Plan &plan, int height, const QString &codec)
+{
+    if (height <= 0 || codec.isEmpty())
+        return plan;
+    for (const VideoOption &o : plan.options) {
+        if (o.height != height || o.codec != codec)
             continue;
         Plan out = plan;
         fillTrack(out.video, o.format);

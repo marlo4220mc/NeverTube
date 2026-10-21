@@ -634,6 +634,12 @@ all inside `m_ctrlBar` (`#playerOverlay`):
 ./build/nevertube_qt2 --selftest-glyphs    # every non-ASCII glyph of the UI exists in the app's real font: runs in CI
 ./build/nevertube_qt2 --selftest-dates     # relative-date parser ("hace 2 semanas" is NOT 2 s → not "hoy"): runs in CI
 ./build/nevertube_qt2 --selftest-i18n      # catalogs: same key set + every key used in the source exists in the base language: runs in CI
+./build/nevertube_qt2 --selftest-variants  # the variants of a video (height, codec and real size): runs in CI
+./build/nevertube_qt2 --selftest-reels     # the filter of the Shorts (the vertical videos): runs in CI
+./build/nevertube_qt2 --selftest-download  # the plan of a download (the fragments, the sidx, the codec): runs in CI
+./build/nevertube_qt2 --selftest-download-folder  # the folder of the downloads and the command that opens it: runs in CI
+./build/nevertube_qt2 --selftest-download-settings  # the codes of the settings of the downloader: runs in CI
+./build/nevertube_qt2 --selftest-settings-page  # the page of Ajustes (the new section of the downloads): runs in CI
 ```
 
 The player selftest verifies invariants of the protected core without
@@ -658,9 +664,13 @@ the distinction is a hard rule:
 - **Offline (gate)**: `--selftest-db`, `--selftest-discover`, `--selftest-ssl`
   (only checks that Qt's TLS backend LOADS), `--selftest-grid`,
   `--selftest-theme`, `--selftest-glyphs`, `--selftest-i18n`,
-  `--selftest-dates`, `--selftest-suggest-parse/panel/gestures` and
-  `--selftest-av1hls`. They run in every build (the three `packaging/linux/*`
-  recipes and both Windows smokes) and can fail the job.
+  `--selftest-dates`, `--selftest-suggest-parse/panel/gestures`,
+  `--selftest-av1hls`, `--selftest-variants`, `--selftest-reels`,
+  `--selftest-download`, `--selftest-download-button`,
+  `--selftest-download-folder`, `--selftest-download-settings` and
+  `--selftest-settings-page`. They run in every build (the three
+  `packaging/linux/*` recipes and both Windows smokes) and can fail the
+  job.
 - **Online (report, NEVER a gate)**: `--selftest-tls` (a REAL handshake),
   `--selftest-innertube`, `--selftest-search`, `--selftest-browse`,
   `--selftest-feeds`, `--selftest-home`, plus the GPU ones (`--selftest-hwprobe`,
@@ -904,6 +914,44 @@ line with its duration (and the `PlayerWidget` geometry before/after) is the
 cheapest fix to the diagnostics and touches no protected code. Until then this is
 a report, not a fix: **do not "fix" it by guessing**, because the two suspects
 lead to different changes and only the measurement distinguishes them.
+
+## The Shorts (the reels) are left out of the lists
+
+A Short is a **vertical** video (9:16). The app does not play them well (the
+player is 16:9) and they are not what the person wants in a list, so they are
+**discarded** from "A continuación", "Continuar viendo" and "Descubre".
+
+**How they are recognized — and the trap of the thumbnails.** The first idea
+was the proportion of the thumbnail, and it works for the VISIONOS layout
+(`compactVideoRenderer` brings 320x180, 1280x720 and, for a Short, 1080x1920).
+But in the **WEB layout the thumbnail is ALWAYS horizontal** (336x188) even
+for a Short, so the proportion says nothing there. The reliable signal in
+the WEB layout is the **shelf**: the Shorts come in their own
+`reelShelfRenderer`, whose items are `shortsLockupViewModel`. So
+`collectWebLockups` does NOT walk that branch: the shelf is skipped whole and
+its items are never collected.
+
+**The list has to be cut AFTER the filter, not before.** The WEB layout
+returned 20 lockups of which 6 were reels, so the list came out with 14
+videos. Now **40 are collected** and the cut to 20 happens after the filter.
+If it still comes short of 20, the **next batch is asked** with the
+continuation token (`requestRadioWebMore`, up to 4 batches): the person asked
+for 20 videos, not for 20 rows of which some are reels.
+
+**Where the filter is applied** (all in the source, so no surface forgets it):
+the radio (the panel, the VISIONOS fallback and the WEB list), the
+suggestions (`parseRelated`), the Home shelves and the trending. The radio
+that was **saved** in the database is filtered again when it is reused
+(`MainWindow::openWatchAt`), because it may have been saved before the rule
+existed.
+
+**The "Continuar viendo" comes from the database**, so the flag is persisted:
+`videos.is_short` (an `ALTER` for the old caches) and `VideoInfo.isShort`.
+
+The pure part is in `src/reels_filter.*` and its selftest
+`--selftest-reels` (runs in CI). `reels::thumbnailIsVertical` needs the
+**measures**: without them nothing is discarded (a video is never dropped by
+ignorance).
 
 ## "A continuación" mode (queue seeding)
 
@@ -1273,6 +1321,209 @@ connections, the headers exposed and the IPv4 forced (the same reason
 `Ipv4Https` does it: YouTube blocks some videos over IPv6 from this
 network).
 
+### The codec of the download (the submenu)
+
+A video has **several variants per height** (AV1, VP9 and H264) and they are
+not the same picture: the AV1 is smaller for the same quality, but the H264
+is the one that opens anywhere. So the **resolution opens a SUBMENU** with
+the codecs of that resolution, each with its **real size**:
+
+```
+1080p HD  ▸
+720p HD   ▸
+──────────────
+Solo el audio (mp3)
+```
+
+and inside "1080p HD ▸": `VP9 · 761,1 MB / AV1 · 874,4 MB / H264 · 1001,9 MB`.
+
+**Clicking the resolution ITSELF still downloads** the default codec of it
+(the smallest one), so nobody is forced to open the submenu.
+
+**The sizes are not a guess**: they are the `contentLength` of the player
+response, which the app ALREADY has (the `kFieldMask` asks for
+`streamingData.adaptiveFormats`), so the menu does not ask YouTube for
+anything. The signal is `Yt::streamVariantsReady` (the variants: height,
+codec and real size) → `WatchPage::m_variants` → the menu.
+
+**The AV1 is not always the smallest**: in `7wVjjtpWWZs` the 1080p is 761 MB
+in VP9 and 874 MB in AV1 (YouTube encoded the VP9 with a more aggressive
+CRF). That is exactly why the submenu shows the size: the choice is
+informed, not assumed.
+
+**The types** live outside the two subsystems that use them
+(`src/video_variant.*`), so the player and the downloader do not depend on
+each other: `VideoVariant` (height, codec, real size) and `videoVariantsOf()`.
+The pure part has its own selftest, `--selftest-variants` (runs in CI).
+
+**The plan** (`src/downloader/segment_plan.*`) has one option per
+**(height, codec)** and `planWithVariant(plan, height, codec)` picks the
+exact track. The default (no codec chosen) is the **smallest** variant of
+the highest resolution: for a download the size is what matters.
+
+**The audio is chosen with ONE rule** for the player and for the downloader
+(`preferredAudioFormat` in `video_variant.cpp`): the original track (or the
+preferred language), the mp4 (with a sidx, so it can be fetched in pieces)
+over the WebM (without one), and the smallest among those. Before there
+were two copies of that rule (one in `segment_plan.cpp` and one in
+`yt_innertube.cpp`): the size the menu showed was not always the one that
+got downloaded.
+
+### The i18n of the downloader
+
+Every text that the person reads goes through `nt::tr` with a KEY (never the
+Spanish text). That includes the **error messages of the downloader**: they
+are shown as they are in the row of the page of Descargas, so they are
+`error.dl*` keys (19 of them: "ffmpeg no encontrado", "no se pudo escribir
+el vídeo", "ya hay una descarga en curso"...). Before they were Spanish
+literals inside the downloader: in English the page said "ffmpeg fallo" in
+the middle of an English row.
+
+**The sizes and the resolutions use the SAME functions as the rest of the
+app**: `format::humanBytes` ("916,8 MB") and `format::resolutionLabel`
+("720p HD"). Before the downloader had its own copy of the size formatter
+and the player had its own copy of the resolution label: three copies of the
+same two functions. Now they are in `src/ui/format.*` and the selftest
+checks the exact text (so the size of the menu and the size of the page
+cannot diverge).
+
+**The numbers come out with a POINT** ("874.4 MB"), not a comma: the app does
+not set a `QLocale` and never did. It is the same in every language (and the
+same as the "1.2 M" of the views), so it is a convention of the app, not a
+miss.
+
+### The settings of the downloader (Ajustes → DESCARGAS)
+
+There is a **DESCARGAS** section in Ajustes with the two settings of the
+downloader:
+
+- **La carpeta de las descargas**: the folder where the files are written.
+  It is a PATH and not a code (it is a place of the file system). Empty =
+  the default one (the folder of downloads of the SYSTEM plus the subfolder
+  "NeverTube"). The row opens a menu with the current folder, "Cambiar"
+  (a `QFileDialog::getExistingDirectory`: the ONE place where a system
+  dialog is right, because choosing a place of the file system cannot be
+  invented) and "Restablecer" (back to the default).
+- **Conexiones simultáneas**: how many parts the app downloads at the same
+  time (1 to 16, **8 by default**). It is the only setting of the downloader
+  that the person NOTICES (the speed) and that had no menu. 8 is the
+  measured optimum (4 -> 15,23 MB/s, 8 -> 17-24, 12 -> 20,3 but not
+  reliable, 16 -> **3,69 MB/s**: the connections start to fight each
+  other). It is saved in `download_connections` and it is applied to the
+  pool of transports of the job (`DownloadJob::setConcurrency`).
+
+**The submenu of the download marks the RECOMMENDED codec** — the one that
+**this PC can reproduce**, from the hardware profile (`av1-hw` -> av1,
+`vp9-hw` -> vp9, `h264-hw` and `soft-all` -> h264) — and it says why:
+
+```
+☑ VP9 · 725,8 MB · Recomendado para tu PC
+  AV1 · 833,9 MB
+  H264 · 955,5 MB
+```
+
+The click on the resolution downloads the recommended one. When the
+resolution does not have it, the smallest one of that resolution is the
+marked: the recommendation never breaks the download.
+
+**There is NO setting of the codec** (there was one and it was removed):
+the submenu already lets the person choose the codec, so a setting that
+only decides WHICH one is marked was redundant.
+
+**The download is NOT capped by the PLAYER.** The cap of the resolution of
+the download used to be `m_player.maxHeight()`: with the player at 360p the
+menu offered "1080p HD" and the download brought the **360p** (the plan
+only had the options up to the cap, and the one that was picked was not
+there). The download is a FILE: the menu shows the resolutions the video
+really has and the plan is built **without a cap** (`maxHeight = 0`).
+
+**The folder is ONE function** (`downloads::folderOf`): the downloader writes
+there, the page of Descargas opens it and the setting of Ajustes shows it.
+
+### The button of "Reintentar" (the resume was lost, twice)
+
+**The retry DELETED the row of the repository** (`remove()`), and with it the
+index of the fragments that were already on the disk (`downloads.parts`).
+The download then started from zero: the bytes that had been downloaded were
+thrown away, and the fragments of the `.parts` folder were left behind
+(hundreds of MB of orphans).
+
+**And the row was erased a SECOND time**, by a line that looked harmless:
+`DownloadManager::start()` builds a FRESH `DownloadInfo` and upserts it, and
+the upsert is an `INSERT OR REPLACE`: the new row had no `parts`, so the
+index was gone even when the retry did not delete the row. Now `start()`
+**reads the row first and keeps it** (only the fields that this call owns
+are written).
+
+**And a third time**, by the first `saveProgress()` of the resumed job: the
+flags of the fragments are marked by `startNext()`, and the progress is
+saved before that happens, so the index was written EMPTY. Now
+`DownloadJob::doneSegments()` also returns the fragments that were already
+on the disk (`m_alreadyDone`): they count as done from the first moment.
+
+**The retry is now `DownloadManager::retry()`** (it does NOT delete the row)
+and the button calls it. The fragments that were half written are discarded
+by the job itself (it checks the size of each one).
+
+**And `remove()` now deletes the FOLDER of the fragments** (the `.parts`
+one): the bytes of a deleted download were staying on the disk.
+
+### The resume asked for NOTHING (the download stayed still)
+
+The loop that gives a fragment to each free transport gave **ONE** fragment
+per transport and went to the next transport when the fragment was already
+on the disk (`continue`). With the **first eight fragments already
+downloaded** (the resume), the eight free transports found their fragment
+already done, the loop asked for **NOTHING**, and the download stayed still
+**FOREVER**: nothing was in flight, so nothing called `startNext()` again.
+
+Now the transport takes the **next fragment that is missing** (the loop
+inside the transport goes on with the following ones), so a resumed download
+asks for the fragments that are not on the disk and keeps going.
+
+Measured after the fix: a download that was cut at 236 MB continued at
+**30-33 MB/s** (about 264 Mbps) from the byte it was at.
+
+### A fragment that fails is asked AGAIN (and the resolution is kept)
+
+A fragment that fails (a timeout, a connection that dies) **failed the whole
+download**. With a saturated IP some requests do not answer at all, and one
+of them was enough to abort hundreds of megabytes. Now the fragment is asked
+again (up to `DownloadJob::kFragmentRetries` = 3) and only after that the
+download really fails.
+
+**The resume keeps the RESOLUTION of the row** ("720p" -> 720): the person
+paused a 720p and it is not a 4K what they get when they continue (it was
+the highest one of the video, because the resume did not pass any height).
+
+### The button of "Abrir carpeta" (two bugs, one button)
+
+The button of the "Descargas" page did **nothing at all**, for TWO reasons
+that had to be fixed together:
+
+1. **The path came from the wrong place.** It took the `filePath` of the
+   FIRST ROW of the list, and that is the **partial** file of a download in
+   progress (a `.ts` per track) — which the new downloader does not use
+   anymore, so the column is **empty**. The fix: the button opens the
+   folder of the **downloader** (`downloads::folderOf`), the one where the
+   files are written.
+2. **`QDesktopServices::openUrl` returns FALSE** in the desktops that have
+   no handler registered for `file://` (measured: it returned false for a
+   folder AND for a file, in the same desktop where `xdg-open` opened
+   nautilus without trouble). The fix: when it fails, the file manager of
+   the session is called directly (`downloads::openCommandFor`): `gio open`
+   first (it is the freedesktop mechanism and it respects the preferences of
+   the session) and then the known file managers, one by one.
+
+The folder of the downloads is now ONE function
+(`downloads::folderOf`, in `src/downloader/download_folder.*`), used by the
+downloader AND by the button: the size that the menu shows and the folder
+that it opens cannot diverge. (There is **no setting** for the folder yet:
+the one of Ajustes does not exist, and the default one is used.)
+
+The pure part has its own selftest, `--selftest-download-folder` (runs in
+CI).
+
 ### The selftests
 
 - `--selftest-download`: the plan is a pure function of the master
@@ -1281,6 +1532,12 @@ network).
   it exists, it has a tooltip AND an accessible name (an icon-only button
   has no text: those two ARE its label), and the row it queues lands in
   the repository with the state "pending".
+- `--selftest-variants`: the variants of a video (the family of the codec
+  and one variant per (height, codec) with its real size), offline.
+- `--selftest-download-settings`: the codes of the settings of the
+  downloader, offline.
+- `--selftest-settings-page`: the REAL page of Ajustes (the new section of
+  the downloads is there).
 
 The two CLI entries `--download <id>` and `--play-local <file>` are how
 the downloader is driven without touching the UI.
@@ -1758,6 +2015,13 @@ DBs, `app_database.cpp`).
 - UI, logic and playback separated. `PlayerController` (state/queue) vs
   `PlayerWidget` (render) vs pages (views).
 - SQLite repos in `src/db/`; reusable infrastructure in `src/ui/`.
+- **The bottom bar: SETTINGS is ALWAYS the last one.** The order is Inicio,
+  Buscar, Biblioteca, Descargas, Ajustes. The button index and the page
+  index are NOT the same: the nav index of the pages is `m_currentTab == 4
+  ? 2 : m_currentTab == 8 ? 3 : m_currentTab == 5 ? 4 : m_currentTab`
+  (library 2, downloads 3, settings 4). When a button is added or moved,
+  those THREE places move with it: the `addBtn` calls, `goSettings()` /
+  `openDownloads()` and that mapping.
 - **ONE single dialog to confirm and ONE only to ask for a text**, and they are
   `nt::confirm` / `nt::inputText` (`src/ui/confirm_dialog.*`). Both mount
   an overlay **child of the WINDOW** (`page->window()`), with a veil, modal, without

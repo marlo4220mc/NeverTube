@@ -437,7 +437,8 @@ bool VideoCacheRepo::upsert(const VideoInfo &v)
     q.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO videos "
         "(id, title, channel, channel_id, duration, views, published, "
-        " thumb_url, description, is_live) VALUES (?,?,?,?,?,?,?,?,?,?)"));
+        " thumb_url, description, is_live, is_short) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)"));
     q.addBindValue(v.id);
     q.addBindValue(v.title);
     q.addBindValue(v.channel);
@@ -448,6 +449,7 @@ bool VideoCacheRepo::upsert(const VideoInfo &v)
     q.addBindValue(v.thumbnailUrl);
     q.addBindValue(v.description);
     q.addBindValue(v.isLive ? 1 : 0);
+    q.addBindValue(v.isShort ? 1 : 0);
     return q.exec();
 }
 
@@ -456,7 +458,7 @@ bool VideoCacheRepo::get(const QString &id, VideoInfo &out) const
     QSqlQuery q(m_db.db());
     if (!q.prepare(QStringLiteral(
             "SELECT id, title, channel, channel_id, duration, views, "
-            "published, thumb_url, description, is_live "
+            "published, thumb_url, description, is_live, is_short "
             "FROM videos WHERE id=? LIMIT 1")))
         return false;
     q.addBindValue(id);
@@ -477,8 +479,8 @@ QVector<VideoInfo> VideoCacheRepo::getMany(const QStringList &ids) const
         marks << QStringLiteral("?");
     QSqlQuery q(m_db.db());
     q.prepare(QStringLiteral("SELECT id, title, channel, channel_id, duration, "
-                             "views, published, thumb_url, description, is_live "
-                             "FROM videos WHERE id IN (%1)")
+                             "views, published, thumb_url, description, is_live, "
+                             "is_short FROM videos WHERE id IN (%1)")
                   .arg(marks.join(QStringLiteral(","))));
     for (const QString &id : ids)
         q.addBindValue(id);
@@ -511,6 +513,7 @@ VideoInfo VideoCacheRepo::fromRow(const QSqlQuery &q) const
     v.thumbnailUrl = q.value(7).toString();
     v.description = q.value(8).toString();
     v.isLive = q.value(9).toBool();
+    v.isShort = q.value(10).toBool();
     return v;
 }
 

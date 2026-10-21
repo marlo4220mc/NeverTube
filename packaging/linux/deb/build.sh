@@ -46,7 +46,10 @@ for t in --selftest-db --selftest-discover --selftest-ssl \
          --selftest-grid --selftest-theme --selftest-glyphs \
          --selftest-i18n --selftest-dates --selftest-suggest-parse \
          --selftest-suggest-panel --selftest-suggest-gestures \
-         --selftest-av1hls; do
+         --selftest-av1hls --selftest-variants --selftest-reels \
+         --selftest-download --selftest-download-button \
+         --selftest-download-folder --selftest-download-settings \
+         --selftest-settings-page; do
   echo "SELFTEST $t"
   ./build-deb/nevertube_qt2 "$t"
 done

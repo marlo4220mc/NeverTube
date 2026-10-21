@@ -49,6 +49,28 @@ QString compactCount(qint64 count)
     return QString::number(count);
 }
 
+QString humanBytes(qint64 bytes)
+{
+    if (bytes <= 0)
+        return QString();
+    if (bytes < 1024 * 1024)
+        return QString::number(bytes / 1024) + QStringLiteral(" KB");
+    if (bytes < 1024LL * 1024 * 1024)
+        return QString::number(double(bytes) / (1024 * 1024), 'f', 1)
+               + QStringLiteral(" MB");
+    return QString::number(double(bytes) / (1024.0 * 1024.0 * 1024.0), 'f', 2)
+           + QStringLiteral(" GB");
+}
+
+QString resolutionLabel(int height)
+{
+    if (height >= 2160)
+        return QStringLiteral("%1p 4K").arg(height);
+    if (height >= 720)
+        return QStringLiteral("%1p HD").arg(height);
+    return QStringLiteral("%1p").arg(height);
+}
+
 QString viewsLabel(qint64 count)
 {
     const QString c = compactCount(count);

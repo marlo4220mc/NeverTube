@@ -8,6 +8,7 @@
 
 #include "hls_server.h"
 #include "models.h"
+#include "video_variant.h"
 #include "yt_innertube.h"
 
 // "A continuación" generation mode (selected via NEVERTUBE_NEXT_MODE:
@@ -181,6 +182,12 @@ signals:
     // one. Empty = indeterminate (the menu falls back to the cap of the loaded
     // stream).
     void streamHeightsReady(const QString &videoId, const QVector<int> &heights);
+    // The VARIANTS of the video (height, codec and real size): what the
+    // menu of the download offers. The Player knows them because the player
+    // response carries the adaptiveFormats, so the menu does not have to
+    // ask YouTube for anything.
+    void streamVariantsReady(const QString &videoId,
+                             const QVector<VideoVariant> &variants);
     void error(const QString &message);
     void resolveError(const QString &message);
     void relatedReady(const QString &videoId, const QVector<VideoInfo> &videos);

@@ -1,5 +1,9 @@
 #include "mainwindow.h"
 
+#include "downloader/download_folder.h"
+#include "downloader/download_settings.h"
+#include "reels_filter.h"
+
 #include <QAbstractButton>
 #include <QApplication>
 #include <QButtonGroup>
@@ -575,21 +579,31 @@ MainWindow::MainWindow(QWidget *parent)
     // for the master, plans the download and keeps the state.
     m_downloadsPage = new DownloadsPage(&m_downloads, this);
     m_downloadManager = new dl::DownloadManager(m_yt, &m_downloads, this, this);
+    // The folder of the downloads: the one of Ajustes, or the default one
+    // (the folder of downloads of the system plus the subfolder "NeverTube").
+    applyDownloadFolder();
+    // The page opens the folder where the files are written: the one of the
+    // downloader (the default one, or the one set in Ajustes).
+    m_downloadsPage->setFolder(m_downloadManager->directory());
     connect(m_downloadManager, &dl::DownloadManager::changed, this, [this]() {
         if (m_downloadsPage)
             m_downloadsPage->reload();
     });
     connect(m_watch, &WatchPage::downloadRequested, this,
             [this](const QString &videoId, const QString &title,
-                   const QString &channel, int height, bool audioOnly) {
+                   const QString &channel, int height, const QString &codec,
+                   bool audioOnly) {
         // The duration: with it the size of the download is known before it
         // starts.
         int duration = 0;
         VideoInfo cached;
         if (m_videoCache.get(videoId, cached))
             duration = cached.durationSeconds;
-        m_downloadManager->start(videoId, title, channel, m_player.maxHeight(),
-                                 duration, height, audioOnly);
+        // The cap of the resolution of the DOWNLOAD is NOT the cap of the
+        // player: the download is a file and the menu of the download
+        // offers the resolutions the video really has.
+        m_downloadManager->start(videoId, title, channel, 0, duration, height,
+                                 codec, audioOnly);
         // The tab of the downloads is opened: the progress is there, and the
         // person asked for a download.
         openDownloads();
@@ -614,23 +628,53 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_downloadsPage, &DownloadsPage::openFolderRequested, this,
             [](const QString &path) {
-        if (!path.isEmpty())
-            QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+        if (path.isEmpty())
+            return;
+        // First the desktop: it is the way that respects the preferences of
+        // the session.
+        if (QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
+            return;
+        // But it returns FALSE in the desktops that have no handler for
+        // "file://" (measured: it returned false for a folder AND for a
+        // file, and the button did nothing at all). Then the file manager
+        // of the session is called directly.
+        const QStringList cmd = downloads::openCommandFor(path);
+        if (cmd.isEmpty()) {
+            NT_DEBUG("E2E downloads openFolder path=%s sin comando\n",
+                     path.toUtf8().constData());
+            return;
+        }
+        const bool started = QProcess::startDetached(cmd.first(), cmd.mid(1));
+        NT_DEBUG("E2E downloads openFolder path=%s cmd=%s ok=%d\n",
+                 path.toUtf8().constData(), cmd.join(' ').toUtf8().constData(),
+                 started ? 1 : 0);
     });
+    connect(m_downloadsPage, &DownloadsPage::pauseRequested, this,
+            [this](const QString &videoId) {
+                m_downloadManager->pause(videoId);
+            });
+    connect(m_downloadsPage, &DownloadsPage::resumeRequested, this,
+            [this](const QString &videoId) {
+                m_downloadManager->resume(videoId);
+            });
     connect(m_downloadsPage, &DownloadsPage::removeRequested, this,
             [this](const QString &videoId) {
         m_downloadManager->remove(videoId);
     });
     connect(m_downloadsPage, &DownloadsPage::retryRequested, this,
             [this](const QString &videoId) {
-        // The retry starts from scratch: the partials of a failed download
-        // may be half written.
-        m_downloadManager->remove(videoId);
-        DownloadInfo info;
-        if (m_downloads.get(videoId, info))
-            m_downloadManager->start(videoId, info.title, info.channel,
-                                     m_player.maxHeight());
+        // The retry does NOT delete the row: the index of the fragments that
+        // are already on the disk lives in it, and deleting it made the
+        // download start from zero (the bytes that were already downloaded
+        // were thrown away).
+        m_downloadManager->retry(videoId);
     });
+    // The folder of the downloads changed: the downloader and the page of
+    // Descargas follow it.
+    connect(m_settingsPage, &SettingsPage::downloadFolderChanged, this,
+            [this](const QString &) { applyDownloadFolder(); });
+    // The default codec of the downloads changed: the menu of the download
+    // reads it when it opens, so there is nothing to do here.
     connect(m_settingsPage, &SettingsPage::qualityChanged,
             this, [this](const QString &val) {
                 if (val == QStringLiteral("auto")) {
@@ -1313,10 +1357,10 @@ void MainWindow::setupNav()
         nt::bindText(b1, "nav.search");
         QToolButton *b2 = addBtn(QStringLiteral("library"), 2);
         nt::bindText(b2, "nav.library");
-        QToolButton *b3 = addBtn(QStringLiteral("settings"), 3);
-        nt::bindText(b3, "nav.settings");
-        QToolButton *b4 = addBtn(QStringLiteral("downloads"), 4);
-        nt::bindText(b4, "nav.downloads");
+        QToolButton *b3 = addBtn(QStringLiteral("downloads"), 3);
+        nt::bindText(b3, "nav.downloads");
+        QToolButton *b4 = addBtn(QStringLiteral("settings"), 4);
+        nt::bindText(b4, "nav.settings");
     }
     lay->addStretch(1);
 
@@ -1344,10 +1388,10 @@ void MainWindow::onNavButton(int index)
         m_currentTab = 4;
         break;
     case 3:
-        m_currentTab = 5;
+        m_currentTab = 8;  // the downloads page
         break;
     case 4:
-        m_currentTab = 8;  // the downloads page is the last one
+        m_currentTab = 5;  // settings is the LAST button of the bar
         break;
     default:
         return;
@@ -1749,12 +1793,26 @@ void MainWindow::goLibrary()
     m_library->reload();
 }
 
+// Pauses a download (the button of the page of Descargas).
+void MainWindow::pauseDownload(const QString &videoId)
+{
+    if (m_downloadManager)
+        m_downloadManager->pause(videoId);
+}
+
+// Continues a paused download (the button of the page of Descargas).
+void MainWindow::resumeDownload(const QString &videoId)
+{
+    if (m_downloadManager)
+        m_downloadManager->resume(videoId);
+}
+
 // Queues a download by id.
 void MainWindow::queueDownload(const QString &videoId)
 {
     if (!m_downloadManager)
         return;
-    m_downloadManager->start(videoId, QString(), QString(), m_player.maxHeight());
+    m_downloadManager->start(videoId, QString(), QString(), 0);
 }
 
 // Queues the download of a video: it is what the button of the Player does.
@@ -1767,8 +1825,8 @@ void MainWindow::downloadVideo(const QString &videoId, int height,
 {
     if (!m_downloadManager)
         return;
-    m_downloadManager->start(videoId, QString(), QString(), m_player.maxHeight(),
-                             0, height, audioOnly);
+    m_downloadManager->start(videoId, QString(), QString(), 0, 0, height,
+                             QString(), audioOnly);
     // The tab of the downloads is opened: the progress is there, and the
     // person asked for a download.
     openDownloads();
@@ -1801,8 +1859,8 @@ void MainWindow::openDownloads()
     m_pages->setCurrentIndex(m_currentTab);
     if (m_downloadsPage)
         m_downloadsPage->reload();
-    if (m_navButtons.size() > 4)
-        m_navButtons[4]->setChecked(true);
+    if (m_navButtons.size() > 3)
+        m_navButtons[3]->setChecked(true);
 }
 
 void MainWindow::openLibrary()
@@ -1848,10 +1906,26 @@ void MainWindow::showVideoRowMenu(const VideoInfo &video, const QPoint &globalPo
     menu.exec(globalPos);
 }
 
+// The folder of the downloads: the one of Ajustes, or the default one. The
+// downloader writes there and the page of Descargas opens it.
+void MainWindow::applyDownloadFolder()
+{
+    if (!m_downloadManager)
+        return;
+    const QString folder = m_settings.getString(
+        QString::fromLatin1(downloadsettings::kFolderKey), QString());
+    m_downloadManager->setDirectory(downloads::folderOf(folder));
+    if (m_downloadsPage)
+        m_downloadsPage->setFolder(m_downloadManager->directory());
+    NT_DEBUG("E2E downloads folder=%s\n",
+             m_downloadManager->directory().toUtf8().constData());
+}
+
 void MainWindow::goSettings()
 {
-    if (m_navButtons.value(3))
-        m_navButtons[3]->setChecked(true);
+    // Settings is the LAST button of the bar.
+    if (m_navButtons.value(4))
+        m_navButtons[4]->setChecked(true);
 }
 
 void MainWindow::resetAppData()
@@ -1904,8 +1978,10 @@ void MainWindow::showPreviousTab()
     // Channel (2) and player (3) have no nav button: mark none.
     if (m_currentTab == 2 || m_currentTab == 3)
         return;
-    const int nav = m_currentTab == 4 ? 2 : m_currentTab == 5 ? 3
-                   : m_currentTab == 8 ? 4 : m_currentTab;
+    // The pages of the bar: library (4), downloads (8) and settings (5).
+    // The SETTINGS button is the last one (index 4).
+    const int nav = m_currentTab == 4 ? 2 : m_currentTab == 8 ? 3
+                   : m_currentTab == 5 ? 4 : m_currentTab;
     if (nav < m_navButtons.size())
         m_navButtons[nav]->setChecked(true);
 }
@@ -2175,10 +2251,15 @@ void MainWindow::openWatchAt(const QVector<VideoInfo> &videos, int startIndex,
                 if (cv.viewCount > 0 || !cv.publishedAt.isEmpty())
                     anyMeta = true;
             }
-            if (!fromCache.isEmpty() && anyMeta && anyChannel) {
+            // The Shorts (the vertical ones) are left out even of a radio
+            // that was saved before: they are not what "A continuación" is
+            // for.
+            const QVector<VideoInfo> clean =
+                reels::withoutShorts(fromCache);
+            if (!clean.isEmpty() && anyMeta && anyChannel) {
                 NT_DEBUG("E2E nextUp radio reuse id=%s n=%d\n",
-                         id.toUtf8().constData(), (int)fromCache.size());
-                m_player.appendVideos(fromCache);
+                         id.toUtf8().constData(), (int)clean.size());
+                m_player.appendVideos(clean);
                 reused = true;
             } else {
                 NT_DEBUG("E2E nextUp radio stale id=%s n=%d -> refresh\n",

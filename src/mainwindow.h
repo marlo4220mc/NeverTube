@@ -62,6 +62,14 @@ public:
     QAbstractButton *downloadButton();
     // The repository of the downloads (the integration test reads it).
     DownloadRepo *downloadsRepo() { return &m_downloads; }
+    // The settings (the folder of the downloads, the codec, ...).
+    SettingsRepo *settingsRepo() { return &m_settings; }
+    // The downloader (the queue, the folder and the connections).
+    dl::DownloadManager *downloadManager() { return m_downloadManager; }
+    // Pauses and continues a download (what the buttons of the page of
+    // Descargas do).
+    void pauseDownload(const QString &videoId);
+    void resumeDownload(const QString &videoId);
     // Queues a download by id (the same path the button of the Player uses).
     void queueDownload(const QString &videoId);
     // Queues the download of a video (the same path as the button of the
@@ -142,6 +150,10 @@ private:
     // profile to Yt + buffer wait (and the 1080p cap in soft-all) and, if persist,
     // stores it in settings.
     void applyCodecProfile(const QString &profile, bool persist);
+    // The folder of the downloads (the one of Ajustes, or the default one).
+    void applyDownloadFolder();
+    // The number of connections of the downloads (the setting of Ajustes).
+    void applyDownloadConnections();
     // Launches the offline HwProbe scan; the blocking dialog only appears if
     // it is slow (basic PC) or if the user tries to play while it scans.
     void startHwProbe();

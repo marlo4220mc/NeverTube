@@ -19,6 +19,15 @@ struct VideoInfo
     // (videoDetails.isLive). Persisted in the cache (videos.is_live) and the
     // thumbnails show "En directo" instead of the duration.
     bool isLive = false;
+    // The REAL size of the thumbnail (the largest one): it tells whether the
+    // video is VERTICAL, and a vertical video is a Short (a reel). 0 = the
+    // renderer did not bring the size.
+    int thumbWidth = 0;
+    int thumbHeight = 0;
+    // It IS a Short (a reel): a vertical video. It is persisted (videos.
+    // is_short) so that the lists that come from the database ("Continuar
+    // viendo", the history) can leave them out too.
+    bool isShort = false;
 };
 
 struct ChannelInfo

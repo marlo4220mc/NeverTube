@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QHash>
 #include <QVector>
 
 #include "segment_plan.h"
@@ -60,11 +61,18 @@ public:
     // The indexes of the fragments already downloaded (video and audio).
     QVector<int> doneSegments() const;
 
+    // How many times a fragment is asked again when it fails (a timeout or
+    // a connection that dies). With a saturated IP some requests do not
+    // answer at all, and the whole download used to fail for ONE of them.
+    static constexpr int kFragmentRetries = 3;
+
     // Where the file is written.
     QString outputPath() const { return m_outputPath; }
 
     // The folder where the fragments and the final file live.
     void setDirectory(const QString &dir) { m_dir = dir; }
+    // The number of connections of the pool (the setting of Ajustes).
+    void setConcurrency(int n) { m_concurrency = n; }
     QString directory() const { return m_dir; }
 
     // The state, in the vocabulary of the repository (pending, downloading,
@@ -114,6 +122,14 @@ private:
     QVector<qint64> m_videoSizes;
     QVector<qint64> m_audioSizes;
     QVector<int> m_alreadyDone;
+    // The size of the pool of transports (the connections).
+    int m_concurrency = 0;
+    // How many times each fragment has been asked (the ones that failed are
+    // asked again, up to kFragmentRetries).
+    QHash<int, int> m_fragmentTries;
+    // The mark of a fragment (the video ones are 0, 1, 2... and the audio
+    // ones are -(2), -(3)...).
+    static int markOf(const QString &track, int index);
     QVector<Range> m_videoRanges;
     QVector<Range> m_audioRanges;
     int m_nextVideo = 0;

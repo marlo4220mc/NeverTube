@@ -1,5 +1,7 @@
 #include "download_manager.h"
 
+#include "download_folder.h"
+
 #include "download_dialog.h"
 #include "../debug.h"
 
@@ -62,14 +64,10 @@ QString DownloadManager::defaultDirectory()
     // The folder of downloads of the system, which comes already translated
     // ("Descargas", "Downloads"). The app keeps its own subfolder so the
     // files are not mixed with the ones of the user.
-    QString base = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
-    if (base.isEmpty())
-        base = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    if (base.isEmpty())
-        base = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
-    if (base.isEmpty())
-        base = QDir::tempPath();
-    return base + QLatin1String("/NeverTube");
+    //
+    // It is ONE function (downloads::folderOf), so the button of "Abrir
+    // carpeta" opens exactly the folder where the files are written.
+    return downloads::folderOf(QString());
 }
 
 bool DownloadManager::hasFfmpeg()
@@ -89,6 +87,20 @@ bool DownloadManager::state(const QString &videoId, DownloadInfo &out) const
 
 bool DownloadManager::remove(const QString &videoId)
 {
+    // The download IN PROGRESS is CANCELLED: the X of a row has to stop
+    // the job, not only delete the row. Without this the job kept
+    // downloading, and when it finished it wrote the row again: the
+    // download came back to the list and the downloader stayed busy.
+    if (m_job && m_currentId == videoId) {
+        // The job is stopped and its callbacks are IGNORED: they arrive
+        // later (the event loop) and they wrote the row again, so the
+        // download came back to the list.
+        m_cancelled = videoId;
+        m_job->stop();
+        m_job->deleteLater();
+        m_job = nullptr;
+        m_currentId.clear();
+    }
     DownloadInfo info;
     if (m_repo)
         m_repo->get(videoId, info);
@@ -103,19 +115,97 @@ bool DownloadManager::remove(const QString &videoId)
         if (!p.isEmpty() && QFileInfo::exists(p))
             QFile::remove(p);
     }
+    // The FOLDER of the fragments: it is where the bytes of the download
+    // live, and it is the one that was left behind (hundreds of MB) when
+    // the download was deleted.
+    {
+        const QString partsDir =
+            m_dir + QLatin1Char('/') + videoId + QStringLiteral(".parts");
+        if (QFileInfo::exists(partsDir))
+            QDir(partsDir).removeRecursively();
+    }
     const bool ok = m_repo ? m_repo->remove(videoId) : false;
     emit changed();
     return ok;
 }
 
+bool DownloadManager::retry(const QString &videoId)
+{
+    DownloadInfo info;
+    if (!m_repo || !m_repo->get(videoId, info)) {
+        return false;
+    }
+    // The row stays (with its index of fragments): the download resumes.
+    //
+    // The RESOLUTION of the row is kept ("720p" -> 720): the person paused
+    // a 720p and it is not a 4K what they get when they continue.
+    int height = 0;
+    if (info.quality.endsWith(QLatin1Char('p'))) {
+        bool ok = false;
+        const int h = info.quality.left(info.quality.size() - 1).toInt(&ok);
+        if (ok && h > 0)
+            height = h;
+    }
+    start(videoId, info.title, info.channel, 0, 0, height, m_forcedCodec,
+          m_forcedAudioOnly);
+    return true;
+}
+
+void DownloadManager::pause(const QString &videoId)
+{
+    // The job is stopped when it is the one that is running. A download that
+    // is paused from a previous session (there is no job) only needs the
+    // row to change its state.
+    const bool isTheJob = m_job && m_currentId == videoId;
+    // The data of the job is read BEFORE releasing it: the job is deleted
+    // right after (it is not a parent that survives), so reading it after
+    // is a use-after-free (it crashed the app).
+    QVector<int> parts;
+    qint64 bytesDone = 0;
+    if (isTheJob) {
+        parts = m_job->doneSegments();
+        bytesDone = m_job->bytesDone();
+        m_job->stop();
+        // The job is RELEASED: the downloader is free again. It used to stay
+        // alive (stopped), and then the start() of the resume found a job in
+        // place and refused it ("a download is already running"): the
+        // download did not continue.
+        m_job->deleteLater();
+        m_job = nullptr;
+        m_currentId.clear();
+    }
+    // The row goes to "paused" with the fragments that are already on the
+    // disk: continuing resumes from there.
+    if (m_repo) {
+        DownloadInfo info;
+        if (m_repo->get(videoId, info)) {
+            info.status = QStringLiteral("paused");
+            if (isTheJob) {
+                info.parts = parts;
+                info.bytesDone = bytesDone;
+            }
+            info.updatedAt = QDateTime::currentMSecsSinceEpoch();
+            m_repo->upsert(info);
+        }
+    }
+    emit changed();
+}
+
+void DownloadManager::resume(const QString &videoId)
+{
+    // Continuing IS the retry: the row is kept (with its fragments) and the
+    // download starts again from where it was.
+    retry(videoId);
+}
+
 void DownloadManager::start(const QString &videoId, const QString &title,
                             const QString &channel, int maxHeight,
                             int durationSeconds, int forcedHeight,
-                            bool forcedAudioOnly)
+                            const QString &forcedCodec, bool forcedAudioOnly)
 {
     if (m_job) {
         // One download at a time (decision D15).
-        emit failed(videoId, QStringLiteral("ya hay una descarga en curso"));
+        emit failed(videoId, nt::tr("error.dlBusy"));
         return;
     }
     DownloadInfo existing;
@@ -137,16 +227,22 @@ void DownloadManager::start(const QString &videoId, const QString &title,
     // When the height (or the audio only) comes from the command line
     // there is nobody to ask: the dialog is skipped.
     m_forcedHeight = forcedHeight;
+    m_forcedCodec = forcedCodec;
     m_forcedAudioOnly = forcedAudioOnly;
 
     if (m_repo) {
+        // The row that was already there is KEPT (with its index of
+        // fragments): the upsert is a REPLACE, so a fresh DownloadInfo would
+        // erase the fragments that are already on the disk and the resume
+        // would be lost.
         DownloadInfo info;
+        if (!m_repo->get(videoId, info))
+            info.createdAt = QDateTime::currentMSecsSinceEpoch();
         info.videoId = videoId;
         info.title = title;
         info.channel = channel;
         info.status = QStringLiteral("pending");
-        info.createdAt = QDateTime::currentMSecsSinceEpoch();
-        info.updatedAt = info.createdAt;
+        info.updatedAt = QDateTime::currentMSecsSinceEpoch();
         m_repo->upsert(info);
     }
     emit changed();
@@ -197,6 +293,7 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
     // without asking YouTube for anything.
     DownloadChoice choice;
     choice.height = m_forcedHeight;
+    choice.codec = m_forcedCodec;
     choice.audioOnly = m_forcedAudioOnly;
 
     // Now the plan, with the resolution that was chosen.
@@ -210,7 +307,9 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
         return;
     }
 
-    if (choice.height > 0)
+    if (choice.height > 0 && !choice.codec.isEmpty())
+        plan = planWithVariant(plan, choice.height, choice.codec);
+    else if (choice.height > 0)
         plan = planWithHeight(plan, choice.height);
     plan.kind = choice.audioOnly ? dl::DownloadKind::Audio
                                  : dl::DownloadKind::Video;
@@ -239,6 +338,8 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
 
     m_job = new DownloadJob(this);
     m_job->setDirectory(m_dir);
+    // The number of connections of the setting of Ajustes.
+    m_job->setConcurrency(m_concurrency);
     m_lastUiUpdateMs = 0;
     connect(m_job, &DownloadJob::progressChanged, this,
             [this, videoId](qint64 done, qint64 total) {
@@ -316,6 +417,18 @@ void DownloadManager::saveProgress()
 void DownloadManager::onJobFinished(const QString &path)
 {
     const QString id = m_currentId;
+    if (!m_cancelled.isEmpty()) {
+        // The download was cancelled with the X: the row is gone and it
+        // does not come back.
+        m_cancelled.clear();
+        if (m_job) {
+            m_job->deleteLater();
+            m_job = nullptr;
+        }
+        m_currentId.clear();
+        emit changed();
+        return;
+    }
     if (m_job) {
         m_job->deleteLater();
         m_job = nullptr;
@@ -328,6 +441,18 @@ void DownloadManager::onJobFinished(const QString &path)
 void DownloadManager::onJobFailed(const QString &reason)
 {
     const QString id = m_currentId;
+    if (!m_cancelled.isEmpty()) {
+        // The download was cancelled with the X: nothing is written (the row
+        // is gone and the files with it).
+        m_cancelled.clear();
+        if (m_job) {
+            m_job->deleteLater();
+            m_job = nullptr;
+        }
+        m_currentId.clear();
+        emit changed();
+        return;
+    }
     if (m_job) {
         m_job->deleteLater();
         m_job = nullptr;

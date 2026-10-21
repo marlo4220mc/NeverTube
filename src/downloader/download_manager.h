@@ -41,12 +41,35 @@ public:
     // The master is asked for first: the dialog of the download needs the
     // variants it has (and their size), so the user picks the resolution
     // BEFORE anything is downloaded.
+    // `maxHeight` is the cap of the resolution of the DOWNLOAD (0 = no
+    // cap). It is NOT the cap of the player: the download is a file and the
+    // person asked for it.
     void start(const QString &videoId, const QString &title,
                const QString &channel, int maxHeight,
                int durationSeconds = 0, int forcedHeight = 0,
+               const QString &forcedCodec = QString(),
                bool forcedAudioOnly = false);
     // The resolutions the dialog offers (the ones of the player).
     void setAvailableHeights(const QVector<int> &heights) { m_availableHeights = heights; }
+
+    // Starts the download AGAIN after a failure.
+    //
+    // It does NOT delete the row of the repository: the index of the
+    // fragments that are already on the disk lives in it, and deleting it
+    // made the download start from zero (the bytes that were already
+    // downloaded were thrown away). The fragments that were half written
+    // are discarded by the job itself (it checks the size of each one).
+    bool retry(const QString &videoId);
+
+    // Pauses the download in progress: the fragments that are already on
+    // the disk are kept (the row keeps its index), so continuing is the
+    // same path as the retry.
+    //
+    // The state "paused" is the one the page of Descargas shows with the
+    // button of "Continuar".
+    void pause(const QString &videoId);
+    // Continues a paused download (the same as the retry: it resumes).
+    void resume(const QString &videoId);
 
 
     // The download in progress, if any.
@@ -55,6 +78,8 @@ public:
 
     // The folder where the files are written.
     void setDirectory(const QString &dir) { m_dir = dir; }
+    // The number of connections of the downloads (the setting of Ajustes).
+    void setConcurrency(int n) { m_concurrency = n; }
     QString directory() const { return m_dir; }
 
     // The default folder: the folder of downloads of the SYSTEM (which
@@ -116,10 +141,23 @@ private:
     QVector<int> m_availableHeights;
     QString m_title;
     QString m_channel;
-    int m_maxHeight = 1080;
+    // The cap of the resolution of the download (0 = no cap: the person
+    // asked for a file and the menu shows the real sizes).
+    int m_maxHeight = 0;
+    // The number of connections (0 = the default of the transport).
+    int m_concurrency = 0;
+    // The download that was CANCELLED with the X of its row: the callbacks
+    // of the job (finished/failed) arrive AFTER the removal (the event loop
+    // delivers them later) and they wrote the row again, so the download
+    // came back to the list. With this flag the callbacks know that the
+    // download was cancelled and they do NOT write anything.
+    QString m_cancelled;
     int m_durationSeconds = 0;  // of the video being downloaded
     // What the command line asked for (0 = ask the user).
     int m_forcedHeight = 0;
+    // The codec the user picked in the submenu of the dialog (empty = the
+    // default one, the smallest).
+    QString m_forcedCodec;
     bool m_forcedAudioOnly = false;
     bool m_masterConnected = false;
     // When the page was last updated (the progress is reported several

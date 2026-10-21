@@ -1,5 +1,7 @@
 #include "watch_page.h"
 
+#include "../../downloader/download_settings.h"
+
 #include <QApplication>
 #include <QAction>
 #include <QClipboard>
@@ -59,14 +61,6 @@ constexpr int kQualityCount =
 // Label for a resolution in the gear menu: appends "HD" to 720p and
 // 1080p (and above) and "4K" to 2160p, like YouTube. Single source: used by the
 // resolution menu.
-QString qualityLabel(int height)
-{
-    if (height >= 2160)
-        return QStringLiteral("%1p 4K").arg(height);
-    if (height >= 720)
-        return QStringLiteral("%1p HD").arg(height);
-    return QStringLiteral("%1p").arg(height);
-}
 // Maximum height of the video area (PlayerContainer). On the page with a
 // single scroll, an uncapped video would take width/aspect (768+ px in large
 // and maximized windows) and description + "A continuación" would be pushed out
@@ -744,7 +738,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_qualityItems.reserve(kQualityCount);
     for (int i = 0; i < kQualityCount; ++i) {
         auto *item =
-            new QPushButton(qualityLabel(kQualityHeights[i]), m_qualityMenu);
+            new QPushButton(resolutionLabel(kQualityHeights[i]), m_qualityMenu);
         item->setFixedWidth(90);
         // soft-all: CPU only, 1440p/2160p are not offered. Each item is
         // stored in m_qualityItems to hide it on the fly if mpv
@@ -1120,6 +1114,9 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // Real video heights (Innertube): if Auto asked for 360 of a 1080 video,
     // the menu must still offer 1080 even if the loaded stream is 360.
     connect(m_yt, &Yt::streamHeightsReady, this, &WatchPage::onStreamHeights);
+    // The variants (height, codec and real size) for the menu of the
+    // download: they come with the player response.
+    connect(m_yt, &Yt::streamVariantsReady, this, &WatchPage::onStreamVariants);
     connect(m_player, &PlayerController::durationChanged, this,
             &WatchPage::onDurationKnown);
     connect(m_yt, &Yt::detailReady, this, &WatchPage::onDetailReady);
@@ -1879,6 +1876,22 @@ void WatchPage::onQualityChanged(int index)
 // played. With Auto the stream is capped to the memorized quality (e.g.
 // 360) and the loaded file does not bring the higher tracks, so the stream
 // ceiling is useless for the menu; this data does reflect what the video offers.
+// The variants of the video (height, codec and real size): they are what the
+// menu of the download offers. They come with the player response, so the
+// menu does not have to ask YouTube for anything.
+void WatchPage::onStreamVariants(const QString &videoId,
+                                  const QVector<VideoVariant> &variants)
+{
+    if (variants.isEmpty() || !m_player->isActive())
+        return;
+    // Only for the video being played: discard the ones of another video.
+    if (!isCurrentVideo(videoId))
+        return;
+    m_variants = variants;
+    NT_DEBUG("E2E streamVariants video=%s n=%d\n",
+             videoId.toUtf8().constData(), int(variants.size()));
+}
+
 void WatchPage::onStreamHeights(const QString &videoId,
                                 const QVector<int> &heights)
 {
@@ -1919,17 +1932,55 @@ void WatchPage::showDownloadMenu()
     const VideoInfo v = m_player->current();
     if (v.id.isEmpty())
         return;
-    const QVector<int> heights = availableHeights();
-    if (heights.isEmpty())
+    // The variants of the video (height, codec and real size). When the
+    // player does not know them (it resolved before the player response
+    // arrived), the resolutions alone are offered: the menu falls back to
+    // the list of the quality menu.
+    QVector<VideoVariant> variants = m_variants;
+    if (variants.isEmpty()) {
+        const QVector<int> heights = availableHeights();
+        for (int h : heights) {
+            VideoVariant var;
+            var.height = h;
+            variants.append(var);
+        }
+    }
+    if (variants.isEmpty())
         return;
     // Where the menu appears: the corner of the button.
     const QPoint pos = m_downloadBtn->mapToGlobal(
         QPoint(0, m_downloadBtn->height()));
     dl::DownloadChoice choice;
-    if (!dl::askDownloadOptions(this, heights, pos, &choice))
+    // The codec that the PC can reproduce: it is the one that the setting
+    // of the hardware profile says, and it is the one that the submenu
+    // marks as "recommended".
+    const QString recommended = recommendedCodec();
+    if (!dl::askDownloadOptions(this, variants, pos, recommended, &choice))
         return;
     emit downloadRequested(v.id, v.title, v.channel, choice.height,
-                          choice.audioOnly);
+                          choice.codec, choice.audioOnly);
+}
+
+// The codec that this PC can reproduce, from the hardware profile.
+//
+// The profile is the one that the HwProbe decided (and that the reactive
+// ladder can lower at runtime): "av1-hw" -> the AV1, "vp9-hw" -> the VP9,
+// "h264-hw" and "soft-all" -> the H264 (the one that every machine plays).
+//
+// It is the DOWNLOADED file that is marked, not the one that is played: the
+// recommendation is about the machine, and the file is the same.
+QString WatchPage::recommendedCodec() const
+{
+    const QString profile = m_settings
+        ? m_settings->getString(QStringLiteral("codec_profile"), QString())
+        : QString();
+    if (profile == QLatin1String("av1-hw"))
+        return QStringLiteral("av1");
+    if (profile == QLatin1String("vp9-hw"))
+        return QStringLiteral("vp9");
+    // h264-hw, soft-all and an unknown profile: the H264 is the one that
+    // every machine reproduces.
+    return QStringLiteral("h264");
 }
 
 // The resolutions this video has, from the highest to the lowest: the same
