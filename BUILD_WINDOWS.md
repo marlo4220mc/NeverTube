@@ -84,6 +84,15 @@ DLLs for FFmpeg), **DXVA2 h264**, **Win7-clean** imports and without
 libwinpthread/libgcc/libunwind. The CI and this recipe use it directly. To
 rebuild it: `tools/build_ffmpeg_i686.sh`. Details: `third_party/ffmpeg-win32/README.md`.
 
+The same recipe also builds the **CLI** that the downloader needs
+(`ffmpeg.exe`, with the muxers enabled): it is part of the same package, and
+the installer carries it. The **x64** build gets its own from the same
+script (`tools/build_ffmpeg_i686.sh <dest> x86_64`) into
+`third_party/ffmpeg-win64/`: the x64 build plays with mpv and does not link
+libav, so those DLLs are the ones the CLI needs and not the ones the app
+uses. There is **no mp3 encoder** in either build (the LGPL one cannot
+carry libmp3lame), so the "solo el audio" download falls back to an M4A.
+
 ```sh
 cmake -B build -DCMAKE_PREFIX_PATH="%CD%\third_party\qt-win32" \
       -G "Visual Studio 17 2022" -A Win32
