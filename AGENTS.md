@@ -1513,6 +1513,53 @@ the same thing the app does with a gated session of the player.
 `DownloadJob::kFragmentRetries` = 3): with a saturated IP some requests do
 not answer at all, and one of them used to abort hundreds of megabytes.
 
+### What actually limits the speed of the download (measured, 2026-10-21)
+
+The speed of the download is **not** the codec and **not** the number of
+connections. It is the route that the URL comes from, and there are two:
+
+| route | what it is | speed | scales with the connections? |
+|---|---|---|---|
+| **adaptive** (`gir=yes`) | the one the app uses: the `adaptiveFormats` of the /player, by byte range | **43 MB/s** (x8) | **NO**: x32 gives 27 MB/s |
+| **master HLS** (`ratebypass=yes`) | the playlist of the master: its segments are small (0,18 MB) | **72 MB/s** (x48), **91 MB/s** (x96) | **YES**: it reaches the ceiling of the line (88 MB/s to cachefly) |
+
+**The master is the faster one** and it is the one that carries
+`ratebypass=yes` **signed** in its `sparams` (the adaptive has the pacing
+`initcwndbps` signed instead, in its `lsparams`). The master is NOT usable
+for the download as it is: **its audio does not mux** (it is AAC in ADTS
+without timestamps, and the ffmpeg 9 refuses it: "Can't write packet with
+unknown timestamp"). The video of the master would be fine (its segments are
+fMP4). A hybrid (the video of the master + the audio of the adaptive) is
+the way to get the 91 MB/s; it is NOT implemented.
+
+**The codec does NOT change the speed.** Measured with the app, the same
+video at 1080p:
+
+| | 1 s | 10 s | 22 s |
+|---|---|---|---|
+| VP9 (836 MB) | 48,2 MB/s | 37,9 | 19,7 |
+| AV1 (961 MB) | 48,4 MB/s | 37,9 | 19,0 |
+
+The curves are **identical**: the AV1 only *looks* faster because it is
+smaller (it spends less time in the part where the CDN has already squeezed
+the IP). The H264 (the biggest) is the one that ends the worst (7,3 MB/s).
+
+**The degradation (48 -> 20 MB/s in 30 s) is the CDN**, not the app: the
+same host that gives 45-90 MB/s at the beginning gives 20 after a few
+hundred MB, and it does not recover with pauses (measured: 30 s, 60 s and
+120 s of pause, the same 0,1-4 MB/s).
+
+**The pacing cannot be touched**: `initcwndbps` is signed (`lsparams`),
+and changing it answers **403** (measured). The same with `ratebypass=yes`
+added by hand.
+
+**The other clients do NOT give a URL** (and there is nothing to decipher):
+the ANDROID and the IOS return the `adaptiveFormats` with **no** `url`, no
+`signatureCipher` and no `n`: they force the SABR path. Only the
+"desktop" ones (the VISIONOS that the app uses, and the ANDROID_VR) return
+the direct URL. The ANDROID_VR returns one that the CDN does not serve
+(0 MB/s).
+
 ### A fragment that does not advance is discarded and asked again
 
 The CDN serves **some** of the requests at a crawl (a few KB/s). Those
