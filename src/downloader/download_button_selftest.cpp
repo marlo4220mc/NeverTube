@@ -363,6 +363,68 @@ bool downloadButtonSelfTest()
         }
     }
 
+    // --- the X of a row: it is a WASTE BASKET and it asks before deleting ---
+    {
+        DownloadsPage *page = window.findChild<DownloadsPage *>();
+        check(page != nullptr, "la pagina de descargas existe");
+        if (page) {
+            // The icon of the button is the waste basket (not an X).
+            QPushButton *trash = nullptr;
+            for (QPushButton *b : page->findChildren<QPushButton *>()) {
+                if (b->property("downloadAction").toString()
+                    == QLatin1String("remove"))
+                    trash = b;
+            }
+            check(trash != nullptr, "el boton de borrar la fila existe");
+            if (trash) {
+                const QIcon ic = trash->icon();
+                check(!ic.isNull(), "el boton de borrar tiene icono");
+                // The drawn waste basket (it is the icon of the app).
+                QPixmap px = ic.pixmap(16, 16);
+                check(!px.isNull() && px.width() > 0,
+                      "el icono del boton de borrar se dibuja");
+                if (!px.isNull())
+                    px.save(QStringLiteral("/tmp/opencode/icono_tacho.png"));
+            }
+        }
+    }
+
+    // --- the delete does NOT touch files outside the folder of the downloads ---
+    //
+    // The path of the file comes from the repository, and a row could name a
+    // file anywhere (a stale row, a hand-edited database). The delete only
+    // removes what is INSIDE the folder of the downloads.
+    {
+        DownloadRepo *r = window.downloadsRepo();
+        dl::DownloadManager *mgr = window.downloadManager();
+        check(r != nullptr && mgr != nullptr,
+              "el repositorio y el downloader existen");
+        if (r && mgr) {
+            const QString videoId = QStringLiteral("selftestDlOutside");
+            const QString outside =
+                QStringLiteral("/tmp/nevertube-fuera-de-la-carpeta.mkv");
+            // A file OUTSIDE the folder of the downloads.
+            {
+                QFile f(outside);
+                f.open(QIODevice::WriteOnly);
+                f.write("no se debe borrar");
+                f.close();
+            }
+            DownloadInfo info;
+            info.videoId = videoId;
+            info.title = QStringLiteral("t");
+            info.status = QStringLiteral("done");
+            info.finalPath = outside;
+            r->upsert(info);
+
+            mgr->remove(videoId);
+            check(QFile::exists(outside),
+                  "un archivo FUERA de la carpeta de descargas NO se borra");
+            QFile::remove(outside);
+            r->remove(videoId);
+        }
+    }
+
     std::fprintf(stderr, "DOWNLOAD-BUTTON SELFTEST %s\n", ok ? "OK" : "FAIL");
     return ok;
 }

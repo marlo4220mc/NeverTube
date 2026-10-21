@@ -1598,6 +1598,28 @@ alone.
 The size that is expected is the one of the range that is asked
 (`range.size()`), so the threshold is proportional to each fragment.
 
+### The delete of a download (a waste basket and a check box)
+
+The X of a row of the page of Descargas is a **waste basket** (`nt::Icon::Trash`,
+drawn with the painter like the other icons) and it **asks before deleting**:
+
+- **In course or paused**: it warns that it cancels the download and deletes
+  what was already downloaded. There is no check box: the partials always go
+  with it.
+- **Finished**: it asks with a **check box** ("also delete the file from the
+  disk"), UNCHECKED by default, so the action of a single click is the safe
+  one (the file stays). It is the same shape that ABDM uses.
+
+The check box is a new capacity of the confirmation overlay
+(`nt::confirm` takes a `checkText` and a `bool *checkState`): the state is
+only written when the dialog is ACCEPTED.
+
+**The app only deletes its own files**: `DownloadManager::remove` checks that
+the path is INSIDE the folder of the downloads (`isInsideDownloadFolder`). The
+path comes from the repository and a row could name a file anywhere (a stale
+row, a hand-edited database), so a file outside that folder is never touched
+(there is a selftest for it).
+
 ### The button of "Abrir carpeta" (two bugs, one button)
 
 The button of the "Descargas" page did **nothing at all**, for TWO reasons

@@ -29,6 +29,7 @@ enum class Icon {
     Download,
     Refresh,
     Clear,
+    Trash,
     User,
     ListAdd,
     QueueList,

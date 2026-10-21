@@ -54,6 +54,7 @@
 #include "ui/pages/channel_page.h"
 #include "ui/pages/library_page.h"
 #include "ui/pages/playlist_page.h"
+#include "ui/confirm_dialog.h"
 #include "ui/pages/settings_page.h"
 #include "ui/pages/downloads_page.h"
 #include "downloader/download_manager.h"
@@ -657,9 +658,45 @@ MainWindow::MainWindow(QWidget *parent)
             [this](const QString &videoId) {
                 m_downloadManager->resume(videoId);
             });
+    // A debug helper: it opens the dialog of the delete with a row of
+    // every state, so the texts can be seen without a download (it is what
+    // --selftest-download-dialog uses).
     connect(m_downloadsPage, &DownloadsPage::removeRequested, this,
             [this](const QString &videoId) {
-        m_downloadManager->remove(videoId);
+        // The delete asks BEFORE: what it deletes depends on the state of
+        // the download.
+        DownloadInfo info;
+        if (!m_downloads.get(videoId, info))
+            return;
+        const bool finished = info.status == QLatin1String("done");
+        const bool paused = info.status == QLatin1String("paused");
+        if (finished) {
+            // Finished: it asks with a CHECK BOX whether to delete the file
+            // too. The box is UNCHECKED by default, so the action of a single
+            // click is the safe one (the file stays). The file is only
+            // deleted if it is INSIDE the folder of the downloads (the
+            // manager checks it).
+            bool alsoFile = false;
+            nt::confirm(this, nt::tr("downloads.deleteTitle"),
+                        nt::tr("downloads.deleteDone"),
+                        nt::tr("downloads.deleteAccept"),
+                        [this, videoId, &alsoFile]() {
+                            if (alsoFile)
+                                m_downloadManager->remove(videoId);
+                            else
+                                m_downloadManager->removeFromList(videoId);
+                        },
+                        nt::tr("downloads.deleteAlsoFile"), &alsoFile);
+            return;
+        }
+        // In course or paused: it warns that it cancels the download and
+        // deletes what was already downloaded. There is no check box here:
+        // the partials always go with it.
+        nt::confirm(this, nt::tr("downloads.deleteTitle"),
+                    nt::tr(paused ? "downloads.deletePaused"
+                                  : "downloads.deleteRunning"),
+                    nt::tr("downloads.deleteAccept"),
+                    [this, videoId]() { m_downloadManager->remove(videoId); });
     });
     connect(m_downloadsPage, &DownloadsPage::retryRequested, this,
             [this](const QString &videoId) {

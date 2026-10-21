@@ -426,6 +426,30 @@ QIcon icon(Icon kind, const QColor &color, int size)
                    r.left() + r.width() * 0.25, r.bottom() - r.height() * 0.25);
         break;
     }
+    case Icon::Trash: {
+        // A waste basket: the lid, the handle and the body.
+        p.setPen(QPen(color, size * 0.10, Qt::SolidLine, Qt::RoundCap,
+                      Qt::RoundJoin));
+        p.setBrush(Qt::NoBrush);
+        // The lid.
+        p.drawLine(r.left() + r.width() * 0.16, r.top() + r.height() * 0.26,
+                   r.right() - r.width() * 0.16, r.top() + r.height() * 0.26);
+        // The handle.
+        p.drawLine(r.center().x() - r.width() * 0.14, r.top() + r.height() * 0.26,
+                   r.center().x() - r.width() * 0.14, r.top() + r.height() * 0.13);
+        p.drawLine(r.center().x() - r.width() * 0.14, r.top() + r.height() * 0.13,
+                   r.center().x() + r.width() * 0.14, r.top() + r.height() * 0.13);
+        p.drawLine(r.center().x() + r.width() * 0.14, r.top() + r.height() * 0.13,
+                   r.center().x() + r.width() * 0.14, r.top() + r.height() * 0.26);
+        // The body (a little narrower at the bottom).
+        p.drawLine(r.left() + r.width() * 0.24, r.top() + r.height() * 0.30,
+                   r.left() + r.width() * 0.32, r.bottom() - r.height() * 0.12);
+        p.drawLine(r.right() - r.width() * 0.24, r.top() + r.height() * 0.30,
+                   r.right() - r.width() * 0.32, r.bottom() - r.height() * 0.12);
+        p.drawLine(r.left() + r.width() * 0.32, r.bottom() - r.height() * 0.12,
+                   r.right() - r.width() * 0.32, r.bottom() - r.height() * 0.12);
+        break;
+    }
     case Icon::User:
         p.drawEllipse(QRectF(r.center().x() - r.width() * 0.13,
                              r.top() + r.height() * 0.12,

@@ -85,6 +85,21 @@ bool DownloadManager::state(const QString &videoId, DownloadInfo &out) const
     return m_repo && m_repo->get(videoId, out);
 }
 
+// True when the path is INSIDE the folder of the downloads (the one of the
+// downloader). The app only deletes its own files: a row could name a file
+// anywhere (a stale row, a hand-edited database) and the delete must not
+// reach outside its own folder.
+bool DownloadManager::isInsideDownloadFolder(const QString &path) const
+{
+    if (path.isEmpty() || m_dir.isEmpty())
+        return false;
+    const QString root = QDir(m_dir).absolutePath();
+    const QString target = QDir(QFileInfo(path).absolutePath()).absolutePath();
+    // The same folder, or a subfolder of it.
+    return target == root
+           || target.startsWith(root + QLatin1Char('/'));
+}
+
 bool DownloadManager::remove(const QString &videoId)
 {
     // The download IN PROGRESS is CANCELLED: the X of a row has to stop
@@ -106,14 +121,22 @@ bool DownloadManager::remove(const QString &videoId)
         m_repo->get(videoId, info);
     // The files of the download go with it: the mp4, the partials and the
     // temporary ones.
+    //
+    // ONLY the ones INSIDE the folder of the downloads: the path comes from
+    // the repository and a row could name a file anywhere (a stale row, a
+    // hand-edited database). The app never deletes a file that is not its
+    // own.
     const QStringList paths = {info.finalPath, info.filePath,
                                m_dir + QLatin1Char('/') + videoId
                                    + QStringLiteral(".video.ts"),
                                m_dir + QLatin1Char('/') + videoId
                                    + QStringLiteral(".audio.ts")};
     for (const QString &p : paths) {
-        if (!p.isEmpty() && QFileInfo::exists(p))
-            QFile::remove(p);
+        if (p.isEmpty() || !QFileInfo::exists(p))
+            continue;
+        if (!isInsideDownloadFolder(p))
+            continue;
+        QFile::remove(p);
     }
     // The FOLDER of the fragments: it is where the bytes of the download
     // live, and it is the one that was left behind (hundreds of MB) when
@@ -149,6 +172,22 @@ bool DownloadManager::retry(const QString &videoId)
     start(videoId, info.title, info.channel, 0, 0, height, m_forcedCodec,
           m_forcedAudioOnly);
     return true;
+}
+
+bool DownloadManager::removeFromList(const QString &videoId)
+{
+    // The job is stopped (a download in course cannot go on without its
+    // row) but the FILE is left on the disk.
+    if (m_job && m_currentId == videoId) {
+        m_cancelled = videoId;
+        m_job->stop();
+        m_job->deleteLater();
+        m_job = nullptr;
+        m_currentId.clear();
+    }
+    const bool ok = m_repo ? m_repo->remove(videoId) : false;
+    emit changed();
+    return ok;
 }
 
 void DownloadManager::pause(const QString &videoId)

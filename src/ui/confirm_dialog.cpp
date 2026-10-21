@@ -1,4 +1,5 @@
 #include <QEventLoop>
+#include <QCheckBox>
 #include <QFrame>
 #include <QHideEvent>
 #include <QHBoxLayout>
@@ -21,20 +22,26 @@ namespace {
 class ConfirmOverlay : public QWidget
 {
 public:
-    static void ask(QWidget *parent, const QString &title, const QString &text,
-                    const QString &acceptText, std::function<void()> onAccept)
-    {
-        ConfirmOverlay ov(parent, title, text, acceptText, std::move(onAccept));
-        ov.run();
-    }
+        static void ask(QWidget *parent, const QString &title, const QString &text,
+                        const QString &acceptText, std::function<void()> onAccept,
+                        const QString &checkText, bool *checkState)
+        {
+            ConfirmOverlay ov(parent, title, text, acceptText, std::move(onAccept),
+                              checkText, checkState);
+            ov.run();
+        }
 
 private:
     ConfirmOverlay(QWidget *page, const QString &title, const QString &text,
-                   const QString &acceptText, std::function<void()> onAccept)
+                   const QString &acceptText, std::function<void()> onAccept,
+                   const QString &checkText = QString(),
+                   bool *checkState = nullptr)
         : QWidget(page->window())
         , m_page(page)
         , m_onAccept(std::move(onAccept))
-    {
+        , m_checkText(checkText)
+        , m_checkState(checkState)
+      {
         auto *lay = new QVBoxLayout(this);
         lay->setContentsMargins(0, 0, 0, 0);
         lay->addStretch(1);
@@ -65,10 +72,26 @@ private:
         body->setWordWrap(true);
         v->addWidget(body);
 
+        // The check box (when there is one): the text of the dialog can
+        // say what happens with it checked and with it unchecked.
+        if (!m_checkText.isEmpty()) {
+            auto *check = new QCheckBox(m_checkText, frame);
+            check->setObjectName(QStringLiteral("popupCheck"));
+            check->setCursor(Qt::PointingHandCursor);
+            if (m_checkState)
+                check->setChecked(*m_checkState);
+            connect(check, &QCheckBox::toggled, this, [this, check](bool on) {
+                if (m_checkState)
+                    *m_checkState = on;
+            });
+            v->addWidget(check);
+            m_check = check;
+        }
+
         auto *row = new QHBoxLayout;
         row->setSpacing(8);
         row->addStretch(1);
-        auto *cancel = new QPushButton(nt::tr("common.cancel"), frame);
+          auto *cancel = new QPushButton(nt::tr("common.cancel"), frame);
         cancel->setObjectName(QStringLiteral("ghost"));
         cancel->setCursor(Qt::PointingHandCursor);
         connect(cancel, &QPushButton::clicked, this,
@@ -120,9 +143,11 @@ private:
             m_loop->quit();
             return;
         }
-        const auto cb = std::move(m_onAccept);
-        if (accepted && cb)
-            cb();
+        if (accepted) {
+            const auto cb = std::move(m_onAccept);
+            if (cb)
+                cb();
+        }
     }
 
     void keyPressEvent(QKeyEvent *event) override
@@ -155,7 +180,11 @@ private:
     QPushButton *m_cancel = nullptr;
     QPointer<QWidget> m_page;
     std::function<void()> m_onAccept;
+    QString m_checkText;
+    bool *m_checkState = nullptr;
+    QCheckBox *m_check = nullptr;
     std::function<void()> m_cbPending;
+
     bool m_accepted = false;
 };
 
@@ -310,14 +339,16 @@ private:
 namespace nt {
 
 void confirm(QWidget *parent, const QString &title, const QString &text,
-             const QString &acceptText, std::function<void()> onAccept)
+               const QString &acceptText, std::function<void()> onAccept,
+               const QString &checkText, bool *checkState)
 {
     if (!parent) {
         if (onAccept)
             onAccept();
         return;
     }
-    ConfirmOverlay::ask(parent, title, text, acceptText, std::move(onAccept));
+    ConfirmOverlay::ask(parent, title, text, acceptText, std::move(onAccept),
+                        checkText, checkState);
 }
 
 bool inputText(QWidget *parent, const QString &title, const QString &prompt,

@@ -92,6 +92,17 @@ public:
 
     // Removes a download from the list and deletes its files.
     bool remove(const QString &videoId);
+    // Removes the download from the list but KEEPS the file on the disk: it
+    // is what the dialog of the delete offers for a finished download
+    // ("only from the list").
+    bool removeFromList(const QString &videoId);
+
+  private:
+    // True when the path is inside the folder of the downloads: the app only
+    // deletes its own files.
+    bool isInsideDownloadFolder(const QString &path) const;
+
+  public:
 
     // The state of one download, if it is in the list.
     bool state(const QString &videoId, DownloadInfo &out) const;

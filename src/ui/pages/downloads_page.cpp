@@ -201,12 +201,14 @@ QWidget *DownloadsPage::buildRow(const DownloadInfo &info)
     auto *remove = new QPushButton(row);
     remove->setObjectName(QStringLiteral("ghost"));
     remove->setCursor(Qt::PointingHandCursor);
-    remove->setIcon(nt::icon(nt::Icon::Clear, nt::kMuted, 16));
+    remove->setProperty("downloadAction", QStringLiteral("remove"));
+    remove->setIcon(nt::icon(nt::Icon::Trash, nt::kMuted, 16));
     remove->setIconSize(QSize(16, 16));
     nt::bindTooltip(remove, "downloads.delete");
     nt::bindAccessibleName(remove, "downloads.delete");
     connect(remove, &QPushButton::clicked, this,
             [this, videoId]() { emit removeRequested(videoId); });
+
 
     lay->addWidget(play);
     lay->addWidget(pause);

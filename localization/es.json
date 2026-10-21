@@ -265,6 +265,14 @@
     "settings.downloadConnectionsNote": "Cuántas descargas en paralelo hace la app. Con 8 es lo más rápido (medido), pero en una línea lenta o con datos móviles conviene bajarlo.",
     "downloads.pause": "Pausar",
     "downloads.resume": "Continuar",
-    "error.dlStalled": "El fragmento no avanzaba y se canceló"
+    "error.dlStalled": "El fragmento no avanzaba y se canceló",
+    "downloads.deleteTitle": "Borrar la descarga",
+    "downloads.deleteRunning": "La descarga está en curso. Si la borras se cancela y se borra lo que ya se descargó. ¿Continuar?",
+    "downloads.deletePaused": "La descarga está en pausa. Si la borras se borra lo que ya se descargó. ¿Continuar?",
+    "downloads.deleteDone": "La descarga está terminada. Se quita de la lista y, si marcas la casilla, también se borra el archivo del disco.",
+    "downloads.deleteAccept": "Borrar todo",
+    "downloads.deleteListOnly": "Solo de la lista",
+    "downloads.deleteDoneTitle": "Borrar la descarga",
+    "downloads.deleteAlsoFile": "Eliminar también el archivo del disco"
   }
 }

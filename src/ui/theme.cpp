@@ -229,6 +229,21 @@ QFrame#popupDialog {
    rule is no longer needed, it existed only so that its frame showed with
    rounded corners. */
 QLabel#popupTitle { font-size: 15px; font-weight: 600; color: #ECECEC; }
+/* The check box of the confirmation dialog (the delete of a download asks
+   with one whether to delete the file from the disk too). */
+QCheckBox#popupCheck { color: @TEXT@; spacing: 8px; }
+QCheckBox#popupCheck::indicator {
+    width: 16px; height: 16px;
+    border: 1px solid @BORDER@;
+    border-radius: 4px;
+    background-color: #1F1F1F;
+}
+QCheckBox#popupCheck::indicator:hover { border-color: @ACCENT@; }
+QCheckBox#popupCheck::indicator:checked {
+    background-color: @ACCENT@;
+    border-color: @ACCENT@;
+    image: none;
+}
 QComboBox::drop-down { border: none; width: 24px; }
 QComboBox::down-arrow {
     image: none;
