@@ -38,6 +38,10 @@ DownloadsPage::DownloadsPage(DownloadRepo *repo, QWidget *parent)
 
     m_openFolder = new QPushButton(this);
     m_openFolder->setObjectName(QStringLiteral("ghost"));
+    // The mark of the button: the tests look for it and NOT for its text
+    // (the text is translated, and a test that looks for "Abrir" does not
+    // find "Open folder").
+    m_openFolder->setProperty("downloadAction", QStringLiteral("openFolder"));
     m_openFolder->setCursor(Qt::PointingHandCursor);
     nt::bindText(m_openFolder, "downloads.openFolder");
     connect(m_openFolder, &QPushButton::clicked, this, [this]() {

@@ -121,19 +121,18 @@ bool downloadButtonSelfTest()
             QString asked;
             QObject::connect(page, &DownloadsPage::openFolderRequested,
                              [&asked](const QString &p) { asked = p; });
-            // The folder of the downloader: the one of the page.
+            // The button is looked up by its MARK and not by its text: the
+            // text is translated, and a test that looks for "Abrir" does not
+            // find "Open folder" (it failed in the CI).
             QPushButton *openFolder = nullptr;
             const QList<QPushButton *> buttons = page->findChildren<QPushButton *>();
             for (QPushButton *b : buttons) {
-                if (b->objectName() == QLatin1String("ghost")
-                    && b->text().contains(QStringLiteral("Abrir"),
-                                          Qt::CaseInsensitive)) {
+                if (b->property("downloadAction").toString()
+                    == QLatin1String("openFolder")) {
                     openFolder = b;
                     break;
                 }
             }
-            // The button is a "ghost": the object name is shared with other
-            // buttons of the page, so it is looked up by its bound text.
             check(openFolder != nullptr, "el boton de abrir carpeta existe");
             if (openFolder) {
                 openFolder->click();
