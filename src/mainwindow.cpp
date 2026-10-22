@@ -1219,7 +1219,7 @@ void tooltipShow()
     const QPoint anchorTopLeft = w->mapToGlobal(QPoint(0, 0));
     const QRect anchor(anchorTopLeft, QSize(w->width(), w->height()));
 
-    QTimer::singleShot(0, w, [w, anchor] {
+    QTimer::singleShot(0, w, [anchor] {
         QWidget *tip = nullptr;
         for (QObject *o : QApplication::topLevelWidgets()) {
             auto *c = qobject_cast<QWidget *>(o);
@@ -1955,13 +1955,6 @@ void MainWindow::applyDownloadFolder()
              m_downloadManager->directory().toUtf8().constData());
 }
 
-void MainWindow::goSettings()
-{
-    // Settings is the LAST button of the bar.
-    if (m_navButtons.value(4))
-        m_navButtons[4]->setChecked(true);
-}
-
 void MainWindow::resetAppData()
 {
     // 1. Quiesce the player (avoids position writes on exit)
@@ -1991,9 +1984,7 @@ void MainWindow::resetAppData()
         QCoreApplication::arguments(),
         QDir::currentPath());
     // The current process exits; the new instance starts clean.
-    QTimer::singleShot(200, this, [this]() {
-        qApp->quit();
-    });
+    QTimer::singleShot(200, this, []() { qApp->quit(); });
 }
 
 void MainWindow::showPreviousTab()
@@ -2368,7 +2359,7 @@ void MainWindow::onRecoveryExhausted()
                             QStringList() << url, QDir::currentPath());
     // The new instance starts with "http://..." -> playVideo resumes the last
     // video (see gate_restart_armed in the constructor).
-    QTimer::singleShot(200, this, [this]() { qApp->quit(); });
+    QTimer::singleShot(200, this, []() { qApp->quit(); });
 }
 
 void MainWindow::onRecoveryHealthy()

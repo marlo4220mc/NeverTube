@@ -142,7 +142,6 @@ private:
     // sections fit their content and leave no vertical gap between one block
     // and the next.
     void applyGridSizes();
-    void scheduleGridSizes();
     // Effective columns after applying the width cap (kMinCellW).
     int effectiveCellColumns() const;
 

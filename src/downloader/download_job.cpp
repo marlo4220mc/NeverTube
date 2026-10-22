@@ -640,7 +640,7 @@ void DownloadJob::startNext()
                        return;
                    }
                    m_fragmentTries.remove(markOf(track, index));
-                   onFragmentDone(track, index, r.body.size());
+                   onFragmentDone(track, index);
                },
                [this, filePtr](const QByteArray &chunk) {
                    if (filePtr)
@@ -654,7 +654,7 @@ void DownloadJob::startNext()
         maybeFinishSegments();
 }
 
-void DownloadJob::onFragmentDone(const QString &track, int index, qint64 size)
+void DownloadJob::onFragmentDone(const QString &track, int index)
 {
     if (!m_running)
         return;
@@ -725,38 +725,6 @@ void DownloadJob::sampleSpeed()
     }
     m_lastSampleMs = now;
     m_lastSampleBytes = m_bytesDone;
-}
-
-// Writes the resource: the init segment first (it is the header of the
-// file) and then the fragments IN ORDER (the order is what makes it a
-// playable stream).
-bool DownloadJob::assembleTrack(const QString &path, const QString &track,
-                                const QVector<Range> &ranges,
-                                const QString &initPath)
-{
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return false;
-    QFile init(initPath);
-    if (init.exists() && init.open(QIODevice::ReadOnly)) {
-        while (!init.atEnd())
-            file.write(init.read(256 * 1024));
-        init.close();
-    }
-    for (int i = 0; i < ranges.size(); ++i) {
-        QFile fragment(fragmentPath(track, i));
-        if (!fragment.exists())
-            continue;
-        if (!fragment.open(QIODevice::ReadOnly)) {
-            file.close();
-            return false;
-        }
-        while (!fragment.atEnd())
-            file.write(fragment.read(256 * 1024));
-        fragment.close();
-    }
-    file.close();
-    return true;
 }
 
 void DownloadJob::maybeFinishSegments()

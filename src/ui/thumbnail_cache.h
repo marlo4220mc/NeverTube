@@ -24,7 +24,6 @@ public:
     void put(const QString &key, const QPixmap &pm);
     int clear();
     int sizeBytes() const;
-    int maxWidth() const;
 
 signals:
     void ready(const QString &key);

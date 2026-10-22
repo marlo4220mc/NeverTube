@@ -19,13 +19,8 @@
 #include "../confirm_dialog.h"
 #include "../theme.h"
 
-static const char *kQualityKey = "quality";
-static const char *kQualityAutoKey = "quality_auto";
-static const char *kNextModeKey = "next_mode";
-static const char *kAudioLangKey = "audio_language";
 static const char *kGridDensityKey = "grid_density";
 static const char *kThumbSizeKey = "thumb_size";
-static const char *kMiniVideoKey = "mini_video";
 static const char *kAccentKey = "ui_accent";
 
 static QStringList qualityOptions(bool noHw = false)
@@ -276,7 +271,7 @@ void SettingsPage::setupValueMenu(
         act->setCheckable(true);
         group->addAction(act);
         connect(act, &QAction::triggered, btn,
-                [btn, opt, onPick, currentOpt, syncMenu]() {
+                [opt, onPick, currentOpt, syncMenu]() {
                     onPick(opt);
                     *currentOpt = opt;
                     syncMenu(opt);
@@ -334,7 +329,7 @@ void SettingsPage::setupValueMenuWithConfirm(
         act->setCheckable(true);
         group->addAction(act);
         connect(act, &QAction::triggered, btn,
-                [btn, opt, confirm, applyAndTrack]() {
+                [opt, confirm, applyAndTrack]() {
                     confirm(opt, applyAndTrack);
                 });
     }

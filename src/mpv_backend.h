@@ -36,7 +36,6 @@ public:
     // --- commands ---
     bool playUrl(const QString &url, double startAt,
                  const QString &audioUrl) override;
-    void setYtdlFormat(const QString &format) override;
     void stop() override;
     void setPaused(bool paused) override;
     void seek(double seconds) override;

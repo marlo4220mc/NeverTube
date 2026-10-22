@@ -15,9 +15,9 @@ namespace dl {
 
 class DownloadJob;
 
-// The downloader of the app: it takes a video id, asks for the master
-// playlist, makes the plan, downloads the segments in parallel and muxes
-// them into one mp4.
+// The downloader of the app: it takes a video id, asks for the adaptive
+// formats, makes the plan, downloads the segments in parallel and muxes
+// them into one mkv.
 //
 // It keeps ONE download at a time (decision D15): the throttle of YouTube is
 // per request, so eight parallel connections plus the player would eat the
@@ -38,9 +38,9 @@ public:
     // Starts the download of a video. When it is already in the list it is
     // NOT queued again: the state is shown instead.
     //
-    // The master is asked for first: the dialog of the download needs the
-    // variants it has (and their size), so the user picks the resolution
-    // BEFORE anything is downloaded.
+    // The formats are asked for first: the dialog of the download needs the
+    // variants the video has (and their size), so the user picks the
+    // resolution BEFORE anything is downloaded.
     // `maxHeight` is the cap of the resolution of the DOWNLOAD (0 = no
     // cap). It is NOT the cap of the player: the download is a file and the
     // person asked for it.
@@ -107,9 +107,6 @@ public:
     // The state of one download, if it is in the list.
     bool state(const QString &videoId, DownloadInfo &out) const;
 
-    // Whether the system has an ffmpeg (needed to join the two tracks).
-    static bool hasFfmpeg();
-
 signals:
     // The list changed (a download was added, moved or removed).
     void changed();
@@ -122,15 +119,9 @@ signals:
     void failed(const QString &videoId, const QString &reason);
 
 private:
-    void onMasterReady(const QString &videoId, const QByteArray &masterBody);
-    // The adaptive formats: the AUDIO comes from here (a clean m4a), because
-    // the audio of the master is AAC in LATM and the FFmpeg of this system
-    // cannot mux that.
+    // The adaptive formats: they carry BOTH tracks (video and audio) with
+    // their direct URL, the initRange and the indexRange of each one.
     void onAdaptiveFormats(const QString &videoId, const QJsonArray &formats);
-    void onFormatsReady(const QString &videoId, const QJsonArray &formats);
-    // Builds the plan and starts the download. It waits for the master AND
-    // the adaptive formats: they arrive in any order.
-    void buildPlan();
     void onJobFinished(const QString &path);
     void onJobFailed(const QString &reason);
     // The progress is saved at most every kSaveEveryMs. The job reports the
@@ -151,9 +142,6 @@ private:
     QString m_currentId;
     QString m_dir;
     QString m_audioLang;
-    // The adaptive formats of the video: the audio comes from here.
-    QJsonArray m_adaptiveFormats;
-    QByteArray m_masterBody;
     // The resolutions the dialog offers: the ones the player already knows
     // this video has (it hides the ones that are not available).
     QVector<int> m_availableHeights;
@@ -177,7 +165,6 @@ private:
     // default one, the smallest).
     QString m_forcedCodec;
     bool m_forcedAudioOnly = false;
-    bool m_masterConnected = false;
     // When the page was last updated (the progress is reported several
     // times per second and the page is repainted at most every 250 ms).
     qint64 m_lastUiUpdateMs = 0;
