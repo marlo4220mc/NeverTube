@@ -16,10 +16,19 @@
 #include "playback_backend.h"
 
 // Playback time with no active audio track that declares the stream gated
-// (YouTube audio 403) and fires the early re-resolution (checkStall). ~10 s
-// per attempt instead of waiting for the premature EOF of the ~60 s master
-// HLS. See PlayerWidget::checkStall.
-static constexpr qint64 kAudioDetectMs = 10000;
+// (YouTube audio 403) and fires the early re-resolution (checkStall).
+//
+// It was 10 s, and that was TOO SHORT for a slow machine: the external
+// audio (the one of the "edge" mode, a separate file that the CDN serves)
+// can take more than that to arrive, and the watchdog then did the WORST
+// thing: it re-resolved, which throws away the URLs that were being
+// downloaded and starts over with a new session. The symptom was "the
+// first opening has no audio (and it is fixed when you change the video)".
+//
+// 25 s is still far below the ~60 s that the gated session takes to die
+// with the premature EOF, so the gate keeps its purpose (re-resolving
+// early instead of waiting a minute of silence).
+static constexpr qint64 kAudioDetectMs = 25000;
 
 PlayerWidget::PlayerWidget(QWidget *parent)
     : QOpenGLWidget(parent)
@@ -161,6 +170,10 @@ void PlayerWidget::playUrl(const QString &url, double startAt)
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     m_lastProgressMs = nowMs;
     m_videoLoadMs = nowMs;
+    // The clock of the audio starts with the load: the external audio (a
+    // separate file) can take a while to arrive on a slow machine and the
+    // watchdog must not fire before that.
+    m_audioLoadMs = nowMs;
     m_cacheOk = false;
     emit positionChanged();
     emit durationChanged();
@@ -624,9 +637,34 @@ void PlayerWidget::checkStall()
     // attempt until the premature EOF. Re-resolve early (with fresh URLs)
     // instead of waiting a minute; with duration >0 (all of the above),
     // streams without real audio (silence) do not exist in practice.
-    if (!m_backend->hasActiveAudio() && now - m_videoLoadMs > kAudioDetectMs
+      // The diagnosis of the audio: it is reported ONCE per stream, so the
+      // log says what mpv has (how many tracks, how many of them are audio,
+      // which one is selected and its format) without filling the log.
+      if (m_state == QLatin1String("playing") && m_position > 2.0
+          && !m_audioProbed) {
+          m_audioProbed = true;
+          const bool hasAudio = m_backend->hasActiveAudio();
+          qint64 nTracks = -1, nAudio = -1, selAudio = -1;
+          QString fmt;
+          m_backend->probeAudioState(&nTracks, &nAudio, &selAudio, &fmt);
+          NT_DEBUG("E2E audio state has=%d tracks=%lld audio=%lld sel=%lld "
+                   "fmt=%s\n", int(hasAudio), nTracks, nAudio, selAudio,
+                   qPrintable(fmt));
+      }
+    if (!m_backend->hasActiveAudio() && m_audioLoadMs > 0 && now - m_audioLoadMs > kAudioDetectMs
         && m_position > 2.0) {
-        m_videoLoadMs = now; // do not fire in a loop while it recovers
+        // BEFORE re-resolving (which throws away the URLs that are being
+        // downloaded and starts a new session): if the audio track ARRIVED
+        // and it is simply not selected, it is selected here. That is the
+        // case of the external audio (the "edge" mode) on a slow machine:
+        // the track takes a while to arrive and mpv does not always select
+        // it, and the app used to throw away a perfectly good download.
+        if (m_backend->ensureAudioSelected()) {
+            m_audioLoadMs = now;   // give it a new margin
+            NT_DEBUG("E2E audio: la pista llego y se ha seleccionado\n");
+            return;
+        }
+        m_audioLoadMs = now; // do not fire in a loop while it recovers
         NT_DEBUG("E2E streamInterrupted sin-audio pos=%.2f dur=%.2f\n",
                  m_position, m_duration);
         emit streamInterrupted();

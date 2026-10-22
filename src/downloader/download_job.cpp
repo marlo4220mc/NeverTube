@@ -85,7 +85,8 @@ void DownloadJob::start(const Plan &plan, const QString &videoId,
     m_nextVideo = 0;
     m_nextAudio = 0;
     m_inFlight = 0;
-    m_extraPending = 0;
+    m_arrival.reset();
+    m_arrivalQueue.clear();
     m_bytesDone = 0;
     m_bytesTotal = plan.estimatedBytes;
     m_muxing = false;
@@ -149,69 +150,100 @@ DownloadTransport *DownloadJob::takeFreeTransport()
 void DownloadJob::fetchTrack(const QString &track, const Track &t)
 {
     if (!t.valid || t.url.isEmpty()) {
-        if (track == QLatin1String("audio"))
-            startNext();
+        // The track does not exist (or has no URL): there is nothing to
+        // wait for and nothing to count.
         return;
     }
 
-    // The init segment first (it is the header of the file).
-    ++m_extraPending;
-    DownloadTransport *ti = takeFreeTransport();
-    if (!ti) {
-        --m_extraPending;
-        if (track == QLatin1String("audio"))
-            startNext();
-        return;
-    }
-    ti->get(QUrl(t.url), t.initStart, t.initEnd, DownloadTransport::userAgent(),
-            [this, track](const DownloadTransport::Response &r) {
-        if (r.isOk()) {
-            const QString path = (track == QLatin1String("video"))
-                ? m_videoInitPath : m_audioInitPath;
-            writeFile(path, r.body);
-        }
-        --m_extraPending;
-    });
+    // Two requests per track: the init segment (the header of the file) and
+    // the index (the sidx, which says where every fragment starts).
+    //
+    // They are COUNTED when they are PLANNED, not when they are launched:
+    // with one connection the second request of a track has to wait for the
+    // first one, and the phase is only over when all of them have answered.
+    ArrivalTask initTask;
+    initTask.track = track;
+    initTask.isInit = true;
+    m_arrivalQueue.append(initTask);
 
-    // Then the index: a window that covers it (the indexRange of the format
-    // does not).
-    const qint64 indexStart = t.indexStart > 0 ? t.indexStart : t.initEnd + 1;
-    const qint64 indexEnd = indexStart + kIndexWindowBytes - 1;
-    ++m_extraPending;
-    DownloadTransport *ta = takeFreeTransport();
-    if (!ta) {
-        --m_extraPending;
-        if (track == QLatin1String("audio"))
-            startNext();
-        return;
-    }
-    ta->get(QUrl(t.url), indexStart, indexEnd, DownloadTransport::userAgent(),
-             [this, track, indexStart, t](const DownloadTransport::Response &r) {
-        if (r.isOk()) {
-            double total = 0.0;
-            QVector<Range> ranges =
-                rangesFromSidx(r.body, indexStart, &total);
-            if (ranges.isEmpty()) {
-                // The track has NO index (a WebM/Opus one: its clusters are
-                // not indexed). It is cut in pieces of 2 MB instead, which is
-                // what makes it downloadable: YouTube throttles a request by
-                // its size.
-                ranges = rangesWithoutIndex(t.contentLength, kChunkBytes);
-            }
-            if (track == QLatin1String("video")) {
-                m_videoRanges = ranges;
-                m_videoDone = QVector<bool>(ranges.size(), false);
-                m_videoSizes = QVector<qint64>(ranges.size(), 0);
-            } else {
-                m_audioRanges = ranges;
-                m_audioDone = QVector<bool>(ranges.size(), false);
-                m_audioSizes = QVector<qint64>(ranges.size(), 0);
-            }
+    ArrivalTask indexTask;
+    indexTask.track = track;
+    indexTask.isInit = false;
+    indexTask.indexStart = t.indexStart > 0 ? t.indexStart : t.initEnd + 1;
+    m_arrivalQueue.append(indexTask);
+
+    m_arrival.add();
+    m_arrival.add();
+    pumpArrival();
+}
+
+// Launches the arrival requests that are waiting for a free transport.
+void DownloadJob::pumpArrival()
+{
+    while (!m_arrivalQueue.isEmpty()) {
+        DownloadTransport *t = takeFreeTransport();
+        if (!t)
+            return;   // no free transport: the rest waits
+        const ArrivalTask task = m_arrivalQueue.takeFirst();
+
+        if (task.isInit) {
+            const Track &tr = (task.track == QLatin1String("video"))
+                ? m_plan.video : m_plan.audio;
+            t->get(QUrl(tr.url), tr.initStart, tr.initEnd,
+                   DownloadTransport::userAgent(),
+                   [this, track = task.track](const DownloadTransport::Response &r) {
+                if (r.isOk()) {
+                    const QString path = (track == QLatin1String("video"))
+                        ? m_videoInitPath : m_audioInitPath;
+                    writeFile(path, r.body);
+                }
+                // The counter is touched in ONE place (the gate), so the
+                // order of the answers does not matter.
+                m_arrival.done();
+                if (m_arrival.takeFinished())
+                    startNext();
+                else
+                    pumpArrival();
+            });
+        } else {
+            const Track &tr = (task.track == QLatin1String("video"))
+                ? m_plan.video : m_plan.audio;
+            const qint64 indexStart = task.indexStart;
+            const qint64 indexEnd = indexStart + kIndexWindowBytes - 1;
+            t->get(QUrl(tr.url), indexStart, indexEnd,
+                   DownloadTransport::userAgent(),
+                   [this, track = task.track, indexStart, tr]
+                   (const DownloadTransport::Response &r) {
+                if (r.isOk()) {
+                    double total = 0.0;
+                    QVector<Range> ranges =
+                        rangesFromSidx(r.body, indexStart, &total);
+                    if (ranges.isEmpty()) {
+                        // The track has NO index (a WebM/Opus one: its
+                        // clusters are not indexed). It is cut in pieces of
+                        // 2 MB instead, which is what makes it downloadable:
+                        // YouTube throttles a request by its size.
+                        ranges = rangesWithoutIndex(tr.contentLength,
+                                                    kChunkBytes);
+                    }
+                    if (track == QLatin1String("video")) {
+                        m_videoRanges = ranges;
+                        m_videoDone = QVector<bool>(ranges.size(), false);
+                        m_videoSizes = QVector<qint64>(ranges.size(), 0);
+                    } else {
+                        m_audioRanges = ranges;
+                        m_audioDone = QVector<bool>(ranges.size(), false);
+                        m_audioSizes = QVector<qint64>(ranges.size(), 0);
+                    }
+                }
+                m_arrival.done();
+                if (m_arrival.takeFinished())
+                    startNext();
+                else
+                    pumpArrival();
+            });
         }
-        --m_extraPending;
-        if (m_extraPending == 0)
-            startNext();
-    });
+    }
 }
 
 QString DownloadJob::fragmentPath(const QString &track, int index) const
@@ -252,7 +284,7 @@ int DownloadJob::markOf(const QString &track, int index)
 
 void DownloadJob::startNext()
 {
-    if (!m_running || m_extraPending > 0)
+    if (!m_running || m_arrival.pending() > 0)
         return;
 
     for (DownloadTransport *t : m_pool) {
@@ -386,7 +418,7 @@ void DownloadJob::startNext()
                }, range.size());
     }
 
-    if (m_inFlight == 0 && m_extraPending == 0)
+    if (m_inFlight == 0 && m_arrival.pending() == 0)
         maybeFinishSegments();
 }
 
@@ -497,7 +529,7 @@ bool DownloadJob::assembleTrack(const QString &path, const QString &track,
 
 void DownloadJob::maybeFinishSegments()
 {
-    if (!m_running || m_inFlight > 0 || m_extraPending > 0)
+    if (!m_running || m_inFlight > 0 || m_arrival.pending() > 0)
         return;
 
     for (int i = 0; i < m_videoDone.size(); ++i)

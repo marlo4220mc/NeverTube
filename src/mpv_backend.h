@@ -4,6 +4,8 @@
 
 #include <QString>
 
+#include <atomic>
+
 #include <mpv/client.h>
 #include <mpv/render.h>
 
@@ -52,6 +54,9 @@ public:
     QString videoCodec() const override;
     int probeMaxVideoHeight() const override;
     bool hasActiveAudio() const override;
+    void probeAudioState(qint64 *tracks, qint64 *audioTracks,
+                         qint64 *selectedAudio, QString *format) const override;
+    bool ensureAudioSelected() override;
     double cacheDuration() const override;
     bool cacheIdle() const override;
 
@@ -67,6 +72,10 @@ private slots:
 private:
     static void mpvWakeup(void *ctx);
     static void mpvUpdate(void *ctx);
+    // Whether mpv says there is a frame to draw (it is asked with
+    // mpv_render_context_update in the render thread). It is written in the
+    // render thread and read in the callback's.
+    std::atomic<bool> m_framePending{false};
     void handleEvent(mpv_event *event);
 
     mpv_handle *m_mpv = nullptr;

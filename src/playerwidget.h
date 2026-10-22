@@ -178,6 +178,13 @@ private:
     // frame stays). m_cacheOk becomes true when the demuxer caches content.
     qint64 m_videoLoadMs = 0;
     bool m_cacheOk = false;
+    // The clock of the audio (its own: the one of the video is reset by the
+    // check of the video that does not load, and with a shared clock the two
+    // watchdogs stole each other's time).
+    qint64 m_audioLoadMs = 0;
+    // Whether the state of the audio was already reported (once per
+    // stream): it is the diagnosis of the "the first opening has no audio".
+    bool m_audioProbed = false;
     // x86: video covered by another window. Slow 250 ms timer +
     // z-order walk; only FfmpegBackend (occlusionSkipSupported).
     // On mpv/x64 this does NOT apply (stopping the render accumulates frames).

@@ -1481,6 +1481,33 @@ int FfmpegBackend::probeMaxVideoHeight() const
     return m->readSnap().maxVideoH;
 }
 
+// The state of the audio (the same probe as the mpv one: how many tracks,
+// how many of them are audio, which one is selected and its format).
+void FfmpegBackend::probeAudioState(qint64 *tracks, qint64 *audioTracks,
+                                    qint64 *selectedAudio,
+                                    QString *format) const
+{
+    if (tracks)
+        *tracks = -1;
+    if (audioTracks)
+        *audioTracks = -1;
+    if (selectedAudio)
+        *selectedAudio = -1;
+    if (format)
+        format->clear();
+    if (tracks)
+        *tracks = -1;
+    if (audioTracks)
+        *audioTracks = m ? (m->readSnap().audioActive ? 1 : 0) : -1;
+}
+
+// The FfmpegBackend has a single audio track and it is always selected:
+// there is nothing to select.
+bool FfmpegBackend::ensureAudioSelected()
+{
+    return false;
+}
+
 bool FfmpegBackend::hasActiveAudio() const
 {
     return m->readSnap().audioActive;

@@ -119,6 +119,23 @@ public:
     // true if there is an active audio track in the current stream (gated-session
     // watchdog: without it the video advances muted).
     virtual bool hasActiveAudio() const = 0;
+    // The state of the audio (for the diagnosis of the "the first opening
+    // has no audio"): the number of tracks, the number of AUDIO ones, the
+    // id of the selected one and the format.
+    virtual void probeAudioState(qint64 *tracks, qint64 *audioTracks,
+                                 qint64 *selectedAudio,
+                                 QString *format) const = 0;
+    // Selects the audio track when there is one and it is NOT selected.
+    //
+    // It is the case of the external audio (the "edge" mode): the track
+    // arrives, but mpv does not always select it, and the video plays
+    // mute. The app used to re-resolve the whole stream (throwing away
+    // the URLs that were being downloaded) and that is what the user saw
+    // as "the first opening has no audio (and it is fixed when you change
+    // the video)".
+    //
+    // It returns true when it selected one.
+    virtual bool ensureAudioSelected() = 0;
     // Seconds of content cached by the demuxer (high-resolution initial
     // buffer wait).
     virtual double cacheDuration() const = 0;

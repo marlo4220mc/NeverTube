@@ -198,7 +198,14 @@ private:
         // In FULLSCREEN the cap does not apply: the video must fill the
         // screen (only its aspect limits it).
         const int h = qRound(width() / m_aspect);
-        const int capped = m_fullscreen ? h : qMin(h, kMaxPlayerHeight);
+        // In FULLSCREEN the area has NO height of its own: it takes the
+        // whole screen and mpv centers the VIDEO inside it (it is the one
+        // that knows the aspect and draws the black bands).
+        //
+        // With a fixed height (width/aspect) the video was in the TOP half
+        // of a screen that is not 21:9, and the control bar (a child of the
+        // video) was in the middle of the screen instead of at its bottom.
+        const int capped = m_fullscreen ? 0 : qMin(h, kMaxPlayerHeight);
         NT_DEBUG("E2E pc aspect=%.3f width=%d maxH=%d curMin=%d curMax=%d\n",
                  m_aspect, width(), capped, minimumHeight(), maximumHeight());
         if (capped == minimumHeight() && capped == maximumHeight())
@@ -206,8 +213,13 @@ private:
         // min = max = cap: inside the page's single scroll the layout must
         // give the video EXACTLY its height (aspect or 560 px), neither stretched
         // by Expanding policies nor shrunk by the scrollable content.
-        setMinimumHeight(capped);
-        setMaximumHeight(capped);
+        if (m_fullscreen) {
+            setMinimumHeight(0);
+            setMaximumHeight(QWIDGETSIZE_MAX);
+        } else {
+            setMinimumHeight(capped);
+            setMaximumHeight(capped);
+        }
     }
 
     QWidget *m_overlay;
@@ -824,6 +836,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // continuación" on the right, with NO vertical limit on the queue (it grows with
     // all its rows and the general scroll goes through it, with no internal scroll).
     auto *midRow = new QWidget;
+    m_midRow = midRow;
     auto *midLay = new QHBoxLayout(midRow);
     midLay->setContentsMargins(0, 0, 0, 0);
     midLay->setSpacing(0);
@@ -1000,7 +1013,13 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     top->addWidget(midRow);
     // The stretch absorbs the surplus when the content does not fill the window:
     // the blocks stay glued to the top, with a gap at the end (like YouTube).
-    top->addStretch(1);
+    // The space at the end of the content. It is a WIDGET and not a
+    // QSpacerItem so that it can be HIDDEN: a hidden widget takes no space
+    // in the layout, and in FULLSCREEN that space has to go to the player.
+    m_bottomSpacer = new QWidget(topWidget);
+    m_bottomSpacer->setFixedHeight(0);
+    m_bottomSpacer->show();
+    top->addWidget(m_bottomSpacer);
 
     // Player "Back": a floating link over the video that ONLY appears
     // with the mouse. It lives inside the overlay page (gl, transparent
@@ -2158,6 +2177,13 @@ void WatchPage::enterFullscreen()
         m_watchBody->hide();
     if (m_bottomWidget)
         m_bottomWidget->hide();
+    // The WHOLE row of the description and of the queue: hiding only its two
+    // blocks left the row (279 px tall) taking space at the bottom.
+    if (m_midRow)
+        m_midRow->hide();
+    // The space at the end goes to the player (hidden = it takes nothing).
+    if (m_bottomSpacer)
+        m_bottomSpacer->hide();
     if (m_topScroll)
         m_topScroll->verticalScrollBar()->setValue(0);
     if (m_overlay->currentIndex() == 0)
@@ -2178,10 +2204,14 @@ void WatchPage::leaveFullscreen()
     // next mouse movement over the video, which is the new rule.
     if (m_back && m_ctrlBar && m_ctrlBar->isVisible())
         m_back->show();
+    if (m_midRow)
+        m_midRow->show();
     if (m_watchBody)
         m_watchBody->show();
     if (m_bottomWidget)
         m_bottomWidget->show();
+    if (m_bottomSpacer)
+        m_bottomSpacer->show();
     emit fullscreenToggled(false);
     NT_DEBUG("E2E fullscreen exit\n");
 }

@@ -78,6 +78,9 @@ public:
     QString videoCodec() const override;
     int probeMaxVideoHeight() const override;
     bool hasActiveAudio() const override;
+    void probeAudioState(qint64 *tracks, qint64 *audioTracks,
+                         qint64 *selectedAudio, QString *format) const override;
+    bool ensureAudioSelected() override;
     double cacheDuration() const override;
     bool cacheIdle() const override;
     void pollEvents() override;

@@ -280,6 +280,21 @@ void MpvBackend::renderGL(int fbo, int width, int height)
         { MPV_RENDER_PARAM_FLIP_Y, &flipY },
         { MPV_RENDER_PARAM_INVALID, nullptr },
     };
+    // The CANONICAL flow of the libmpv render API: before rendering, the
+    // app asks mpv what there is to draw (mpv_render_context_update) and
+    // the update callback has to be followed by that call.
+    //
+    // The app did NOT call it ever, and mpv complained about it in every
+    // session ("mpv_render_context_render() not being called or stuck",
+    // 235 times in two minutes). The symptom of the broken handshake is
+    // that a surface that was hidden and comes back (the fullscreen that
+    // ends) stays BLACK until the next frame arrives.
+    //
+    // It is called HERE and not in the update callback because the doc says
+    // so: "this has to happen on the render thread, and NOT from the update
+    // callback itself".
+    const uint64_t flags = mpv_render_context_update(m_rctx);
+    m_framePending = (flags & MPV_RENDER_UPDATE_FRAME) != 0;
     const int res = mpv_render_context_render(m_rctx, params);
     if (res < 0)
         qWarning("player: render error: %s", mpv_error_string(res));
@@ -493,6 +508,93 @@ bool MpvBackend::hasActiveAudio() const
     return ok;
 }
 
+// The state of the audio of mpv: how many tracks there are, how many of
+// them are audio, which one is selected and its format.
+//
+// It is the diagnosis of the "the first opening has no audio": with the
+// counts, it is clear whether the external track arrived at all (audio=0)
+// or whether it arrived and was not selected (audio=1, sel=-1).
+void MpvBackend::probeAudioState(qint64 *tracks, qint64 *audioTracks,
+                                 qint64 *selectedAudio, QString *format) const
+{
+    if (tracks)
+        *tracks = -1;
+    if (audioTracks)
+        *audioTracks = -1;
+    if (selectedAudio)
+        *selectedAudio = -1;
+    if (format)
+        format->clear();
+    if (!m_mpv)
+        return;
+    int64_t n = 0;
+    if (mpv_get_property(m_mpv, "track-list/count", MPV_FORMAT_INT64, &n) >= 0
+        && tracks)
+        *tracks = n;
+    int64_t na = 0;
+    if (mpv_get_property(m_mpv, "current-tracks/audio", MPV_FORMAT_INT64, &na) >= 0
+        && audioTracks)
+        *audioTracks = na;
+    int64_t sel = -1;
+    if (mpv_get_property(m_mpv, "aid", MPV_FORMAT_INT64, &sel) >= 0
+        && selectedAudio)
+        *selectedAudio = sel;
+    if (format) {
+        char *f = nullptr;
+        if (mpv_get_property(m_mpv, "audio-params/format", MPV_FORMAT_STRING, &f) >= 0
+            && f) {
+            *format = QString::fromUtf8(f);
+            mpv_free(f);
+        }
+    }
+}
+
+// Selects the audio track when there is one and it is not selected.
+//
+// The case of the external audio (the "edge" mode): the track arrives (the
+// "audio-files" of the loadfile) but mpv does not always select it, and the
+// video plays mute. Re-resolving the whole stream (what the app did
+// before) throws away the URLs that were being downloaded and it is slow
+// and noisy; selecting the track that is already there is immediate.
+//
+// It returns true when it selected one.
+bool MpvBackend::ensureAudioSelected()
+{
+    if (!m_mpv)
+        return false;
+    // The id of the selected audio track ("aid"). -1 = none.
+    int64_t sel = -1;
+    mpv_get_property(m_mpv, "aid", MPV_FORMAT_INT64, &sel);
+    // The list of the tracks: the audio ones (the property "track-list" is
+    // a list of maps; the "audio-files" of the loadfile adds one).
+    int64_t count = 0;
+    if (mpv_get_property(m_mpv, "track-list/count", MPV_FORMAT_INT64, &count) < 0)
+        return false;
+    for (int64_t i = 0; i < count; ++i) {
+        const QByteArray path = "track-list/" + QByteArray::number(static_cast<int>(i)) + "/type";
+        char *type = nullptr;
+        if (mpv_get_property(m_mpv, path.constData(), MPV_FORMAT_STRING, &type) < 0
+            || !type)
+            continue;
+        const bool isAudio = QByteArray(type) == QByteArrayLiteral("audio");
+        mpv_free(type);
+        if (!isAudio)
+            continue;
+        const QByteArray idPath =
+            "track-list/" + QByteArray::number(static_cast<int>(i)) + "/id";
+        int64_t id = -1;
+        if (mpv_get_property(m_mpv, idPath.constData(), MPV_FORMAT_INT64, &id) < 0)
+            continue;
+        if (id == sel)
+            return false;   // it is already selected
+        // The track is there and it is not the selected one: select it.
+        mpv_set_property(m_mpv, "aid", MPV_FORMAT_INT64, &id);
+        NT_DEBUG("E2E audio seleccion=%lld (venia %lld)\n", id, sel);
+        return true;
+    }
+    return false;
+}
+
 double MpvBackend::cacheDuration() const
 {
     double v = 0.0;
@@ -614,5 +716,10 @@ void MpvBackend::mpvWakeup(void *ctx)
 void MpvBackend::mpvUpdate(void *ctx)
 {
     MpvBackend *self = static_cast<MpvBackend *>(ctx);
+    // The update callback of libmpv: mpv says "there is something new to
+    // draw" and the app has to repaint. The repaint is ALWAYS asked for
+    // (not only when a flag says so): the callback is the only thing that
+    // wakes the app up, and a repaint that depends on a flag can leave the
+    // surface black (the cycle stops and nothing restarts it).
     QMetaObject::invokeMethod(self, "deliverFrameReady", Qt::QueuedConnection);
 }

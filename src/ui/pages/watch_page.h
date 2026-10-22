@@ -221,6 +221,13 @@ private:
     // Description block (title/meta/channel/actions/description) inside
     // the scroll. Hidden in fullscreen to leave only the video.
     QWidget *m_watchBody = nullptr;
+    // The row of the description and of the queue (the parent of
+    // m_watchBody): in FULLSCREEN the whole row is hidden (hiding only its
+    // two blocks left the row taking space at the bottom of the screen).
+    QWidget *m_midRow = nullptr;
+    // The space at the end of the content of the scroll: in FULLSCREEN it
+    // is hidden so that all the height goes to the player.
+    QWidget *m_bottomSpacer = nullptr;
     bool m_inFullscreen = false;
     QLabel *m_title;
     QLabel *m_meta;

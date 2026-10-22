@@ -5,6 +5,7 @@
 #include <QHash>
 #include <QVector>
 
+#include "arrival_gate.h"
 #include "segment_plan.h"
 
 class DownloadTransport;
@@ -98,6 +99,18 @@ private:
     DownloadTransport *takeFreeTransport();
     // Fetches the index (the sidx) of a track and the fragments it says.
     void fetchTrack(const QString &track, const Track &t);
+    // Launches the requests of the arrival phase that are waiting for a free
+    // transport (with one connection the second request of a track has to
+    // wait for the first one).
+    void pumpArrival();
+    // A request of the arrival phase that is planned but not launched yet.
+    struct ArrivalTask
+    {
+        QString track;
+        bool isInit = true;   // false = the index
+        qint64 indexStart = 0;
+    };
+    QVector<ArrivalTask> m_arrivalQueue;
     void onIndex(const QString &track, const QVector<Range> &ranges);
     void startNext();
     void onFragmentDone(const QString &track, int index, qint64 size);
@@ -138,9 +151,17 @@ private:
     int m_nextVideo = 0;
     int m_nextAudio = 0;
     int m_inFlight = 0;
-    // The init and the index of each track are requests of their own: they
-    // are counted here so the file is not assembled before they arrive.
-    int m_extraPending = 0;
+    // The requests of the ARRIVAL phase (the init and the index of each
+    // track) that are still in flight. The fragments only start when ALL of
+    // them are done (the ranges of the video are not known until its index
+    // arrives).
+    //
+    // It is a GATE and not a plain counter: the counter is only touched in
+    // ONE place, so the order of the answers does not matter. Before, it
+    // was decremented in two places and only one of them checked it, so if
+    // the last answer was an init (and not an index) the counter went to
+    // zero with nobody noticing and the download never started.
+    ArrivalGate m_arrival;
     bool m_running = false;
     bool m_muxing = false;
 
