@@ -11,6 +11,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QThread>
+#include <QUrl>
 
 namespace dl {
 
@@ -25,6 +27,11 @@ constexpr qint64 kIndexWindowBytes = 16 * 1024;
 // the ~8 MB that YouTube's throttle allows per request (measured: 2 MB runs
 // at 14 MB/s).
 constexpr qint64 kChunkBytes = 2 * 1024 * 1024;
+
+// How long stop() waits for the thread of the transports to finish its
+// cleanup. The posted work only aborts sockets and deletes objects: it does
+// not wait for the network, so this is a ceiling, not a delay.
+constexpr int kShutdownWaitMs = 2000;
 }
 
 DownloadJob::DownloadJob(QObject *parent)
@@ -105,14 +112,9 @@ void DownloadJob::start(const Plan &plan, const QString &videoId,
 
 void DownloadJob::stop()
 {
-    if (m_pool.isEmpty() && !m_running)
+    if (m_pool.isEmpty() && !m_running && !m_thread)
         return;
-    for (DownloadTransport *t : m_pool) {
-        if (t)
-            t->abort();
-    }
-    qDeleteAll(m_pool);
-    m_pool.clear();
+    shutdownTransportPool();
     m_running = false;
     m_inFlight = 0;
     if (m_status == QStringLiteral("downloading")
@@ -122,11 +124,103 @@ void DownloadJob::stop()
 
 void DownloadJob::buildTransportPool()
 {
-    qDeleteAll(m_pool);
+    shutdownTransportPool();
+    // The transports work in their OWN thread. This is what keeps the frames
+    // of the player, which are painted from the thread of the interface: with
+    // 8 connections there, the main thread was decrypting TLS, copying the
+    // buffers and writing the fragments while it had to paint, and the video
+    // dropped frames for as long as the download lasted.
+    //
+    // The callbacks still come back HERE (setCallbackContext), so the state
+    // of the job (the counters, the queue, the file of the fragment) is only
+    // touched by the thread of the interface.
+    m_thread = new QThread();
+    m_thread->setObjectName(QStringLiteral("download-transport"));
+    m_thread->start();
+    m_home = new QObject();
+    m_home->moveToThread(m_thread);
+
+    // The setting of Ajustes (the connections) is what decides the size of
+    // the pool. It used to be ignored: buildTransportPool() asked for
+    // defaultConcurrency() always, so the setting did nothing.
+    const int n = m_concurrency > 0 ? m_concurrency
+                                    : DownloadTransport::defaultConcurrency();
+    for (int i = 0; i < n; ++i) {
+        // No parent: an object with a parent cannot change of thread.
+        DownloadTransport *t = new DownloadTransport();
+        t->moveToThread(m_thread);
+        t->setCallbackContext(this);
+        m_pool.append(t);
+    }
+}
+
+// The cleanup has to run INSIDE the thread of the transports: destroying an
+// object from another thread while its socket is alive is a crash waiting for
+// a readyRead. The work is posted to m_home (which lives in that thread) and
+// the thread is asked to quit at the END of that same call, so the deletes
+// cannot be left pending.
+//
+// The wait is bounded and short: the posted work only aborts sockets and
+// destroys objects (it never waits for the network), so in practice this is a
+// few milliseconds. It is what lets the transports be gone when stop()
+// returns, instead of leaving a thread and a home behind every pause.
+void DownloadJob::shutdownTransportPool()
+{
+    const QVector<DownloadTransport *> pool = m_pool;
     m_pool.clear();
-    const int n = DownloadTransport::defaultConcurrency();
-    for (int i = 0; i < n; ++i)
-        m_pool.append(new DownloadTransport(this));
+    m_busy.clear();
+    QThread *thread = m_thread;
+    QObject *home = m_home;
+    m_thread = nullptr;
+    m_home = nullptr;
+
+    if (!thread) {
+        qDeleteAll(pool);
+        return;
+    }
+
+    if (home && !pool.isEmpty()) {
+        QMetaObject::invokeMethod(home, [thread, pool]() {
+            for (DownloadTransport *t : pool) {
+                t->abort();
+                delete t;
+            }
+            thread->quit();
+        }, Qt::QueuedConnection);
+    } else {
+        qDeleteAll(pool);
+        thread->quit();
+    }
+
+    if (!thread->wait(kShutdownWaitMs)) {
+        // It did not stop in the bounded wait (it should never happen: the
+        // posted work does not touch the network). Rather than destroying a
+        // running QThread (a crash), it is left to delete itself when it
+        // ends.
+        QObject::connect(thread, &QThread::finished, thread, [thread, home]() {
+            delete home;
+            thread->deleteLater();
+        }, Qt::QueuedConnection);
+        return;
+    }
+    delete home;
+    delete thread;
+}
+
+void DownloadJob::launch(DownloadTransport *t, const QUrl &url,
+                         qint64 rangeStart, qint64 rangeEnd,
+                         DownloadTransport::DoneFn done,
+                         DownloadTransport::ProgressFn progress,
+                         qint64 expectedBytes)
+{
+    if (!t)
+        return;
+    m_busy.insert(t);
+    const QString ua = DownloadTransport::userAgent();
+    QMetaObject::invokeMethod(t, [t, url, rangeStart, rangeEnd, ua, done,
+                                  progress, expectedBytes]() {
+        t->get(url, rangeStart, rangeEnd, ua, done, progress, expectedBytes);
+    }, Qt::QueuedConnection);
 }
 
 // A transport that is FREE.
@@ -138,7 +232,7 @@ void DownloadJob::buildTransportPool()
 DownloadTransport *DownloadJob::takeFreeTransport()
 {
     for (DownloadTransport *t : m_pool) {
-        if (t && !t->isBusy())
+        if (t && !m_busy.contains(t))
             return t;
     }
     return nullptr;
@@ -178,6 +272,42 @@ void DownloadJob::fetchTrack(const QString &track, const Track &t)
 }
 
 // Launches the arrival requests that are waiting for a free transport.
+void DownloadJob::onArrivalFailed(const ArrivalTask &task,
+                                  const DownloadTransport::Response &r)
+{
+    // The arrival phase is over (a pause): nothing to re-ask.
+    if (!m_running) {
+        m_arrival.done();
+        return;
+    }
+    // The signed URL ran out of its budget: the download is resolved again
+    // with fresh URLs. It is not a failure of the video.
+    if (r.status == 401 || r.status == 403) {
+        m_arrival.done();
+        m_running = false;
+        setStatus(QStringLiteral("expired"));
+        emit urlExpired();
+        return;
+    }
+    if (task.tries + 1 < kArrivalRetries) {
+        ArrivalTask again = task;
+        ++again.tries;
+        m_arrivalQueue.prepend(again);
+        // add() BEFORE done(): the gate counts the planned requests and it
+        // must not see zero (that would start the fragments with no index).
+        m_arrival.add();
+        m_arrival.done();
+        pumpArrival();
+        return;
+    }
+    const QString msg = r.error.isEmpty() ? nt::tr("error.dlPartFetch")
+                                          : r.error;
+    m_arrival.done();
+    m_running = false;
+    setStatus(QStringLiteral("error"), msg);
+    emit failed(msg);
+}
+
 void DownloadJob::pumpArrival()
 {
     while (!m_arrivalQueue.isEmpty()) {
@@ -189,14 +319,19 @@ void DownloadJob::pumpArrival()
         if (task.isInit) {
             const Track &tr = (task.track == QLatin1String("video"))
                 ? m_plan.video : m_plan.audio;
-            t->get(QUrl(tr.url), tr.initStart, tr.initEnd,
-                   DownloadTransport::userAgent(),
-                   [this, track = task.track](const DownloadTransport::Response &r) {
-                if (r.isOk()) {
-                    const QString path = (track == QLatin1String("video"))
-                        ? m_videoInitPath : m_audioInitPath;
-                    writeFile(path, r.body);
+            launch(t, QUrl(tr.url), tr.initStart, tr.initEnd,
+                   [this, task, t]
+                   (const DownloadTransport::Response &r) {
+                m_busy.remove(t);
+                if (!r.isOk()) {
+                    // It is NOT ignored: an init that never arrives leaves
+                    // the file without its header.
+                    onArrivalFailed(task, r);
+                    return;
                 }
+                const QString path = (task.track == QLatin1String("video"))
+                    ? m_videoInitPath : m_audioInitPath;
+                writeFile(path, r.body);
                 // The counter is touched in ONE place (the gate), so the
                 // order of the answers does not matter.
                 m_arrival.done();
@@ -204,44 +339,47 @@ void DownloadJob::pumpArrival()
                     startNext();
                 else
                     pumpArrival();
-            });
+            }, nullptr, tr.initEnd - tr.initStart + 1);
         } else {
             const Track &tr = (task.track == QLatin1String("video"))
                 ? m_plan.video : m_plan.audio;
             const qint64 indexStart = task.indexStart;
             const qint64 indexEnd = indexStart + kIndexWindowBytes - 1;
-            t->get(QUrl(tr.url), indexStart, indexEnd,
-                   DownloadTransport::userAgent(),
-                   [this, track = task.track, indexStart, tr]
+            launch(t, QUrl(tr.url), indexStart, indexEnd,
+                   [this, task, indexStart, tr, t]
                    (const DownloadTransport::Response &r) {
-                if (r.isOk()) {
-                    double total = 0.0;
-                    QVector<Range> ranges =
-                        rangesFromSidx(r.body, indexStart, &total);
-                    if (ranges.isEmpty()) {
-                        // The track has NO index (a WebM/Opus one: its
-                        // clusters are not indexed). It is cut in pieces of
-                        // 2 MB instead, which is what makes it downloadable:
-                        // YouTube throttles a request by its size.
-                        ranges = rangesWithoutIndex(tr.contentLength,
-                                                    kChunkBytes);
-                    }
-                    if (track == QLatin1String("video")) {
-                        m_videoRanges = ranges;
-                        m_videoDone = QVector<bool>(ranges.size(), false);
-                        m_videoSizes = QVector<qint64>(ranges.size(), 0);
-                    } else {
-                        m_audioRanges = ranges;
-                        m_audioDone = QVector<bool>(ranges.size(), false);
-                        m_audioSizes = QVector<qint64>(ranges.size(), 0);
-                    }
+                m_busy.remove(t);
+                if (!r.isOk()) {
+                    // Without the index there are NO ranges: the download
+                    // used to continue anyway and report "done" an empty file.
+                    onArrivalFailed(task, r);
+                    return;
+                }
+                const QString track = task.track;
+                double total = 0.0;
+                QVector<Range> ranges = rangesFromSidx(r.body, indexStart, &total);
+                if (ranges.isEmpty()) {
+                    // The track has NO index (a WebM/Opus one: its clusters
+                    // are not indexed). It is cut in pieces of 2 MB instead,
+                    // which is what makes it downloadable: YouTube throttles a
+                    // request by its size.
+                    ranges = rangesWithoutIndex(tr.contentLength, kChunkBytes);
+                }
+                if (track == QLatin1String("video")) {
+                    m_videoRanges = ranges;
+                    m_videoDone = QVector<bool>(ranges.size(), false);
+                    m_videoSizes = QVector<qint64>(ranges.size(), 0);
+                } else {
+                    m_audioRanges = ranges;
+                    m_audioDone = QVector<bool>(ranges.size(), false);
+                    m_audioSizes = QVector<qint64>(ranges.size(), 0);
                 }
                 m_arrival.done();
                 if (m_arrival.takeFinished())
                     startNext();
                 else
                     pumpArrival();
-            });
+            }, nullptr, indexEnd - indexStart + 1);
         }
     }
 }
@@ -288,7 +426,13 @@ void DownloadJob::startNext()
         return;
 
     for (DownloadTransport *t : m_pool) {
-        if (!t || t->isBusy())
+        // The busy flag is the job's (m_busy) and not the transport's: the
+        // request is POSTED to the thread of the transport, so at this moment
+        // the transport does not know yet that it is working. Asking it here
+        // would hand out the same transport twice, and the second get() aborts
+        // the first (a fragment that never answers and a counter that never
+        // comes down).
+        if (!t || m_busy.contains(t))
             continue;
 
         // The next fragment that is NOT on the disk yet. The ones that ARE
@@ -366,9 +510,10 @@ void DownloadJob::startNext()
         }
         QFile *const filePtr = file;
         const QString url = isVideo ? m_plan.video.url : m_plan.audio.url;
-        t->get(QUrl(url), range.start, range.end,
-               DownloadTransport::userAgent(),
-               [this, track, index, filePtr](const DownloadTransport::Response &r) {
+        launch(t, QUrl(url), range.start, range.end,
+               [this, track, index, filePtr, t]
+               (const DownloadTransport::Response &r) {
+                   m_busy.remove(t);
                    --m_inFlight;
                    filePtr->close();
                    delete filePtr;

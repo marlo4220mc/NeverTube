@@ -1,14 +1,16 @@
 #pragma once
 
 #include <QObject>
+#include <QSet>
 #include <QString>
 #include <QHash>
 #include <QVector>
 
 #include "arrival_gate.h"
+#include "download_transport.h"
 #include "segment_plan.h"
 
-class DownloadTransport;
+class QThread;
 
 namespace dl {
 
@@ -67,6 +69,12 @@ public:
     // answer at all, and the whole download used to fail for ONE of them.
     static constexpr int kFragmentRetries = 3;
 
+    // The same for the two requests of the arrival phase (the init segment and
+    // the index). It is NOT cosmetic: without the index the plan has no
+    // fragments and the download ended up reporting "done" a file of 891
+    // bytes (the init only), and without the init the file has no header.
+    static constexpr int kArrivalRetries = 3;
+
     // Where the file is written.
     QString outputPath() const { return m_outputPath; }
 
@@ -97,6 +105,14 @@ private:
     // cannot be reused: DownloadTransport::get() aborts what is in flight,
     // and the request that was aborted never answers.
     DownloadTransport *takeFreeTransport();
+    // Sends a request to the WORKER thread of the transports (they live
+    // there: the socket, the TLS and the buffers are theirs) and marks the
+    // transport as busy until its answer comes back.
+    void launch(DownloadTransport *t, const QUrl &url, qint64 rangeStart,
+                qint64 rangeEnd, DownloadTransport::DoneFn done,
+                DownloadTransport::ProgressFn progress, qint64 expectedBytes);
+    // Aborts and destroys the transports IN THEIR OWN thread and stops it.
+    void shutdownTransportPool();
     // Fetches the index (the sidx) of a track and the fragments it says.
     void fetchTrack(const QString &track, const Track &t);
     // Launches the requests of the arrival phase that are waiting for a free
@@ -109,9 +125,18 @@ private:
         QString track;
         bool isInit = true;   // false = the index
         qint64 indexStart = 0;
+        // How many times this request was asked already. The server sometimes
+        // answers NOTHING to the first requests of a download (measured: zero
+        // bytes in 12 s), so they are asked again.
+        int tries = 0;
     };
     QVector<ArrivalTask> m_arrivalQueue;
     void onIndex(const QString &track, const QVector<Range> &ranges);
+    // A request of the arrival phase failed. It is asked again (up to
+    // kArrivalRetries) and, when the tries run out, the download FAILS: it is
+    // not possible to build the file without the init segment or the index.
+    void onArrivalFailed(const ArrivalTask &task,
+                         const DownloadTransport::Response &r);
     void startNext();
     void onFragmentDone(const QString &track, int index, qint64 size);
     bool writeFile(const QString &path, const QByteArray &data);
@@ -133,6 +158,14 @@ private:
     QString m_tempDir;
 
     QVector<DownloadTransport *> m_pool;
+    // The transports that are downloading something RIGHT NOW. It is the
+    // job's (not the transport's flag) because the transport writes its state
+    // in the worker thread and this one is read from the thread of the job.
+    QSet<DownloadTransport *> m_busy;
+    // The thread of the transports and the object that lives in it (it is
+    // the context used to run the cleanup INSIDE that thread).
+    QThread *m_thread = nullptr;
+    QObject *m_home = nullptr;
     QVector<bool> m_videoDone;
     QVector<bool> m_audioDone;
     QVector<qint64> m_videoSizes;

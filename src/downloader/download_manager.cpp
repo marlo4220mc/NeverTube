@@ -383,8 +383,11 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
     // The number of connections of the setting of Ajustes.
     m_job->setConcurrency(m_concurrency);
     m_lastUiUpdateMs = 0;
+    m_lastSaveMs = 0;
     connect(m_job, &DownloadJob::progressChanged, this,
             [this, videoId](qint64 done, qint64 total) {
+        // The save is throttled inside (kSaveEveryMs): this signal arrives
+        // with every chunk of ~64 KB.
         saveProgress();
         emit progressChanged(videoId, done, total);
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -394,9 +397,9 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
         }
     });
     // The indexes of the fragments that are already on disk: they are what
-    // the resume reads.
+    // the resume reads, so this one is saved at once.
     connect(m_job, &DownloadJob::segmentDone, this,
-            [this, videoId](int) { saveProgress(); });
+            [this, videoId](int) { saveProgress(true); });
     connect(m_job, &DownloadJob::finished, this,
             [this, videoId](const QString &path) {
         if (m_repo) {
@@ -464,10 +467,16 @@ void DownloadManager::buildPlan()
     onAdaptiveFormats(m_currentId, m_adaptiveFormats);
 }
 
-void DownloadManager::saveProgress()
+void DownloadManager::saveProgress(bool force)
 {
     if (!m_repo || !m_job || m_currentId.isEmpty())
         return;
+    // The throttle: the job reports progress on every ~64 KB chunk, and each
+    // save is a SELECT plus an INSERT with its commit. See kSaveEveryMs.
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (!force && m_lastSaveMs != 0 && nowMs - m_lastSaveMs < kSaveEveryMs)
+        return;
+    m_lastSaveMs = nowMs;
     DownloadInfo info;
     if (!m_repo->get(m_currentId, info))
         return;

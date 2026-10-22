@@ -68,9 +68,28 @@ public:
     explicit DownloadTransport(QObject *parent = nullptr);
     ~DownloadTransport() override;
 
+    // The object in whose thread the callbacks (done/progress) run.
+    //
+    // The transport LIVES in a worker thread: that is where the socket, the
+    // TLS and the buffers are handled, because doing that on the thread of
+    // the interface takes the frames away from the player (measured: with 8
+    // connections the main thread was decrypting and copying ~30 MB/s while
+    // it had to paint).
+    //
+    // The callbacks, though, touch the state of the job (the counters, the
+    // file of the fragment, the queue of the next fragments), which is the
+    // job's and belongs to the thread of the interface: with this context
+    // they are POSTED there instead of being called from the worker, so the
+    // order is kept and nothing is touched from two threads.
+    //
+    // Null = the callbacks run in the thread of the transport (what the
+    // selftests and a synchronous use want).
+    void setCallbackContext(QObject *context) { m_context = context; }
+
     // Starts a GET of an absolute https URL. The callback runs in the thread
-    // of this object (the main one). Only one request per object at a time:
-    // the pool is made of N objects, one per connection.
+    // of setCallbackContext() (or of this object when it is not set). Only
+    // one request per object at a time: the pool is made of N objects, one
+    // per connection.
     //
     // rangeStart/rangeEnd are inclusive byte offsets, or -1 for a whole
     // resource. A ranged request answers 206 with a Content-Range header.
@@ -84,6 +103,9 @@ public:
     // Aborts the request in progress (if any). The callback is NOT called.
     void abort();
 
+    // Only valid INSIDE the thread of the transport: it is written by get()
+    // and by the answer of the socket. The job keeps its own set (m_busy),
+    // because it decides which transport is free from another thread.
     bool isBusy() const { return m_inFlight; }
 
     // The rules of the discard of a fragment that does not advance.
@@ -101,6 +123,13 @@ public:
     static constexpr int stallTimeoutMs() { return 12000; }
     static constexpr double stallMinRatio() { return 0.10; }
 
+    // The rule itself, in one place (and testable): has the request advanced
+    // enough at the deadline not to be discarded? `received` is what arrived
+    // so far and `expected` the size of the range that was asked (0 =
+    // unknown, and then nothing is discarded: a video is never dropped by
+    // ignorance).
+    static bool stallIsEnough(qint64 received, qint64 expected);
+
     // How many connections the downloader should open at the same time.
     // The measurement behind it: the segments of the master are ~1.3 MB, and
     // with 8 in parallel the download ran at 60 MB/s against 0.37 MB/s
@@ -112,6 +141,10 @@ public:
     static QString userAgent();
 
 private:
+    // The callbacks, delivered in the thread of m_context when there is one
+    // (see setCallbackContext).
+    void deliverDone(const Response &response);
+    void deliverProgress(const QByteArray &chunk);
     void start();
     void onEncrypted();
     void onReadyRead();
@@ -144,6 +177,8 @@ private:
     QByteArray m_response;   // everything received, header included
     int m_reportedBytes = 0; // how much of the body was already reported
     QByteArray m_decoded;    // the body, without the chunk headers
+    // The object in whose thread the callbacks run (null = this thread).
+    QObject *m_context = nullptr;
     DownloadTransport::Headers m_headers;
     int m_status = 0;
     int m_headerSize = -1;

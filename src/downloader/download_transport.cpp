@@ -1,5 +1,6 @@
 #include "download_transport.h"
 
+#include "../debug.h"
 #include "../i18n.h"
 
 #include <QHostAddress>
@@ -27,11 +28,40 @@ DownloadTransport::DownloadTransport(QObject *parent)
     // a timeout here would fail the whole download for a moment of slowness.
     m_timeout->setInterval(60000);
     connect(m_timeout, &QTimer::timeout, this, &DownloadTransport::onTimeout);
+
+    // m_stallTimer is NOT created, on purpose. It used to be declared and
+    // never created, so the discard of a fragment that does not advance never
+    // ran (see onStall()); it is left that way DELIBERATELY: measured, the
+    // sidx of a real video gives fragments of ~60 KB, so a download at 20 MB/s
+    // asks 300+ times per second, YouTube punishes that rate by leaving
+    // requests without an answer (0 bytes for 12 s), and discarding them made
+    // the download go from 20 MB/s to 0.9 MB/s. The fix is the SIZE of the
+    // request (merge consecutive fragments), not discarding them; when that is
+    // done, arming this is two lines (new QTimer + connect here).
+}
+
+bool DownloadTransport::stallIsEnough(qint64 received, qint64 expected)
+{
+    if (expected <= 0)
+        return true;   // no threshold to compare with: never discarded
+    return double(received) >= double(expected) * stallMinRatio();
 }
 
 DownloadTransport::~DownloadTransport()
 {
-    abort();
+    // No callback can run from a destructor: the job would be called with an
+    // object that is being destroyed.
+    m_done = nullptr;
+    m_progress = nullptr;
+    if (m_socket) {
+        // Destroyed HERE and not with deleteLater(): the thread of the
+        // transports quits right after this, and a DeferredDelete left
+        // pending would never be processed (the socket and its descriptor
+        // would leak on every stop).
+        m_socket->abort();
+        delete m_socket;
+        m_socket = nullptr;
+    }
 }
 
 // How many connections the downloader opens at the same time.
@@ -206,8 +236,12 @@ void DownloadTransport::onReadyRead()
 {
     if (!m_socket)
         return;
-    m_response += m_socket->readAll();
-    m_receivedBytes += m_socket->bytesAvailable();
+    // The count is taken from the bytes that JUST arrived: bytesAvailable()
+    // is read AFTER readAll() and it is always 0 then, so the rule of the
+    // discard saw "nothing arrived" in every request.
+    const QByteArray incoming = m_socket->readAll();
+    m_receivedBytes += incoming.size();
+    m_response += incoming;
     if (m_headerSize < 0) {
         const int headerEnd = m_response.indexOf("\r\n\r\n");
         if (headerEnd >= 0) {
@@ -228,7 +262,7 @@ void DownloadTransport::onReadyRead()
         const QByteArray chunk =
             m_response.mid(m_headerSize + m_reportedBytes);
         m_reportedBytes += chunk.size();
-        m_progress(chunk);
+        deliverProgress(chunk);
     }
 
     if (m_chunked) {
@@ -350,11 +384,13 @@ void DownloadTransport::onStall()
     if (m_finished)
         return;
     m_stallTimer->stop();
-    // Only when the size of the range is known: without it there is no
-    // threshold to compare with.
-    if (m_expectedBytes > 0
-        && m_receivedBytes * 10 >= m_expectedBytes * int(stallMinRatio()))
-        return;  // it IS advancing (slowly): it is left alone
+    // The comparison is the rule of stallIsEnough(): before it was
+    // `m_receivedBytes * 10 >= m_expectedBytes * int(stallMinRatio())`, whose
+    // right side is 0 (int(0.10) is 0), so it was true always.
+    if (stallIsEnough(m_receivedBytes, m_expectedBytes))
+        return;  // it IS advancing (slowly, but advancing): it is left alone
+    NT_DEBUG("E2E dl stall recibido=%lld esperado=%lld -> se descarta\n",
+             m_receivedBytes, m_expectedBytes);
     fail(nt::tr("error.dlStalled"));
 }
 
@@ -372,6 +408,8 @@ void DownloadTransport::finish()
     m_finished = true;
     m_inFlight = false;
     m_timeout->stop();
+    if (m_stallTimer)
+        m_stallTimer->stop();
 
     Response response;
     if (m_headerSize < 0) {
@@ -389,10 +427,46 @@ void DownloadTransport::finish()
         m_socket->deleteLater();
         m_socket = nullptr;
     }
+    // No more chunks after the end of the response.
+    m_progress = nullptr;
+    deliverDone(response);
+}
+
+// The callback runs in the thread of m_context when it is set: the job (and
+// its counters, its queue and the file of the fragment) is the job's, and it
+// belongs to the thread of the interface. The transport itself lives in a
+// worker thread, so calling it straight from here would touch the state of
+// the job from the wrong thread.
+//
+// A queued call also keeps the ORDER: the progress of a fragment is posted
+// before its done, and both go to the same object, so the file is closed
+// after every chunk was written.
+void DownloadTransport::deliverDone(const Response &response)
+{
     DoneFn done = std::move(m_done);
     m_done = nullptr;
-    if (done)
+    if (!done)
+        return;
+    if (!m_context) {
         done(response);
+        return;
+    }
+    QMetaObject::invokeMethod(m_context, [done, response]() { done(response); },
+                              Qt::QueuedConnection);
+}
+
+void DownloadTransport::deliverProgress(const QByteArray &chunk)
+{
+    if (!m_progress)
+        return;
+    if (!m_context) {
+        m_progress(chunk);
+        return;
+    }
+    ProgressFn progress = m_progress;
+    // The chunk is implicitly shared: posting it does not copy the bytes.
+    QMetaObject::invokeMethod(m_context, [progress, chunk]() { progress(chunk); },
+                              Qt::QueuedConnection);
 }
 
 void DownloadTransport::fail(const QString &reason)
@@ -402,6 +476,8 @@ void DownloadTransport::fail(const QString &reason)
     m_finished = true;
     m_inFlight = false;
     m_timeout->stop();
+    if (m_stallTimer)
+        m_stallTimer->stop();
     if (m_socket) {
         m_socket->abort();
         m_socket->deleteLater();
@@ -409,8 +485,6 @@ void DownloadTransport::fail(const QString &reason)
     }
     Response response;
     response.error = reason;
-    DoneFn done = std::move(m_done);
-    m_done = nullptr;
-    if (done)
-        done(response);
+    m_progress = nullptr;
+    deliverDone(response);
 }

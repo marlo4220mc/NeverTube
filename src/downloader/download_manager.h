@@ -133,7 +133,14 @@ private:
     void buildPlan();
     void onJobFinished(const QString &path);
     void onJobFailed(const QString &reason);
-    void saveProgress();
+    // The progress is saved at most every kSaveEveryMs. The job reports the
+    // progress on EVERY chunk that arrives (~64 KB), and writing the row to
+    // the database (a SELECT + an INSERT with a commit) per chunk is what
+    // made the interface stutter while downloading. The events that matter
+    // (a fragment done, pause, finish) force the save.
+    static constexpr int kSaveEveryMs = 700;
+    qint64 m_lastSaveMs = 0;
+    void saveProgress(bool force = false);
 
     Yt *m_yt = nullptr;
     // The window: the dialog of the download is an overlay child of it (a

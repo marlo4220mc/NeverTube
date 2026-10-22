@@ -35,6 +35,26 @@ bool downloadTransportSelfTest()
           "el minimo es una fraccion del tamano esperado (5-25%): un "
           "fragmento que avanza un poco NO se descarta");
 
+    // --- the rule itself, at the deadline ---
+    //
+    // The rule was dead in three places at once: the timer was never created,
+    // the comparison was `received * 10 >= expected * int(0.10)` (the right
+    // side is 0, so it was true always) and the counter of the received bytes
+    // was read with bytesAvailable() AFTER readAll(), so it was always 0.
+    {
+        const qint64 expected = 2 * 1024 * 1024;   // a fragment of 2 MB
+        check(!DownloadTransport::stallIsEnough(0, expected),
+              "un fragmento que no movio un byte en el plazo se descarta");
+        check(!DownloadTransport::stallIsEnough(1024 * 1024 / 8, expected),
+              "un fragmento a menos del 10% tambien se descarta");
+        check(DownloadTransport::stallIsEnough(expected / 10 + 1, expected),
+              "rozando el 10% ya cuenta como avance");
+        check(DownloadTransport::stallIsEnough(expected, expected),
+              "un fragmento completo no se descarta nunca");
+        check(DownloadTransport::stallIsEnough(0, 0),
+              "sin tamano esperado no se descarta (no se juzga por ignorancia)");
+    }
+
     // --- the rest of the transport ---
     check(!DownloadTransport::userAgent().isEmpty(),
           "el transporte tiene un user agent");
