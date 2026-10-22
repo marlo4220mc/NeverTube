@@ -32,6 +32,80 @@ constexpr qint64 kChunkBytes = 2 * 1024 * 1024;
 // cleanup. The posted work only aborts sockets and deletes objects: it does
 // not wait for the network, so this is a ceiling, not a delay.
 constexpr int kShutdownWaitMs = 2000;
+
+// The path of one fragment. It is a free function (and not the member
+// fragmentPath) because the assembly runs in the FINALIZE thread, which
+// cannot read the members of the job: those belong to the thread of the
+// interface.
+QString fragmentPathIn(const QString &tempDir, const QString &track, int index)
+{
+    return tempDir + QLatin1Char('/') + track + QLatin1Char('_')
+           + QString::number(index) + QStringLiteral(".part");
+}
+
+// Writes the resource: the init segment first (it is the header of the file)
+// and then the fragments IN ORDER (the order is what makes it a playable
+// stream).
+//
+// It runs in the FINALIZE thread: reading ~1 GB of fragments and writing them
+// again from the thread of the interface is what froze the app for 20.8 s
+// when a download ended (measured, a 58 minute video at 1080p).
+bool assembleTrackFiles(const QString &tempDir, const QString &path,
+                        const QString &track, const QVector<Range> &ranges,
+                        const QString &initPath)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+    QFile init(initPath);
+    if (init.exists() && init.open(QIODevice::ReadOnly)) {
+        while (!init.atEnd())
+            file.write(init.read(256 * 1024));
+        init.close();
+    }
+    for (int i = 0; i < ranges.size(); ++i) {
+        QFile fragment(fragmentPathIn(tempDir, track, i));
+        if (!fragment.exists())
+            continue;
+        if (!fragment.open(QIODevice::ReadOnly)) {
+            file.close();
+            return false;
+        }
+        while (!fragment.atEnd())
+            file.write(fragment.read(256 * 1024));
+        fragment.close();
+    }
+    file.close();
+    return true;
+}
+
+// What the FINALIZE thread needs to do its work. It is a copy (and not a
+// pointer to the job): the thread never reads the members of the job, which
+// the thread of the interface keeps touching.
+struct FinalizeInput
+{
+    QString tempDir;
+    QString videoPath;
+    QString audioPath;
+    QString videoInitPath;
+    QString audioInitPath;
+    QString outputPath;
+    QVector<Range> videoRanges;
+    QVector<Range> audioRanges;
+    bool hasAudio = false;
+    bool audioOnly = false;
+    bool keepPartials = false;
+};
+
+// What it returns. `stage` says WHERE it failed: the two failures are
+// different messages in the page of Descargas.
+struct FinalizeResult
+{
+    bool assembled = true;   // false = the resource could not be written
+    bool ok = false;         // the mux worked and the file is there
+    QString error;
+    QString outputPath;
+};
 }
 
 DownloadJob::DownloadJob(QObject *parent)
@@ -43,6 +117,15 @@ DownloadJob::DownloadJob(QObject *parent)
 DownloadJob::~DownloadJob()
 {
     stop();
+    // The finalize thread writes the file (~1 GB): it is JOINED and not
+    // killed, because killing it in the middle would leave a half written
+    // video. It is the same wait the app did before, only it no longer
+    // freezes the interface while the download runs.
+    if (m_finalThread) {
+        m_finalThread->wait();
+        delete m_finalThread;
+        m_finalThread = nullptr;
+    }
 }
 
 void DownloadJob::setStatus(const QString &status, const QString &error)
@@ -117,6 +200,11 @@ void DownloadJob::stop()
     shutdownTransportPool();
     m_running = false;
     m_inFlight = 0;
+    // A mux in progress is NOT paused: it is writing the file and stopping it
+    // half way would leave a broken video. The state stays "muxing" and the
+    // result arrives when the thread ends.
+    if (m_muxing)
+        return;
     if (m_status == QStringLiteral("downloading")
         || m_status == QStringLiteral("muxing"))
         setStatus(QStringLiteral("paused"));
@@ -386,8 +474,7 @@ void DownloadJob::pumpArrival()
 
 QString DownloadJob::fragmentPath(const QString &track, int index) const
 {
-    return m_tempDir + QLatin1Char('/') + track + QLatin1Char('_')
-           + QString::number(index) + QStringLiteral(".part");
+    return fragmentPathIn(m_tempDir, track, index);
 }
 
 bool DownloadJob::writeFile(const QString &path, const QByteArray &data)
@@ -676,6 +763,10 @@ void DownloadJob::maybeFinishSegments()
 {
     if (!m_running || m_inFlight > 0 || m_arrival.pending() > 0)
         return;
+    // The finalize is already running (or done): the bytes are complete and
+    // the assembly must not be started twice.
+    if (m_muxing)
+        return;
 
     for (int i = 0; i < m_videoDone.size(); ++i)
         if (!m_videoDone.at(i))
@@ -689,71 +780,129 @@ void DownloadJob::maybeFinishSegments()
     m_bytesTotal = m_bytesDone;
     emit progressChanged(m_bytesDone, m_bytesTotal);
 
-    if (!assembleTrack(m_videoPath, QStringLiteral("video"), m_videoRanges,
-                       m_videoInitPath)) {
-        const QString msg = QStringLiteral("no se pudo escribir el video");
-        setStatus(QStringLiteral("error"), msg);
-        m_running = false;
-        emit failed(msg);
-        return;
-    }
-    if (m_plan.audio.valid
-        && !assembleTrack(m_audioPath, QStringLiteral("audio"), m_audioRanges,
-                          m_audioInitPath)) {
-        const QString msg = QStringLiteral("no se pudo escribir el audio");
-        setStatus(QStringLiteral("error"), msg);
-        m_running = false;
-        emit failed(msg);
-        return;
-    }
-
-    startMux();
+    startFinalize();
 }
 
-void DownloadJob::startMux()
+// The assembly (the fragments into one resource) and the mux (ffmpeg) run in
+// their OWN thread, and that is not a detail: both of them are blocking work
+// over ~1 GB and they ran in the thread of the interface. Measured on the
+// machine that reported it, when a download ended the app froze 20.8 s
+// (zero position ticks, zero repaints) and the player stayed frozen after the
+// last byte had arrived, which is exactly what the report said.
+//
+// The mux is `ffmpeg -c copy` and it waits for it with waitForFinished, so it
+// cannot be made asynchronous in place: it has to leave this thread.
+void DownloadJob::startFinalize()
 {
     m_muxing = true;
     setStatus(QStringLiteral("muxing"));
 
-    const QString ffmpeg = findFfmpeg();
-    if (ffmpeg.isEmpty()) {
-        // The fragments are already on the disk: the mux can be retried
-        // later when an ffmpeg shows up. The download is NOT lost.
-        const QString msg = nt::tr("error.dlFfmpegMissing");
-        setStatus(QStringLiteral("error"), msg);
-        m_running = false;
-        emit failed(msg);
-        return;
+    FinalizeInput in;
+    in.tempDir = m_tempDir;
+    in.videoPath = m_videoPath;
+    in.audioPath = m_audioPath;
+    in.videoInitPath = m_videoInitPath;
+    in.audioInitPath = m_audioInitPath;
+    in.outputPath = m_outputPath;
+    in.videoRanges = m_videoRanges;
+    in.audioRanges = m_audioRanges;
+    in.hasAudio = m_plan.audio.valid;
+    in.audioOnly = m_kind == dl::DownloadKind::Audio;
+    in.keepPartials = qEnvironmentVariableIsSet("NEVERTUBE_KEEP_PARTIALS");
+
+    // The thread is detached from the job's lifetime of the members: it only
+    // reads the copy `in` and, when it ends, it posts the result back HERE
+    // (the state, the signals and the repository are the thread of the
+    // interface's).
+    QThread *thread = QThread::create([this, in]() {
+        FinalizeResult r;
+        r.outputPath = in.outputPath;
+
+        if (!in.audioOnly
+            && !assembleTrackFiles(in.tempDir, in.videoPath,
+                                   QStringLiteral("video"), in.videoRanges,
+                                   in.videoInitPath)) {
+            r.assembled = false;
+            r.error = QStringLiteral("no se pudo escribir el video");
+            r.outputPath.clear();
+        } else if (!in.audioOnly && in.hasAudio
+                   && !assembleTrackFiles(in.tempDir, in.audioPath,
+                                          QStringLiteral("audio"), in.audioRanges,
+                                          in.audioInitPath)) {
+            r.assembled = false;
+            r.error = QStringLiteral("no se pudo escribir el audio");
+            r.outputPath.clear();
+        } else {
+            const QString ffmpeg = findFfmpeg();
+            if (ffmpeg.isEmpty()) {
+                // The fragments are already on the disk: the mux can be
+                // retried later when an ffmpeg shows up. The download is NOT
+                // lost.
+                r.error = nt::tr("error.dlFfmpegMissing");
+                r.outputPath.clear();
+            } else {
+                MuxResult m;
+                if (in.audioOnly)
+                    m = convertToMp3(in.audioPath, in.outputPath, ffmpeg);
+                else
+                    m = muxToMp4(in.videoPath, in.audioPath, in.outputPath, ffmpeg);
+                r.ok = m.ok;
+                r.error = m.error;
+                // The name of the file can change (the audio falls back to an
+                // M4A when the ffmpeg has no mp3 encoder).
+                if (m.ok && !m.outputPath.isEmpty())
+                    r.outputPath = m.outputPath;
+            }
+        }
+
+        // The cleanup of the partials is file work over ~1 GB too: it stays in
+        // this thread.
+        if (r.ok && !in.keepPartials) {
+            QFile::remove(in.videoPath);
+            QFile::remove(in.audioPath);
+            QDir(in.tempDir).removeRecursively();
+        }
+
+        QMetaObject::invokeMethod(this, [this, r]() {
+            onFinalizeDone(r.assembled, r.ok, r.error, r.outputPath);
+        }, Qt::QueuedConnection);
+    });
+    thread->setObjectName(QStringLiteral("download-finalize"));
+    m_finalThread = thread;
+    thread->start();
+}
+
+// Back in the thread of the interface: the state, the signals and the
+// repository are only touched here.
+void DownloadJob::onFinalizeDone(bool assembled, bool ok, const QString &error,
+                                 const QString &outputPath)
+{
+    if (m_finalThread) {
+        // The thread posted this call as its last statement: the wait is
+        // immediate and the delete cannot race with it.
+        m_finalThread->wait();
+        delete m_finalThread;
+        m_finalThread = nullptr;
     }
 
-    MuxResult result;
-    if (m_kind == dl::DownloadKind::Audio) {
-        result = convertToMp3(m_audioPath, m_outputPath, ffmpeg);
-    } else {
-        result = muxToMp4(m_videoPath, m_audioPath, m_outputPath, ffmpeg);
+    if (!assembled) {
+        setStatus(QStringLiteral("error"), error);
+        m_running = false;
+        m_muxing = false;
+        emit failed(error);
+        return;
     }
-    if (!result.ok) {
+    if (!ok) {
         // The fragments are NOT deleted when the mux fails: the bytes that
         // were downloaded are still there and the mux can be retried.
-        setStatus(QStringLiteral("error"), result.error);
+        setStatus(QStringLiteral("error"), error);
         m_running = false;
-        emit failed(result.error);
+        m_muxing = false;
+        emit failed(error);
         return;
     }
-    // The name of the file can change (the audio falls back to an M4A when
-    // the ffmpeg has no mp3 encoder): the one that was really written is
-    // the one that is moved and the one that is announced.
-    if (!result.outputPath.isEmpty() && result.outputPath != m_outputPath)
-        m_outputPath = result.outputPath;
-
-    // The mux worked: the fragments are not needed any more. They are the
-    // same size as the file, so leaving them would double what a download
-    // takes on the disk.
-    if (!qEnvironmentVariableIsSet("NEVERTUBE_KEEP_PARTIALS")) {
-        QFile::remove(m_videoPath);
-        QFile::remove(m_audioPath);
-        QDir(m_tempDir).removeRecursively();
-    }
+    if (!outputPath.isEmpty() && outputPath != m_outputPath)
+        m_outputPath = outputPath;
 
     m_running = false;
     m_muxing = false;

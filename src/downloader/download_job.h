@@ -147,7 +147,13 @@ private:
     bool assembleTrack(const QString &path, const QString &track,
                        const QVector<Range> &ranges, const QString &initPath);
     void maybeFinishSegments();
-    void startMux();
+    // The assembly of the tracks and the mux, in their OWN thread (they are
+    // blocking work over ~1 GB: in the thread of the interface they froze the
+    // app when a download ended).
+    void startFinalize();
+    // The result of that thread, back in the thread of the interface.
+    void onFinalizeDone(bool assembled, bool ok, const QString &error,
+                        const QString &outputPath);
     void sampleSpeed();
     qint64 bytesOnDisk() const;
     void setStatus(const QString &status, const QString &error = QString());
@@ -166,6 +172,10 @@ private:
     // the context used to run the cleanup INSIDE that thread).
     QThread *m_thread = nullptr;
     QObject *m_home = nullptr;
+    // The thread of the FINALIZE phase (the assembly and the mux). It is
+    // separate from the pool: a pause must not interrupt a mux that is
+    // writing the file.
+    QThread *m_finalThread = nullptr;
     QVector<bool> m_videoDone;
     QVector<bool> m_audioDone;
     QVector<qint64> m_videoSizes;
