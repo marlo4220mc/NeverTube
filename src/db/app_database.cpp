@@ -295,7 +295,7 @@ void AppDatabase::createSchema(QSqlDatabase &db)
         "  value TEXT NOT NULL"
         ")"));
     // Persistent per-section Home cache (smart refresh): only NETWORK sections
-    // are stored (recommended/feed/trending). Video metadata reuses the
+    // are stored (recommended/feed). Video metadata reuses the
     // "videos" table (VideoCacheRepo): here only ordered ids + the moment they
     // were saved (to decide the refresh after a restart). Continue watching is
     // derived from history and Discover from the saved radios, so neither of

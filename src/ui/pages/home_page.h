@@ -29,15 +29,14 @@ class Yt;
 //   3. ✨ Recomendado YouTube   : browse FEwhat_to_watch VISIONOS (≤3×8, TTL 60 min)
 //   4. 🎲 Descubre             : ≤5 videos from SAVED radios (1-2 per radio,
 //                                persistent SQLite source, TTL 60 min)
-//   5. 🔥 Tendencias           : ≤8, trending via Innertube (TTL 2 h)
 // In-memory cache with TTL: on entering Home the cached content is shown right
 // away and if it expired it is refreshed ONCE in the background (single-flight,
 // no polling). If the update fails or returns empty, the previous cached
 // section is KEPT (memory and UI; it is neither hidden nor replaced by empty,
-// nor is fetched_at refreshed). The subscription feed and the trends (Innertube)
-// never disappear: if those sections end up empty after everything fails, what
-// is persisted in home_cache is kept. What is persisted in the DB is replaced
-// only when a VALID network response arrives (never on failure).
+// nor is fetched_at refreshed). The subscription feed never disappears: if that
+// section ends up empty after everything fails, what is persisted in
+// home_cache is kept. What is persisted in the DB is replaced only when a VALID
+// network response arrives (never on failure).
 class HomePage : public QWidget
 {
     Q_OBJECT
@@ -89,7 +88,6 @@ protected:
     void resizeEvent(QResizeEvent *event) override;
 
 private slots:
-    void onTrending(const QVector<VideoInfo> &videos);
     void onChannelVideos(const QVector<VideoInfo> &videos);
     void onFeedDone();
     void onHomeReady(const QVector<VideoInfo> &videos);
@@ -137,8 +135,8 @@ private:
     void showDiscover();
     void refreshBusy();
     void adjustGridHeight(VideoListView *grid);
-    // Recomputes the height of the section grids (continue/feed/Recomendado/
-    // Tendencias). The height is derived from the grid's real width, so the
+    // Recomputes the height of the section grids (continue/feed/Recomendado).
+    // The height is derived from the grid's real width, so the
     // sections fit their content and leave no vertical gap between one block
     // and the next.
     void applyGridSizes();
@@ -179,8 +177,6 @@ private:
     QLabel *m_discTitle;
     QPushButton *m_discMoreBtn;
     VideoListView *m_discGrid;
-    QLabel *m_trendTitle;
-    VideoListView *m_trendGrid;
     // Videos per row chosen by the user (4/5/6). applyGridSizes() applies the
     // width cap to them before fixing the size of the grids.
     int m_cellColumns = 5;
@@ -213,15 +209,12 @@ private:
     QStringList m_discoverSeeds;
     QSet<QString> m_discoverTried;
     QString m_discoverSeedId;
-    QVector<VideoInfo> m_trending;
-    qint64 m_trendFetchedAt = 0;
 
     QStringList m_pendingChannels;
     int m_pendingIdx = 0;
     QHash<QString, QString> m_channelNames;
     bool m_feedBusy = false;
     bool m_homeBusy = false;
-    bool m_trendBusy = false;
     QString m_currentVideoId;
     bool m_miniVisible = false;
     QVBoxLayout *m_bodyLayout = nullptr;

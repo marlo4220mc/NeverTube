@@ -267,19 +267,19 @@ bool databaseSelfTest(const QString &dbPath)
     ok &= yes(homeCache.saveSection(QStringLiteral("recommended"), secIds2, 2222),
               "home cache replace section");
     ok &= yes(homeCache.sectionVideoIds(QStringLiteral("recommended")) == secIds2
-                  && homeCache.sectionVideoIds(QStringLiteral("trending")).isEmpty(),
+                  && homeCache.sectionVideoIds(QStringLiteral("test")).isEmpty(),
               "home cache replaced (no merge, no leak to other sections)");
     ok &= yes(homeCache.sectionFetchedAt(QStringLiteral("recommended")) == 2222,
               "home cache replaced fetchedAt");
     // Sections are independent of one another.
-    ok &= yes(homeCache.saveSection(QStringLiteral("trending"),
+    ok &= yes(homeCache.saveSection(QStringLiteral("test"),
                                     QStringList{QLatin1String("vidX")}, 3333),
               "home cache second section");
     ok &= yes(homeCache.sectionVideoIds(QStringLiteral("recommended")) == secIds2
-                  && homeCache.sectionFetchedAt(QStringLiteral("trending")) == 3333,
+                  && homeCache.sectionFetchedAt(QStringLiteral("test")) == 3333,
               "home cache sections independent");
-    ok &= yes(homeCache.clearSection(QStringLiteral("trending"))
-                  && homeCache.sectionVideoIds(QStringLiteral("trending")).isEmpty(),
+    ok &= yes(homeCache.clearSection(QStringLiteral("test"))
+                  && homeCache.sectionVideoIds(QStringLiteral("test")).isEmpty(),
               "home cache clear section");
 
     // Home reconstruction after a restart (fresh install included):
