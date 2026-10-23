@@ -60,6 +60,10 @@ endif()
 
 add_executable(nevertube_qt2
   src/main.cpp
+  src/single_instance.cpp
+  src/single_instance.h
+  src/single_instance_selftest.cpp
+  src/single_instance_selftest.h
   src/models.h
   src/db/app_database.cpp
   src/db/app_database.h

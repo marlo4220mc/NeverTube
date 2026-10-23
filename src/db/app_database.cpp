@@ -67,6 +67,13 @@ bool AppDatabase::open()
             m_lastError = q.lastError().text();
         if (!q.exec(QStringLiteral("PRAGMA synchronous=NORMAL;")))
             m_lastError = q.lastError().text();
+        // Two writers of the same file (two instances of the app, a copy of the
+        // exe of another version, a database opened by a tool) got SQLITE_BUSY
+        // AT ONCE and the write was lost. With a timeout the second one waits
+        // instead of failing. SingleInstance keeps a second app from starting,
+        // but it cannot cover everything: this is the safety net.
+        if (!q.exec(QStringLiteral("PRAGMA busy_timeout=5000;")))
+            m_lastError = q.lastError().text();
     }
 
     createSchema(m_db);

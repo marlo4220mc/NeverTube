@@ -33,6 +33,8 @@
 #include "downloader/download_settings_selftest.h"
 #include "downloader/download_transport_selftest.h"
 #include "reels_filter_selftest.h"
+#include "single_instance.h"
+#include "single_instance_selftest.h"
 #include "video_variant_selftest.h"
 
 #ifdef Q_OS_WIN
@@ -472,6 +474,103 @@ static bool gridGeometrySelfTest()
 }
 
 
+namespace {
+
+// The command line applied to the window.
+//
+// It is a function and not a block inside main() because the SAME arguments
+// arrive from another process when there is already an instance running (see
+// SingleInstance): a link opened while the app runs has to end up in the window
+// that is already there, with the meaning it has when it is typed here.
+void applyArgs(MainWindow &window, const QStringList &args)
+{
+    for (int i = 1; i < args.size(); ++i) {
+        const QString arg = args.at(i);
+        if (arg == QLatin1String("--search") && i + 1 < args.size()) {
+            const QString query = args.at(++i);
+            QTimer::singleShot(400, &window, [&window, query]() {
+                window.searchFor(query);
+            });
+        } else if (arg == QLatin1String("--channel") && i + 1 < args.size()) {
+            const QString channelId = args.at(++i);
+            QTimer::singleShot(500, &window, [&window, channelId]() {
+                window.openChannel(channelId);
+            });
+        } else if (arg == QLatin1String("--pause-download")
+                   && i + 1 < args.size()) {
+            // Pauses the download in progress (how the downloader is driven
+            // from the command line, like --download).
+            const QString videoId = args.at(++i);
+            QTimer::singleShot(600, &window, [&window, videoId]() {
+                window.pauseDownload(videoId);
+            });
+        } else if (arg == QLatin1String("--resume-download")
+                   && i + 1 < args.size()) {
+            // Continues a paused download.
+            const QString videoId = args.at(++i);
+            QTimer::singleShot(600, &window, [&window, videoId]() {
+                window.resumeDownload(videoId);
+            });
+        } else if (arg == QLatin1String("--download")
+                   && i + 1 < args.size()) {
+            // Queues the download of a video without touching the UI: it
+            // is how the downloader is driven from the command line.
+            const QString videoId = args.at(++i);
+            // The options of the dialog, so the download can be driven
+            // without it: --download <id> [height] [audio]
+            int height = 0;
+            bool audioOnly = false;
+            if (i + 1 < args.size()) {
+                const QString next = args.at(i + 1);
+                if (next == QLatin1String("audio")) {
+                    audioOnly = true;
+                    ++i;
+                } else {
+                    bool ok = false;
+                    const int h = next.toInt(&ok);
+                    if (ok && h > 0) {
+                        height = h;
+                        ++i;
+                    }
+                }
+            }
+            QTimer::singleShot(600, &window, [&window, videoId, height, audioOnly]() {
+                window.downloadVideo(videoId, height, audioOnly);
+            });
+        } else if (arg == QLatin1String("--play-local")
+                   && i + 1 < args.size()) {
+            // Plays a local file (a download): how the button of the
+            // Downloads page is tested.
+            const QString path = args.at(++i);
+            QTimer::singleShot(600, &window, [&window, path]() {
+                window.playLocal(path);
+            });
+        } else if (arg == QLatin1String("--downloads")) {
+            QTimer::singleShot(500, &window, [&window]() {
+                window.openDownloads();
+            });
+        } else if (arg == QLatin1String("--library")) {
+            QTimer::singleShot(500, &window, [&window]() {
+                window.openLibrary();
+            });
+        } else if (arg == QLatin1String("--playlist") && i + 1 < args.size()) {
+            const QString playlistId = args.at(++i);
+            QTimer::singleShot(500, &window, [&window, playlistId]() {
+                window.openPlaylist(playlistId,
+                                    QStringLiteral("Mi playlist de demo"));
+            });
+        } else if (arg.startsWith(QLatin1String("http"))) {
+            const QString url = arg;
+            QTimer::singleShot(500, &window, [&window, url]() {
+                window.playVideo(url);
+            });
+        }
+    }
+}
+
+} // namespace
+
+
 int main(int argc, char *argv[])
 {
 #ifdef Q_OS_WIN
@@ -729,6 +828,13 @@ int main(int argc, char *argv[])
         return downloadFolderSelfTest() ? 0 : 1;
     }
 
+    if (args.contains(QLatin1String("--selftest-single-instance"))) {
+        // Offline: two objects of this same process with the same name. The
+        // second one must NOT take the name and its arguments must arrive at
+        // the first one (a socket, no second process: nothing to wait for).
+        return singleInstanceSelfTest() ? 0 : 1;
+    }
+
     if (args.contains(QLatin1String("--selftest-reels"))) {
         // Offline: the filter of the Shorts (the vertical videos) is a pure
         // function of the list.
@@ -911,91 +1017,29 @@ int main(int argc, char *argv[])
         return ok ? 0 : 1;
     }
 
+    // ONE instance per user: a second process hands its arguments over and
+    // exits (see SingleInstance). It is HERE and not before the selftests: a
+    // test run must never talk to the app of the user, nor be refused because
+    // the app is open.
+    SingleInstance instance(SingleInstance::name());
+    if (!instance.start(args))
+        return 0;
+
     MainWindow window;
     window.show();
-
-    for (int i = 1; i < args.size(); ++i) {
-        const QString arg = args.at(i);
-        if (arg == QLatin1String("--search") && i + 1 < args.size()) {
-            const QString query = args.at(++i);
-            QTimer::singleShot(400, &window, [&window, query]() {
-                window.searchFor(query);
-            });
-        } else if (arg == QLatin1String("--channel") && i + 1 < args.size()) {
-            const QString channelId = args.at(++i);
-            QTimer::singleShot(500, &window, [&window, channelId]() {
-                window.openChannel(channelId);
-            });
-        } else if (arg == QLatin1String("--pause-download")
-                   && i + 1 < args.size()) {
-            // Pauses the download in progress (how the downloader is driven
-            // from the command line, like --download).
-            const QString videoId = args.at(++i);
-            QTimer::singleShot(600, &window, [&window, videoId]() {
-                window.pauseDownload(videoId);
-            });
-        } else if (arg == QLatin1String("--resume-download")
-                   && i + 1 < args.size()) {
-            // Continues a paused download.
-            const QString videoId = args.at(++i);
-            QTimer::singleShot(600, &window, [&window, videoId]() {
-                window.resumeDownload(videoId);
-            });
-        } else if (arg == QLatin1String("--download")
-                   && i + 1 < args.size()) {
-            // Queues the download of a video without touching the UI: it
-            // is how the downloader is driven from the command line.
-            const QString videoId = args.at(++i);
-            // The options of the dialog, so the download can be driven
-            // without it: --download <id> [height] [audio]
-            int height = 0;
-            bool audioOnly = false;
-            if (i + 1 < args.size()) {
-                const QString next = args.at(i + 1);
-                if (next == QLatin1String("audio")) {
-                    audioOnly = true;
-                    ++i;
-                } else {
-                    bool ok = false;
-                    const int h = next.toInt(&ok);
-                    if (ok && h > 0) {
-                        height = h;
-                        ++i;
-                    }
-                }
-            }
-            QTimer::singleShot(600, &window, [&window, videoId, height, audioOnly]() {
-                window.downloadVideo(videoId, height, audioOnly);
-            });
-        } else if (arg == QLatin1String("--play-local")
-                   && i + 1 < args.size()) {
-            // Plays a local file (a download): how the button of the
-            // Downloads page is tested.
-            const QString path = args.at(++i);
-            QTimer::singleShot(600, &window, [&window, path]() {
-                window.playLocal(path);
-            });
-        } else if (arg == QLatin1String("--downloads")) {
-            QTimer::singleShot(500, &window, [&window]() {
-                window.openDownloads();
-            });
-        } else if (arg == QLatin1String("--library")) {
-            QTimer::singleShot(500, &window, [&window]() {
-                window.openLibrary();
-            });
-        } else if (arg == QLatin1String("--playlist") && i + 1 < args.size()) {
-            const QString playlistId = args.at(++i);
-            QTimer::singleShot(500, &window, [&window, playlistId]() {
-                window.openPlaylist(playlistId,
-                                    QStringLiteral("Mi playlist de demo"));
-            });
-        } else if (arg.startsWith(QLatin1String("http"))) {
-            const QString url = arg;
-            QTimer::singleShot(500, &window, [&window, url]() {
-                window.playVideo(url);
-            });
-        }
-    }
+    QObject::connect(&instance, &SingleInstance::argumentsReceived, &window,
+                     [&window](const QStringList &a) {
+                         // With the app already open: the window comes to the
+                         // front (which is half of what opening a link means)
+                         // and the arguments mean what they mean on the
+                         // command line.
+                         if (window.isMinimized())
+                             window.showNormal();
+                         window.raise();
+                         window.activateWindow();
+                         applyArgs(window, a);
+                     });
+    applyArgs(window, args);
 
     return app.exec();
 }
