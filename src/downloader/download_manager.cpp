@@ -62,6 +62,11 @@ DownloadManager::~DownloadManager()
 
 void DownloadManager::setPlaybackActive(bool active)
 {
+    // Kill switch, to tell "the player+download slows down" apart from "the
+    // priority change is to blame" on a machine: with this set the downloader
+    // behaves exactly as before this feature.
+    if (qEnvironmentVariableIsSet("NEVERTUBE_NO_DL_LOWPRIO"))
+        active = false;
     if (m_playbackActive == active)
         return;
     m_playbackActive = active;

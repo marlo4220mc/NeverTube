@@ -1774,6 +1774,19 @@ contention.
 - **The next lever, if priority alone is not enough**, is the concurrency, and
   only under measured pressure (CPU high with playback + download), never by
   default: the aim is not to punish a PC that can do both.
+- **Kill switch for the measurement**: `NEVERTUBE_NO_DL_LOWPRIO=1` makes the
+  downloader ignore the playback state entirely (it behaves exactly as before
+  this feature). It exists so a report of "player + download is slow" can be
+  told apart from "the priority change is to blame" on the machine that
+  reports it, instead of guessing.
+- **A gotcha this already produced**: ANGLE was made the default on x64 in the
+  same batch, and it looked harmless for a while because the D3D shader
+  compiler was reaching the app with the WRONG NAME: the startup died before
+  ANGLE could run, so the "it works" of the first test was the default OpenGL.
+  With the DLL fixed, ANGLE really activated and **the player + download went
+  unresponsive** on the Lenovo. It is back to opt-in (`NEVERTUBE_ANGLE=1`),
+  which is what this document always said. Lesson: a feature that cannot run
+  because of a missing file is NOT a feature that works.
 
 ## AV1 over HLS (synthetic)
 
