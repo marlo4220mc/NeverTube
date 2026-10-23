@@ -115,7 +115,8 @@ private:
     // transport as busy until its answer comes back.
     void launch(DownloadTransport *t, const QUrl &url, qint64 rangeStart,
                 qint64 rangeEnd, DownloadTransport::DoneFn done,
-                DownloadTransport::ProgressFn progress, qint64 expectedBytes);
+                DownloadTransport::ProgressFn progress, qint64 expectedBytes,
+                const QString &sinkPath = QString());
     // Aborts and destroys the transports IN THEIR OWN thread and stops it.
     void shutdownTransportPool();
     // Fetches the index (the sidx) of a track and the fragments it says.
@@ -159,7 +160,6 @@ private:
     void onFinalizeDone(bool assembled, bool ok, const QString &error,
                         const QString &outputPath);
     void sampleSpeed();
-    qint64 bytesOnDisk() const;
     void setStatus(const QString &status, const QString &error = QString());
 
     Plan m_plan;
@@ -190,6 +190,12 @@ private:
     // How many times each fragment has been asked (the ones that failed are
     // asked again, up to kFragmentRetries).
     QHash<int, int> m_fragmentTries;
+    // The bytes reported by the transport for the fragment that is being
+    // fetched NOW, by mark. They are what makes the bar advance without
+    // asking the disk: the old code measured EVERY fragment (QFileInfo) on
+    // every fragment that finished, which is O(n^2) stats in the thread of
+    // the interface (n = the fragments of the video, hundreds).
+    QHash<int, qint64> m_fragmentBytes;
     // The mark of a fragment (the video ones are 0, 1, 2... and the audio
     // ones are -(2), -(3)...).
     static int markOf(const QString &track, int index);

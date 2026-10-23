@@ -9,6 +9,7 @@
 
 class QSslSocket;
 class QTimer;
+class QFile;
 
 // Transport of the downloader: N SIMULTANEOUS HTTPS connections.
 //
@@ -54,16 +55,20 @@ public:
     };
 
     using DoneFn = std::function<void(const Response &)>;
-    // Called with the NEW bytes, while the response is still arriving. It is
-    // what makes the progress bar of a download MOVE: the whole response of
-    // a segment is ~1.3 MB, so waiting for it to finish would make the bar
-    // jump every 1.3 MB instead of advancing smoothly.
+    // Called with HOW MANY new bytes arrived, while the response is still
+    // coming, and NOT with the bytes themselves.
     //
-    // The chunk is the raw body (the chunked transfer is NOT decoded here:
-    // the decoding happens when the response is complete, because a chunk
-    // can be split in the middle). The bytes counted with it are therefore
-    // an approximation until the response ends, which is enough for a bar.
-    using ProgressFn = std::function<void(const QByteArray &chunk)>;
+    // It used to hand over the chunk: the job posted it to the thread of the
+    // interface and wrote it there, so the GUI thread was writing the ~45 MB/s
+    // of the .part files (plus a QFileInfo of every fragment, O(n^2)) and the
+    // player fell to 2-5 fps. The file is written HERE now (see sinkPath in
+    // get()); the interface only sees a number, which is all the bar needs.
+    //
+    // The count is of the raw body (the chunked transfer is NOT decoded here:
+    // the decoding happens when the response is complete, because a chunk can
+    // be split in the middle). It is therefore an approximation until the
+    // response ends, which is enough for a bar.
+    using ProgressFn = std::function<void(qint64 bytes)>;
 
     explicit DownloadTransport(QObject *parent = nullptr);
     ~DownloadTransport() override;
@@ -77,10 +82,12 @@ public:
     // it had to paint).
     //
     // The callbacks, though, touch the state of the job (the counters, the
-    // file of the fragment, the queue of the next fragments), which is the
-    // job's and belongs to the thread of the interface: with this context
-    // they are POSTED there instead of being called from the worker, so the
-    // order is kept and nothing is touched from two threads.
+    // queue of the next fragments), which is the job's and belongs to the
+    // thread of the interface: with this context they are POSTED there
+    // instead of being called from the worker, so the order is kept and
+    // nothing is touched from two threads. The BYTES of the fragment are the
+    // exception: they are written by the transport in its own thread (see
+    // sinkPath in get()), so they never pass through the interface.
     //
     // Null = the callbacks run in the thread of the transport (what the
     // selftests and a synchronous use want).
@@ -96,9 +103,18 @@ public:
     // `expectedBytes` is the size of the range that is asked (0 = unknown).
     // It is what the rule of the discard of a slow fragment compares with
     // (the transport knows how many bytes were asked for).
+    //
+    // `sinkPath`, when it is not empty, is the file the body is WRITTEN to:
+    // the file is opened, written and closed in the thread of the transport,
+    // which is the whole point of it. The thread of the interface must not
+    // receive the data: it is the one that paints the player, and writing the
+    // fragments there (measured: 465 files and ~1.8 GB in 40 s) took the
+    // frames away (2-5 fps) even with the sockets already in a worker thread.
+    // Empty = the bytes are only counted (the selftests and a synchronous use
+    // want that), and Response::body keeps carrying the body.
     void get(const QUrl &url, qint64 rangeStart, qint64 rangeEnd,
              const QString &ua, DoneFn done, ProgressFn progress = nullptr,
-             qint64 expectedBytes = 0);
+             qint64 expectedBytes = 0, const QString &sinkPath = QString());
 
     // Aborts the request in progress (if any). The callback is NOT called.
     void abort();
@@ -144,7 +160,12 @@ private:
     // The callbacks, delivered in the thread of m_context when there is one
     // (see setCallbackContext).
     void deliverDone(const Response &response);
-    void deliverProgress(const QByteArray &chunk);
+    void deliverProgress(qint64 bytes);
+    // The new body bytes: written to the sink in THIS thread (the thread of
+    // the transport) and only counted in the interface.
+    void deliverBody(const QByteArray &chunk);
+    bool openSink();
+    void closeSink();
     void start();
     void onEncrypted();
     void onReadyRead();
@@ -174,6 +195,16 @@ private:
     QString m_userAgent;
     DoneFn m_done;
     ProgressFn m_progress;
+    // The file of the fragment: opened, written and closed in the thread of
+    // the transport (null = the body is only counted).
+    QString m_sinkPath;
+    QFile *m_sink = nullptr;
+    // The progress is COALESCED: a request at ~45 MB/s delivers a chunk every
+    // millisecond, and posting one event per chunk to the interface is work
+    // for the interface. 100 ms (or 256 KB) is smooth for a bar and it is
+    // ~10 events per second per connection instead of ~700.
+    qint64 m_pendingProgress = 0;
+    qint64 m_lastProgressMs = 0;
     QByteArray m_response;   // everything received, header included
     int m_reportedBytes = 0; // how much of the body was already reported
     QByteArray m_decoded;    // the body, without the chunk headers
