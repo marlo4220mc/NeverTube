@@ -20,6 +20,12 @@ namespace {
 // interval is noticeable neither in CPU nor on disk. The rest of the save points (pause, video
 // change, aboutToQuit) still save instantly.
 constexpr int kPositionFlushMs = 20000;
+// Notification cadence of positionChanged for the UI (ms). The backends emit
+// the position per tick (~15/s with mpv) and every emit repaints the clocks,
+// the seek bar and the mini bar; 4/s is what YouTube shows and is below what
+// the eye can tell on a clock of minutes. m_position/m_duration keep updating
+// on every tick, so nothing that reads the state loses resolution.
+constexpr int kPositionUiMs = 250;
 // Minimum advance (ms) to treat the position to save as new. Avoids rewriting
 // the same row when the flush fires with the video stopped.
 constexpr qlonglong kPositionFlushMinDeltaMs = 2000;
@@ -337,6 +343,15 @@ void PlayerController::onPlayerPosition()
 {
     m_position = m_player->position();
     m_duration = m_player->duration();
+    // UI cadence: the backends notify the position far more often than any of
+    // the surfaces needs (measured ~15/s with mpv). Every emit refreshes two
+    // clocks, the seek bar, the live detector and the mini bar, so they are
+    // coalesced to kPositionUiMs. The state above is always up to date: only
+    // the notification is coalesced.
+    if (m_positionUiClock.isValid()
+        && m_positionUiClock.elapsed() < kPositionUiMs)
+        return;
+    m_positionUiClock.restart();
     emit positionChanged(m_position, m_duration);
 }
 

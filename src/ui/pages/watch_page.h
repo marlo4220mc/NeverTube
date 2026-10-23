@@ -307,6 +307,13 @@ private:
     QPushButton *m_ovPlaylistBtn = nullptr;
     QPushButton *m_ovFsBtn = nullptr;
     QTimer *m_overlayTimer = nullptr;
+    // State last applied to the overlay buttons by updateOverlayIcons().
+    // That function is called from showOverlayControls(), which runs on every
+    // real mouse move over the video, so rebuilding the eight icons and
+    // setting them again repainted the whole control row for nothing when the
+    // state had not changed. -1 = never applied (or invalidated by an accent
+    // change, which re-tints the icons).
+    int m_ovIconSig = -1;
     QPoint m_lastMousePos = QPoint(-100000, -100000);
     double m_volume = 100.0;
     bool m_subsVisible = false;
