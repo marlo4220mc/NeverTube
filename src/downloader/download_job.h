@@ -6,6 +6,8 @@
 #include <QHash>
 #include <QVector>
 
+#include <atomic>
+
 #include "arrival_gate.h"
 #include "download_transport.h"
 #include "segment_plan.h"
@@ -224,7 +226,9 @@ private:
     dl::DownloadKind m_kind = dl::DownloadKind::Video;
     QString m_status;
     QString m_error;
-    bool m_playbackActive = false;
+    // Read by the pool thread and by the finalize thread while they run, so
+    // it is atomic and not a plain bool.
+    std::atomic<bool> m_playbackActive{false};
 };
 
 } // namespace dl

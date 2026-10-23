@@ -126,10 +126,13 @@ void applyThreadPriority(bool belowNormal)
 {
 #if defined(Q_OS_WIN)
     HANDLE h = GetCurrentThread();
-    if (belowNormal)
-        SetThreadPriority(h, THREAD_PRIORITY_BELOW_NORMAL);
-    else
-        SetThreadPriority(h, THREAD_PRIORITY_NORMAL);
+    const BOOL ok = SetThreadPriority(
+        h, belowNormal ? THREAD_PRIORITY_BELOW_NORMAL : THREAD_PRIORITY_NORMAL);
+    // The probe of the scheduling: with NEVERTUBE_DEBUG=1 the log says which
+    // priority the thread of the downloads gets, so "the FPS did not come
+    // back" can be told apart from "the priority was never applied".
+    NT_DEBUG("E2E dlThreadPriority below=%d ok=%d\n", belowNormal ? 1 : 0,
+             ok ? 1 : 0);
 #elif defined(Q_OS_UNIX)
     errno = 0;
     int nic = getpriority(PRIO_PROCESS, 0);
@@ -142,6 +145,10 @@ void applyThreadPriority(bool belowNormal)
         if (nic > 0)
             setpriority(PRIO_PROCESS, 0, 0);
     }
+    NT_DEBUG("E2E dlThreadPriority below=%d nice=%d\n", belowNormal ? 1 : 0,
+             getpriority(PRIO_PROCESS, 0));
+#else
+    Q_UNUSED(belowNormal);
 #endif
 }
 
@@ -163,7 +170,19 @@ DownloadJob::~DownloadJob()
 
 void DownloadJob::setPlaybackActive(bool active)
 {
-    m_playbackActive = active;
+    if (m_playbackActive.exchange(active) == active)
+        return;
+    // The priority has to change in the THREAD THAT OWNS IT, and it has to
+    // change WHILE it runs: a download started with no video playing keeps
+    // its workers in NORMAL until the video starts, and that is exactly the
+    // case where the frames drop (measured on the Lenovo: the FPS fell from
+    // the FIRST second of the download, before any fragment was muxed). The
+    // functor is posted to the thread of the transports and runs there.
+    if (!m_home || !m_thread || !m_thread->isRunning())
+        return;
+    QMetaObject::invokeMethod(
+        m_home, [this]() { applyThreadPriority(m_playbackActive.load()); },
+        Qt::QueuedConnection);
 }
 
 void DownloadJob::setStatus(const QString &status, const QString &error)
@@ -262,7 +281,7 @@ void DownloadJob::buildTransportPool()
     // touched by the thread of the interface.
     m_thread = new QThread();
     m_thread->setObjectName(QStringLiteral("download-transport"));
-    const bool belowNormal = m_playbackActive;
+    const bool belowNormal = m_playbackActive.load();
     connect(m_thread, &QThread::started, this, [belowNormal]() {
         applyThreadPriority(belowNormal);
     }, Qt::DirectConnection);
@@ -825,7 +844,7 @@ void DownloadJob::startFinalize()
     // (the state, the signals and the repository are the thread of the
     // interface's).
     QThread *thread = QThread::create([this, in]() {
-        applyThreadPriority(m_playbackActive);
+        applyThreadPriority(m_playbackActive.load());
         FinalizeResult r;
         r.outputPath = in.outputPath;
 
@@ -879,9 +898,6 @@ void DownloadJob::startFinalize()
         }, Qt::QueuedConnection);
     });
     thread->setObjectName(QStringLiteral("download-finalize"));
-    connect(thread, &QThread::started, this, [this]() {
-        applyThreadPriority(m_playbackActive);
-    }, Qt::DirectConnection);
     m_finalThread = thread;
     thread->start();
 }

@@ -939,7 +939,7 @@ MainWindow::MainWindow(QWidget *parent)
     goHome();
     m_home->reload();
     connect(&m_player, &PlayerController::phaseChanged, this,
-            [this](const QString &phase) {
+            [this](const QString &) {
                 updateMiniPlayer();
                 updateDownloadPlaybackState();
             });
@@ -1571,11 +1571,17 @@ void MainWindow::updateDownloadPlaybackState()
 {
     if (!m_downloadManager)
         return;
-    const bool playing = m_player.isActive() && !m_player.isPaused()
-                         && !isFullScreen();
-    const bool showMini = m_miniBar && m_miniBar->isVisible();
-    const bool onWatch = m_pages && m_pages->currentWidget() == m_watch;
-    const bool realtime = playing && (onWatch || showMini);
+    // Real-time playback is what the downloader must yield to: a video that is
+    // PLAYING (Player page, full screen or the mini player, the three of them
+    // paint frames continuously) or LOADING (the moment the stream is opened,
+    // the most sensitive one). A paused, stopped or failed video does not need
+    // CPU, so the downloads go back to full speed by themselves. This is the
+    // whole recoverability of the scheduling: no state is saved anywhere, it
+    // is derived from the player on every phase change.
+    const QString phase = m_player.phase();
+    const bool realtime = m_player.isActive()
+                          && (phase == QLatin1String("playing")
+                              || phase == QLatin1String("loading"));
     m_downloadManager->setPlaybackActive(realtime);
 }
 

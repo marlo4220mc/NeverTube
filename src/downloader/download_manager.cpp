@@ -65,6 +65,8 @@ void DownloadManager::setPlaybackActive(bool active)
     if (m_playbackActive == active)
         return;
     m_playbackActive = active;
+    NT_DEBUG("E2E dlPlaybackActive=%d job=%d\n", active ? 1 : 0,
+             m_job ? 1 : 0);
     // Priority is applied per-worker when the transport thread starts; keep it
     // in sync for any job created later.
     if (m_job) {
