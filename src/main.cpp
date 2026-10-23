@@ -451,27 +451,31 @@ int main(int argc, char *argv[])
 #endif
 #ifdef Q_OS_WIN
 #ifndef NEVERTUBE_NO_MPV
-    // ANGLE experiment (Windows x64, OPT-IN with NEVERTUBE_ANGLE=1): force
-    // the widget's GL context to ANGLE (OpenGL ES over D3D11) so mpv
-    // can decode with zero-copy. With desktop GL (the default on the test
-    // machine — mpv logs "Detected desktop OpenGL") mpv CANNOT import D3D11 textures
-    // and is forced to d3d11va-copy: the VRAM->RAM->GL texture copy-back is the
-    // cost of the 100% CPU on the test machine. With an ANGLE context, mpv (hwdec=auto,
-    // protected invariant intact) picks only the d3d11-egl hwdec: it decodes
-    // in D3D11 and the frame travels via EGLStream to the widget's texture without
-    // copying to CPU. mpv loads LIBEGL.DLL with the LoadLibrary search, so
-    // it uses the SAME ANGLE that Qt loads (same directory) and takes the display
-    // with eglGetCurrentDisplay() in paintGL: no handles need to be passed.
-    // Windows only, and only where mpv exists (the x86/FfmpegBackend build exits via
-    // NEVERTUBE_NO_MPV; its GLES render is not prepared for ANGLE). Respect
-    // a QT_OPENGL the user has already set.
-    if (qEnvironmentVariableIsSet("NEVERTUBE_ANGLE")
-        && !qEnvironmentVariableIsSet("QT_OPENGL")) {
-        qputenv("QT_OPENGL", QByteArrayLiteral("angle"));
-        std::fprintf(stderr,
-                     "ANGLE: QT_OPENGL=angle (contexto Qt -> ANGLE/D3D11) por "
-                     "NEVERTUBE_ANGLE=1; mpv debera elegir hwdec d3d11-egl "
-                     "(zero-copy)\n");
+    // ANGLE: prefer zero-copy (d3d11-egl) on x64 to avoid d3d11va-copy.
+    // By default on x64 we force Qt to ANGLE unless the user opts out with
+    // NEVERTUBE_NO_ANGLE=1 or sets QT_OPENGL explicitly. NEVERTUBE_ANGLE=1
+    // still works for backwards compatibility. The x86/FfmpegBackend build has
+    // NEVERTUBE_NO_MPV and is not touched. mpv loads the same ANGLE DLLs that
+    // windeployqt places next to the exe.
+    if (!qEnvironmentVariableIsSet("QT_OPENGL")) {
+#if defined(_WIN64)
+        if (qEnvironmentVariableIsSet("NEVERTUBE_NO_ANGLE")) {
+            // explicit opt-out, leave default
+        } else {
+            qputenv("QT_OPENGL", QByteArrayLiteral("angle"));
+            std::fprintf(stderr,
+                         "ANGLE: QT_OPENGL=angle por defecto (x64) para usar "
+                         "hwdec d3d11-egl zero-copy. Para desactivar: "
+                         "NEVERTUBE_NO_ANGLE=1\n");
+        }
+#endif
+        if (qEnvironmentVariableIsSet("NEVERTUBE_ANGLE")) {
+            qputenv("QT_OPENGL", QByteArrayLiteral("angle"));
+            std::fprintf(stderr,
+                         "ANGLE: QT_OPENGL=angle (contexto Qt -> ANGLE/D3D11) por "
+                         "NEVERTUBE_ANGLE=1; mpv debera elegir hwdec d3d11-egl "
+                         "(zero-copy)\n");
+        }
     }
 #endif // !NEVERTUBE_NO_MPV
 #endif // Q_OS_WIN
