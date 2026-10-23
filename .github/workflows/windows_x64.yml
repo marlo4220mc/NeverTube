@@ -224,9 +224,13 @@ jobs:
           Copy-Item $exe dist\nevertube_qt2.exe
           Copy-Item (Get-ChildItem mpv-dev -Recurse -Filter libmpv-2.dll |
             Select-Object -First 1).FullName dist\
-          Copy-Item vulkan-1.dll dist\
-          Copy-Item libssl-3-x64.dll dist\
-          Copy-Item libcrypto-3-x64.dll dist\
+          # Qt with ANGLE needs the D3D shader compiler. It is shipped with the
+          # Windows SDK/VS redist in some environments but windeployqt doesn't
+          # always copy it; without it ANGLE fails to start ("Could not find
+          # D3D compiler 'd3dcompiler_47.dll'").
+          $d3d = Join-Path $env:VCToolsRedistDir 'x64\Microsoft.VC143.CRT\d3dcompiler_47.dll'
+          if (-not (Test-Path $d3d)) { $d3d = "C:\Windows\System32\d3dcompiler_47.dll" }
+          if (Test-Path $d3d) { Copy-Item $d3d dist\ } else { Write-Host "WARNING: d3dcompiler_47.dll not found" }
           # The ffmpeg of OUR build (third_party/ffmpeg-win64/, the same
           # recipe as the x86 one). It is NOT needed to play (this build
           # uses mpv): it is what the DOWNLOADER runs to join the two
