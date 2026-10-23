@@ -79,6 +79,9 @@ private:
 
     mpv_handle *m_mpv = nullptr;
     mpv_render_context *m_rctx = nullptr;
+    // DRM render node handed to the render context for the VAAPI interop
+    // (zero-copy); -1 when there is none. Closed only in shutdown().
+    int m_renderFd = -1;
     // Counter of logged render frames (every 90, as before).
     int m_logFrames = 0;
     // Hardware decoding configured ("auto"), read at startup.
