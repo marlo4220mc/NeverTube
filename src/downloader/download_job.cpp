@@ -180,8 +180,11 @@ void DownloadJob::setPlaybackActive(bool active)
     // functor is posted to the thread of the transports and runs there.
     if (!m_home || !m_thread || !m_thread->isRunning())
         return;
+    // The value goes BY VALUE: the functor does not touch the job (it could
+    // outlive it on a shutdown that goes wrong) and only needs the flag.
+    const bool belowNormal = m_playbackActive.load();
     QMetaObject::invokeMethod(
-        m_home, [this]() { applyThreadPriority(m_playbackActive.load()); },
+        m_home, [belowNormal]() { applyThreadPriority(belowNormal); },
         Qt::QueuedConnection);
 }
 
