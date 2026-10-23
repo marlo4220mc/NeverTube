@@ -72,6 +72,34 @@ void ensureConsoleAttached()
 } // namespace
 #endif // Q_OS_WIN
 
+#if defined(Q_OS_WIN) && defined(_WIN64) && !defined(NEVERTUBE_NO_MPV)
+namespace {
+// ANGLE is only useful if it can actually start: it needs its two DLLs next to
+// the exe (windeployqt deploys them) AND the D3D shader compiler, which is a
+// system DLL. Forcing QT_OPENGL=angle when one of them is missing makes Qt fail
+// to create the context and the app dies with
+// "no se encuentra d3dcompiler_47.dll" BEFORE it can show anything (reported on
+// the Lenovo x64). Probing is cheap (three LoadLibrary) and it turns a fatal
+// startup into "the app opens with the default OpenGL".
+bool angleDllsAvailable(QString *missing = nullptr)
+{
+    static const wchar_t *const kNeeded[] = {
+        L"libEGL.dll", L"libGLESv2.dll", L"d3dcompiler_47.dll",
+    };
+    for (const wchar_t *name : kNeeded) {
+        HMODULE h = LoadLibraryW(name);
+        if (!h) {
+            if (missing)
+                *missing = QString::fromWCharArray(name);
+            return false;
+        }
+        FreeLibrary(h);
+    }
+    return true;
+}
+} // namespace
+#endif
+
 // TLS SELFTEST with a REAL handshake. The old --selftest-ssl only loaded the
 // OpenSSL DLLs (supportsSsl): a backend that loads but aborts on the
 // first real use (e.g. "OpenSSL internal error, assertion failed:
@@ -457,25 +485,30 @@ int main(int argc, char *argv[])
     // still works for backwards compatibility. The x86/FfmpegBackend build has
     // NEVERTUBE_NO_MPV and is not touched. mpv loads the same ANGLE DLLs that
     // windeployqt places next to the exe.
+    //
+    // WHATEVER the mode, ANGLE is only forced when its DLLs are really there:
+    // forcing it without them does not fall back, it kills the startup with
+    // "no se encuentra d3dcompiler_47.dll" before any window exists (reported
+    // on the Lenovo x64). A machine without them opens with the default
+    // OpenGL, which is the behaviour of before and works.
     if (!qEnvironmentVariableIsSet("QT_OPENGL")) {
 #if defined(_WIN64)
-        if (qEnvironmentVariableIsSet("NEVERTUBE_NO_ANGLE")) {
-            // explicit opt-out, leave default
-        } else {
+        QString angleMissing;
+        const bool angleOk = angleDllsAvailable(&angleMissing);
+        const bool wantsAngle = !qEnvironmentVariableIsSet("NEVERTUBE_NO_ANGLE")
+                                || qEnvironmentVariableIsSet("NEVERTUBE_ANGLE");
+        if (!angleOk) {
+            std::fprintf(stderr,
+                         "ANGLE: no disponible (falta %s); se usa el OpenGL "
+                         "por defecto\n",
+                         angleMissing.toUtf8().constData());
+        } else if (wantsAngle) {
             qputenv("QT_OPENGL", QByteArrayLiteral("angle"));
             std::fprintf(stderr,
-                         "ANGLE: QT_OPENGL=angle por defecto (x64) para usar "
-                         "hwdec d3d11-egl zero-copy. Para desactivar: "
-                         "NEVERTUBE_NO_ANGLE=1\n");
+                         "ANGLE: QT_OPENGL=angle para usar hwdec d3d11-egl "
+                         "zero-copy. Para desactivar: NEVERTUBE_NO_ANGLE=1\n");
         }
 #endif
-        if (qEnvironmentVariableIsSet("NEVERTUBE_ANGLE")) {
-            qputenv("QT_OPENGL", QByteArrayLiteral("angle"));
-            std::fprintf(stderr,
-                         "ANGLE: QT_OPENGL=angle (contexto Qt -> ANGLE/D3D11) por "
-                         "NEVERTUBE_ANGLE=1; mpv debera elegir hwdec d3d11-egl "
-                         "(zero-copy)\n");
-        }
     }
 #endif // !NEVERTUBE_NO_MPV
 #endif // Q_OS_WIN
