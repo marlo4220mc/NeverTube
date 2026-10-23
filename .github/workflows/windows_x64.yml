@@ -224,6 +224,9 @@ jobs:
           Copy-Item $exe dist\nevertube_qt2.exe
           Copy-Item (Get-ChildItem mpv-dev -Recurse -Filter libmpv-2.dll |
             Select-Object -First 1).FullName dist\
+          Copy-Item vulkan-1.dll dist\
+          Copy-Item libssl-3-x64.dll dist\
+          Copy-Item libcrypto-3-x64.dll dist\
           # Qt with ANGLE needs the D3D shader compiler ("Updating
           # D3DCompiler_47.dll" already comes from windeployqt, this is the
           # belt and braces) and without it ANGLE cannot start at all.
