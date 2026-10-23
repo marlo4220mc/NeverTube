@@ -82,6 +82,9 @@ public:
     void setDirectory(const QString &dir) { m_dir = dir; }
     // The number of connections of the pool (the setting of Ajustes).
     void setConcurrency(int n) { m_concurrency = n; }
+    // When video playback is active, download transport threads run at
+    // below-normal priority so the player keeps real-time responsiveness.
+    void setPlaybackActive(bool active);
     QString directory() const { return m_dir; }
 
     // The state, in the vocabulary of the repository (pending, downloading,
@@ -221,6 +224,7 @@ private:
     dl::DownloadKind m_kind = dl::DownloadKind::Video;
     QString m_status;
     QString m_error;
+    bool m_playbackActive = false;
 };
 
 } // namespace dl

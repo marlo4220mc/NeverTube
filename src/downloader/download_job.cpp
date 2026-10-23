@@ -14,6 +14,12 @@
 #include <QThread>
 #include <QUrl>
 
+#if defined(Q_OS_WIN)
+#include <windows.h>
+#elif defined(Q_OS_UNIX)
+#include <sys/resource.h>
+#endif
+
 namespace dl {
 
 namespace {
@@ -114,6 +120,33 @@ DownloadJob::DownloadJob(QObject *parent)
 {
 }
 
+namespace {
+
+void applyThreadPriority(bool belowNormal)
+{
+#if defined(Q_OS_WIN)
+    HANDLE h = GetCurrentThread();
+    if (belowNormal)
+        SetThreadPriority(h, THREAD_PRIORITY_BELOW_NORMAL);
+    else
+        SetThreadPriority(h, THREAD_PRIORITY_NORMAL);
+#elif defined(Q_OS_UNIX)
+    errno = 0;
+    int nic = getpriority(PRIO_PROCESS, 0);
+    if (nic == -1 && errno != 0)
+        return;
+    if (belowNormal) {
+        if (nic < 10)
+            setpriority(PRIO_PROCESS, 0, 10);
+    } else {
+        if (nic > 0)
+            setpriority(PRIO_PROCESS, 0, 0);
+    }
+#endif
+}
+
+}
+
 DownloadJob::~DownloadJob()
 {
     stop();
@@ -126,6 +159,11 @@ DownloadJob::~DownloadJob()
         delete m_finalThread;
         m_finalThread = nullptr;
     }
+}
+
+void DownloadJob::setPlaybackActive(bool active)
+{
+    m_playbackActive = active;
 }
 
 void DownloadJob::setStatus(const QString &status, const QString &error)
@@ -224,6 +262,10 @@ void DownloadJob::buildTransportPool()
     // touched by the thread of the interface.
     m_thread = new QThread();
     m_thread->setObjectName(QStringLiteral("download-transport"));
+    const bool belowNormal = m_playbackActive;
+    connect(m_thread, &QThread::started, this, [belowNormal]() {
+        applyThreadPriority(belowNormal);
+    }, Qt::DirectConnection);
     m_thread->start();
     m_home = new QObject();
     m_home->moveToThread(m_thread);
@@ -783,6 +825,7 @@ void DownloadJob::startFinalize()
     // (the state, the signals and the repository are the thread of the
     // interface's).
     QThread *thread = QThread::create([this, in]() {
+        applyThreadPriority(m_playbackActive);
         FinalizeResult r;
         r.outputPath = in.outputPath;
 
@@ -836,6 +879,9 @@ void DownloadJob::startFinalize()
         }, Qt::QueuedConnection);
     });
     thread->setObjectName(QStringLiteral("download-finalize"));
+    connect(thread, &QThread::started, this, [this]() {
+        applyThreadPriority(m_playbackActive);
+    }, Qt::DirectConnection);
     m_finalThread = thread;
     thread->start();
 }

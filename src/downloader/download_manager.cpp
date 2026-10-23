@@ -16,6 +16,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <QThread>
 
 namespace dl {
 
@@ -56,6 +57,18 @@ DownloadManager::~DownloadManager()
     if (m_job) {
         m_job->stop();
         delete m_job;
+    }
+}
+
+void DownloadManager::setPlaybackActive(bool active)
+{
+    if (m_playbackActive == active)
+        return;
+    m_playbackActive = active;
+    // Priority is applied per-worker when the transport thread starts; keep it
+    // in sync for any job created later.
+    if (m_job) {
+        m_job->setPlaybackActive(m_playbackActive);
     }
 }
 
@@ -372,6 +385,7 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
     m_job->setDirectory(m_dir);
     // The number of connections of the setting of Ajustes.
     m_job->setConcurrency(m_concurrency);
+    m_job->setPlaybackActive(m_playbackActive);
     m_lastUiUpdateMs = 0;
     m_lastSaveMs = 0;
     connect(m_job, &DownloadJob::progressChanged, this,

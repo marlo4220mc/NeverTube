@@ -857,6 +857,7 @@ MainWindow::MainWindow(QWidget *parent)
                     showNormal();
                     updateMiniPlayer();
                 }
+                updateDownloadPlaybackState();
             });
     connect(m_watch, &WatchPage::channelRequested, this,
             [this](const QString &channelId, const QString &) {
@@ -924,6 +925,7 @@ MainWindow::MainWindow(QWidget *parent)
     // bar do not receive the app sheet, see WatchPage::applyAccent -- so it is
     // re-applied here, after this line, instead of in its constructor.
     m_watch->applyAccent();
+    updateDownloadPlaybackState();
     // QMainWindow's status bar shows no message at all: it is hidden so the
     // bottom navigation bar touches the window's bottom edge (without the
     // empty bordered strip that stayed below).
@@ -937,7 +939,10 @@ MainWindow::MainWindow(QWidget *parent)
     goHome();
     m_home->reload();
     connect(&m_player, &PlayerController::phaseChanged, this,
-            [this](const QString &) { updateMiniPlayer(); });
+            [this](const QString &phase) {
+                updateMiniPlayer();
+                updateDownloadPlaybackState();
+            });
     connect(&m_player, &PlayerController::phaseChanged, this,
             [this](const QString &phase) {
                 // "Generation on playback": once playback is confirmed
@@ -968,6 +973,7 @@ MainWindow::MainWindow(QWidget *parent)
                 m_miniLiveDet.reset();
                 m_miniLive = false;
                 updateMiniPlayer();
+                updateDownloadPlaybackState();
                 m_home->setCurrentVideoId(m_player.current().id);
                 // When the video changes, copy to the Home cache if needed
             });
@@ -1013,7 +1019,10 @@ MainWindow::MainWindow(QWidget *parent)
                 updateMiniTimeText();
             });
     connect(m_pages, &QStackedWidget::currentChanged, this,
-            [this](int) { updateMiniPlayer(); });
+            [this](int) {
+                updateMiniPlayer();
+                updateDownloadPlaybackState();
+            });
     connect(m_yt, &Yt::radioReady, this, &MainWindow::onRadioReadyDiscover);
     connect(m_homeThumbs, &ThumbnailCache::ready, this, [this](const QString &key) {
         const QString cur = QStringLiteral("v_%1").arg(m_player.current().id);
@@ -1558,6 +1567,18 @@ void MainWindow::setupMiniBar()
 // Mini player visibility rule: never at the same time as the Player page.
 // It is shown when leaving Player with active/paused playback and hidden when
 // going back to Player or when playback stops (isActive()==false).
+void MainWindow::updateDownloadPlaybackState()
+{
+    if (!m_downloadManager)
+        return;
+    const bool playing = m_player.isActive() && !m_player.isPaused()
+                         && !isFullScreen();
+    const bool showMini = m_miniBar && m_miniBar->isVisible();
+    const bool onWatch = m_pages && m_pages->currentWidget() == m_watch;
+    const bool realtime = playing && (onWatch || showMini);
+    m_downloadManager->setPlaybackActive(realtime);
+}
+
 void MainWindow::updateMiniPlayer()
 {
     const bool watching = m_pages && m_pages->currentIndex() == 3;
