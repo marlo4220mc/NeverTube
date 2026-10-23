@@ -82,6 +82,9 @@ private:
     // DRM render node handed to the render context for the VAAPI interop
     // (zero-copy); -1 when there is none. Closed only in shutdown().
     int m_renderFd = -1;
+    // Display* of an X11 session (nullptr on Wayland), only to let mpv create
+    // its VA display; it is opened by us with dlopen and outlives the context.
+    void *m_x11Display = nullptr;
     // Counter of logged render frames (every 90, as before).
     int m_logFrames = 0;
     // Hardware decoding configured ("auto"), read at startup.
