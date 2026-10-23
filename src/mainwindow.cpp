@@ -1598,6 +1598,7 @@ void MainWindow::updateMiniPlayer()
         m_miniBar->setVisible(show);
     if (m_home)
         m_home->setMiniPlayerVisible(show);
+    updateDownloadPlaybackState();
     // Live video in the mini: on showing it, the PlayerWidget is reparented to
     // the mini bar slot and keeps rendering (no decoder reconf and no
     // accumulated frames). On returning to the Player page it is reinserted
