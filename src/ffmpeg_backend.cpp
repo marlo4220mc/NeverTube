@@ -819,8 +819,18 @@ static void runLoop(FfmpegBackend::Impl *m)
             ac->sample_fmt, ac->sample_rate, 0, nullptr);
         rc = swr ? 0 : -1;
 #endif
+        // swr_alloc_set_opts*() only ALLOCATES the context: it has to be
+        // initialized with swr_init() before the first swr_get_out_samples()/
+        // swr_convert(). Without it, the context is half-built and FFmpeg 9
+        // aborts inside swr_get_out_samples() ("Assertion s->out_sample_rate
+        // == s->in_sample_rate failed", libswresample/swresample.c) on the
+        // FIRST audio frame. It is not a Linux quirk: the vendored x86/Win7
+        // package is the same 9.0.2, so the crash was there too.
+        if (rc >= 0 && swr && swr_init(swr) < 0)
+            rc = -1;
         if (rc < 0 || !swr) {
             NT_DEBUG("E2E ffmpeg: init del resampler falló; sin audio\n");
+            swr_free(&swr); // swr_free() also nulls the pointer
             ac = nullptr;
         }
     }
@@ -1044,8 +1054,15 @@ static void runLoop(FfmpegBackend::Impl *m)
                 avcodec_flush_buffers(vc);
             if (ac)
                 avcodec_flush_buffers(ac);
-            if (swr)
-                swr_close(swr); // empties the resampler's internal state
+            if (swr) {
+                // swr_close() DEINITIALIZES the context (that is its whole
+                // point: release the internal buffers and keep the options),
+                // so it has to be initialized again before the next
+                // swr_get_out_samples()/swr_convert(), or the assert above
+                // comes back right after a seek.
+                swr_close(swr);
+                swr_init(swr);
+            }
             if (sink)
                 sink->flush();
             vReadDone = false;
