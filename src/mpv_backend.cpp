@@ -1,5 +1,6 @@
 #include "mpv_backend.h"
 
+#include <QGuiApplication>
 #include <QMetaObject>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
@@ -10,6 +11,12 @@
 #include <clocale>
 #include <cstdlib>
 #include <cstring>
+
+#if defined(Q_OS_UNIX) && !defined(Q_OS_MACOS)
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 #include <mpv/render_gl.h>
 
@@ -155,6 +162,14 @@ MpvBackend::MpvBackend(QObject *parent)
     const QByteArray lavcThreads = QByteArray::number(qMin(cores, 4));
     mpv_set_option_string(m_mpv, "vd-lavc-threads", lavcThreads.constData());
     mpv_set_option_string(m_mpv, "audio-buffer", "2.0");
+    // No clipboard of ours: the app never pastes anything into mpv and has no
+    // OSC, so the wayland/x11 backends are dead weight. "vo" is the only value
+    // that touches no system service (with the render API there is no VO
+    // clipboard, so this means "none"). It matters because mpv's wayland
+    // backend reads the data offer on every clipboard change (measured: one
+    // read per copy, and 66 reads/s for a whole minute in pathological
+    // sessions where the owner keeps re-offering: each one is a roundtrip).
+    mpv_set_option_string(m_mpv, "clipboard-backends", "vo");
 
     if (mpv_initialize(m_mpv) < 0) {
         qWarning("player: mpv_initialize fallo");
@@ -220,6 +235,54 @@ QString MpvBackend::videoCodec() const
     return out;
 }
 
+// DRM render node for the VAAPI interop of the RENDER API. With the render
+// API (libmpv_render + the widget's GL context) mpv has NO native display, so
+// it cannot create the VA display and `hwdec=auto` falls back to a COPY path
+// (measured: `vulkan-copy`, ~0.7 ms of CPU per frame in renderGL). With the
+// render node mpv opens the VA display over DRM and the frames are exported as
+// dmabufs and imported into the GL texture (zero copy).
+static int openDrmRenderNode()
+{
+#if defined(Q_OS_UNIX) && !defined(Q_OS_MACOS)
+    static const char *const nodes[] = {"/dev/dri/renderD128",
+                                       "/dev/dri/renderD129",
+                                       "/dev/dri/renderD130"};
+    for (const char *node : nodes) {
+        const int fd = ::open(node, O_RDONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            NT_DEBUG("E2E render node %s fd=%d\n", node, fd);
+            return fd;
+        }
+    }
+#endif
+    return -1;
+}
+
+// X11 display for the RENDER API. On an X11 session the DRM render node alone
+// is not enough: mpv's vaapi interop opens the VA display through the X11
+// display (vaGetDisplay), and so does vdpau-gl. It is resolved with dlopen so
+// that the build needs no X11 headers nor an extra link dependency, and it is
+// only attempted when Qt is really running on xcb (on Wayland it is absent and
+// the render node is the path).
+static void *openX11Display()
+{
+#if defined(Q_OS_UNIX) && !defined(Q_OS_MACOS)
+    if (!QGuiApplication::platformName().startsWith(QLatin1String("xcb")))
+        return nullptr;
+    void *lib = dlopen("libX11.so.6", RTLD_LAZY | RTLD_LOCAL);
+    if (!lib)
+        return nullptr;
+    using OpenDisplayFn = void *(*)(const char *);
+    auto openDisplay =
+        reinterpret_cast<OpenDisplayFn>(dlsym(lib, "XOpenDisplay"));
+    void *display = openDisplay ? openDisplay(nullptr) : nullptr;
+    if (display)
+        NT_DEBUG("E2E render ctx x11 display %p\n", display);
+    return display;
+#endif
+    return nullptr;
+}
+
 bool MpvBackend::initGL()
 {
     if (!m_mpv || m_rctx)
@@ -241,11 +304,31 @@ bool MpvBackend::initGL()
                      reinterpret_cast<const char *>(renderer));
     }
     mpv_opengl_init_params init{ getProcAddress, nullptr };
-    mpv_render_param params[] = {
-        { MPV_RENDER_PARAM_API_TYPE, const_cast<char *>(MPV_RENDER_API_TYPE_OPENGL) },
-        { MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &init },
-        { MPV_RENDER_PARAM_INVALID, nullptr },
-    };
+    mpv_render_param params[6];
+    int np = 0;
+    params[np++] = { MPV_RENDER_PARAM_API_TYPE,
+                     const_cast<char *>(MPV_RENDER_API_TYPE_OPENGL) };
+    params[np++] = { MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &init };
+#if defined(Q_OS_UNIX) && !defined(Q_OS_MACOS)
+    // The fd outlives the render context (the VA display keeps using it).
+    if (m_renderFd < 0)
+        m_renderFd = openDrmRenderNode();
+    mpv_opengl_drm_params_v2 drm{};
+    if (m_renderFd >= 0) {
+        drm.fd = -1;
+        drm.crtc_id = -1;
+        drm.connector_id = -1;
+        drm.atomic_request_ptr = nullptr;
+        drm.render_fd = m_renderFd;
+        params[np++] = { MPV_RENDER_PARAM_DRM_DISPLAY_V2, &drm };
+    }
+    if (!m_x11Display)
+        m_x11Display = openX11Display();
+    if (m_x11Display) {
+        params[np++] = { MPV_RENDER_PARAM_X11_DISPLAY, m_x11Display };
+    }
+#endif
+    params[np] = { MPV_RENDER_PARAM_INVALID, nullptr };
     if (mpv_render_context_create(&m_rctx, m_mpv, params) < 0)
         return false;
     mpv_render_context_set_update_callback(m_rctx, MpvBackend::mpvUpdate, this);

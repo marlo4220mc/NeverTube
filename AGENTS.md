@@ -1881,6 +1881,65 @@ in the x86 build, which goes out via `NEVERTUBE_NO_MPV`):
 - On Linux the `Q_OS_WIN` guard leaves everything as it was (desktop GL;
   there zero-copy is already possible via VAAPI/EGL without ANGLE, see `hwdec-current`).
 
+## Linux: the render node + EGL (the 35 % that the render API was hiding)
+
+With `vo=libmpv` (render API) mpv has **no native display of its own**: it gets the GL
+context of the `QOpenGLWidget`. Without a display it cannot create its `VADisplay`, so
+`hwdec=auto` fell back to a **copy** path (`vulkan-copy` here): every frame went
+VRAM → RAM → GL texture. It was invisible in the logs unless `hwdec-current` was read,
+and it cost about **1 pp of the UI thread and 0.85 pp of the mpv core**.
+
+Two independent pieces, both guarded (`render_fd = -1` / no `Display*` = exactly the
+previous behaviour):
+
+1. **`MPV_RENDER_PARAM_DRM_DISPLAY_V2`** with a render node the app opens itself
+   (`/dev/dri/renderD128`, 129, 130: `MpvBackend::openDrmRenderNode`). This is what
+   makes `hwdec=auto` reach `vaapi` (dmabuf imported into the GL texture) on Wayland.
+2. **EGL on X11**, because the DRM node alone is NOT enough there:
+   `hwdec_vaapi.c` `init()` first looks for a **dmabuf→texture interop** and only
+   warns `"VAAPI hwdec only works with OpenGL or Vulkan backends."` when there is
+   none — the message is about the interop mapper, not about the backend. With GLX
+   there is none (EGL only), so the fix is to make Qt use EGL on X11 too:
+   - `src/main.cpp` sets `QT_XCB_GL_INTEGRATION=xcb_egl` **before** `QApplication`
+     when Qt really ends up on xcb (explicit `QT_QPA_PLATFORM` wins; a Wayland
+     session is left alone) and only if the user has not set it. `xcb_glx` restores
+     the old path.
+   - `MpvBackend::openX11Display` passes `MPV_RENDER_PARAM_X11_DISPLAY` with a
+     `Display*` opened with `dlopen("libX11.so.6")`: no X11 headers, no new link
+     dependency, and only when `QGuiApplication::platformName()` starts with `xcb`.
+
+Measured with the same build, the same local clip (1080p30), the player page and no
+debug logging, three 30 s samples per configuration (Ryzen 7 7840U / Radeon 760M):
+
+| configuration | total | UI thread | mpv core |
+|---|---|---|---|
+| base, Wayland, `vulkan-copy` | 6.32 % | 2.88 % | 1.56 % |
+| now, Wayland, `vaapi` | **4.08 %** | 1.84 % | 0.72 % |
+| base, X11/GLX, `vulkan-copy` | 6.08 % | 2.96 % | 1.68 % |
+| now, X11/EGL, `vaapi` | **4.08 %** | 1.84 % | 0.76 % |
+
+(`%` of one core.) The same result on both sessions is the proof that it is the
+interop and not the compositor. Verification without trusting the number:
+`NEVERTUBE_DEBUG=1` must show `E2E render node … fd=`, `E2E render ctx x11 display`
+(only on X11) and mpv's `Using hardware decoding (vaapi)` **plus**
+`Using EGL dmabuf interop via GL_EXT_EGL_image_storage`. If the interop is missing mpv
+says `VAAPI hwdec only works with OpenGL or Vulkan backends` and it is the copy path.
+
+- **Do not** "solve" this by switching the widget to a Vulkan surface: `vo=libmpv` +
+  the GL context is the protected piece, and both fixes are inside it.
+- **Windows does not need any of this**: there `hwdec=auto` reaches `d3d11-egl`
+  with the ANGLE experiment above, or `d3d11va-copy` with desktop GL.
+- The x86/FfmpegBackend build is untouched: it has no libmpv (`NEVERTUBE_NO_MPV`),
+  so neither the node nor the EGL integration is compiled or applied.
+- `MpvBackend` also pins `clipboard-backends=vo`: the app never pastes anything into
+  mpv and its wayland backend reads the data offer on every clipboard change
+  (measured: 66 reads/s for a whole minute while the owner kept re-offering).
+
+**If the video goes black on an X11 machine** the suspect is the EGL integration:
+launch with `QT_XCB_GL_INTEGRATION=xcb_glx` and the app is back to the previous path
+(with the copy hwdec). It has only been measured on Mesa/AMD; NVIDIA's EGL is the
+other one QA has to confirm.
+
 ## CLI entry points
 
 - `./build/nevertube_qt2` → normal app

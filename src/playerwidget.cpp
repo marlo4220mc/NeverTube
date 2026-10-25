@@ -33,6 +33,9 @@ static constexpr qint64 kAudioDetectMs = 25000;
 PlayerWidget::PlayerWidget(QWidget *parent)
     : QOpenGLWidget(parent)
 {
+    setAutoFillBackground(false);
+    setAttribute(Qt::WA_OpaquePaintEvent);
+    setAttribute(Qt::WA_NoSystemBackground);
     // The factory picks the engine per platform: mpv on x64 (protected piece,
     // Phase 1: all mpv integration lives in MpvBackend) or FfmpegBackend on
     // the x86 (no libmpv). The rest of the widget only knows the interface.

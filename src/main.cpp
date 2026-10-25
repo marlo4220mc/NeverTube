@@ -475,6 +475,35 @@ int main(int argc, char *argv[])
     }
 #endif // !NEVERTUBE_NO_MPV
 #endif // Q_OS_WIN
+#if defined(Q_OS_LINUX) && !defined(NEVERTUBE_NO_MPV)
+    // EGL on X11 (default, unless the user already chose an integration).
+    // mpv's VAAPI hwdec needs a dmabuf->texture interop, and with the render API
+    // (libmpv_render) the only interop that exists is EGL: the DRM render node
+    // we hand over is not enough by itself. Qt uses EGL on Wayland but GLX on
+    // X11, and with GLX mpv logs "VAAPI hwdec only works with OpenGL or Vulkan
+    // backends" and falls back to a COPY path (vulkan-copy here). With
+    // xcb_egl the widget's context is EGL on X11 too, mpv finds the interop and
+    // hwdec=auto reaches zero-copy (vaapi).
+    // Measured on the same build and clip (1080p30, Ryzen 7 7840U / Radeon
+    // 760M): GLX 6.10 % of a core vs EGL 4.30 %; on Wayland 3.80 %.
+    // Only when Qt really ends up on xcb (an explicit QT_QPA_PLATFORM wins, and
+    // a Wayland session is left alone) and never overriding what the user set:
+    // QT_XCB_GL_INTEGRATION=xcb_glx restores the old behaviour.
+    {
+        const QByteArray platform = qgetenv("QT_QPA_PLATFORM");
+        const bool onX11 =
+            platform.startsWith("xcb")
+            || (platform.isEmpty()
+                && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY"));
+        if (onX11 && !qEnvironmentVariableIsSet("QT_XCB_GL_INTEGRATION")) {
+            qputenv("QT_XCB_GL_INTEGRATION", QByteArrayLiteral("xcb_egl"));
+            std::fprintf(stderr,
+                         "EGL: QT_XCB_GL_INTEGRATION=xcb_egl (contexto Qt -> EGL "
+                         "en X11); mpv debera poder elegir hwdec vaapi "
+                         "(zero-copy)\n");
+        }
+    }
+#endif // Q_OS_LINUX && !NEVERTUBE_NO_MPV
     QApplication app(argc, argv);
     Q_INIT_RESOURCE(resources);
     app.setApplicationName(QStringLiteral("nevertube"));
