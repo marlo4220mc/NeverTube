@@ -2380,6 +2380,22 @@ void WatchPage::updateOverlayIcons()
 {
     if (!m_ovPlayBtn)
         return;
+    // Cheap guard FIRST: showOverlayControls() calls this on every real mouse
+    // move over the video (measured: 1076 calls in one session, nearly all of
+    // them with the same state). Every icon is a nt::playerIcon() lookup and
+    // every setIcon() schedules a repaint of that button, which ends up
+    // recomposing the video area. When nothing changed, none of it is needed.
+    int sig = (m_player->isPaused() ? 1 : 0)
+              | (m_player->hasNext() ? 2 : 0)
+              | (m_player->previousAvailable() ? 4 : 0)
+              | (m_player->shuffle() ? 8 : 0)
+              | (m_player->repeat() ? 16 : 0)
+              | (m_player->muted() ? 32 : 0)
+              | (m_subsVisible ? 64 : 0)
+              | (qBound(0, qRound(m_player->volume()), 255) << 8);
+    if (sig == m_ovIconSig)
+        return;
+    m_ovIconSig = sig;
     const QColor accent(nt::accentHex());
     // Player art icons (nt::playerIcon). The active modes
     // (shuffle, repeat, captions) go in the accent color.
@@ -2466,6 +2482,9 @@ void WatchPage::applyAccent()
     // the rich text is regenerated (always at full height).
     if (!m_description.isEmpty())
         applyDescription(m_description);
-    // Overlay: the active captions icon uses the accent.
+    // Overlay: the active captions icon uses the accent. The signature is
+    // invalidated because the accent is not part of it: without this the
+    // guard would keep the icons of the previous color.
+    m_ovIconSig = -1;
     updateOverlayIcons();
 }

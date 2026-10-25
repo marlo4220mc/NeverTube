@@ -67,7 +67,10 @@ PlayerWidget::PlayerWidget(QWidget *parent)
     m_stallTimer = new QTimer(this);
     m_stallTimer->setInterval(1000);
     connect(m_stallTimer, &QTimer::timeout, this, &PlayerWidget::checkStall);
-    m_stallTimer->start();
+    // Armed by updateWatchdogTimer() when playback starts, not here: see its
+    // comment in the header.
+    connect(this, &PlayerWidget::stateChanged, this,
+            &PlayerWidget::updateWatchdogTimer);
 
     // x86 (FfmpegBackend): if another window covers the video, the engine
     // stops converting and painting while it lasts (real CPU/GPU saving;
@@ -179,16 +182,6 @@ void PlayerWidget::playUrl(const QString &url, double startAt)
     emit durationChanged();
 }
 
-void PlayerWidget::playYtdl(const QString &watchUrl, int maxHeight)
-{
-    if (watchUrl.isEmpty())
-        return;
-    const QString fmt = QStringLiteral("bestvideo[height<=%1]+bestaudio/best[height<=%1]")
-        .arg(maxHeight);
-    m_backend->setYtdlFormat(fmt);
-    playUrl(watchUrl);
-}
-
 void PlayerWidget::stop()
 {
     if (!m_backend->isValid())
@@ -204,6 +197,19 @@ void PlayerWidget::setPaused(bool paused)
     if (!paused)
         m_lastProgressMs = QDateTime::currentMSecsSinceEpoch();
     m_paused = paused;
+    updateWatchdogTimer();
+}
+
+void PlayerWidget::updateWatchdogTimer()
+{
+    const bool watching = m_backend && m_backend->isValid()
+        && m_state == QLatin1String("playing") && !m_paused;
+    if (watching) {
+        if (!m_stallTimer->isActive())
+            m_stallTimer->start();
+    } else if (m_stallTimer->isActive()) {
+        m_stallTimer->stop();
+    }
 }
 
 void PlayerWidget::seek(double seconds)
@@ -322,6 +328,9 @@ void PlayerWidget::onEndFile(PlaybackBackend::EndReason reason,
         // playback: it must NOT auto-advance. m_state is reset so that the
         // next START_FILE re-emits "playing" to the controller.
         m_state.clear();
+        // No stateChanged() is emitted here (the listeners treat it as the
+        // end of the stream), so the watchdog is disarmed by hand.
+        updateWatchdogTimer();
         break;
     case PlaybackBackend::EndReason::Error:
         if (m_state != QLatin1String("error")) {

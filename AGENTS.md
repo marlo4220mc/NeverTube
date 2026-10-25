@@ -107,6 +107,7 @@ The functional player is a protected piece. The following elements must NOT be t
 
 - `QOpenGLWidget` (class `PlayerWidget`) as the video surface
 - **Event-driven redraw**: the engine notifies `frameReady` when there is a new frame (mpv update callback installed in `MpvBackend::initGL` / `frameReady` per frame from `FfmpegBackend`) and `PlayerWidget::onFrameReady` forces `QWidget::update()`. There is NO poll timer: at rest (paused, buffering, covered) nothing is repainted. It replaced the old 33 ms `QTimer`, which became redundant once the event path existed (verified: real playback + overlay shown/auto-hidden with screenshots, selftest-player).
+- **The stall watchdog (1 s) is only armed while the engine plays** (`PlayerWidget::updateWatchdogTimer`, called from `stateChanged` and from `setPaused`). At rest `checkStall()` returned on its first line, so the timer was a wakeup per second for the whole life of the process (the player is created at startup and then lives in the mini bar). Measured at rest: the voluntary context switches of the process went from 48 to 28 per 20 s. Do NOT start it in the constructor again: `onStreamStart` emits `stateChanged`, which is what arms it.
 - `vo=libmpv` + `hwdec=auto` (works with and without hardware acceleration)
 - Direct rendering to FBO (`mpv_render_context_render`) in `paintGL`
 - Any change to the mpv integration (libmpv / mpv_render_context)
@@ -2195,8 +2196,11 @@ DBs, `app_database.cpp`).
   index are NOT the same: the nav index of the pages is `m_currentTab == 4
   ? 2 : m_currentTab == 8 ? 3 : m_currentTab == 5 ? 4 : m_currentTab`
   (library 2, downloads 3, settings 4). When a button is added or moved,
-  those THREE places move with it: the `addBtn` calls, `goSettings()` /
-  `openDownloads()` and that mapping.
+  those THREE places move with it: the `addBtn` calls, the `switch` of
+  `MainWindow::onNavButton` (which assigns `m_currentTab`) and that mapping.
+  `openDownloads()`/`goLibrary()` are shortcuts to that same switch; there is
+  no `goSettings()` (the settings button is the last one and goes through
+  `onNavButton`).
 - **ONE single dialog to confirm and ONE only to ask for a text**, and they are
   `nt::confirm` / `nt::inputText` (`src/ui/confirm_dialog.*`). Both mount
   an overlay **child of the WINDOW** (`page->window()`), with a veil, modal, without
@@ -2218,7 +2222,11 @@ DBs, `app_database.cpp`).
   - `Yt::channelInfo` → browse "Información" tab: `c4TabbedHeaderRenderer` (name, avatar, subscribers) + `channelAboutMetadataRenderer` (description).
   - `Yt::channelTabVideos` → channel browse with the **WEB** client for the three tabs (videos/shorts/live): VISIONOS only exposes "Vídeos" and its continuation returns empty pages, while WEB serves the three with the modern layout (`lockupViewModel`/`shortsLockupViewModel`) and a working continuation. The WEB client does not need an API key. `fetchChannelVideos` (subscriptions feed, without pagination) continues via VISIONOS with `compactVideoRenderer`.
   - `Yt::getDetail` → `/next`: `videoMetadataRenderer` (title/description translated, views, date, channel) + `likeButtonRenderer` (likes). The **channel id** comes from `owner.videoOwnerRenderer.navigationEndpoint.browseEndpoint.browseId` and, if missing (COLLABORATION videos: the owner only brings `avatarStack` + `subscribeButton`), from `owner.subscribeButton.subscribeButtonRenderer.channelId`: without that path the `channelId` stayed empty and the "Canal" and "Suscribirse" buttons did nothing (both return early if it is empty). The queue renderers (`compactVideoRenderer`/`playlistPanelVideoRenderer`) also take the id from `longBylineText`/`shortBylineText` → `runs[0].navigationEndpoint.browseEndpoint.browseId` (`channelIdFromByline`), where before only the name was read.
-  - `Yt::playlistDetail` → browse `VL<id>`: `playlistHeaderRenderer` + `playlistVideoRenderer`.
+  - `Innertube::fetchPlaylist` → browse `VL<id>`: `playlistHeaderRenderer` +
+    `playlistVideoRenderer`. There is NO `Yt::playlistDetail`: browsing a
+    YouTube playlist is not wired to any page (the user playlists are local,
+    in the DB), so the forwarding through `Yt` was dead code and was removed.
+    The parser stays because `--selftest-browse` covers it.
 - **Searching with Enter really closes the suggestions dropdown**: `doSearch()`
   stops the 300 ms debounce and marks the query as already searched
   (`SearchPage::m_suggestClosedFor`), and `onSuggestReady` ignores it. Without that,

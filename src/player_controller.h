@@ -243,6 +243,8 @@ private:
     int m_recoverAttempts = 0;
     qint64 m_lastRecoverMs = 0;
     QElapsedTimer m_stableSince;
+    // Cadence of the positionChanged notification for the UI (see kPositionUiMs).
+    QElapsedTimer m_positionUiClock;
     QMetaObject::Connection m_stallConn;
     QMetaObject::Connection m_interruptConn;
     QMetaObject::Connection m_resolveConn;

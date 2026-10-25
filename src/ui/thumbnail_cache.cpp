@@ -34,6 +34,12 @@ QString ThumbnailCache::filePath(const QString &key) const
 
 void ThumbnailCache::touch(const QString &key) const
 {
+    // pixmap() calls this on every paint of every visible cell. When the key is
+    // already the most recent (the usual case: the same grid is repainted over
+    // and over) there is nothing to reorder, and removeOne()+prepend() would be
+    // an O(n) scan of the LRU plus an allocation per cell per frame.
+    if (!m_lru.isEmpty() && m_lru.first() == key)
+        return;
     m_lru.removeOne(key);
     m_lru.prepend(key);
 }

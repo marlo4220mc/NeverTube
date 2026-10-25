@@ -50,7 +50,6 @@ public:
 
 public slots:
     void playUrl(const QString &url, double startAt = 0.0);
-    void playYtdl(const QString &watchUrl, int maxHeight);
     void stop();
     void setPaused(bool paused);
     void seek(double seconds);
@@ -126,6 +125,12 @@ private slots:
     void onLogMessage(const QString &prefix, const QString &text);
     void checkInitialBuffer();
     void checkStall();
+    // The stall watchdog is only armed while the engine is really playing:
+    // at rest (paused, stopped, ended, no stream) checkStall() returns on its
+    // first line and the 1 s timer was a wakeup per second for the whole
+    // life of the process (the player is created at startup and then lives
+    // in the mini bar).
+    void updateWatchdogTimer();
     void retryHwdec();
     // x86 (FfmpegBackend): detects whether another window fully covers the video
     // (slow timer; Win7/DWM gives no occlusion notice). While covered, the
