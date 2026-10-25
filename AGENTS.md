@@ -1814,30 +1814,50 @@ being the plain video id, which no row written by this version can satisfy.
   constructor) and only INSIDE the folder of the downloads. The row of a
   download that is going to be revived keeps its folder.
 
-### Threads: what the audit found (open, on purpose)
+### Threads: the bridge between the transports and the job
 
 The `done` and `progress` callbacks of `DownloadTransport` run in the **thread
-of the transports** (`download_transport.cpp` posts them to its own context),
-so the state machine of the job (`m_videoDone`/`m_audioDone`/`m_fragmentTries`/
-`m_bytesDone`, `startNext`) lives there, while the thread of the interface READS
-it: `saveProgress()` calls `bytesDone`/`progress`/`doneSegments`/`status` on
-every save and `pause()` calls `doneSegments()`/`bytesDone()` before releasing
-the job.
+of the transports** (`download_transport.cpp` posts them to its own context).
+The state of the job — the cursors of the fragments, the flags, the counts of
+the arrival gate, the counters — belongs to ONE thread: the one the job lives
+in. Without a bridge the state machine ran in the transport thread while the
+interface thread read it (`saveProgress()` calls `bytesDone`/`progress`/
+`doneSegments`/`status` on every save, `pause()` calls `doneSegments()`/
+`bytesDone()` before releasing the job), which is a data race with a crash
+inside it: a `QVector` read while the other thread appends.
 
-That is a data race with real consequences (a `QVector` read while the other
-thread appends is a crash waiting to happen), and **it was not "fixed" in this
-branch on purpose**: moving `done` to the thread of the job requires moving
-`progress` too, because `m_fragmentBytes` is a `QHash` that the `done` path
-reads and `progress` *inserts into* (a rehash while reading is exactly the
-crash). Moving only one of the two trades a documented race for an
-undocumented one, and there is no network-backed test that would catch it.
+Now everything crosses the bridge (`DownloadJob::postToJob`,
+`Qt::QueuedConnection` with `this` as context, so a call posted while the job
+was alive is DROPPED by Qt if the job is gone instead of touching a dead
+object):
 
-The fix, when it is done, is: marshal BOTH callbacks to the job's thread, keep
-the per-fragment bytes in an atomic (indexed by `fragmentMark`, so the size is
-known: `videoCount + audioCount + 2`), and keep the `progress` events throttled
-(the transport reports every ~64 KB, which is ~600 events/s at 40 MB/s: posting
-all of them would flood the event loop that has to repaint the player). It has
-to be measured with `--selftest-player` and a real download, not inferred.
+- **The four answers of the transport are posted to the job** (init, index and
+the body of a fragment). The whole state machine — `startNext`, the gate, the
+cursors, `onFragmentDone` — runs in the thread of the job.
+- **The per-chunk progress is the exception, and it is an ATOMIC one**:
+`m_bytesDone` and the bytes of each fragment (`m_fragmentBytes`, a
+`unique_ptr<std::atomic<qint64>[]>` with one slot per fragment, NOT indexed by
+`mark`: the video 2 and the audio 0 are 2 and −2 and would collide) are written
+in the transport thread. Posting every chunk (~64 KB, ~600 events/s at
+40 MB/s) into the event loop that has to paint the player would flood it, so
+`postProgress()` posts at most one event every 200 ms (`kProgressPostMs`) and
+the interface reads the atomics through `bytesDone()`.
+- **Nothing else is shared**: `m_bytesTotal`, the ranges, the flags and the
+speed window are written and read only in the thread of the job. `sampleSpeed()`
+runs there, inside the posted progress.
+- The guard at the top of every posted body (`if (!m_running) return;`) is what
+makes a late answer of a paused or cancelled download harmless.
+
+**Measured with the real YouTube, not inferred**: a 19 s video at 144p
+downloaded and muxed into a playable mkv (VP9 192x144 + AAC stereo,
+303 706 bytes, `ffprobe` clean), and a 4:12 video at 1080p cut at 3 s and
+resumed: **227 fragments on disk → the resume asked only for the 4 missing ones**
+(231) and the file came out complete (AV1 1920x1080 + AAC, 69 785 150 bytes).
+
+**A trap for the next one**: `slots` is a macro of Qt (it expands to nothing
+unless `QT_NO_KEYWORDS` is defined), so a local variable with that name does not
+compile — `error: expected unqualified-id before '=' token`. The one here is
+`slotCount`.
 
 ### The selftests
 

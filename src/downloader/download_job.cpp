@@ -296,10 +296,12 @@ void DownloadJob::start(const Plan &plan, const QString &key,
     m_nextVideo = 0;
     m_nextAudio = 0;
     m_inFlight = 0;
-    m_fragmentBytes.clear();
+    m_fragmentBytes.reset();
+    m_fragmentByteSlots = 0;
+    m_lastProgressPostMs.store(0);
     m_arrival.reset();
     m_arrivalQueue.clear();
-    m_bytesDone = 0;
+    m_bytesDone.store(0);
     m_speed.clear();
     m_bytesPerSecond = 0;
     m_bytesTotal = (m_kind == dl::DownloadKind::Audio)
@@ -544,23 +546,30 @@ void DownloadJob::pumpArrival()
             launch(t, QUrl(tr.url), tr.initStart, tr.initEnd,
                    [this, task, t]
                    (const DownloadTransport::Response &r) {
-                m_busy.remove(t);
-                if (!r.isOk()) {
-                    // It is NOT ignored: an init that never arrives leaves
-                    // the file without its header.
-                    onArrivalFailed(task, r);
-                    return;
-                }
-                const QString path = (task.track == QLatin1String("video"))
-                    ? m_videoInitPath : m_audioInitPath;
-                writeFile(path, r.body);
-                // The counter is touched in ONE place (the gate), so the
-                // order of the answers does not matter.
-                m_arrival.done();
-                if (m_arrival.takeFinished())
-                    startNext();
-                else
-                    pumpArrival();
+                // The answer arrives in the thread of the transports: the
+                // state of the job is posted to ITS thread (see the header).
+                postToJob([this, task, t, r]() {
+                    if (!m_running)
+                        return;
+                    m_busy.remove(t);
+                    if (!r.isOk()) {
+                        // It is NOT ignored: an init that never arrives leaves
+                        // the file without its header.
+                        onArrivalFailed(task, r);
+                        return;
+                    }
+                    const QString path =
+                        (task.track == QLatin1String("video"))
+                            ? m_videoInitPath : m_audioInitPath;
+                    writeFile(path, r.body);
+                    // The counter is touched in ONE place (the gate), so the
+                    // order of the answers does not matter.
+                    m_arrival.done();
+                    if (m_arrival.takeFinished())
+                        startNext();
+                    else
+                        pumpArrival();
+                });
             }, nullptr, tr.initEnd - tr.initStart + 1);
         } else {
             const Track &tr = (task.track == QLatin1String("video"))
@@ -570,37 +579,44 @@ void DownloadJob::pumpArrival()
             launch(t, QUrl(tr.url), indexStart, indexEnd,
                    [this, task, indexStart, tr, t]
                    (const DownloadTransport::Response &r) {
-                m_busy.remove(t);
-                if (!r.isOk()) {
-                    // Without the index there are NO ranges: the download
-                    // used to continue anyway and report "done" an empty file.
-                    onArrivalFailed(task, r);
-                    return;
-                }
-                const QString track = task.track;
-                double total = 0.0;
-                QVector<Range> ranges = rangesFromSidx(r.body, indexStart, &total);
-                if (ranges.isEmpty()) {
-                    // The track has NO index (a WebM/Opus one: its clusters
-                    // are not indexed). It is cut in pieces of 2 MB instead,
-                    // which is what makes it downloadable: YouTube throttles a
-                    // request by its size.
-                    ranges = rangesWithoutIndex(tr.contentLength, kChunkBytes);
-                }
-                if (track == QLatin1String("video")) {
-                    m_videoRanges = ranges;
-                    m_videoDone = QVector<bool>(ranges.size(), false);
-                    m_videoSizes = QVector<qint64>(ranges.size(), 0);
-                } else {
-                    m_audioRanges = ranges;
-                    m_audioDone = QVector<bool>(ranges.size(), false);
-                    m_audioSizes = QVector<qint64>(ranges.size(), 0);
-                }
-                m_arrival.done();
-                if (m_arrival.takeFinished())
-                    startNext();
-                else
-                    pumpArrival();
+                postToJob([this, task, indexStart, tr, t, r]() {
+                    if (!m_running)
+                        return;
+                    m_busy.remove(t);
+                    if (!r.isOk()) {
+                        // Without the index there are NO ranges: the download
+                        // used to continue anyway and report "done" an empty
+                        // file.
+                        onArrivalFailed(task, r);
+                        return;
+                    }
+                    const QString track = task.track;
+                    double total = 0.0;
+                    QVector<Range> ranges =
+                        rangesFromSidx(r.body, indexStart, &total);
+                    if (ranges.isEmpty()) {
+                        // The track has NO index (a WebM/Opus one: its
+                        // clusters are not indexed). It is cut in pieces of
+                        // 2 MB instead, which is what makes it downloadable:
+                        // YouTube throttles a request by its size.
+                        ranges = rangesWithoutIndex(tr.contentLength,
+                                                    kChunkBytes);
+                    }
+                    if (track == QLatin1String("video")) {
+                        m_videoRanges = ranges;
+                        m_videoDone = QVector<bool>(ranges.size(), false);
+                        m_videoSizes = QVector<qint64>(ranges.size(), 0);
+                    } else {
+                        m_audioRanges = ranges;
+                        m_audioDone = QVector<bool>(ranges.size(), false);
+                        m_audioSizes = QVector<qint64>(ranges.size(), 0);
+                    }
+                    m_arrival.done();
+                    if (m_arrival.takeFinished())
+                        startNext();
+                    else
+                        pumpArrival();
+                });
             }, nullptr, indexEnd - indexStart + 1);
         }
     }
@@ -646,6 +662,22 @@ void DownloadJob::startNext()
     if (!m_running || m_arrival.pending() > 0)
         return;
 
+    // One slot of bytes per fragment (the video first and then the audio). It
+    // is done HERE, in the thread of the job and before anything is launched,
+    // because the thread of the transports reads it while a fragment arrives.
+    //
+    // (`slots` is a macro of Qt —it expands to nothing unless QT_NO_KEYWORDS—
+    // so the variable is called slotCount.)
+    const int slotCount = m_videoRanges.size() + m_audioRanges.size();
+    if (m_fragmentByteSlots != slotCount) {
+        std::atomic<qint64> *memory =
+            new std::atomic<qint64>[size_t(slotCount > 0 ? slotCount : 1)];
+        for (int i = 0; i < slotCount; ++i)
+            memory[i].store(0);
+        m_fragmentBytes.reset(memory);
+        m_fragmentByteSlots = slotCount;
+    }
+
     for (DownloadTransport *t : m_pool) {
         // The busy flag is the job's (m_busy) and not the transport's: the
         // request is POSTED to the thread of the transport, so at this moment
@@ -656,13 +688,6 @@ void DownloadJob::startNext()
         if (!t || m_busy.contains(t))
             continue;
 
-        // The next fragment that is NOT on the disk yet. The ones that ARE
-        // on the disk are not asked again (that is what makes the download
-        // resumable) and the transport takes the next one: the old code
-        // went to the next transport with `continue`, so with the first
-        // eight fragments already downloaded it asked for NOTHING and the
-        // download stayed still FOREVER (nothing was in flight, so nothing
-        // called startNext again).
         // The next fragment that is NOT on the disk yet. The walk (and the
         // SKIP of the ones that are already there, which is what makes the
         // resume work) is a pure function with its own selftest:
@@ -694,12 +719,12 @@ void DownloadJob::startNext()
                         size = QFileInfo(fragmentPath(track, i)).size();
                         (*sizes)[i] = size;
                     }
-                    m_bytesDone += size;
+                    m_bytesDone.fetch_add(size);
                 }
             };
             accountSkipped(true, m_nextVideo, skippedVideo);
             accountSkipped(false, m_nextAudio, skippedAudio);
-            emit progressChanged(m_bytesDone, m_bytesTotal);
+            emit progressChanged(m_bytesDone.load(), m_bytesTotal);
         }
         m_nextVideo += pick.videoAdvance;
         m_nextAudio += pick.audioAdvance;
@@ -724,64 +749,24 @@ void DownloadJob::startNext()
         launch(t, QUrl(url), range.start, range.end,
                [this, track, index, mark, t]
                (const DownloadTransport::Response &r) {
-                   m_busy.remove(t);
-                   --m_inFlight;
-                   if (!r.isOk()) {
-                       // The bytes of the attempt that failed are not kept in
-                       // the counter: the fragment is asked again from zero
-                       // (the transport removed the partial file).
-                       m_bytesDone -= m_fragmentBytes.take(mark);
-                       if (m_bytesDone < 0)
-                           m_bytesDone = 0;
-                       emit progressChanged(m_bytesDone, m_bytesTotal);
-                       // The fragment is asked AGAIN: with a saturated IP
-                       // some requests do not answer at all (a timeout),
-                       // and the whole download used to fail for ONE of
-                       // them. After a few tries it really fails.
-                       const int tries =
-                           ++m_fragmentTries[mark];
-                       if (m_running && tries < kFragmentRetries) {
-                           if (track == QLatin1String("video"))
-                               m_nextVideo = index;
-                           else
-                               m_nextAudio = index;
-                           // The retry is SAID: for the person the download
-                           // looked stuck while the fragments were being asked
-                           // again without a word.
-                           emit fragmentRetrying(tries, kFragmentRetries);
-                           startNext();
-                           return;
-                       }
-                       if (m_running) {
-                           // The signed URL ran out of its budget (the
-                           // server answers 401/403): the download has to
-                           // ask for the formats again. It is NOT an error
-                           // of the video: it is an expired URL.
-                           if (r.status == 401 || r.status == 403) {
-                               setStatus(QStringLiteral("expired"));
-                               m_running = false;
-                               emit urlExpired();
-                               return;
-                           }
-                           const QString msg = r.error.isEmpty()
-                               ? nt::tr("error.dlPartFetch")
-                               : r.error;
-                           setStatus(QStringLiteral("error"), msg);
-                           m_running = false;
-                           emit failed(msg);
-                       }
-                       return;
-                   }
-                   // The fragment went through: if it was being retried, the
-                   // note of the row stops saying it (attempt 0).
-                   if (m_fragmentTries.remove(mark) > 0)
-                       emit fragmentRetrying(0, kFragmentRetries);
-                   onFragmentDone(track, index);
+                   // In the thread of the transports: the body is posted to the
+                   // thread of the job, so the state machine only ever runs in
+                   // one thread (see the header). The answers of a transport
+                   // are delivered in order, so the progress of this fragment
+                   // has already been accounted when the body runs.
+                   postToJob([this, track, index, mark, t, r]() {
+                       onFragmentResponse(track, index, mark, t, r);
+                   });
                },
-               [this, mark](qint64 bytes) {
-                   m_fragmentBytes[mark] += bytes;
-                   m_bytesDone += bytes;
-                   emit progressChanged(m_bytesDone, m_bytesTotal);
+               [this, track, index](qint64 bytes) {
+                   // In the thread of the transports: ONLY atomics here, and
+                   // the progress of the interface is posted at most every
+                   // kProgressPostMs (this is called on every ~64 KB chunk).
+                   const int slot = byteSlot(track, index);
+                   if (slot >= 0)
+                       m_fragmentBytes[slot].fetch_add(bytes);
+                   m_bytesDone.fetch_add(bytes);
+                   postProgress();
                }, range.size(), path);
     }
 
@@ -804,16 +789,18 @@ void DownloadJob::onFragmentDone(const QString &track, int index)
     // calls in the thread of the interface (n = the ~460 fragments of a
     // video), and that is what kept the player from painting.
     const qint64 real = QFileInfo(fragmentPath(track, index)).size();
-    m_bytesDone += real - m_fragmentBytes.take(mark);
-    if (m_bytesDone < 0)
-        m_bytesDone = 0;
+    // The bytes that the transport reported for this fragment are replaced by
+    // the ones that are really on the disk.
+    m_bytesDone.fetch_add(real - takeFragmentBytes(track, index));
+    if (m_bytesDone.load() < 0)
+        m_bytesDone.store(0);
     if (index >= 0 && index < flags->size())
         (*flags)[index] = true;
     if (index >= 0 && index < sizes->size())
         (*sizes)[index] = real;
     sampleSpeed();
     emit segmentDone(index);
-    emit progressChanged(m_bytesDone, m_bytesTotal);
+    emit progressChanged(m_bytesDone.load(), m_bytesTotal);
     startNext();
 }
 
@@ -839,8 +826,113 @@ void DownloadJob::sampleSpeed()
     // the connection, and after a resume it counted the bytes of the previous
     // session, which were not moved in this one.
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    m_speed.add(now, m_bytesDone);
+    m_speed.add(now, m_bytesDone.load());
     m_bytesPerSecond = m_speed.bytesPerSecond(now);
+}
+
+// --- the bridge between the thread of the transports and the thread of the job ---
+
+void DownloadJob::postToJob(std::function<void()> fn)
+{
+    // The context is `this`: a call that was posted while the job was alive is
+    // DROPPED by Qt if the job is gone, instead of touching a dead object.
+    QMetaObject::invokeMethod(this, std::move(fn), Qt::QueuedConnection);
+}
+
+int DownloadJob::byteSlot(const QString &track, int index) const
+{
+    if (index < 0)
+        return -1;
+    const bool video = track == QLatin1String("video");
+    // The video occupies the first slots and the audio the ones after it: the
+    // "mark" cannot be used as an index (the video 2 and the audio 0 are 2 and
+    // -2, and both are small numbers).
+    const int base = video ? 0 : m_videoRanges.size();
+    const int slot = base + index;
+    if (slot >= m_fragmentByteSlots)
+        return -1;
+    return slot;
+}
+
+qint64 DownloadJob::takeFragmentBytes(const QString &track, int index)
+{
+    const int slot = byteSlot(track, index);
+    if (slot < 0 || !m_fragmentBytes)
+        return 0;
+    return m_fragmentBytes[slot].exchange(0);
+}
+
+void DownloadJob::postProgress()
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    qint64 last = m_lastProgressPostMs.load();
+    if (last != 0 && now - last < kProgressPostMs)
+        return;
+    // Only ONE post per window: the transports run in one thread, but the
+    // check is atomic so a second call cannot slip in between.
+    if (!m_lastProgressPostMs.compare_exchange_strong(last, now))
+        return;
+    postToJob([this]() {
+        if (!m_running)
+            return;
+        // The speed is measured where its state lives.
+        sampleSpeed();
+        emit progressChanged(m_bytesDone.load(), m_bytesTotal);
+    });
+}
+
+void DownloadJob::onFragmentResponse(const QString &track, int index, int mark,
+                                     DownloadTransport *t,
+                                     const DownloadTransport::Response &r)
+{
+    m_busy.remove(t);
+    --m_inFlight;
+    if (!m_running)
+        return;
+    if (!r.isOk()) {
+        // The bytes of the attempt that failed are not kept in the counter:
+        // the fragment is asked again from zero (the transport removed the
+        // partial file).
+        m_bytesDone.fetch_sub(takeFragmentBytes(track, index));
+        if (m_bytesDone.load() < 0)
+            m_bytesDone.store(0);
+        emit progressChanged(m_bytesDone.load(), m_bytesTotal);
+        // The fragment is asked AGAIN: with a saturated IP some requests do
+        // not answer at all (a timeout), and the whole download used to fail
+        // for ONE of them. After a few tries it really fails.
+        const int tries = ++m_fragmentTries[mark];
+        if (tries < kFragmentRetries) {
+            if (track == QLatin1String("video"))
+                m_nextVideo = index;
+            else
+                m_nextAudio = index;
+            // The retry is SAID: for the person the download looked stuck
+            // while the fragments were being asked again without a word.
+            emit fragmentRetrying(tries, kFragmentRetries);
+            startNext();
+            return;
+        }
+        // The signed URL ran out of its budget (the server answers 401/403):
+        // the download has to ask for the formats again. It is NOT an error of
+        // the video: it is an expired URL.
+        if (r.status == 401 || r.status == 403) {
+            setStatus(QStringLiteral("expired"));
+            m_running = false;
+            emit urlExpired();
+            return;
+        }
+        const QString msg = r.error.isEmpty() ? nt::tr("error.dlPartFetch")
+                                              : r.error;
+        setStatus(QStringLiteral("error"), msg);
+        m_running = false;
+        emit failed(msg);
+        return;
+    }
+    // The fragment went through: if it was being retried, the note of the row
+    // stops saying it (attempt 0).
+    if (m_fragmentTries.remove(mark) > 0)
+        emit fragmentRetrying(0, kFragmentRetries);
+    onFragmentDone(track, index);
 }
 
 void DownloadJob::maybeFinishSegments()
@@ -861,8 +953,8 @@ void DownloadJob::maybeFinishSegments()
 
     // The download is done: the total is the size of what is on the disk,
     // which is the truth.
-    m_bytesTotal = m_bytesDone;
-    emit progressChanged(m_bytesDone, m_bytesTotal);
+    m_bytesTotal = m_bytesDone.load();
+    emit progressChanged(m_bytesDone.load(), m_bytesTotal);
 
     startFinalize();
 }

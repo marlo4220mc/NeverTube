@@ -7,6 +7,8 @@
 #include <QVector>
 
 #include <atomic>
+#include <functional>
+#include <memory>
 
 #include "arrival_gate.h"
 #include "download_transport.h"
@@ -61,7 +63,7 @@ public:
     bool isRunning() const { return m_running; }
 
     // How many bytes are already written.
-    qint64 bytesDone() const { return m_bytesDone; }
+    qint64 bytesDone() const { return m_bytesDone.load(); }
     // The expected size (the real one, from the contentLength).
     qint64 bytesTotal() const { return m_bytesTotal; }
     // The speed of the download, in bytes per second (0 when it cannot be
@@ -158,6 +160,33 @@ private:
                          const DownloadTransport::Response &r);
     void startNext();
     void onFragmentDone(const QString &track, int index);
+
+    // --- the bridge between the thread of the transports and this one ---
+    //
+    // `DownloadTransport` delivers its answers in ITS thread, and the state of
+    // this class (the cursors of the fragments, the flags, the counters, the
+    // gates) belongs to ONE thread: the one the job lives in. Every callback
+    // is posted here, so the whole state machine runs in the thread of the job
+    // and the manager can read its counters from there without a race.
+    //
+    // The counters the transport thread touches while a fragment is arriving
+    // are ATOMICS (m_bytesDone and m_fragmentBytes): the progress is called on
+    // every ~64 KB chunk and posting all of them would flood the event loop
+    // that has to paint the player.
+    void postToJob(std::function<void()> fn);
+    // The slot of a fragment in m_fragmentBytes. It is NOT `mark`: the video 2
+    // and the audio 0 are both small numbers (2 and -2) and would collide.
+    // -1 when there is no slot (the ranges are not known yet).
+    int byteSlot(const QString &track, int index) const;
+    qint64 takeFragmentBytes(const QString &track, int index);
+    // Posts a progress event to the thread of the job, at most every
+    // kProgressPostMs (the bars do not need 600 updates per second).
+    void postProgress();
+    static constexpr int kProgressPostMs = 200;
+    // The body of the answer of a fragment, in the thread of the job.
+    void onFragmentResponse(const QString &track, int index, int mark,
+                            DownloadTransport *t,
+                            const DownloadTransport::Response &r);
     bool writeFile(const QString &path, const QByteArray &data);
     QString fragmentPath(const QString &track, int index) const;
     // Writes the resource: the init segment first (it is the header of the
@@ -209,12 +238,6 @@ private:
     // How many times each fragment has been asked (the ones that failed are
     // asked again, up to kFragmentRetries).
     QHash<int, int> m_fragmentTries;
-    // The bytes reported by the transport for the fragment that is being
-    // fetched NOW, by mark. They are what makes the bar advance without
-    // asking the disk: the old code measured EVERY fragment (QFileInfo) on
-    // every fragment that finished, which is O(n^2) stats in the thread of
-    // the interface (n = the fragments of the video, hundreds).
-    QHash<int, qint64> m_fragmentBytes;
     // The mark of a fragment (the video ones are 0, 1, 2... and the audio
     // ones are -(2), -(3)...).
     static int markOf(const QString &track, int index);
@@ -237,7 +260,18 @@ private:
     bool m_running = false;
     bool m_muxing = false;
 
-    qint64 m_bytesDone = 0;
+    // Written by the thread of the transports (one atomic add per chunk) and
+    // read by the thread of the job (the manager asks for it on every save).
+    std::atomic<qint64> m_bytesDone{0};
+    // The bytes reported for the fragment being fetched, one slot per fragment
+    // (video first, then audio). The transport thread adds, the job thread
+    // takes them when the fragment answers (to correct the counter with the
+    // real size of the file, or to drop them when the fragment failed).
+    // It is a unique_ptr of atomics and not a std::vector because
+    // std::atomic is neither copyable nor movable.
+    std::unique_ptr<std::atomic<qint64>[]> m_fragmentBytes;
+    int m_fragmentByteSlots = 0;
+    std::atomic<qint64> m_lastProgressPostMs{0};
     qint64 m_bytesTotal = 0;
     qint64 m_bytesPerSecond = 0;
     // The speed over the last seconds, not the average since the start (see
