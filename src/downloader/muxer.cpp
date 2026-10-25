@@ -163,7 +163,7 @@ QStringList audioArgs(const QString &audioPath, const QString &outputPath)
          << QStringLiteral("-i") << audioPath
          << QStringLiteral("-vn")                    // only the audio
          << QStringLiteral("-acodec") << QStringLiteral("libmp3lame")
-         << QStringLiteral("-q:a") << QStringLiteral("2")
+         << QStringLiteral("-b:a") << QStringLiteral("320k")
          << outputPath;
     return args;
 }

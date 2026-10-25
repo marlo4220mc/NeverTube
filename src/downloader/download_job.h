@@ -39,11 +39,19 @@ public:
     // Starts the download of `plan`. The plan has to come from
     // planFromFormats() and be valid.
     //
+    // `key` is the IDENTITY of the download (see DownloadInfo::identity()): it
+    // names the temporary folder and the partial files, so the video and the
+    // mp3 of the same video do not share them.
+    //
+    // `title` is the name of the final file (the title of the video): the
+    // person looks for "El título.mkv" in the folder, not for the id. When it
+    // is empty the key is used.
+    //
     // `alreadyDone` are the indexes of the fragments that are already on
     // disk from a previous attempt: they are not fetched again, which is
     // what makes the download resumable. The video ones are positive and
     // the audio ones are negative (-1 - index).
-    void start(const Plan &plan, const QString &videoId,
+    void start(const Plan &plan, const QString &key, const QString &title,
                const QVector<int> &alreadyDone = QVector<int>());
 
     // Stops the download. What is already on disk stays there.
@@ -163,7 +171,12 @@ private:
     void setStatus(const QString &status, const QString &error = QString());
 
     Plan m_plan;
+    // The identity of the download: it names the temporary folder and the
+    // partial files (NOT the video id: the mp3 of a video is its own
+    // download).
     QString m_videoId;
+    // The title of the video: it is the name of the final file.
+    QString m_title;
     QString m_dir;
     QString m_tempDir;
 

@@ -1028,6 +1028,17 @@ bool DownloadInfo::isDone() const
     return status == QLatin1String("done");
 }
 
+// The identity of the download of a video. The video keeps the video id (all
+// the rows written before the audio had its own row are video rows and they
+// still match) and the mp3 gets a suffix, because the two files are
+// different and they live in the SAME list.
+QString downloadKey(const QString &videoId, bool audioOnly)
+{
+    if (!audioOnly)
+        return videoId;
+    return videoId + QStringLiteral("-audio");
+}
+
 QString DownloadRepo::partsToJson(const QVector<int> &parts)
 {
     QJsonArray arr;
@@ -1074,11 +1085,15 @@ bool DownloadRepo::upsert(const DownloadInfo &d)
         " error, created_at, final_path, bytes_done, bytes_total, quality, "
         " parts, position_ms, updated_at, bytes_per_second) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
-    bindText(q, d.videoId);
+    // The ID is the identity of the row (the video OR its mp3) and the
+    // video_id is the video. They are the same for a video download (which
+    // is what keeps the rows written before this distinction working).
+    bindText(q, d.identity());
     bindText(q, d.videoId);
     bindText(q, d.title);
     bindText(q, d.channel);
-    bindText(q, QStringLiteral("video"));
+    bindText(q, d.identity() == d.videoId ? QStringLiteral("video")
+                                          : QStringLiteral("audio"));
     bindText(q, d.status);
     q.addBindValue(d.progress);
     bindText(q, d.filePath);
@@ -1114,22 +1129,31 @@ DownloadInfo DownloadRepo::fromRow(const QSqlQuery &q) const
     d.positionMs = q.value(13).toLongLong();
     d.updatedAt = q.value(14).toLongLong();
     d.bytesPerSecond = q.value(15).toLongLong();
+    d.key = q.value(16).toString();
+    if (d.key.isEmpty())
+        d.key = d.videoId;
     return d;
 }
 
-bool DownloadRepo::get(const QString &videoId, DownloadInfo &out) const
+bool DownloadRepo::get(const QString &key, DownloadInfo &out) const
 {
     QSqlQuery q(m_db.db());
     q.prepare(QStringLiteral(
         "SELECT video_id, title, channel, status, progress, file_path, error, "
         "created_at, final_path, bytes_done, bytes_total, quality, parts, "
-        "position_ms, updated_at, bytes_per_second "
-        "FROM downloads WHERE video_id=? LIMIT 1"));
-    q.addBindValue(videoId);
+        "position_ms, updated_at, bytes_per_second, id "
+        "FROM downloads WHERE id=? LIMIT 1"));
+    q.addBindValue(key);
     if (!q.exec() || !q.next())
         return false;
     out = fromRow(q);
     return true;
+}
+
+bool DownloadRepo::getForVideo(const QString &videoId, bool audioOnly,
+                               DownloadInfo &out) const
+{
+    return get(downloadKey(videoId, audioOnly), out);
 }
 
 QVector<DownloadInfo> DownloadRepo::all() const
@@ -1139,7 +1163,7 @@ QVector<DownloadInfo> DownloadRepo::all() const
     q.prepare(QStringLiteral(
         "SELECT video_id, title, channel, status, progress, file_path, error, "
         "created_at, final_path, bytes_done, bytes_total, quality, parts, "
-        "position_ms, updated_at, bytes_per_second "
+        "position_ms, updated_at, bytes_per_second, id "
         "FROM downloads ORDER BY created_at DESC"));
     if (!q.exec())
         return out;
@@ -1148,28 +1172,28 @@ QVector<DownloadInfo> DownloadRepo::all() const
     return out;
 }
 
-bool DownloadRepo::remove(const QString &videoId)
+bool DownloadRepo::remove(const QString &key)
 {
     QSqlQuery q(m_db.db());
-    q.prepare(QStringLiteral("DELETE FROM downloads WHERE video_id=?"));
-    q.addBindValue(videoId);
+    q.prepare(QStringLiteral("DELETE FROM downloads WHERE id=?"));
+    q.addBindValue(key);
     return q.exec();
 }
 
-bool DownloadRepo::setStatus(const QString &videoId, const QString &status,
+bool DownloadRepo::setStatus(const QString &key, const QString &status,
                              const QString &error)
 {
     QSqlQuery q(m_db.db());
     q.prepare(QStringLiteral(
-        "UPDATE downloads SET status=?, error=?, updated_at=? WHERE video_id=?"));
+        "UPDATE downloads SET status=?, error=?, updated_at=? WHERE id=?"));
     q.addBindValue(status);
     q.addBindValue(error);
     q.addBindValue(QDateTime::currentMSecsSinceEpoch());
-    q.addBindValue(videoId);
+    q.addBindValue(key);
     return q.exec();
 }
 
-bool DownloadRepo::setProgress(const QString &videoId, qint64 bytesDone,
+bool DownloadRepo::setProgress(const QString &key, qint64 bytesDone,
                                qint64 bytesTotal)
 {
     const double frac = bytesTotal > 0
@@ -1178,12 +1202,12 @@ bool DownloadRepo::setProgress(const QString &videoId, qint64 bytesDone,
     QSqlQuery q(m_db.db());
     q.prepare(QStringLiteral(
         "UPDATE downloads SET bytes_done=?, bytes_total=?, progress=?, "
-        "updated_at=? WHERE video_id=?"));
+        "updated_at=? WHERE id=?"));
     q.addBindValue(bytesDone);
     q.addBindValue(bytesTotal);
     q.addBindValue(frac);
     q.addBindValue(QDateTime::currentMSecsSinceEpoch());
-    q.addBindValue(videoId);
+    q.addBindValue(key);
     return q.exec();
 }
 

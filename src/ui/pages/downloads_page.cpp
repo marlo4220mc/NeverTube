@@ -105,34 +105,36 @@ QString DownloadsPage::stateText(const DownloadInfo &info) const
 // progress) are kept in members so they can be UPDATED in place: rebuilding
 // the row on every tick would restart the progress bar from zero and the
 // bar would never look like it was moving.
-bool DownloadsPage::rowIsPaused(const QString &videoId) const
+bool DownloadsPage::rowIsPaused(const QString &key) const
 {
     if (!m_repo)
         return false;
     DownloadInfo info;
-    if (!m_repo->get(videoId, info))
+    if (!m_repo->get(key, info))
         return false;
     return info.status == QLatin1String("paused");
 }
 
-QString DownloadsPage::finalPathOf(const QString &videoId) const
+QString DownloadsPage::finalPathOf(const QString &key) const
 {
     if (!m_repo)
         return QString();
     DownloadInfo info;
-    if (!m_repo->get(videoId, info))
+    if (!m_repo->get(key, info))
         return QString();
     return info.finalPath;
 }
 
 QWidget *DownloadsPage::buildRow(const DownloadInfo &info)
 {
-    const QString videoId = info.videoId;
+    // The identity of the row: the video OR its mp3 (they are two rows of
+    // the same video).
+    const QString key = info.identity();
     auto *row = new QWidget(this);
     row->setObjectName(QStringLiteral("downloadRow"));
-    // The id of the video, so that a button of THIS row can be found (the
+    // The key of the row, so that a button of THIS row can be found (the
     // rows are updated in place and there is one row per download).
-    row->setProperty("downloadVideoId", info.videoId);
+    row->setProperty("downloadVideoId", key);
     auto *lay = new QHBoxLayout(row);
     lay->setContentsMargins(12, 10, 12, 10);
     lay->setSpacing(12);
@@ -170,14 +172,14 @@ QWidget *DownloadsPage::buildRow(const DownloadInfo &info)
     nt::bindTooltip(play, "downloads.play");
     nt::bindAccessibleName(play, "downloads.play");
     connect(play, &QPushButton::clicked, this,
-            [this, videoId]() { emit playRequested(videoId, finalPathOf(videoId)); });
+            [this, key]() { emit playRequested(key, finalPathOf(key)); });
 
     auto *retry = new QPushButton(row);
     retry->setObjectName(QStringLiteral("ghost"));
     retry->setCursor(Qt::PointingHandCursor);
     nt::bindText(retry, "downloads.retry");
     connect(retry, &QPushButton::clicked, this,
-            [this, videoId]() { emit retryRequested(videoId); });
+            [this, key]() { emit retryRequested(key); });
 
     // The pause: while the download runs it PAUSES it, and while it is
     // paused it CONTINUES it. The same button with the icon of the state.
@@ -189,17 +191,17 @@ QWidget *DownloadsPage::buildRow(const DownloadInfo &info)
     pause->setProperty("downloadAction", QVariant(QStringLiteral("pause")));
     nt::bindTooltip(pause, "downloads.pause");
     nt::bindAccessibleName(pause, "downloads.pause");
-    connect(pause, &QPushButton::clicked, this, [this, videoId]() {
+    connect(pause, &QPushButton::clicked, this, [this, key]() {
         // The state of the row is ASKED FOR, not taken from the copy that
         // was captured when the row was built: the rows are updated in
         // place (the same widget), so the captured copy was the OLD one and
         // the button paused a download that was already paused (and never
         // continued it).
-        const bool isPaused = rowIsPaused(videoId);
+        const bool isPaused = rowIsPaused(key);
         if (isPaused)
-            emit resumeRequested(videoId);
+            emit resumeRequested(key);
         else
-            emit pauseRequested(videoId);
+            emit pauseRequested(key);
     });
 
     auto *remove = new QPushButton(row);
@@ -211,7 +213,7 @@ QWidget *DownloadsPage::buildRow(const DownloadInfo &info)
     nt::bindTooltip(remove, "downloads.delete");
     nt::bindAccessibleName(remove, "downloads.delete");
     connect(remove, &QPushButton::clicked, this,
-            [this, videoId]() { emit removeRequested(videoId); });
+            [this, key]() { emit removeRequested(key); });
 
 
     lay->addWidget(play);
@@ -227,7 +229,7 @@ QWidget *DownloadsPage::buildRow(const DownloadInfo &info)
     rowInfo.pause = pause;
     rowInfo.retry = retry;
     rowInfo.remove = remove;
-    m_rowParts.insert(info.videoId, rowInfo);
+    m_rowParts.insert(key, rowInfo);
 
     updateRow(info, rowInfo);
     return row;
@@ -242,7 +244,13 @@ void DownloadsPage::updateRow(const DownloadInfo &info, const Row &row)
     QString meta = stateText(info);
     if (!info.quality.isEmpty())
         meta += QStringLiteral(" · ") + info.quality;
-    if (info.bytesTotal > 0) {
+    // While it runs, "what it has / what it is going to have"; when it is
+    // done, only the size of the file (which IS the total: the estimate of
+    // the tracks is not the size of the encoded mp3).
+    const bool finishedRow = info.status == QLatin1String("done");
+    if (finishedRow && info.bytesDone > 0) {
+        meta += QStringLiteral(" · ") + humanBytes(info.bytesDone);
+    } else if (info.bytesTotal > 0) {
         meta += QStringLiteral(" · ") + humanBytes(info.bytesDone)
                 + QStringLiteral(" / ") + humanBytes(info.bytesTotal);
     }
@@ -298,7 +306,7 @@ void DownloadsPage::reload()
     for (auto it = m_rowParts.begin(); it != m_rowParts.end();) {
         bool found = false;
         for (const DownloadInfo &info : all) {
-            if (info.videoId == it.key()) {
+            if (info.identity() == it.key()) {
                 updateRow(info, it.value());
                 found = true;
                 break;
@@ -330,7 +338,7 @@ void DownloadsPage::reload()
     // and the new ones are the last).
     for (int i = all.size() - 1; i >= 0; --i) {
         const DownloadInfo &info = all.at(i);
-        if (m_rowParts.contains(info.videoId))
+        if (m_rowParts.contains(info.identity()))
             continue;
         m_listLayout->insertWidget(m_listLayout->count() - 1,
                                    buildRow(info));

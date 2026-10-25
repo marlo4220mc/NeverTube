@@ -33,21 +33,28 @@ DownloadManager::DownloadManager(Yt *yt, DownloadRepo *repo, QWidget *window,
                 &DownloadManager::onAdaptiveFormats);
         connect(m_yt, &Yt::adaptiveFormatsFailed, this,
                 [this](const QString &vid, const QString &reason) {
-            if (vid != m_currentId)
+            // The answer carries the VIDEO ID, not the key: the mp3 of a video
+            // ("<id>-audio") is the same video.
+            if (vid != m_currentVideoId)
                 return;
             // There is NO job yet when the formats fail: the job is created
             // AFTER the formats arrive. Without this the row would stay in
             // "pending" forever (measured: a video that YouTube refuses
             // left the list as "pending" and nothing happened).
+            const QString key = m_currentId;
             if (m_repo)
-                m_repo->setStatus(vid, QStringLiteral("error"), reason);
+                m_repo->setStatus(key, QStringLiteral("error"), reason);
             if (m_job) {
                 m_job->deleteLater();
                 m_job = nullptr;
             }
             m_currentId.clear();
+            m_currentVideoId.clear();
             emit changed();
-            emit failed(vid, reason);
+            emit failed(key, reason);
+            // The queue goes on: a queued download must not wait for a
+            // failure of the previous one.
+            processQueue();
         });
     }
 }
@@ -95,9 +102,9 @@ QVector<DownloadInfo> DownloadManager::downloads() const
     return m_repo ? m_repo->all() : QVector<DownloadInfo>();
 }
 
-bool DownloadManager::state(const QString &videoId, DownloadInfo &out) const
+bool DownloadManager::state(const QString &key, DownloadInfo &out) const
 {
-    return m_repo && m_repo->get(videoId, out);
+    return m_repo && m_repo->get(key, out);
 }
 
 // True when the path is INSIDE the folder of the downloads (the one of the
@@ -115,25 +122,37 @@ bool DownloadManager::isInsideDownloadFolder(const QString &path) const
            || target.startsWith(root + QLatin1Char('/'));
 }
 
-bool DownloadManager::remove(const QString &videoId)
+bool DownloadManager::cancelInFlight(const QString &key)
+{
+    if (m_currentId != key)
+        return false;
+    if (m_job) {
+        m_job->stop();
+        m_job->deleteLater();
+        m_job = nullptr;
+    }
+    m_currentId.clear();
+    m_currentVideoId.clear();
+    return true;
+}
+
+bool DownloadManager::remove(const QString &key)
 {
     // The download IN PROGRESS is CANCELLED: the X of a row has to stop
     // the job, not only delete the row. Without this the job kept
     // downloading, and when it finished it wrote the row again: the
     // download came back to the list and the downloader stayed busy.
-    if (m_job && m_currentId == videoId) {
-        // The job is stopped and its callbacks are IGNORED: they arrive
-        // later (the event loop) and they wrote the row again, so the
-        // download came back to the list.
-        m_cancelled = videoId;
-        m_job->stop();
-        m_job->deleteLater();
-        m_job = nullptr;
-        m_currentId.clear();
-    }
+    //
+    // It also covers the download that is only WAITING for its formats
+    // (there is no job yet): its late answer was creating the job for a row
+    // that had already been deleted.
+    const bool wasInFlight = cancelInFlight(key);
+    // A download that only WAITED in the queue goes with the row: without
+    // this it started when the current one ended and came back to the list.
+    dropQueued(key);
     DownloadInfo info;
     if (m_repo)
-        m_repo->get(videoId, info);
+        m_repo->get(key, info);
     // The files of the download go with it: the mp4, the partials and the
     // temporary ones.
     //
@@ -142,9 +161,17 @@ bool DownloadManager::remove(const QString &videoId)
     // hand-edited database). The app never deletes a file that is not its
     // own.
     const QStringList paths = {info.finalPath, info.filePath,
-                               m_dir + QLatin1Char('/') + videoId
+                               m_dir + QLatin1Char('/') + key
+                                   + QStringLiteral(".video.mp4"),
+                               m_dir + QLatin1Char('/') + key
+                                   + QStringLiteral(".audio.m4a"),
+                               m_dir + QLatin1Char('/') + key
+                                   + QStringLiteral(".audio.webm"),
+                               // The names of the downloader before it wrote
+                               // .mp4 tracks (a stale row can still name them).
+                               m_dir + QLatin1Char('/') + key
                                    + QStringLiteral(".video.ts"),
-                               m_dir + QLatin1Char('/') + videoId
+                               m_dir + QLatin1Char('/') + key
                                    + QStringLiteral(".audio.ts")};
     for (const QString &p : paths) {
         if (p.isEmpty() || !QFileInfo::exists(p))
@@ -155,26 +182,87 @@ bool DownloadManager::remove(const QString &videoId)
     }
     // The FOLDER of the fragments: it is where the bytes of the download
     // live, and it is the one that was left behind (hundreds of MB) when
-    // the download was deleted.
+    // the download was deleted. Same rule as the files: only inside the
+    // folder of the downloads (the key comes from the repository).
     {
         const QString partsDir =
-            m_dir + QLatin1Char('/') + videoId + QStringLiteral(".parts");
-        if (QFileInfo::exists(partsDir))
+            m_dir + QLatin1Char('/') + key + QStringLiteral(".parts");
+        if (QFileInfo::exists(partsDir) && isInsideDownloadFolder(partsDir))
             QDir(partsDir).removeRecursively();
     }
-    const bool ok = m_repo ? m_repo->remove(videoId) : false;
+    const bool ok = m_repo ? m_repo->remove(key) : false;
     emit changed();
+    // The downloader is free again: the next one of the queue goes on.
+    if (wasInFlight)
+        processQueue();
     return ok;
 }
 
-bool DownloadManager::retry(const QString &videoId)
+// See the header: the mp3 rows of the first version of the downloader shared
+// the row (and the ".parts" folder) of the video, so their key is the plain
+// video id. They are moved to the row of the mp3 ONCE, with their folder.
+void DownloadManager::migrateLegacyAudioRow(DownloadInfo &info)
+{
+    if (!m_repo || info.quality != QLatin1String("mp3"))
+        return;
+    const QString key = info.identity();
+    if (key != info.videoId) {
+        // It already has a row of its own (the key carries the suffix).
+        return;
+    }
+    const QString audioKey = downloadKey(info.videoId, true);
+    DownloadInfo existing;
+    if (m_repo->get(audioKey, existing)) {
+        // The row of the mp3 already exists: the old one is a leftover (the
+        // migration ran and the old row survived, or the mp3 was downloaded
+        // again after the update). The ROW goes, the FILE stays: it is the
+        // one of the row that already exists (the name is the title, so the
+        // two can point at the same file).
+        removeFromList(key);
+        info.key = audioKey;
+        return;
+    }
+    // The bytes that are already on the disk go with the row: the folder of
+    // the fragments is named after the key.
+    const QString oldParts = m_dir + QLatin1Char('/') + key
+                             + QStringLiteral(".parts");
+    const QString newParts = m_dir + QLatin1Char('/') + audioKey
+                             + QStringLiteral(".parts");
+    bool moved = true;
+    if (QFileInfo::exists(oldParts))
+        moved = QDir().rename(oldParts, newParts);
+    // The index of the fragments is only valid with its bytes: if the folder
+    // could not be moved, the row starts from zero instead of trusting an
+    // index of files that are not there (the output would be corrupt).
+    if (!moved)
+        info.parts.clear();
+    info.key = audioKey;
+    info.updatedAt = QDateTime::currentMSecsSinceEpoch();
+    m_repo->upsert(info);
+    m_repo->remove(key);
+}
+
+bool DownloadManager::retry(const QString &key)
 {
     DownloadInfo info;
-    if (!m_repo || !m_repo->get(videoId, info)) {
+    if (!m_repo || !m_repo->get(key, info)) {
         return false;
     }
+    // A row of the first version (the mp3 shared the row of the video) is
+    // moved to the row of the mp3 before it is resumed: see the header.
+    migrateLegacyAudioRow(info);
     // The row stays (with its index of fragments): the download resumes.
     //
+    // `key` is the IDENTITY of the download, not the video: the mp3 of a
+    // video is "<videoId>-audio". The video id that YouTube knows is the one
+    // in `info.videoId`, so THAT is what is asked for again (asking for
+    // "abc-audio" answered nothing and the mp3 never resumed).
+    // The IDENTITY of the row says whether it is the mp3: the key carries the
+    // suffix. `quality` is the belt and braces of the migration above (a row
+    // that could not be migrated is still an mp3 and must not be resumed as a
+    // VIDEO: a full video download under the name of an mp3).
+    const bool audioOnly = info.identity() != info.videoId
+                           || info.quality == QLatin1String("mp3");
     // The RESOLUTION of the row is kept ("720p" -> 720): the person paused
     // a 720p and it is not a 4K what they get when they continue.
     int height = 0;
@@ -184,33 +272,34 @@ bool DownloadManager::retry(const QString &videoId)
         if (ok && h > 0)
             height = h;
     }
-    start(videoId, info.title, info.channel, 0, 0, height, m_forcedCodec,
-          m_forcedAudioOnly);
+    // The codec is NOT kept: the row stores the resolution, not the codec, and
+    // reusing the last one clicked (of another video) made no sense. Empty =
+    // the default of that resolution (the smallest), the same rule of the
+    // first download.
+    start(info.videoId, info.title, info.channel, 0, 0, height, QString(),
+          audioOnly);
     return true;
 }
 
-bool DownloadManager::removeFromList(const QString &videoId)
+bool DownloadManager::removeFromList(const QString &key)
 {
     // The job is stopped (a download in course cannot go on without its
     // row) but the FILE is left on the disk.
-    if (m_job && m_currentId == videoId) {
-        m_cancelled = videoId;
-        m_job->stop();
-        m_job->deleteLater();
-        m_job = nullptr;
-        m_currentId.clear();
-    }
-    const bool ok = m_repo ? m_repo->remove(videoId) : false;
+    const bool wasInFlight = cancelInFlight(key);
+    dropQueued(key);
+    const bool ok = m_repo ? m_repo->remove(key) : false;
     emit changed();
+    if (wasInFlight)
+        processQueue();
     return ok;
 }
 
-void DownloadManager::pause(const QString &videoId)
+void DownloadManager::pause(const QString &key)
 {
     // The job is stopped when it is the one that is running. A download that
     // is paused from a previous session (there is no job) only needs the
     // row to change its state.
-    const bool isTheJob = m_job && m_currentId == videoId;
+    const bool isTheJob = m_job && m_currentId == key;
     // The data of the job is read BEFORE releasing it: the job is deleted
     // right after (it is not a parent that survives), so reading it after
     // is a use-after-free (it crashed the app).
@@ -219,20 +308,20 @@ void DownloadManager::pause(const QString &videoId)
     if (isTheJob) {
         parts = m_job->doneSegments();
         bytesDone = m_job->bytesDone();
-        m_job->stop();
-        // The job is RELEASED: the downloader is free again. It used to stay
-        // alive (stopped), and then the start() of the resume found a job in
-        // place and refused it ("a download is already running"): the
-        // download did not continue.
-        m_job->deleteLater();
-        m_job = nullptr;
-        m_currentId.clear();
     }
+    // The job is RELEASED (and the download that was only waiting for its
+    // formats is forgotten, so the answer does not start it): the downloader
+    // is free again. It used to stay alive (stopped), and then the start()
+    // of the resume found a job in place and refused it ("a download is
+    // already running"): the download did not continue.
+    const bool wasInFlight = cancelInFlight(key);
+    // The queued download of that row waits no more: it is paused.
+    dropQueued(key);
     // The row goes to "paused" with the fragments that are already on the
     // disk: continuing resumes from there.
     if (m_repo) {
         DownloadInfo info;
-        if (m_repo->get(videoId, info)) {
+        if (m_repo->get(key, info)) {
             info.status = QStringLiteral("paused");
             if (isTheJob) {
                 info.parts = parts;
@@ -243,13 +332,16 @@ void DownloadManager::pause(const QString &videoId)
         }
     }
     emit changed();
+    // The downloader is free: the next one of the queue goes on.
+    if (wasInFlight)
+        processQueue();
 }
 
-void DownloadManager::resume(const QString &videoId)
+void DownloadManager::resume(const QString &key)
 {
     // Continuing IS the retry: the row is kept (with its fragments) and the
     // download starts again from where it was.
-    retry(videoId);
+    retry(key);
 }
 
 void DownloadManager::start(const QString &videoId, const QString &title,
@@ -257,23 +349,57 @@ void DownloadManager::start(const QString &videoId, const QString &title,
                             int durationSeconds, int forcedHeight,
                             const QString &forcedCodec, bool forcedAudioOnly)
 {
-    if (m_job) {
-        // One download at a time (decision D15).
-        emit failed(videoId, nt::tr("error.dlBusy"));
-        return;
-    }
+    // The IDENTITY of the download: video and its MP3 are two different
+    // downloads (two files, two rows), so the audio one does not replace
+    // the video one in the list.
+    const QString key = downloadKey(videoId, forcedAudioOnly);
+
+    // Already in the list AND finished: the state is shown, it is not queued
+    // again (the file is on the disk).
     DownloadInfo existing;
-    if (m_repo && m_repo->get(videoId, existing)) {
-        // Already known: the state is shown, it is not queued again. BUT a
-        // download that was interrupted (or that failed) is RESUMED: the
-        // segments that are already on disk are not fetched again.
+    if (m_repo && m_repo->get(key, existing)) {
+        // A row of the first version: the mp3 shared the row of the video, so
+        // the VIDEO of that id found the row of the mp3 ("done") and refused
+        // to download, silently. The mp3 is moved to its own row first, and
+        // then the row of the video is read again (it may not exist).
+        if (!forcedAudioOnly && existing.quality == QLatin1String("mp3")
+            && existing.identity() == existing.videoId) {
+            migrateLegacyAudioRow(existing);
+            if (!m_repo->get(key, existing))
+                existing = DownloadInfo();
+        }
         if (existing.status == QLatin1String("done")) {
             emit changed();
             return;
         }
     }
 
-    m_currentId = videoId;
+    if (m_job || !m_currentId.isEmpty()) {
+        // One download at a time: the request waits in the queue. The
+        // downloader is busy while the job runs AND while it is waiting for
+        // the formats of the previous one (there is no job yet, but its
+        // identity is taken: starting another one would lose that answer).
+        // It is not queued twice (the same video pressed twice) and the row
+        // is written NOW, so the person sees it as "pending" while the
+        // other one runs. The one that is RUNNING is not queued again either.
+        bool alreadyQueued = (m_currentId == key);
+        for (const DownloadRequest &r : m_queue) {
+            if (downloadKey(r.videoId, r.forcedAudioOnly) == key) {
+                alreadyQueued = true;
+                break;
+            }
+        }
+        if (!alreadyQueued)
+            m_queue.enqueue({videoId, title, channel, maxHeight,
+                             durationSeconds, forcedHeight, forcedCodec,
+                             forcedAudioOnly});
+        writePendingRow(key, videoId, title, channel);
+        emit changed();
+        return;
+    }
+
+    m_currentId = key;
+    m_currentVideoId = videoId;
     m_title = title;
     m_channel = channel;
     m_maxHeight = maxHeight;
@@ -284,24 +410,40 @@ void DownloadManager::start(const QString &videoId, const QString &title,
     m_forcedCodec = forcedCodec;
     m_forcedAudioOnly = forcedAudioOnly;
 
-    if (m_repo) {
-        // The row that was already there is KEPT (with its index of
-        // fragments): the upsert is a REPLACE, so a fresh DownloadInfo would
-        // erase the fragments that are already on the disk and the resume
-        // would be lost.
-        DownloadInfo info;
-        if (!m_repo->get(videoId, info))
-            info.createdAt = QDateTime::currentMSecsSinceEpoch();
-        info.videoId = videoId;
-        info.title = title;
-        info.channel = channel;
-        info.status = QStringLiteral("pending");
-        info.updatedAt = QDateTime::currentMSecsSinceEpoch();
-        m_repo->upsert(info);
-    }
+    writePendingRow(key, videoId, title, channel);
     emit changed();
 
-    m_yt->requestAdaptiveFormats(videoId);
+    // A manager without Yt is the one the tests build to exercise the QUEUE
+    // (which is pure state) without network: there is nobody to ask.
+    if (m_yt)
+        m_yt->requestAdaptiveFormats(videoId);
+}
+
+// The row of a queued (or just started) download: the fragments that are
+// already on the disk are KEPT (the upsert is a REPLACE, so a fresh
+// DownloadInfo would erase them and the resume would be lost).
+void DownloadManager::writePendingRow(const QString &key,
+                                      const QString &videoId,
+                                      const QString &title,
+                                      const QString &channel)
+{
+    if (!m_repo)
+        return;
+    DownloadInfo info;
+    if (!m_repo->get(key, info))
+        info.createdAt = QDateTime::currentMSecsSinceEpoch();
+    info.key = key;
+    info.videoId = videoId;
+    if (!title.isEmpty())
+        info.title = title;
+    if (!channel.isEmpty())
+        info.channel = channel;
+    // A download that is already running is not sent back to "pending": the
+    // pending row is only for the ones that wait.
+    if (info.status != QLatin1String("downloading"))
+        info.status = QStringLiteral("pending");
+    info.updatedAt = QDateTime::currentMSecsSinceEpoch();
+    m_repo->upsert(info);
 }
 
 
@@ -318,8 +460,11 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
     NT_DEBUG("E2E dl formatos id=%s n=%d current=%s\n",
              videoId.toUtf8().constData(), int(formats.size()),
              m_currentId.toUtf8().constData());
-    if (videoId != m_currentId)
+    // The answer comes with the VIDEO id; the row of the download is `key`
+    // (the video, or "<videoId>-audio" for its mp3).
+    if (videoId != m_currentVideoId)
         return;
+    const QString key = m_currentId;
 
     // The same ranking that the player uses, in miniature: VP9 beats h264.
     // The HEIGHT wins for a download (the opposite of the player): the user
@@ -352,10 +497,13 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
     Plan plan = planFromFormats(formats, m_maxHeight, QString(), &Rank::of);
     if (!plan.valid) {
         if (m_repo)
-            m_repo->setStatus(videoId, QStringLiteral("error"), plan.error);
+            m_repo->setStatus(key, QStringLiteral("error"), plan.error);
         emit changed();
-        emit failed(videoId, plan.error);
+        emit failed(key, plan.error);
         m_currentId.clear();
+        m_currentVideoId.clear();
+        // The queue goes on with the next one.
+        processQueue();
         return;
     }
 
@@ -365,10 +513,18 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
         plan = planWithHeight(plan, choice.height);
     plan.kind = choice.audioOnly ? dl::DownloadKind::Audio
                                  : dl::DownloadKind::Video;
+    // The total of an mp3 is the audio track, NOT the video plus the audio
+    // (the row showed "2 MB / 300 MB" and the bar never filled).
+    if (plan.kind == dl::DownloadKind::Audio && plan.audio.contentLength > 0)
+        plan.estimatedBytes = plan.audio.contentLength;
 
     if (m_repo) {
         DownloadInfo info;
-        m_repo->get(videoId, info);
+        // The row is the KEY (the mp3 has its own): reading it by the video id
+        // wrote the state and the path of the mp3 in the row of the VIDEO, and
+        // the two downloads of the same video stopped coexisting.
+        m_repo->get(key, info);
+        info.key = key;
         info.videoId = videoId;
         if (info.title.isNull())
             info.title = QString();
@@ -388,6 +544,14 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
         m_repo->upsert(info);
     }
 
+    // A job of the same row that is still around (a duplicated answer, a
+    // forced refresh) is released before the new one: overwriting the
+    // pointer would leak it and leave its threads running.
+    if (m_job) {
+        m_job->stop();
+        m_job->deleteLater();
+        m_job = nullptr;
+    }
     m_job = new DownloadJob(this);
     m_job->setDirectory(m_dir);
     // The number of connections of the setting of Ajustes.
@@ -395,12 +559,19 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
     m_job->setPlaybackActive(m_playbackActive);
     m_lastUiUpdateMs = 0;
     m_lastSaveMs = 0;
+    // The number of THIS job: the callbacks compare it against m_jobSerial
+    // and ignore themselves when the job is no longer the current one (it
+    // was cancelled, paused or replaced and the event loop delivered its
+    // signals late).
+    const quint64 serial = ++m_jobSerial;
     connect(m_job, &DownloadJob::progressChanged, this,
-            [this, videoId](qint64 done, qint64 total) {
+            [this, key, serial](qint64 done, qint64 total) {
+        if (serial != m_jobSerial || !m_job)
+            return;
         // The save is throttled inside (kSaveEveryMs): this signal arrives
         // with every chunk of ~64 KB.
         saveProgress();
-        emit progressChanged(videoId, done, total);
+        emit progressChanged(key, done, total);
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         if (now - m_lastUiUpdateMs >= 250) {
             m_lastUiUpdateMs = now;
@@ -410,12 +581,22 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
     // The indexes of the fragments that are already on disk: they are what
     // the resume reads, so this one is saved at once.
     connect(m_job, &DownloadJob::segmentDone, this,
-            [this, videoId](int) { saveProgress(true); });
+            [this, serial](int) {
+        if (serial != m_jobSerial || !m_job)
+            return;
+        saveProgress(true);
+    });
     connect(m_job, &DownloadJob::finished, this,
-            [this, videoId](const QString &path) {
+            [this, key, videoId, serial](const QString &path) {
+        // A job that is no longer the current one (its row was deleted, or
+        // the download was paused or replaced) does not write anything: the
+        // row is gone or belongs to another download now.
+        if (serial != m_jobSerial || !m_job)
+            return;
         if (m_repo) {
             DownloadInfo info;
-            m_repo->get(videoId, info);
+            m_repo->get(key, info);
+            info.key = key;
             info.videoId = videoId;
             info.finalPath = path;
             info.status = QStringLiteral("done");
@@ -432,7 +613,9 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
     // video: the URLs of the player response last a while and a long
     // download outlives them.
     connect(m_job, &DownloadJob::urlExpired, this,
-            [this, videoId]() {
+            [this, key, videoId, serial]() {
+                if (serial != m_jobSerial || !m_job)
+                    return;
                 NT_DEBUG("E2E dl url expirada id=%s -> pedir formatos\n",
                          videoId.toUtf8().constData());
                 if (m_job) {
@@ -443,22 +626,29 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
                 // failure) and the formats are asked again.
                 if (m_repo) {
                     DownloadInfo info;
-                    if (m_repo->get(videoId, info)) {
+                    if (m_repo->get(key, info)) {
                         info.status = QStringLiteral("downloading");
                         info.updatedAt =
                             QDateTime::currentMSecsSinceEpoch();
                         m_repo->upsert(info);
                     }
                 }
-                m_currentId = videoId;
+                // The key is KEPT (it is the identity of the download, not the
+                // video): only the id of the video is asked for again.
+                m_currentId = key;
+                m_currentVideoId = videoId;
                 // With forceRefresh: the cached URLs are the dead ones.
                 m_yt->requestAdaptiveFormats(videoId, true);
                 emit changed();
             });
     connect(m_job, &DownloadJob::failed, this,
-            [this, videoId](const QString &reason) {
+            [this, key, serial](const QString &reason) {
+        // The job is no longer the current one: nothing is written (the row
+        // was deleted or the download was paused/replaced).
+        if (serial != m_jobSerial || !m_job)
+            return;
         if (m_repo)
-            m_repo->setStatus(videoId, QStringLiteral("error"), reason);
+            m_repo->setStatus(key, QStringLiteral("error"), reason);
         onJobFailed(reason);
     });
 
@@ -466,10 +656,10 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
     QVector<int> already;
     if (m_repo) {
         DownloadInfo info;
-        if (m_repo->get(videoId, info))
+        if (m_repo->get(key, info))
             already = info.parts;
     }
-    m_job->start(plan, videoId, already);
+    m_job->start(plan, key, m_title, already);
     emit changed();
 }
 
@@ -503,49 +693,110 @@ void DownloadManager::saveProgress(bool force)
 void DownloadManager::onJobFinished(const QString &path)
 {
     const QString id = m_currentId;
-    if (!m_cancelled.isEmpty()) {
-        // The download was cancelled with the X: the row is gone and it
-        // does not come back.
-        m_cancelled.clear();
-        if (m_job) {
-            m_job->deleteLater();
-            m_job = nullptr;
-        }
-        m_currentId.clear();
-        emit changed();
-        return;
-    }
     if (m_job) {
         m_job->deleteLater();
         m_job = nullptr;
     }
     m_currentId.clear();
+    m_currentVideoId.clear();
     emit changed();
     emit finished(id, path);
+    processQueue();
 }
 
 void DownloadManager::onJobFailed(const QString &reason)
 {
     const QString id = m_currentId;
-    if (!m_cancelled.isEmpty()) {
-        // The download was cancelled with the X: nothing is written (the row
-        // is gone and the files with it).
-        m_cancelled.clear();
-        if (m_job) {
-            m_job->deleteLater();
-            m_job = nullptr;
-        }
-        m_currentId.clear();
-        emit changed();
-        return;
-    }
     if (m_job) {
         m_job->deleteLater();
         m_job = nullptr;
     }
     m_currentId.clear();
+    m_currentVideoId.clear();
     emit changed();
     emit failed(id, reason);
+    processQueue();
+}
+
+// Processes the next download in the queue.
+void DownloadManager::processQueue()
+{
+    // One at a time: a start() while a job runs would only queue the request
+    // again (and it would be taken out of the queue in the wrong order). The
+    // identity is also checked: a download that is WAITING for its formats
+    // has no job yet but it is still the one in flight.
+    //
+    // The loop is NOT cosmetic: start() can refuse a request (a row that is
+    // already "done"), and with a single attempt that request left the queue
+    // and NOTHING was started: the whole queue stayed still until the next
+    // event. Each turn takes one request out, so the loop always ends.
+    while (!m_job && m_currentId.isEmpty() && !m_queue.isEmpty()) {
+        const DownloadRequest req = m_queue.dequeue();
+        start(req.videoId, req.title, req.channel, req.maxHeight,
+              req.durationSeconds, req.forcedHeight, req.forcedCodec,
+              req.forcedAudioOnly);
+    }
+}
+
+// The downloads that a previous session left half way. See the header: the
+// queue is in memory, so a row that waited for the other one to end was
+// "pending" and stayed that way for ever.
+void DownloadManager::resumePending()
+{
+    if (!m_repo)
+        return;
+    // `all()` comes newest first; the downloads are resumed in the order they
+    // were created (the queue is a FIFO).
+    const QVector<DownloadInfo> all = m_repo->all();
+    for (int i = all.size() - 1; i >= 0; --i) {
+        DownloadInfo info = all.at(i);
+        const bool waiting = info.status == QLatin1String("pending");
+        const bool interrupted = info.status == QLatin1String("downloading")
+                                 || info.status == QLatin1String("muxing");
+        if (!waiting && !interrupted)
+            continue;
+        // A row of the first version (the mp3 shared the row of the video) is
+        // moved to the row of the mp3, with its folder, before anything else:
+        // the migrated row is the one that starts.
+        migrateLegacyAudioRow(info);
+        // An interrupted row is written back as "pending" BEFORE starting:
+        // the job that was running is gone, and a row that says "downloading"
+        // with nothing running is a lie (and it also made writePendingRow()
+        // keep the state of a download that does not exist).
+        if (interrupted) {
+            info.status = QStringLiteral("pending");
+            info.bytesPerSecond = 0;
+            info.updatedAt = QDateTime::currentMSecsSinceEpoch();
+            m_repo->upsert(info);
+        }
+        // The same rule as the retry: the row knows if it is the mp3 (the
+        // migration above leaves it in its own row) and at what resolution it
+        // was going. `quality` stays as the belt and braces of a row that
+        // could not be migrated.
+        const bool audioOnly = info.identity() != info.videoId
+                               || info.quality == QLatin1String("mp3");
+        int height = 0;
+        if (!audioOnly && info.quality.endsWith(QLatin1Char('p'))) {
+            bool ok = false;
+            const int h = info.quality.left(info.quality.size() - 1).toInt(&ok);
+            if (ok && h > 0)
+                height = h;
+        }
+        start(info.videoId, info.title, info.channel, 0, 0, height, QString(),
+              audioOnly);
+    }
+}
+
+// The request of that row is not going to run: it leaves the queue.
+void DownloadManager::dropQueued(const QString &key)
+{
+    for (int i = 0; i < m_queue.size(); ++i) {
+        const DownloadRequest &r = m_queue.at(i);
+        if (downloadKey(r.videoId, r.forcedAudioOnly) == key) {
+            m_queue.removeAt(i);
+            return;
+        }
+    }
 }
 
 } // namespace dl

@@ -118,6 +118,12 @@ bool downloadPlanSelfTest()
     check(p.estimatedBytes == 25000000 + 3449447,
           "el total es la suma de las dos pistas");
 
+    dl::Plan pAudio = p;
+    pAudio.kind = dl::DownloadKind::Audio;
+    pAudio.estimatedBytes = pAudio.audio.contentLength;
+    check(pAudio.estimatedBytes == 3449447,
+          "el plan de solo audio estima solo la pista de audio (no el video)");
+
     // --- the options for the dialog ---
     // ONE per (height, codec): the dialog offers the codec of each one.
     check(p.options.size() == 5,
@@ -535,6 +541,8 @@ bool downloadPlanSelfTest()
         check(a.contains(QStringLiteral("-vn")), "el audio solo quita el video");
         check(a.contains(QStringLiteral("libmp3lame")),
               "el audio se codifica con libmp3lame");
+        check(a.contains(QStringLiteral("320k")),
+              "el audio se codifica a 320 kbps (maxima calidad)");
         check(a.last() == QLatin1String("/o.mp3"),
               "la salida del audio es el ULTIMO argumento");
         // The fall-back: the same name with the other extension. The

@@ -1700,14 +1700,79 @@ the one of Ajustes does not exist, and the default one is used.)
 The pure part has its own selftest, `--selftest-download-folder` (runs in
 CI).
 
+### The queue of the downloads (one at a time, and it ADVANCES)
+
+Four things were reported broken together, and they share one cause: the
+queue only lives in **memory**.
+
+- **The row of a download is its KEY, not the video id.** The mp3 of a video
+  is `<videoId>-audio` (`downloadKey`), so the mp3 and the video of the SAME
+  video are two rows, two files and two downloads. The manager keeps
+  `m_currentId` (the KEY: what the row is read and written by) apart from
+  `m_currentVideoId` (the VIDEO id: what YouTube answers with). Mixing them
+  was the bug: the answer of the formats carried the plain video id, the mp3
+  row was never matched and stayed "pending", and the mp3 wrote its state into
+  the row of the video.
+- **Pressing download while another one runs queues it.** `start()` with
+  `m_job` **or** `!m_currentId.isEmpty()` (a download waiting for its formats
+  has no job yet but it is still the one in flight) writes the row as
+  "pending" NOW (so the person sees it) and enqueues the request, without
+  queuing the same key twice.
+- **The queue advances** from every terminal point (finished, failed, plan
+  invalid, formats failed, removed, paused). `processQueue()` is a LOOP and
+  not a single attempt: `start()` can refuse a request (a row that is already
+  "done"), and with one attempt that request left the queue and nothing was
+  started, so the whole queue stayed still until the next event.
+- **`resumePending()` at startup** revives the rows a previous session left
+  half way: "pending" (they waited in a queue nobody reads when the app opens
+  again) and "downloading"/"muxing" (the process ended while they ran). They
+  are started oldest first, and an interrupted row is normalized to "pending"
+  first (a row that says "downloading" with nothing running is a lie, and
+  `writePendingRow()` keeps that state). `paused` and `error` are NOT touched:
+  those wait for the person.
+  It is called by `main.cpp` when the app opens (`resumePendingDownloads()`),
+  **NOT from the constructor of `MainWindow`**: the integration tests build a
+  real window, and with the revive in the constructor they started the real
+  downloads of the person (network, files) behind a test that is offline, and
+  left the downloader busy when the test expected it free.
+
+The queue itself is pure state, so `--selftest-download-button` drives a
+`DownloadManager` of its own with its own database and **no `Yt`** (a
+manager without it just leaves the download waiting for its formats, which is
+the state the queue has to survive): mp3 + video coexisting, the second
+request queued as "pending", the queue advancing when the running one is
+removed, a repeated request not queued twice, and the revive of a "pending",
+an interrupted and a paused row (including an mp3, and a row of the previous
+version, where the mp3 shared the row of the video and is told apart by
+`quality == "mp3"`). With the REAL window it checks the opposite of the
+revive: that **building** it starts nothing, even with a "pending" row in the
+database (the revive belongs to the startup, `main.cpp`).
+
+**A row of the previous version is an mp3 when `quality == "mp3"`.** The
+first version of the downloader wrote the mp3 into the row of the video (the
+key was the plain video id), so `identity() != videoId` is not enough to
+know: `retry()` and `resumePending()` also look at `quality`. Without it, the
+first start after the update downloaded a full VIDEO under the name of an mp3
+that was half way.
+
+And such a row is **migrated**, not resumed where it is
+(`migrateLegacyAudioRow`): its key becomes `<videoId>-audio` and its
+`.parts` folder is renamed with it (the bytes already on the disk are kept),
+because the old key belongs to the video and resuming the mp3 there would
+collide with the video of the same id. It is also migrated when the VIDEO of
+that id is asked for: otherwise the video found the row of the mp3 "done" and
+refused to download, silently. The gate is `quality == "mp3"` **and** the key
+being the plain video id, which no row written by this version can satisfy.
+
 ### The selftests
 
 - `--selftest-download`: the plan is a pure function of the master
   (27 cases, offline).
-- `--selftest-download-button`: the button of the REAL window (11 cases):
-  it exists, it has a tooltip AND an accessible name (an icon-only button
-  has no text: those two ARE its label), and the row it queues lands in
-  the repository with the state "pending".
+- `--selftest-download-button`: the button of the REAL window and the QUEUE
+  of the downloads (the isolated manager, the button, the page and the
+  revive), offline. The button: it exists, it has a tooltip AND an
+  accessible name (an icon-only button has no text: those two ARE its label),
+  and the row it queues lands in the repository with the state "pending".
 - `--selftest-variants`: the variants of a video (the family of the codec
   and one variant per (height, codec) with its real size), offline.
 - `--selftest-download-settings`: the codes of the settings of the

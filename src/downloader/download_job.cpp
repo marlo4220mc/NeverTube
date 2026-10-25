@@ -3,6 +3,7 @@
 #include "../i18n.h"
 
 #include "download_transport.h"
+#include "download_folder.h"
 #include "muxer.h"
 
 #include "../debug.h"
@@ -195,7 +196,8 @@ void DownloadJob::setStatus(const QString &status, const QString &error)
     emit statusChanged(m_status, m_error);
 }
 
-void DownloadJob::start(const Plan &plan, const QString &videoId,
+void DownloadJob::start(const Plan &plan, const QString &key,
+                        const QString &title,
                         const QVector<int> &alreadyDone)
 {
     stop();
@@ -208,7 +210,8 @@ void DownloadJob::start(const Plan &plan, const QString &videoId,
 
     m_plan = plan;
     m_kind = plan.kind;
-    m_videoId = videoId;
+    m_videoId = key;
+    m_title = title;
     m_dir = m_dir.isEmpty() ? QDir::tempPath() : m_dir;
     QDir().mkpath(m_dir);
 
@@ -223,11 +226,22 @@ void DownloadJob::start(const Plan &plan, const QString &videoId,
     // does the conversion fails with "Not yet implemented in FFmpeg" in the
     // FFmpeg of this system. Matroska takes the ADTS as it is. For the
     // audio only it is an mp3.
+    //
+    // The NAME is the title of the video (the id says nothing to a person),
+    // and `uniquePathIn` appends " (2)" when that name is already taken: the
+    // video and the mp3 of the SAME video have the same title and neither of
+    // them overwrites the other.
+    const QString audioExt = plan.audio.format.value(QStringLiteral("mimeType"))
+                                .toString().contains(QLatin1String("webm"))
+                                 ? QStringLiteral(".audio.webm")
+                                 : QStringLiteral(".audio.m4a");
     m_videoPath = m_dir + QLatin1Char('/') + m_videoId + QStringLiteral(".video.mp4");
-    m_audioPath = m_dir + QLatin1Char('/') + m_videoId + QStringLiteral(".audio.m4a");
-    m_outputPath = m_dir + QLatin1Char('/') + m_videoId
-                   + (m_kind == dl::DownloadKind::Audio ? QStringLiteral(".mp3")
-                                                       : QStringLiteral(".mkv"));
+    m_audioPath = m_dir + QLatin1Char('/') + m_videoId + audioExt;
+    const QString ext = (m_kind == dl::DownloadKind::Audio)
+                            ? QStringLiteral(".mp3")
+                            : QStringLiteral(".mkv");
+    m_outputPath = downloads::uniquePathIn(
+        m_dir, downloads::safeFileName(m_title, m_videoId), ext);
     m_videoInitPath = m_tempDir + QStringLiteral("/video.init");
     m_audioInitPath = m_tempDir + QStringLiteral("/audio.init");
 
@@ -239,7 +253,9 @@ void DownloadJob::start(const Plan &plan, const QString &videoId,
     m_arrival.reset();
     m_arrivalQueue.clear();
     m_bytesDone = 0;
-    m_bytesTotal = plan.estimatedBytes;
+    m_bytesTotal = (m_kind == dl::DownloadKind::Audio)
+                       ? plan.audio.contentLength
+                       : plan.estimatedBytes;
     m_muxing = false;
     m_running = true;
 
@@ -847,21 +863,30 @@ void DownloadJob::startFinalize()
         FinalizeResult r;
         r.outputPath = in.outputPath;
 
-        if (!in.audioOnly
-            && !assembleTrackFiles(in.tempDir, in.videoPath,
+        // 1. Ensamblar video (si no es solo audio)
+        if (!in.audioOnly) {
+            if (!assembleTrackFiles(in.tempDir, in.videoPath,
                                    QStringLiteral("video"), in.videoRanges,
                                    in.videoInitPath)) {
-            r.assembled = false;
-            r.error = QStringLiteral("no se pudo escribir el video");
-            r.outputPath.clear();
-        } else if (!in.audioOnly && in.hasAudio
-                   && !assembleTrackFiles(in.tempDir, in.audioPath,
-                                          QStringLiteral("audio"), in.audioRanges,
-                                          in.audioInitPath)) {
-            r.assembled = false;
-            r.error = QStringLiteral("no se pudo escribir el audio");
-            r.outputPath.clear();
-        } else {
+                r.assembled = false;
+                r.error = QStringLiteral("no se pudo escribir el video");
+                r.outputPath.clear();
+            }
+        }
+
+        // 2. Ensamblar audio (si tiene audio)
+        if (r.assembled && in.hasAudio) {
+            if (!assembleTrackFiles(in.tempDir, in.audioPath,
+                                    QStringLiteral("audio"), in.audioRanges,
+                                    in.audioInitPath)) {
+                r.assembled = false;
+                r.error = QStringLiteral("no se pudo escribir el audio");
+                r.outputPath.clear();
+            }
+        }
+
+        // 3. Mux/Convertir (solo si todo lo anterior salió bien)
+        if (r.assembled) {
             const QString ffmpeg = findFfmpeg();
             if (ffmpeg.isEmpty()) {
                 // The fragments are already on the disk: the mux can be

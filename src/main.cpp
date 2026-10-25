@@ -914,6 +914,13 @@ int main(int argc, char *argv[])
     MainWindow window;
     window.show();
 
+    // The queue of the downloads lives in memory: the rows that a previous
+    // session left "pending" (or half way) are revived HERE, when the app
+    // really opens. NOT in the constructor of MainWindow: the integration
+    // tests build a window too, and they must not start the downloads of the
+    // person (network, files) behind a test that is offline.
+    window.resumePendingDownloads();
+
     for (int i = 1; i < args.size(); ++i) {
         const QString arg = args.at(i);
         if (arg == QLatin1String("--search") && i + 1 < args.size()) {
@@ -929,14 +936,17 @@ int main(int argc, char *argv[])
         } else if (arg == QLatin1String("--pause-download")
                    && i + 1 < args.size()) {
             // Pauses the download in progress (how the downloader is driven
-            // from the command line, like --download).
+            // from the command line, like --download). The id of the VIDEO
+            // is enough: the manager resolves the row (the mp3 of that video
+            // is "<videoId>-audio").
             const QString videoId = args.at(++i);
             QTimer::singleShot(600, &window, [&window, videoId]() {
                 window.pauseDownload(videoId);
             });
         } else if (arg == QLatin1String("--resume-download")
                    && i + 1 < args.size()) {
-            // Continues a paused download.
+            // Continues a paused download (the same resolution of the row:
+            // the video id, or the key of its mp3).
             const QString videoId = args.at(++i);
             QTimer::singleShot(600, &window, [&window, videoId]() {
                 window.resumeDownload(videoId);

@@ -84,6 +84,17 @@ qint64 formatBytes(const QJsonObject &f)
 QJsonObject preferredAudioFormat(const QJsonArray &adaptiveFormats,
                                   const QString &prefLang)
 {
+    // The track is chosen in TWO steps, and the order matters:
+    //
+    // 1. The MP4 (fMP4 with a sidx) beats the WebM, ALWAYS: the sidx is what
+    //    lets the downloader resume fragment by fragment (and ask for pieces of
+    //    ~2 MB, which is what evades YouTube's per-request throttle). A WebM
+    //    has no index of its clusters and has to be cut blind.
+    // 2. Inside the same family, the SMALLEST one: the rule is shared with the
+    //    player, which does not need the heaviest track to sound the same.
+    //
+    // The Opus of the WebM may have a higher bitrate than the AAC, but
+    // choosing it costs the index: the download of the audio would be blind.
     QJsonObject best;
     const QString pref = prefLang.trimmed().toLower();
     for (const QJsonValue &val : adaptiveFormats) {
@@ -106,7 +117,8 @@ QJsonObject preferredAudioFormat(const QJsonArray &adaptiveFormats,
         if (!best.isEmpty()) {
             const QString bestMime =
                 best.value(QStringLiteral("mimeType")).toString();
-            const bool bestIsMp4 = bestMime.startsWith(QLatin1String("audio/mp4"));
+            const bool bestIsMp4 =
+                bestMime.startsWith(QLatin1String("audio/mp4"));
             if (isMp4 != bestIsMp4) {
                 if (!isMp4)
                     continue;

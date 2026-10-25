@@ -12,6 +12,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QTemporaryDir>
 #include <QTimer>
 
 #include <cstdio>
@@ -26,10 +27,178 @@ bool downloadButtonSelfTest()
             ok = false;
     };
 
+    // --- the QUEUE, in isolation (its own database, no network) ---
+    //
+    // These are the four things that were reported broken:
+    //   1. the mp3 stayed "pending" and never started,
+    //   2. the mp3 and the video of the SAME video could not coexist,
+    //   3. pressing download while another one ran did not queue anything,
+    //   4. the queue did not advance (it waited for ever).
+    //
+    // A manager of its own is used on purpose: the queue is pure state, so it
+    // can be driven without Yt (there is nobody to ask for the formats) and
+    // without touching the database of the app. `start()` without Yt leaves
+    // the download "waiting for its formats", which is exactly the state in
+    // which the queue has to keep working.
+    {
+        QTemporaryDir tmp;
+        check(tmp.isValid(), "hay una carpeta temporal para el test de la cola");
+        AppDatabase qdb(tmp.path() + QStringLiteral("/cola.db"));
+        check(qdb.open(), "la base de datos del test de la cola abre");
+        DownloadRepo repo(qdb);
+        dl::DownloadManager mgr(nullptr, &repo, nullptr, nullptr);
+        // So that a delete of a row can never reach the real folder of the
+        // downloads (the test writes no file, but the rule is the rule).
+        mgr.setDirectory(tmp.path());
+
+        const QString videoId = QStringLiteral("colaVid");
+        const QString videoKey = downloadKey(videoId, false);
+        const QString audioKey = downloadKey(videoId, true);
+        DownloadInfo row;
+
+        // 2) the mp3 and the video of the SAME video are two downloads.
+        mgr.start(videoId, QStringLiteral("t"), QStringLiteral("c"), 0);
+        check(repo.get(videoKey, row), "el video entra en la lista");
+        check(mgr.currentKey() == videoKey, "el video es el que esta en curso");
+        mgr.start(videoId, QStringLiteral("t"), QStringLiteral("c"), 0, 0, 0,
+                  QString(), true);
+        check(repo.get(audioKey, row), "el mp3 del MISMO video entra en la lista");
+        check(row.videoId == videoId,
+              "la fila del mp3 guarda el ID DEL VIDEO (no el de la fila)");
+        check(row.key == audioKey, "la fila del mp3 tiene su propia clave");
+        check(repo.get(videoKey, row), "el mp3 NO reemplaza la fila del video");
+        check(mgr.currentKey() == videoKey,
+              "el mp3 espera su turno (no desplaza al video)");
+
+        // 3) pressing download while another one runs queues it.
+        const QString second = QStringLiteral("colaVid2");
+        mgr.start(second, QStringLiteral("t"), QStringLiteral("c"), 0);
+        check(mgr.currentKey() == videoKey,
+              "la cola no arranca dos descargas a la vez");
+        check(repo.get(second, row) && row.status == QLatin1String("pending"),
+              "la que espera entra en la lista como pending (se ve)");
+
+        // 4) the queue advances when the running one goes away.
+        mgr.remove(videoKey);
+        check(mgr.currentKey() == audioKey,
+              "al quitar la que corria, AVANZA la siguiente de la cola");
+        mgr.remove(audioKey);
+        check(mgr.currentKey() == second, "y la siguiente tambien avanza");
+        mgr.remove(second);
+        check(mgr.currentKey().isEmpty(), "la cola se vacia");
+
+        // The same request twice is not queued twice.
+        mgr.start(videoId, QStringLiteral("t"), QStringLiteral("c"), 0);
+        mgr.start(videoId, QStringLiteral("t"), QStringLiteral("c"), 0);
+        mgr.remove(videoKey);
+        check(mgr.currentKey().isEmpty(),
+              "un pedido repetido no se encola dos veces");
+
+        // 1) a row left "pending" (or half way) is resumed at startup.
+        DownloadInfo pend;
+        pend.key = QStringLiteral("colaPend");
+        pend.videoId = pend.key;
+        pend.title = QStringLiteral("t");
+        pend.status = QStringLiteral("pending");
+        repo.upsert(pend);
+        mgr.resumePending();
+        check(mgr.currentKey() == pend.key,
+              "una fila que quedo en ESPERA se reanuda al abrir la app");
+        mgr.remove(pend.key);
+
+        DownloadInfo half;
+        half.key = QStringLiteral("colaMedio");
+        half.videoId = half.key;
+        half.title = QStringLiteral("t");
+        half.status = QStringLiteral("downloading");
+        half.bytesPerSecond = 999;
+        repo.upsert(half);
+        mgr.resumePending();
+        DownloadInfo after;
+        check(repo.get(half.key, after)
+                  && after.status != QLatin1String("downloading"),
+              "una descarga interrumpida no se queda mintiendo 'downloading'");
+        mgr.remove(half.key);
+
+        DownloadInfo paused;
+        paused.key = QStringLiteral("colaPausa");
+        paused.videoId = paused.key;
+        paused.title = QStringLiteral("t");
+        paused.status = QStringLiteral("paused");
+        repo.upsert(paused);
+        mgr.resumePending();
+        check(mgr.currentKey() != paused.key,
+              "una fila PAUSADA no se reanuda sola");
+        check(repo.get(paused.key, after)
+                  && after.status == QLatin1String("paused"),
+              "la pausa se respeta");
+        repo.remove(paused.key);
+
+        // 1) the mp3 in the queue is resumed as an mp3, not as a video.
+        DownloadInfo mp3;
+        mp3.key = audioKey;
+        mp3.videoId = videoId;
+        mp3.title = QStringLiteral("t");
+        mp3.status = QStringLiteral("pending");
+        repo.upsert(mp3);
+        mgr.resumePending();
+        check(mgr.currentKey() == audioKey,
+              "el mp3 que quedo en espera se reanuda COMO MP3");
+        check(repo.get(audioKey, after) && after.key == audioKey,
+              "el mp3 no se convierte en el video");
+        check(!repo.get(videoKey, after),
+              "y no crea la fila del video del mismo id");
+        mgr.remove(audioKey);
+    }
+
+    // --- building the window does NOT start the queue ---
+    //
+    // The queue lives in memory, so the rows a previous session left
+    // "pending" are revived when the app OPENS (main.cpp calls
+    // resumePendingDownloads()). It must NOT happen in the constructor:
+    // the integration tests build a real MainWindow, and with the revive in
+    // there they started the real downloads of the person running them
+    // (network, files, and a manager busy when the test expected it free).
+    // The revive itself is covered above, on the isolated manager.
+    const QString reviveId = QStringLiteral("selftestDlRevive");
+    {
+        AppDatabase db;  // the database of the app
+        if (db.open()) {
+            DownloadRepo repo(db);
+            repo.remove(reviveId);
+            DownloadInfo info;
+            info.key = reviveId;
+            info.videoId = reviveId;
+            info.title = QStringLiteral("t");
+            info.status = QStringLiteral("pending");
+            // The OLDEST: `resumePending` resumes in the order they were
+            // created, so this one is the first whatever else the database
+            // has.
+            info.createdAt = 1;
+            repo.upsert(info);
+        }
+    }
+
     // The REAL window, with the real Player page: the button is the one the
     // person presses.
     MainWindow window;
     window.show();
+
+    check(window.downloadManager() != nullptr,
+          "el downloader existe al abrir la ventana");
+    if (window.downloadManager()) {
+        // A "pending" row is in the database (the one written above, the
+        // oldest one): the constructor must not have started it. Without
+        // this check, the revive in the constructor went unnoticed until
+        // somebody opened the app with a queue and saw files appear.
+        check(window.downloadManager()->currentKey().isEmpty(),
+              "construir la ventana NO arranca la cola de las descargas");
+        DownloadInfo waiting;
+        check(window.downloadsRepo()->get(reviveId, waiting)
+                  && waiting.status == QLatin1String("pending"),
+              "la fila que quedo en espera sigue esperando (no se toco)");
+        window.downloadManager()->remove(reviveId);
+    }
 
     // --- the button ---
     QAbstractButton *button = window.downloadButton();
@@ -78,6 +247,16 @@ bool downloadButtonSelfTest()
     check(gotCodec == QLatin1String("av1"), "el signal lleva el codec elegido");
     check(gotAudio, "el signal lleva la opcion de solo el audio");
 
+    // The emit above ALSO reaches the real slot of the window (the connection
+    // already exists), so it started a download of "vidDePrueba" as audio
+    // only. It is cancelled here: it is not the subject of this test, and left
+    // waiting for the formats of a video that does not exist it kept the
+    // downloader busy, which made the checks that follow fail ("the X leaves
+    // the downloader free").
+    if (window.downloadManager())
+        window.downloadManager()->remove(
+            downloadKey(QStringLiteral("vidDePrueba"), true));
+
     // --- the queue path (the same one the button uses) ---
     // The row has to appear in the repository with the state "pending": that
     // is what the page of Downloads reads.
@@ -104,7 +283,15 @@ bool downloadButtonSelfTest()
                 ++rows;
         }
         check(rows == 1, "el mismo video no se encola dos veces");
-        repo->remove(videoId);
+        // Through the MANAGER: the request for the formats is in flight (the
+        // row was just queued), and deleting the row behind its back left
+        // the downloader waiting for an answer that would create the row
+        // again and start a real download. remove() cancels it and leaves the
+        // downloader free for the checks that follow.
+        if (window.downloadManager())
+            window.downloadManager()->remove(videoId);
+        else
+            repo->remove(videoId);
         check(!repo->get(videoId, info), "se puede borrar de la lista");
     }
 

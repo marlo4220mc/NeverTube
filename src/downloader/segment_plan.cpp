@@ -194,7 +194,9 @@ Plan planWithHeight(const Plan &plan, int height)
             continue;
         Plan out = plan;
         fillTrack(out.video, o.format);
-        out.estimatedBytes = out.video.contentLength + out.audio.contentLength;
+        out.estimatedBytes = (out.kind == DownloadKind::Audio)
+                                 ? out.audio.contentLength
+                                 : (out.video.contentLength + out.audio.contentLength);
         return out;
     }
     return plan;
@@ -209,7 +211,9 @@ Plan planWithVariant(const Plan &plan, int height, const QString &codec)
             continue;
         Plan out = plan;
         fillTrack(out.video, o.format);
-        out.estimatedBytes = out.video.contentLength + out.audio.contentLength;
+        out.estimatedBytes = (out.kind == DownloadKind::Audio)
+                                 ? out.audio.contentLength
+                                 : (out.video.contentLength + out.audio.contentLength);
         return out;
     }
     return plan;

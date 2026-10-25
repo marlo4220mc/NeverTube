@@ -590,6 +590,17 @@ MainWindow::MainWindow(QWidget *parent)
         if (m_downloadsPage)
             m_downloadsPage->reload();
     });
+    // The queue of the downloads lives in MEMORY, so a row that was waiting
+    // for the other one to end was left "pending" and nothing read it when
+    // the app opened again: it stayed "pending" for ever. The same with the
+    // one that was running when the app closed.
+    //
+    // The revive is NOT done here: main.cpp calls resumePendingDownloads()
+    // when the app really opens. Doing it in the constructor made every
+    // window (the integration tests build one) start the real downloads of
+    // the person, with network and files.
+    //
+    // `paused` and `error` are NOT touched: those wait for the person.
     connect(m_watch, &WatchPage::downloadRequested, this,
             [this](const QString &videoId, const QString &title,
                    const QString &channel, int height, const QString &codec,
@@ -610,20 +621,23 @@ MainWindow::MainWindow(QWidget *parent)
         openDownloads();
     });
     connect(m_downloadsPage, &DownloadsPage::playRequested, this,
-            [this](const QString &videoId, const QString &filePath) {
+            [this](const QString &key, const QString &filePath) {
         if (filePath.isEmpty())
             return;
         // The local file: the queue is replaced with it and the history is
         // NOT touched (a downloaded file is not a YouTube video).
+        //
+        // The id of the download is the KEY of its row (the video or its
+        // mp3): the title and the position come from the row, so the player
+        // shows the name of the video and not its id.
+        DownloadInfo d;
+        const bool found = m_downloads.get(key, d);
         VideoInfo info;
-        info.id = videoId;
-        info.title = videoId;
+        info.id = found ? d.videoId : key;
+        info.title = (found && !d.title.isEmpty()) ? d.title : info.id;
         // The position of the local playback lives in the downloads table,
         // NOT in the history (that is about YouTube videos).
-        DownloadInfo d;
-        qlonglong pos = 0;
-        if (m_downloads.get(videoId, d))
-            pos = d.positionMs;
+        const qlonglong pos = found ? d.positionMs : 0;
         m_player.playLocalFile(filePath, info, pos);
         goToPlayerPage();
     });
@@ -651,19 +665,19 @@ MainWindow::MainWindow(QWidget *parent)
                  started ? 1 : 0);
     });
     connect(m_downloadsPage, &DownloadsPage::pauseRequested, this,
-            [this](const QString &videoId) {
-                m_downloadManager->pause(videoId);
+            [this](const QString &key) {
+                m_downloadManager->pause(key);
             });
     connect(m_downloadsPage, &DownloadsPage::resumeRequested, this,
-            [this](const QString &videoId) {
-                m_downloadManager->resume(videoId);
+            [this](const QString &key) {
+                m_downloadManager->resume(key);
             });
     connect(m_downloadsPage, &DownloadsPage::removeRequested, this,
-            [this](const QString &videoId) {
+            [this](const QString &key) {
         // The delete asks BEFORE: what it deletes depends on the state of
         // the download.
         DownloadInfo info;
-        if (!m_downloads.get(videoId, info))
+        if (!m_downloads.get(key, info))
             return;
         const bool finished = info.status == QLatin1String("done");
         const bool paused = info.status == QLatin1String("paused");
@@ -677,11 +691,11 @@ MainWindow::MainWindow(QWidget *parent)
             nt::confirm(this, nt::tr("downloads.deleteTitle"),
                         nt::tr("downloads.deleteDone"),
                         nt::tr("downloads.deleteAccept"),
-                        [this, videoId, &alsoFile]() {
+                        [this, key, &alsoFile]() {
                             if (alsoFile)
-                                m_downloadManager->remove(videoId);
+                                m_downloadManager->remove(key);
                             else
-                                m_downloadManager->removeFromList(videoId);
+                                m_downloadManager->removeFromList(key);
                         },
                         nt::tr("downloads.deleteAlsoFile"), &alsoFile);
             return;
@@ -693,15 +707,15 @@ MainWindow::MainWindow(QWidget *parent)
                     nt::tr(paused ? "downloads.deletePaused"
                                   : "downloads.deleteRunning"),
                     nt::tr("downloads.deleteAccept"),
-                    [this, videoId]() { m_downloadManager->remove(videoId); });
+                    [this, key]() { m_downloadManager->remove(key); });
     });
     connect(m_downloadsPage, &DownloadsPage::retryRequested, this,
-            [this](const QString &videoId) {
+            [this](const QString &key) {
         // The retry does NOT delete the row: the index of the fragments that
         // are already on the disk lives in it, and deleting it made the
         // download start from zero (the bytes that were already downloaded
         // were thrown away).
-        m_downloadManager->retry(videoId);
+        m_downloadManager->retry(key);
     });
     // The folder of the downloads changed: the downloader and the page of
     // Descargas follow it.
@@ -1855,18 +1869,43 @@ void MainWindow::goLibrary()
     m_library->reload();
 }
 
+// The row that a video id names. The page of Descargas passes the KEY of the
+// row (the mp3 is "<videoId>-audio"), but the command line passes the VIDEO
+// id: the row that EXISTS is the one that is paused or continued. With the
+// plain id an mp3 was neither (the key of its row is not the video id).
+static QString downloadRowKey(DownloadRepo *repo, const QString &idOrKey)
+{
+    if (!repo)
+        return idOrKey;
+    DownloadInfo info;
+    if (repo->get(idOrKey, info))
+        return idOrKey;
+    const QString audioKey = downloadKey(idOrKey, true);
+    if (repo->get(audioKey, info))
+        return audioKey;
+    return idOrKey;
+}
+
 // Pauses a download (the button of the page of Descargas).
-void MainWindow::pauseDownload(const QString &videoId)
+void MainWindow::pauseDownload(const QString &idOrKey)
 {
     if (m_downloadManager)
-        m_downloadManager->pause(videoId);
+        m_downloadManager->pause(downloadRowKey(&m_downloads, idOrKey));
 }
 
 // Continues a paused download (the button of the page of Descargas).
-void MainWindow::resumeDownload(const QString &videoId)
+void MainWindow::resumeDownload(const QString &idOrKey)
 {
     if (m_downloadManager)
-        m_downloadManager->resume(videoId);
+        m_downloadManager->resume(downloadRowKey(&m_downloads, idOrKey));
+}
+
+// Revives the queue that a previous session left half way. It is called by
+// main.cpp when the app opens (NOT by the constructor: see the header).
+void MainWindow::resumePendingDownloads()
+{
+    if (m_downloadManager)
+        m_downloadManager->resumePending();
 }
 
 // Queues a download by id.

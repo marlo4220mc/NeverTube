@@ -66,10 +66,19 @@ public:
     SettingsRepo *settingsRepo() { return &m_settings; }
     // The downloader (the queue, the folder and the connections).
     dl::DownloadManager *downloadManager() { return m_downloadManager; }
+    // Revives the downloads that a previous session left half way (the rows
+    // that say "pending" and the ones that were running when the app closed).
+    //
+    // It is called ONCE by main.cpp when the app really opens, NOT by the
+    // constructor: building a MainWindow (the integration test does) must not
+    // start the downloads that the person left waiting, with network and
+    // files, behind a test that is supposed to be offline.
+    void resumePendingDownloads();
     // Pauses and continues a download (what the buttons of the page of
-    // Descargas do).
-    void pauseDownload(const QString &videoId);
-    void resumeDownload(const QString &videoId);
+    // Descargas do). The argument may be the video id or the KEY of the row
+    // ("<videoId>-audio" for an mp3): the row that exists is the one used.
+    void pauseDownload(const QString &idOrKey);
+    void resumeDownload(const QString &idOrKey);
     // Queues a download by id (the same path the button of the Player uses).
     void queueDownload(const QString &videoId);
     // Queues the download of a video (the same path as the button of the

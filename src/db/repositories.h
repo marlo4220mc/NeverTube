@@ -192,6 +192,12 @@ private:
 class DownloadInfo
 {
 public:
+    // The IDENTITY of the row, which is NOT always the video id: the same
+    // video can be downloaded as a video and as an mp3, and those are two
+    // separate files with two separate rows. The video one keeps the video
+    // id (so the rows that existed before this distinction still match) and
+    // the audio one is "<videoId>-audio".
+    QString key;
     QString videoId;
     QString title;
     QString channel;
@@ -209,9 +215,17 @@ public:
     qlonglong createdAt = 0;
     qlonglong updatedAt = 0;
 
+    // The key of the row: `key` when it is set, and the video id when it is
+    // not (a row written before the key existed is a video download).
+    QString identity() const { return key.isEmpty() ? videoId : key; }
+
     bool isActive() const;  // downloading / paused / muxing
     bool isDone() const;     // the mp4 is there and usable
 };
+
+// The key of the download of a video: `audioOnly` downloads do NOT share the
+// row (nor the files) with the video of the same id.
+QString downloadKey(const QString &videoId, bool audioOnly);
 
 // Persists the downloads. The table has been in the database since the
 // beginning of the app (empty, nobody used it) and the downloader extends it
@@ -227,15 +241,21 @@ public:
     explicit DownloadRepo(AppDatabase &db);
 
     bool upsert(const DownloadInfo &d);
-    bool get(const QString &videoId, DownloadInfo &out) const;
+    // `key` is the IDENTITY of the row (see DownloadInfo::identity()), not
+    // the video id: the video and the mp3 of the same video are two rows.
+    bool get(const QString &key, DownloadInfo &out) const;
+    // The row of a video's download of a kind (true = the mp3). It is what
+    // the callers that only know the video id use.
+    bool getForVideo(const QString &videoId, bool audioOnly,
+                     DownloadInfo &out) const;
     QVector<DownloadInfo> all() const;  // newest first
-    bool remove(const QString &videoId);
-    bool setStatus(const QString &videoId, const QString &status,
+    bool remove(const QString &key);
+    bool setStatus(const QString &key, const QString &status,
                    const QString &error = QString());
-    bool setProgress(const QString &videoId, qint64 bytesDone,
+    bool setProgress(const QString &key, qint64 bytesDone,
                      qint64 bytesTotal);
-    bool setParts(const QString &videoId, const QVector<int> &parts);
-    bool setPosition(const QString &videoId, qlonglong positionMs);
+    bool setParts(const QString &key, const QVector<int> &parts);
+    bool setPosition(const QString &key, qlonglong positionMs);
 
 private:
     DownloadInfo fromRow(const QSqlQuery &q) const;

@@ -113,6 +113,36 @@ bool videoVariantSelfTest()
     // An empty list is an empty list (not a crash).
     check(videoVariantsOf(QJsonArray()).isEmpty(), "sin formatos no hay variantes");
 
+    // The audio: the MP4 (with a sidx, so it can be fetched and resumed
+    // fragment by fragment) beats the WebM even when the WebM has a higher
+    // bitrate; inside the same family the SMALLEST one wins.
+    QJsonArray audioFmts;
+    QJsonObject aac = fmt(QStringLiteral("audio/mp4; codecs=\"mp4a.40.2\""), 0, 10000000,
+                          QStringLiteral("https://x/aac"));
+    aac.insert(QStringLiteral("bitrate"), 128000);
+    audioFmts.append(aac);
+
+    QJsonObject opus = fmt(QStringLiteral("audio/webm; codecs=\"opus\""), 0, 12000000,
+                           QStringLiteral("https://x/opus"));
+    opus.insert(QStringLiteral("bitrate"), 160000);
+    audioFmts.append(opus);
+
+    const QJsonObject bestAud = preferredAudioFormat(audioFmts);
+    check(bestAud.value(QStringLiteral("mimeType")).toString().contains(QLatin1String("mp4")),
+          "el audio preferido es el MP4 (tiene sidx) aunque el opus tenga mas bitrate");
+
+    // Without an mp4, the smallest one (the same rule as the player: the
+    // family does not change, so the lightest track wins).
+    QJsonArray onlyWebm;
+    QJsonObject opusLow = fmt(QStringLiteral("audio/webm; codecs=\"opus\""), 0, 5000000,
+                              QStringLiteral("https://x/opus-low"));
+    opusLow.insert(QStringLiteral("bitrate"), 64000);
+    onlyWebm.append(opusLow);
+    onlyWebm.append(opus);
+    const QJsonObject bestWebm = preferredAudioFormat(onlyWebm);
+    check(bestWebm.value(QStringLiteral("url")).toString() == QLatin1String("https://x/opus-low"),
+          "sin mp4 gana el mas chico de la familia");
+
     std::printf("VARIANT SELFTEST %s\n", ok ? "OK" : "FAIL");
     return ok;
 }

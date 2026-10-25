@@ -38,17 +38,21 @@ public:
 
 signals:
     // The user wants to play a downloaded file.
-    void playRequested(const QString &videoId, const QString &filePath);
+    //
+    // The id of a download is the KEY of its row (DownloadInfo::identity())
+    // and NOT necessarily the video: the video and the mp3 of the same video
+    // are two rows, each one with its own file.
+    void playRequested(const QString &key, const QString &filePath);
     // The user wants the folder of the downloads opened.
     void openFolderRequested(const QString &path);
     // The user wants a download retried.
-    void retryRequested(const QString &videoId);
+    void retryRequested(const QString &key);
     // The user wants a download removed (the file goes with it).
-    void removeRequested(const QString &videoId);
+    void removeRequested(const QString &key);
     // The user wants to pause a download (or to continue it).
-    void pauseRequested(const QString &videoId);
+    void pauseRequested(const QString &key);
     // The user wants to continue a paused download.
-    void resumeRequested(const QString &videoId);
+    void resumeRequested(const QString &key);
 
 private:
     // The widgets of one row, so it can be UPDATED in place (rebuilding it
@@ -72,8 +76,8 @@ private:
     // The CURRENT state of a row: the rows are updated in place (the same
     // widget), so the buttons cannot decide with the copy that was
     // captured when the row was built (it is the old one).
-    bool rowIsPaused(const QString &videoId) const;
-    QString finalPathOf(const QString &videoId) const;
+    bool rowIsPaused(const QString &key) const;
+    QString finalPathOf(const QString &key) const;
     void updateRow(const DownloadInfo &info, const Row &row);
     QString stateText(const DownloadInfo &info) const;
 
