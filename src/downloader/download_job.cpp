@@ -14,6 +14,12 @@
 #include <QThread>
 #include <QUrl>
 
+#if defined(Q_OS_WIN)
+#include <windows.h>
+#elif defined(Q_OS_UNIX)
+#include <sys/resource.h>
+#endif
+
 namespace dl {
 
 namespace {
@@ -114,6 +120,40 @@ DownloadJob::DownloadJob(QObject *parent)
 {
 }
 
+namespace {
+
+void applyThreadPriority(bool belowNormal)
+{
+#if defined(Q_OS_WIN)
+    HANDLE h = GetCurrentThread();
+    const BOOL ok = SetThreadPriority(
+        h, belowNormal ? THREAD_PRIORITY_BELOW_NORMAL : THREAD_PRIORITY_NORMAL);
+    // The probe of the scheduling: with NEVERTUBE_DEBUG=1 the log says which
+    // priority the thread of the downloads gets, so "the FPS did not come
+    // back" can be told apart from "the priority was never applied".
+    NT_DEBUG("E2E dlThreadPriority below=%d ok=%d\n", belowNormal ? 1 : 0,
+             ok ? 1 : 0);
+#elif defined(Q_OS_UNIX)
+    errno = 0;
+    int nic = getpriority(PRIO_PROCESS, 0);
+    if (nic == -1 && errno != 0)
+        return;
+    if (belowNormal) {
+        if (nic < 10)
+            setpriority(PRIO_PROCESS, 0, 10);
+    } else {
+        if (nic > 0)
+            setpriority(PRIO_PROCESS, 0, 0);
+    }
+    NT_DEBUG("E2E dlThreadPriority below=%d nice=%d\n", belowNormal ? 1 : 0,
+             getpriority(PRIO_PROCESS, 0));
+#else
+    Q_UNUSED(belowNormal);
+#endif
+}
+
+}
+
 DownloadJob::~DownloadJob()
 {
     stop();
@@ -126,6 +166,26 @@ DownloadJob::~DownloadJob()
         delete m_finalThread;
         m_finalThread = nullptr;
     }
+}
+
+void DownloadJob::setPlaybackActive(bool active)
+{
+    if (m_playbackActive.exchange(active) == active)
+        return;
+    // The priority has to change in the THREAD THAT OWNS IT, and it has to
+    // change WHILE it runs: a download started with no video playing keeps
+    // its workers in NORMAL until the video starts, and that is exactly the
+    // case where the frames drop (measured on the Lenovo: the FPS fell from
+    // the FIRST second of the download, before any fragment was muxed). The
+    // functor is posted to the thread of the transports and runs there.
+    if (!m_home || !m_thread || !m_thread->isRunning())
+        return;
+    // The value goes BY VALUE: the functor does not touch the job (it could
+    // outlive it on a shutdown that goes wrong) and only needs the flag.
+    const bool belowNormal = m_playbackActive.load();
+    QMetaObject::invokeMethod(
+        m_home, [belowNormal]() { applyThreadPriority(belowNormal); },
+        Qt::QueuedConnection);
 }
 
 void DownloadJob::setStatus(const QString &status, const QString &error)
@@ -175,6 +235,7 @@ void DownloadJob::start(const Plan &plan, const QString &videoId,
     m_nextVideo = 0;
     m_nextAudio = 0;
     m_inFlight = 0;
+    m_fragmentBytes.clear();
     m_arrival.reset();
     m_arrivalQueue.clear();
     m_bytesDone = 0;
@@ -220,10 +281,17 @@ void DownloadJob::buildTransportPool()
     // dropped frames for as long as the download lasted.
     //
     // The callbacks still come back HERE (setCallbackContext), so the state
-    // of the job (the counters, the queue, the file of the fragment) is only
-    // touched by the thread of the interface.
+    // of the job (the counters, the queue) is only touched by the thread of
+    // the interface. The BYTES are not: each transport writes its fragment in
+    // its own thread (see DownloadTransport::get()), because writing them
+    // here is what dropped the player to 2-5 fps with a full core of the
+    // interface busy in QFile/QFileInfo.
     m_thread = new QThread();
     m_thread->setObjectName(QStringLiteral("download-transport"));
+    const bool belowNormal = m_playbackActive.load();
+    connect(m_thread, &QThread::started, this, [belowNormal]() {
+        applyThreadPriority(belowNormal);
+    }, Qt::DirectConnection);
     m_thread->start();
     m_home = new QObject();
     m_home->moveToThread(m_thread);
@@ -299,15 +367,16 @@ void DownloadJob::launch(DownloadTransport *t, const QUrl &url,
                          qint64 rangeStart, qint64 rangeEnd,
                          DownloadTransport::DoneFn done,
                          DownloadTransport::ProgressFn progress,
-                         qint64 expectedBytes)
+                         qint64 expectedBytes, const QString &sinkPath)
 {
     if (!t)
         return;
     m_busy.insert(t);
     const QString ua = DownloadTransport::userAgent();
     QMetaObject::invokeMethod(t, [t, url, rangeStart, rangeEnd, ua, done,
-                                  progress, expectedBytes]() {
-        t->get(url, rangeStart, rangeEnd, ua, done, progress, expectedBytes);
+                                  progress, expectedBytes, sinkPath]() {
+        t->get(url, rangeStart, rangeEnd, ua, done, progress, expectedBytes,
+               sinkPath);
     }, Qt::QueuedConnection);
 }
 
@@ -561,15 +630,18 @@ void DownloadJob::startNext()
                 // It is on the disk: it is not asked again, and the
                 // transport takes the next fragment.
                 QVector<bool> *flags = isVideo ? &m_videoDone : &m_audioDone;
-                if (index < flags->size()) {
+                if (index < flags->size())
                     (*flags)[index] = true;
-                    QVector<qint64> *sizes =
-                        isVideo ? &m_videoSizes : &m_audioSizes;
-                    if (index < sizes->size())
-                        (*sizes)[index] =
-                            QFileInfo(fragmentPath(track, index)).size();
+                QVector<qint64> *sizes = isVideo ? &m_videoSizes : &m_audioSizes;
+                qint64 size = 0;
+                if (index < sizes->size()) {
+                    size = QFileInfo(fragmentPath(track, index)).size();
+                    (*sizes)[index] = size;
                 }
-                m_bytesDone = bytesOnDisk();
+                // ONE stat for the fragment that is skipped, not a stat of
+                // every fragment of the download (this runs once per
+                // fragment, so the whole resume measures n and not n^2).
+                m_bytesDone += size;
                 emit progressChanged(m_bytesDone, m_bytesTotal);
                 continue;
             }
@@ -582,35 +654,32 @@ void DownloadJob::startNext()
         const QString track = isVideo ? QStringLiteral("video")
                                       : QStringLiteral("audio");
         ++m_inFlight;
-        // The file of the fragment is opened HERE and the bytes are written
-        // to it as they arrive: that is what makes the bar advance smoothly
-        // (and the bytes are on the disk even if the download is killed).
-        QFile *file = new QFile(fragmentPath(track, index));
-        if (!file->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            delete file;
-            --m_inFlight;
-            const QString msg = QStringLiteral("no se pudo abrir el archivo del fragmento");
-            setStatus(QStringLiteral("error"), msg);
-            m_running = false;
-            emit failed(msg);
-            return;
-        }
-        QFile *const filePtr = file;
+        // The fragment is written by the TRANSPORT, in the thread of the
+        // transports: opening, writing and closing the file here (the thread
+        // of the interface) was what dropped the player to 2-5 fps. The
+        // thread of the interface only receives how many bytes arrived.
+        const QString path = fragmentPath(track, index);
+        const int mark = markOf(track, index);
         const QString url = isVideo ? m_plan.video.url : m_plan.audio.url;
         launch(t, QUrl(url), range.start, range.end,
-               [this, track, index, filePtr, t]
+               [this, track, index, mark, t]
                (const DownloadTransport::Response &r) {
                    m_busy.remove(t);
                    --m_inFlight;
-                   filePtr->close();
-                   delete filePtr;
                    if (!r.isOk()) {
+                       // The bytes of the attempt that failed are not kept in
+                       // the counter: the fragment is asked again from zero
+                       // (the transport removed the partial file).
+                       m_bytesDone -= m_fragmentBytes.take(mark);
+                       if (m_bytesDone < 0)
+                           m_bytesDone = 0;
+                       emit progressChanged(m_bytesDone, m_bytesTotal);
                        // The fragment is asked AGAIN: with a saturated IP
                        // some requests do not answer at all (a timeout),
                        // and the whole download used to fail for ONE of
                        // them. After a few tries it really fails.
                        const int tries =
-                           ++m_fragmentTries[markOf(track, index)];
+                           ++m_fragmentTries[mark];
                        if (m_running && tries < kFragmentRetries) {
                            if (track == QLatin1String("video"))
                                m_nextVideo = index;
@@ -639,15 +708,14 @@ void DownloadJob::startNext()
                        }
                        return;
                    }
-                   m_fragmentTries.remove(markOf(track, index));
+                   m_fragmentTries.remove(mark);
                    onFragmentDone(track, index);
                },
-               [this, filePtr](const QByteArray &chunk) {
-                   if (filePtr)
-                       filePtr->write(chunk);
-                   m_bytesDone += chunk.size();
+               [this, mark](qint64 bytes) {
+                   m_fragmentBytes[mark] += bytes;
+                   m_bytesDone += bytes;
                    emit progressChanged(m_bytesDone, m_bytesTotal);
-               }, range.size());
+               }, range.size(), path);
     }
 
     if (m_inFlight == 0 && m_arrival.pending() == 0)
@@ -660,34 +728,26 @@ void DownloadJob::onFragmentDone(const QString &track, int index)
         return;
     QVector<bool> *flags = (track == QLatin1String("video"))
         ? &m_videoDone : &m_audioDone;
-    if (index >= 0 && index < flags->size()) {
+    QVector<qint64> *sizes = (track == QLatin1String("video"))
+        ? &m_videoSizes : &m_audioSizes;
+    const int mark = markOf(track, index);
+    // The size on the disk is the truth. It is corrected ONCE per fragment
+    // (the transport counts the body as it arrives): measuring EVERY
+    // fragment on every answer was O(n^2) QFileInfo/GetFileAttributesExW
+    // calls in the thread of the interface (n = the ~460 fragments of a
+    // video), and that is what kept the player from painting.
+    const qint64 real = QFileInfo(fragmentPath(track, index)).size();
+    m_bytesDone += real - m_fragmentBytes.take(mark);
+    if (m_bytesDone < 0)
+        m_bytesDone = 0;
+    if (index >= 0 && index < flags->size())
         (*flags)[index] = true;
-        QVector<qint64> *sizes = (track == QLatin1String("video"))
-            ? &m_videoSizes : &m_audioSizes;
-        if (index < sizes->size())
-            (*sizes)[index] = QFileInfo(fragmentPath(track, index)).size();
-    }
-    m_bytesDone = bytesOnDisk();
+    if (index >= 0 && index < sizes->size())
+        (*sizes)[index] = real;
     sampleSpeed();
     emit segmentDone(index);
     emit progressChanged(m_bytesDone, m_bytesTotal);
     startNext();
-}
-
-qint64 DownloadJob::bytesOnDisk() const
-{
-    qint64 total = 0;
-    for (int i = 0; i < m_videoRanges.size(); ++i) {
-        const QFileInfo info(fragmentPath(QStringLiteral("video"), i));
-        if (info.exists())
-            total += info.size();
-    }
-    for (int i = 0; i < m_audioRanges.size(); ++i) {
-        const QFileInfo info(fragmentPath(QStringLiteral("audio"), i));
-        if (info.exists())
-            total += info.size();
-    }
-    return total;
 }
 
 double DownloadJob::progress() const
@@ -783,6 +843,7 @@ void DownloadJob::startFinalize()
     // (the state, the signals and the repository are the thread of the
     // interface's).
     QThread *thread = QThread::create([this, in]() {
+        applyThreadPriority(m_playbackActive.load());
         FinalizeResult r;
         r.outputPath = in.outputPath;
 

@@ -114,6 +114,7 @@ private:
     void setupNav();
     void setupMiniBar();
     void updateMiniPlayer();
+    void updateDownloadPlaybackState();
     // Persists player volume and mute in the settings DB
     // (keys "volume" / "volume_muted"), to re-apply them on the
     // next startup. Reads the controller state; called after every

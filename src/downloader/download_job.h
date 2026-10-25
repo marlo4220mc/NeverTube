@@ -6,6 +6,8 @@
 #include <QHash>
 #include <QVector>
 
+#include <atomic>
+
 #include "arrival_gate.h"
 #include "download_transport.h"
 #include "segment_plan.h"
@@ -82,6 +84,9 @@ public:
     void setDirectory(const QString &dir) { m_dir = dir; }
     // The number of connections of the pool (the setting of Ajustes).
     void setConcurrency(int n) { m_concurrency = n; }
+    // When video playback is active, download transport threads run at
+    // below-normal priority so the player keeps real-time responsiveness.
+    void setPlaybackActive(bool active);
     QString directory() const { return m_dir; }
 
     // The state, in the vocabulary of the repository (pending, downloading,
@@ -110,7 +115,8 @@ private:
     // transport as busy until its answer comes back.
     void launch(DownloadTransport *t, const QUrl &url, qint64 rangeStart,
                 qint64 rangeEnd, DownloadTransport::DoneFn done,
-                DownloadTransport::ProgressFn progress, qint64 expectedBytes);
+                DownloadTransport::ProgressFn progress, qint64 expectedBytes,
+                const QString &sinkPath = QString());
     // Aborts and destroys the transports IN THEIR OWN thread and stops it.
     void shutdownTransportPool();
     // Fetches the index (the sidx) of a track and the fragments it says.
@@ -154,7 +160,6 @@ private:
     void onFinalizeDone(bool assembled, bool ok, const QString &error,
                         const QString &outputPath);
     void sampleSpeed();
-    qint64 bytesOnDisk() const;
     void setStatus(const QString &status, const QString &error = QString());
 
     Plan m_plan;
@@ -185,6 +190,12 @@ private:
     // How many times each fragment has been asked (the ones that failed are
     // asked again, up to kFragmentRetries).
     QHash<int, int> m_fragmentTries;
+    // The bytes reported by the transport for the fragment that is being
+    // fetched NOW, by mark. They are what makes the bar advance without
+    // asking the disk: the old code measured EVERY fragment (QFileInfo) on
+    // every fragment that finished, which is O(n^2) stats in the thread of
+    // the interface (n = the fragments of the video, hundreds).
+    QHash<int, qint64> m_fragmentBytes;
     // The mark of a fragment (the video ones are 0, 1, 2... and the audio
     // ones are -(2), -(3)...).
     static int markOf(const QString &track, int index);
@@ -221,6 +232,9 @@ private:
     dl::DownloadKind m_kind = dl::DownloadKind::Video;
     QString m_status;
     QString m_error;
+    // Read by the pool thread and by the finalize thread while they run, so
+    // it is atomic and not a plain bool.
+    std::atomic<bool> m_playbackActive{false};
 };
 
 } // namespace dl

@@ -81,6 +81,11 @@ public:
     // The number of connections of the downloads (the setting of Ajustes).
     void setConcurrency(int n) { m_concurrency = n; }
     QString directory() const { return m_dir; }
+    // When video is playing (player or mini player), download workers run at
+    // below-normal priority to avoid stealing CPU from realtime playback. The
+    // change is recoverable: closing the player immediately restores normal
+    // priority for future workers.
+    void setPlaybackActive(bool active);
 
     // The default folder: the folder of downloads of the SYSTEM (which
     // comes already translated: "Descargas", "Downloads") plus a subfolder
@@ -96,6 +101,9 @@ public:
     // is what the dialog of the delete offers for a finished download
     // ("only from the list").
     bool removeFromList(const QString &videoId);
+
+private:
+    bool m_playbackActive = false;
 
   private:
     // True when the path is inside the folder of the downloads: the app only

@@ -4,6 +4,7 @@
 #include "../i18n.h"
 
 #include <QHostAddress>
+#include <QDateTime>
 #include <QFile>
 #include <QHostInfo>
 #include <QSslSocket>
@@ -53,6 +54,7 @@ DownloadTransport::~DownloadTransport()
     // object that is being destroyed.
     m_done = nullptr;
     m_progress = nullptr;
+    closeSink();
     if (m_socket) {
         // Destroyed HERE and not with deleteLater(): the thread of the
         // transports quits right after this, and a DeferredDelete left
@@ -98,7 +100,7 @@ QString DownloadTransport::userAgent()
 
 void DownloadTransport::get(const QUrl &url, qint64 rangeStart, qint64 rangeEnd,
                             const QString &ua, DoneFn done, ProgressFn progress,
-                            qint64 expectedBytes)
+                            qint64 expectedBytes, const QString &sinkPath)
 {
     abort();
     m_expectedBytes = expectedBytes;
@@ -118,7 +120,46 @@ void DownloadTransport::get(const QUrl &url, qint64 rangeStart, qint64 rangeEnd,
     m_headerSize = -1;
     m_bodyPos = 0;
     m_chunked = false;
+    m_reportedBytes = 0;
+    m_sinkPath = sinkPath;
+    m_pendingProgress = 0;
+    m_lastProgressMs = QDateTime::currentMSecsSinceEpoch();
+    // The file of the fragment is opened BEFORE the request: a folder that is
+    // not writable has to fail here, not after downloading ~1 GB.
+    if (!openSink()) {
+        const QString reason =
+            QStringLiteral("no se pudo abrir el archivo del fragmento");
+        fail(reason);
+        return;
+    }
     start();
+}
+
+bool DownloadTransport::openSink()
+{
+    closeSink();
+    if (m_sinkPath.isEmpty())
+        return true;
+    m_sink = new QFile(m_sinkPath);
+    if (!m_sink->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        delete m_sink;
+        m_sink = nullptr;
+        m_sinkPath.clear();
+        return false;
+    }
+    return true;
+}
+
+void DownloadTransport::closeSink()
+{
+    if (!m_sink)
+        return;
+    // close() flushes the file. A write that failed was already treated as a
+    // failure of the fragment in deliverBody(), so there is nothing to
+    // inspect here: the fragment is only "done" when every byte was written.
+    m_sink->close();
+    delete m_sink;
+    m_sink = nullptr;
 }
 
 void DownloadTransport::abort()
@@ -127,6 +168,8 @@ void DownloadTransport::abort()
     m_progress = nullptr;
     m_inFlight = false;
     m_finished = true;
+    closeSink();
+    m_pendingProgress = 0;
     if (m_timeout)
         m_timeout->stop();
     if (m_stallTimer)
@@ -254,15 +297,19 @@ void DownloadTransport::onReadyRead()
     if (m_headerSize < 0)
         return;
 
-    // The new bytes of the body, so the bar moves while the segment is
-    // coming. The chunked transfer is NOT decoded here (a chunk can be
-    // split in the middle): the count is an approximation until the
-    // response ends, which is enough for a bar.
-    if (m_progress && m_response.size() > m_headerSize + m_reportedBytes) {
+    // The new bytes of the body. They are WRITTEN here (the thread of the
+    // transport) and only counted for the interface: the interface writing
+    // them is what took the frames away from the player.
+    //
+    // The chunked transfer is NOT decoded here (a chunk can be split in the
+    // middle); the count is an approximation until the response ends, which
+    // is enough for a bar.
+    const int newBody = m_response.size() - (m_headerSize + m_reportedBytes);
+    if (newBody > 0) {
         const QByteArray chunk =
             m_response.mid(m_headerSize + m_reportedBytes);
         m_reportedBytes += chunk.size();
-        deliverProgress(chunk);
+        deliverBody(chunk);
     }
 
     if (m_chunked) {
@@ -418,29 +465,38 @@ void DownloadTransport::finish()
         response.status = m_status;
         response.headers = m_headers;
         response.chunked = m_chunked;
-        // The chunked body was decoded while it arrived; otherwise the body
-        // is the raw bytes after the header.
-        response.body = m_chunked ? m_decoded : m_response.mid(m_headerSize);
+        // The body is carried only when nobody wrote it to a file: with a
+        // sink the bytes are already on the disk, and copying ~4 MB per
+        // fragment just to free them in the thread of the interface is work
+        // for nothing (and a 4 MB allocation in the GUI thread per fragment).
+        if (m_sinkPath.isEmpty())
+            response.body = m_chunked ? m_decoded : m_response.mid(m_headerSize);
     }
 
     if (m_socket) {
         m_socket->deleteLater();
         m_socket = nullptr;
     }
+    // The file of the fragment is closed HERE and before the answer is
+    // posted: the job measures it as soon as the fragment is done.
+    closeSink();
+    if (m_pendingProgress > 0)
+        deliverProgress(m_pendingProgress);
+    m_pendingProgress = 0;
     // No more chunks after the end of the response.
     m_progress = nullptr;
     deliverDone(response);
 }
 
 // The callback runs in the thread of m_context when it is set: the job (and
-// its counters, its queue and the file of the fragment) is the job's, and it
-// belongs to the thread of the interface. The transport itself lives in a
-// worker thread, so calling it straight from here would touch the state of
-// the job from the wrong thread.
+// its counters and its queue) is the job's, and it belongs to the thread of
+// the interface. The transport itself lives in a worker thread, so calling it
+// straight from here would touch the state of the job from the wrong thread.
+// The bytes are NOT in this path: they were already written by the transport,
+// in its own thread, when this is posted.
 //
 // A queued call also keeps the ORDER: the progress of a fragment is posted
-// before its done, and both go to the same object, so the file is closed
-// after every chunk was written.
+// before its done, and both go to the same object.
 void DownloadTransport::deliverDone(const Response &response)
 {
     DoneFn done = std::move(m_done);
@@ -455,17 +511,46 @@ void DownloadTransport::deliverDone(const Response &response)
                               Qt::QueuedConnection);
 }
 
-void DownloadTransport::deliverProgress(const QByteArray &chunk)
+void DownloadTransport::deliverBody(const QByteArray &chunk)
 {
+    // The bytes go to the disk in THIS thread (the thread of the transport).
+    // Handing them to the thread of the interface is what made the GUI thread
+    // write ~45 MB/s of fragments while it had to paint the player (measured:
+    // 2-5 fps with a 41 s freeze at the start of every download).
+    if (m_sink) {
+        const qint64 written = m_sink->write(chunk);
+        if (written != chunk.size()) {
+            const QString reason = QStringLiteral("no se pudo escribir el fragmento en el disco");
+            fail(reason);
+            return;
+        }
+    }
+
+    m_pendingProgress += chunk.size();
     if (!m_progress)
         return;
+    // The progress of a request at ~45 MB/s arrives every millisecond: one
+    // event per chunk is ~700 events per second for the interface. Coalesced,
+    // it is ~10 per second per connection, which is smooth for a bar.
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (m_pendingProgress < 256 * 1024 && now - m_lastProgressMs < 100)
+        return;
+    const qint64 bytes = m_pendingProgress;
+    m_pendingProgress = 0;
+    m_lastProgressMs = now;
+    deliverProgress(bytes);
+}
+
+void DownloadTransport::deliverProgress(qint64 bytes)
+{
+    if (!m_progress || bytes <= 0)
+        return;
     if (!m_context) {
-        m_progress(chunk);
+        m_progress(bytes);
         return;
     }
     ProgressFn progress = m_progress;
-    // The chunk is implicitly shared: posting it does not copy the bytes.
-    QMetaObject::invokeMethod(m_context, [progress, chunk]() { progress(chunk); },
+    QMetaObject::invokeMethod(m_context, [progress, bytes]() { progress(bytes); },
                               Qt::QueuedConnection);
 }
 
@@ -483,6 +568,13 @@ void DownloadTransport::fail(const QString &reason)
         m_socket->deleteLater();
         m_socket = nullptr;
     }
+    // The partial file goes away with the request: the job asks the fragment
+    // again and it is opened with Truncate, so half a fragment must not stay
+    // on the disk as if it were a finished one.
+    closeSink();
+    if (!m_sinkPath.isEmpty())
+        QFile::remove(m_sinkPath);
+    m_pendingProgress = 0;
     Response response;
     response.error = reason;
     m_progress = nullptr;

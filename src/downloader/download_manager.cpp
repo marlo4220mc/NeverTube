@@ -16,6 +16,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <QThread>
 
 namespace dl {
 
@@ -56,6 +57,25 @@ DownloadManager::~DownloadManager()
     if (m_job) {
         m_job->stop();
         delete m_job;
+    }
+}
+
+void DownloadManager::setPlaybackActive(bool active)
+{
+    // Kill switch, to tell "the player+download slows down" apart from "the
+    // priority change is to blame" on a machine: with this set the downloader
+    // behaves exactly as before this feature.
+    if (qEnvironmentVariableIsSet("NEVERTUBE_NO_DL_LOWPRIO"))
+        active = false;
+    if (m_playbackActive == active)
+        return;
+    m_playbackActive = active;
+    NT_DEBUG("E2E dlPlaybackActive=%d job=%d\n", active ? 1 : 0,
+             m_job ? 1 : 0);
+    // Priority is applied per-worker when the transport thread starts; keep it
+    // in sync for any job created later.
+    if (m_job) {
+        m_job->setPlaybackActive(m_playbackActive);
     }
 }
 
@@ -372,6 +392,7 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
     m_job->setDirectory(m_dir);
     // The number of connections of the setting of Ajustes.
     m_job->setConcurrency(m_concurrency);
+    m_job->setPlaybackActive(m_playbackActive);
     m_lastUiUpdateMs = 0;
     m_lastSaveMs = 0;
     connect(m_job, &DownloadJob::progressChanged, this,
