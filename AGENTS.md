@@ -2196,6 +2196,18 @@ live from Ajustes (Interfaz → Color de acento) and is persisted.
   of the nav icons (only re-evaluates the suffix), repaint of `VideoListView`
   and `applyAccent()` in watch/channel/home/settings (subscribe, active
   actions, description links, empty state, reset button).
+- **`inactive`/`disabled` are the only nav sprites WITHOUT a variant per
+  accent** (`NavButton::updateIcon` loads `<key>_inactive.png` with no suffix), so
+  their gray is shared by the seven colors. The four old ones (home, search,
+  library, settings) came with `#414248`, which on the `#101010` bar is almost
+  invisible, while `downloads` -- the newest, drawn by
+  `tools/gen_nav_downloads.py` -- used `kMuted` (`#8F8F8F`): seen together, the
+  downloads icon read as "lighter" than the others. All five are on `kMuted`
+  now, applied by `tools/gen_nav_inactive.py` (exact recolor: RGB forced and only
+  the alpha kept, the same rule as `gen_nav_accent.cpp`). Run it after adding a
+  key or replacing a sprite; it is idempotent. `disabled` is deliberately NOT
+  touched (the nav buttons are never disabled; if one ever is, it has to go to
+  `kDisabled` `#6A6A6A` like the rest of the UI).
 
 ## SELECTION color: text and suggestion (from the user)
 
