@@ -359,14 +359,6 @@ bool MpvBackend::playUrl(const QString &url, double startAt,
     return false; // loaded without audio: the caller keeps the pending URL
 }
 
-void MpvBackend::setYtdlFormat(const QString &format)
-{
-    if (!m_mpv)
-        return;
-    mpv_set_option_string(m_mpv, "ytdl", "yes");
-    mpv_set_option_string(m_mpv, "ytdl-format", format.toUtf8().constData());
-}
-
 void MpvBackend::stop()
 {
     if (!m_mpv)
@@ -589,7 +581,8 @@ bool MpvBackend::ensureAudioSelected()
             return false;   // it is already selected
         // The track is there and it is not the selected one: select it.
         mpv_set_property(m_mpv, "aid", MPV_FORMAT_INT64, &id);
-        NT_DEBUG("E2E audio seleccion=%lld (venia %lld)\n", id, sel);
+        NT_DEBUG("E2E audio seleccion=%lld (venia %lld)\n",
+                 static_cast<long long>(id), static_cast<long long>(sel));
         return true;
     }
     return false;

@@ -1435,8 +1435,6 @@ bool FfmpegBackend::playUrl(const QString &url, double startAt,
     return true;
 }
 
-void FfmpegBackend::setYtdlFormat(const QString &) {}
-
 void FfmpegBackend::stop()
 {
     shutdown();

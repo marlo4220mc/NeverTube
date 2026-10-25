@@ -832,7 +832,7 @@ void LibraryPage::buildRows(
         row->setAction(makeMoreButton(menu, row));
 
         const int index = i;
-        row->setActivate([this, activate, index]() { activate(index); });
+        row->setActivate([activate, index]() { activate(index); });
         lay->addWidget(row);
     }
 }

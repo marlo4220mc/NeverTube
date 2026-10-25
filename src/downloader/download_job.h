@@ -131,14 +131,13 @@ private:
         int tries = 0;
     };
     QVector<ArrivalTask> m_arrivalQueue;
-    void onIndex(const QString &track, const QVector<Range> &ranges);
     // A request of the arrival phase failed. It is asked again (up to
     // kArrivalRetries) and, when the tries run out, the download FAILS: it is
     // not possible to build the file without the init segment or the index.
     void onArrivalFailed(const ArrivalTask &task,
                          const DownloadTransport::Response &r);
     void startNext();
-    void onFragmentDone(const QString &track, int index, qint64 size);
+    void onFragmentDone(const QString &track, int index);
     bool writeFile(const QString &path, const QByteArray &data);
     QString fragmentPath(const QString &track, int index) const;
     // Writes the resource: the init segment first (it is the header of the

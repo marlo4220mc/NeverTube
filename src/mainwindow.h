@@ -93,7 +93,6 @@ private slots:
     void goHome();
     void goSearch();
     void goLibrary();
-    void goSettings();
     void showPreviousTab();
     void openHistory();
     void resetAppData();
@@ -152,8 +151,6 @@ private:
     void applyCodecProfile(const QString &profile, bool persist);
     // The folder of the downloads (the one of Ajustes, or the default one).
     void applyDownloadFolder();
-    // The number of connections of the downloads (the setting of Ajustes).
-    void applyDownloadConnections();
     // Launches the offline HwProbe scan; the blocking dialog only appears if
     // it is slow (basic PC) or if the user tries to play while it scans.
     void startHwProbe();

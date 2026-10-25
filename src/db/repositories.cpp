@@ -68,7 +68,7 @@ bool databaseSelfTest(const QString &dbPath)
     PlaylistsRepo playlists(db);
     SettingsRepo settings(db);
 
-    const auto tick = [&db](qlonglong &last) {
+    const auto tick = [](qlonglong &last) {
         qlonglong now;
         do {
             now = nowMs();

@@ -492,7 +492,6 @@ private:
     bool m_channelPending = false;
     bool m_channelInFlight = false;
     QString m_channelId;
-    QString m_channelContinuation;
     bool m_channelVisitorRetried = false;
 
     // Trending request (browse FEtrending). Independent; if it fails/

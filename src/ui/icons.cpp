@@ -31,25 +31,6 @@ static void paintPause(QPainter &p, const QRectF &r)
                p.pen().color());
 }
 
-static void paintPlayCircle(QPainter &p, const QRectF &r)
-{
-    const qreal cw = r.width();
-    p.setPen(QPen(p.pen().color(), cw * 0.09, Qt::SolidLine, Qt::RoundCap,
-                  Qt::RoundJoin));
-    p.setBrush(Qt::NoBrush);
-    p.drawEllipse(r.adjusted(cw * 0.05, cw * 0.05, -cw * 0.05, -cw * 0.05));
-    const qreal d = cw * 0.24;
-    const QRectF pr(r.left() + (cw - d) / 2, r.top() + (cw - d) / 2, d, d);
-    QPainterPath path;
-    path.moveTo(pr.left() + pr.width() * 0.32, pr.top() + pr.height() * 0.14);
-    path.lineTo(pr.left() + pr.width() * 0.32, pr.bottom() - pr.height() * 0.14);
-    path.lineTo(pr.right() - pr.width() * 0.12, pr.center().y());
-    path.closeSubpath();
-    p.setBrush(p.pen().color());
-    p.setPen(Qt::NoPen);
-    p.fillPath(path, p.pen().color());
-}
-
 static void paintArrow(QPainter &p, const QRectF &r, bool right)
 {
     QPainterPath path;

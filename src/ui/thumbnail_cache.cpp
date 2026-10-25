@@ -239,11 +239,6 @@ int ThumbnailCache::clear()
     return n;
 }
 
-int ThumbnailCache::maxWidth() const
-{
-    return kMaxThumbW;
-}
-
 int ThumbnailCache::sizeBytes() const
 {
     return m_bytes;

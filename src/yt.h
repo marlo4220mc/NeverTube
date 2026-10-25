@@ -52,20 +52,11 @@ public:
                           int limit = 100, int offset = 0);
     void channelInfo(const QString &channelId);
     void getDetail(const QString &videoId);
-    void playlistDetail(const QString &playlistId, int limit = 50);
     // forceRefresh=true re-resolves with the POST /player even if there is a
     // session cache for the video (fresh signed URLs; see Innertube::fetchHls).
     void resolveStream(const QString &videoId, int maxHeight,
                        bool forceRefresh = false);
 
-    // Asks for the RAW master playlist of a video (the multivariant one)
-    // and emits it as masterBodyReady. It is what the downloader uses: it
-    // needs the master as it is, to pick the variant and the audio rendition
-    // itself, instead of the filtered one the player is served.
-    //
-    // It does NOT touch the player: it is a separate request path, and the
-    // signals of the playback are not emitted.
-    void requestMaster(const QString &videoId);
     // Asks for the ADAPTIVE FORMATS of a video (the ones with a direct URL,
     // the initRange and the indexRange of each one) and emits them as
     // adaptiveFormatsReady. It is what the downloader uses: it downloads the
@@ -95,7 +86,6 @@ public:
     // if the response brought it.
     void home();
     void homeMore();
-    bool homeHasContinuation() const;
 
     static QString videoIdFromUrl(const QString &url);
 
@@ -161,13 +151,7 @@ signals:
     // getDetail did not get valid metadata from the /next (video unavailable or
     // empty response).
     void detailFailed(const QString &videoId);
-    void playlistDetailReady(const PlaylistInfo &info,
-                             const QVector<VideoInfo> &videos);
     void streamReady(const StreamInfo &stream);
-    // The RAW master playlist of a video, as YouTube serves it (the
-    // multivariant one, with the variants and the #EXT-X-MEDIA renditions).
-    // The downloader uses it to build its plan.
-    void masterBodyReady(const QString &videoId, const QByteArray &masterBody);
     // The ADAPTIVE FORMATS of a video (the ones with a direct URL), as the
     // player response gives them. The downloader takes the AUDIO from here
     // and not from the master: the audio of the master is AAC in LATM (its
@@ -176,8 +160,9 @@ signals:
     // output packet for stream #1: Not yet implemented in FFmpeg"). The
     // adaptive gives the same track as a clean m4a.
     void adaptiveFormatsReady(const QString &videoId, const QJsonArray &formats);
-    // The master could not be fetched.
-    void masterBodyFailed(const QString &videoId, const QString &reason);
+    // The ADAPTIVE FORMATS could not be fetched (the downloader has nothing
+    // to download without them).
+    void adaptiveFormatsFailed(const QString &videoId, const QString &reason);
     // Available video heights of the video (Innertube adaptiveFormats),
     // independent of the cap the profile asks for: the player's resolution menu
     // uses them to offer all the real qualities even if Auto asked for a low

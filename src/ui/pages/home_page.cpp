@@ -96,8 +96,8 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     , m_yt(yt)
     , m_subs(subs)
     , m_history(history)
-    , m_discover(discover)
     , m_videoCache(videoCache)
+    , m_discover(discover)
     , m_thumbs(thumbs)
     , m_settings(settings)
     , m_homeCache(homeCache)
@@ -1107,11 +1107,6 @@ void HomePage::applyGridSizes()
     NT_DEBUG("E2E applyGridSizes done: cols=%d cont=%d feed=%d home=%d disc=%d trend=%d\n",
              cols, m_contGrid->height(), m_feedGrid->height(),
              m_homeGrid->height(), m_discGrid->height(), m_trendGrid->height());
-}
-
-void HomePage::scheduleGridSizes()
-{
-    QTimer::singleShot(0, this, &HomePage::applyGridSizes);
 }
 
 void HomePage::resizeEvent(QResizeEvent *event)

@@ -47,7 +47,6 @@ void setThumbSize(VideoInfo &v, const QJsonArray &thumbs)
 
 namespace {
 
-const char kYoutubeHost[] = "https://www.youtube.com";
 const char kYoutubeName[] = "www.youtube.com";
 const char kSwJsData[] = "/sw.js_data";
 const char kPlayerEndpoint[] =
@@ -158,11 +157,6 @@ constexpr int kPlayerClientCount =
 // modern (*ViewModel) layout. It requires no X-Goog-Api-Key (verified).
 constexpr int kWebClientId = 1;
 const char kWebClientVersion[] = "2.20240726.00.00";
-
-const char kFieldMask[] =
-    "playabilityStatus.status,playabilityStatus.reason,"
-    "streamingData.hlsManifestUrl,streamingData.adaptiveFormats,"
-    "videoDetails.videoId,videoDetails.lengthSeconds,videoDetails.isLive";
 
 // Unique ascending video heights extracted from streamingData.
 // Only video entries (with width/height > 0) are taken into account;
@@ -535,7 +529,7 @@ private:
             return;
         if (m_queue.isEmpty())
             return;
-        m_request = std::move(m_queue.dequeue());
+        m_request = m_queue.dequeue();
         m_inFlight = true;
         m_response.clear();
         m_responseHeaderSize = -1;
@@ -3154,34 +3148,6 @@ int webLockupMeta(const QJsonObject &contentImage, int *secondsOut,
     return seconds;
 }
 
-// shortsLockupViewModel: id in entityId="shorts-shelf-item-<id>", title and
-// views in overlayMetadata, vertical thumbnail in thumbnailViewModel.
-VideoInfo videoFromWebShorts(const QJsonObject &sl)
-{
-    VideoInfo v;
-    v.id = sl.value(QStringLiteral("entityId")).toString();
-    const QString prefix = QStringLiteral("shorts-shelf-item-");
-    if (v.id.startsWith(prefix))
-        v.id.remove(0, prefix.size());
-    const QJsonObject ov = sl.value(QStringLiteral("overlayMetadata")).toObject();
-    v.title = ov.value(QStringLiteral("primaryText")).toObject()
-                  .value(QStringLiteral("content")).toString();
-    v.viewCount = countFromText(ov.value(QStringLiteral("secondaryText")).toObject()
-                                    .value(QStringLiteral("content")).toString());
-    const QJsonArray sources = sl.value(QStringLiteral("thumbnailViewModel"))
-                                   .toObject().value(QStringLiteral("image"))
-                                   .toObject().value(QStringLiteral("sources"))
-                                   .toArray();
-    if (!sources.isEmpty()) {
-        v.thumbnailUrl = sources.last().toObject()
-                             .value(QStringLiteral("url")).toString();
-        setThumbSize(v, sources);
-    }
-    if (v.thumbnailUrl.isEmpty())
-        v.thumbnailUrl = fallbackThumbnailUrl(v.id);
-    return v;
-}
-
 // Is the text a count like "21 K", "5,4 M", "684"? The /next lockup gives the
 // views as number + multiplier, WITHOUT the word "vistas" (that word only
 // appears in the channel layout). It requires the text to start with a digit
@@ -4236,7 +4202,7 @@ void Innertube::saveHlsCacheToDisk() const
 
 void Innertube::loadHlsCacheFromDisk()
 {
-    const QByteArray json = [this]() {
+    const QByteArray json = []() {
         QFile file(hlsCacheFilePath());
         if (!file.open(QIODevice::ReadOnly))
             return QByteArray();
@@ -4285,7 +4251,7 @@ bool innertubeSelfTest()
 
     auto *timeout = new QTimer;
     timeout->setSingleShot(true);
-    QObject::connect(timeout, &QTimer::timeout, [&success]() {
+    QObject::connect(timeout, &QTimer::timeout, []() {
         std::fprintf(stderr, "SELFTEST FAIL: innertube timeout sin HLS/next\n");
         QCoreApplication::exit(1);
     });
@@ -5223,7 +5189,7 @@ bool feedsProtocolSelfTest()
 
     // phases: 0 visitor | 1 channel diag | 2 channel data (tube) | 3 trending diag
     // | 4 trending data (tube) | 5 empty case (tube) | 6 end
-    st.next = [&st, &countRenderers, &validIds]() {
+    st.next = [&st, &countRenderers]() {
         switch (st.phase) {
         case 0: {
             st.phase = 1;

@@ -80,7 +80,7 @@ private:
             check->setCursor(Qt::PointingHandCursor);
             if (m_checkState)
                 check->setChecked(*m_checkState);
-            connect(check, &QCheckBox::toggled, this, [this, check](bool on) {
+            connect(check, &QCheckBox::toggled, this, [this](bool on) {
                 if (m_checkState)
                     *m_checkState = on;
             });

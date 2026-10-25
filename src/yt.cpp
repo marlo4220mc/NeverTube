@@ -161,8 +161,6 @@ Yt::Yt(QObject *parent)
                 emit detailReady(video, description, likeCount,
                                  QVector<FormatInfo>());
             });
-    connect(&m_innertube, &Innertube::playlistReady, this,
-            &Yt::playlistDetailReady);
     // Video heights available for the resolutions menu:
     // they come from the HLS master (adaptiveFormats' videoHeights) and, as a
     // fallback, from /player (formatsReady). They do not affect the resolved
@@ -262,11 +260,6 @@ void Yt::homeMore()
     m_innertube.fetchHomeMore();
 }
 
-bool Yt::homeHasContinuation() const
-{
-    return m_innertube.hasHomeContinuation();
-}
-
 QString Yt::videoIdFromUrl(const QString &url)
 {
     if (url.size() == 11 && !url.contains(QStringLiteral("youtube")))
@@ -364,12 +357,6 @@ void Yt::getDetail(const QString &videoId)
     m_innertube.fetchVideoDetail(videoId);
 }
 
-void Yt::playlistDetail(const QString &playlistId, int limit)
-{
-    // Innertube: browse VL<id> (header + playlistVideoRenderer).
-    m_innertube.fetchPlaylist(playlistId, limit);
-}
-
 void Yt::resolveStream(const QString &videoId, int maxHeight,
                        bool forceRefresh)
 {
@@ -405,7 +392,7 @@ void Yt::requestAdaptiveFormats(const QString &videoId, bool forceRefresh)
                 if (vid != videoId)
                     return;
                 guard->deleteLater();
-                emit masterBodyFailed(videoId, reason);
+                emit adaptiveFormatsFailed(videoId, reason);
             });
 
     connect(innTube, &Innertube::formatsReady, guard,
@@ -421,7 +408,7 @@ void Yt::requestAdaptiveFormats(const QString &videoId, bool forceRefresh)
                 if (vid != videoId)
                     return;
                 guard->deleteLater();
-                emit masterBodyFailed(videoId, QStringLiteral("formats"));
+                emit adaptiveFormatsFailed(videoId, QStringLiteral("formats"));
             });
 
     // The player response gives the formats. It is the OWN path of the
@@ -440,8 +427,8 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
 
     QMetaObject::Connection guardFail;
     guardFail = connect(innTube, &Innertube::failed, guard,
-            [this, guard, videoId, maxHeight, gen](const QString &vid,
-                                                   const QString &reason) {
+            [this, guard, videoId, gen](const QString &vid,
+                                        const QString &reason) {
                 if (vid != videoId || gen != m_resolveGen)
                     return;
                 guard->deleteLater();
@@ -467,8 +454,8 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
     QSharedPointer<QString> av1Hls(new QString);
     QSharedPointer<int> av1H(new int(0));
     connect(innTube, &Innertube::formatsReady, guard,
-            [this, guard, innTube, videoId, maxHeight, gen, edgeUrl,
-             edgeAudioUrl, edgeH, av1Hls, av1H](const QString &vid,
+            [this, videoId, maxHeight, gen, edgeUrl, edgeAudioUrl, edgeH,
+             av1Hls, av1H](const QString &vid,
                                    const QJsonArray &formats, int dur) {
                 if (vid != videoId || gen != m_resolveGen)
                     return;
@@ -612,7 +599,7 @@ void Yt::resolveViaInnertube(const QString &videoId, int maxHeight,
                 QMetaObject::Connection masterFail;
                 masterFail = connect(
                     innTube, &Innertube::failed, filterGuard,
-                    [this, filterGuard, masterConn, innTube, videoId, maxHeight, gen,
+                    [this, filterGuard, masterConn, innTube, videoId, gen,
                      edgeUrl, edgeAudioUrl, edgeH](
                         const QString &fid, const QString &reason) {
                         if (fid != videoId || gen != m_resolveGen)
@@ -771,7 +758,6 @@ QString Yt::buildEdgeMaster(const QString &videoId,
         return QString();
 
     QJsonObject bestVideo, bestAudio;
-    int bestVideoH = 0;
     int bestScore = std::numeric_limits<int>::min();
     int bestAudioScore = -1;
     const bool wantOriginal = audioLang.isEmpty()
@@ -790,7 +776,6 @@ QString Yt::buildEdgeMaster(const QString &videoId,
             if (score > bestScore) {
                 bestScore = score;
                 bestVideo = f;
-                bestVideoH = h;
             }
         } else if (mime.startsWith(QLatin1String("audio/"))) {
             const QJsonObject track =

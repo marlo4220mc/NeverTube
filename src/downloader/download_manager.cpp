@@ -30,12 +30,12 @@ DownloadManager::DownloadManager(Yt *yt, DownloadRepo *repo, QWidget *window,
     if (m_yt) {
         connect(m_yt, &Yt::adaptiveFormatsReady, this,
                 &DownloadManager::onAdaptiveFormats);
-        connect(m_yt, &Yt::masterBodyFailed, this,
+        connect(m_yt, &Yt::adaptiveFormatsFailed, this,
                 [this](const QString &vid, const QString &reason) {
             if (vid != m_currentId)
                 return;
-            // There is NO job yet when the master fails: the job is created
-            // AFTER the master arrives. Without this the row would stay in
+            // There is NO job yet when the formats fail: the job is created
+            // AFTER the formats arrive. Without this the row would stay in
             // "pending" forever (measured: a video that YouTube refuses
             // left the list as "pending" and nothing happened).
             if (m_repo)
@@ -68,11 +68,6 @@ QString DownloadManager::defaultDirectory()
     // It is ONE function (downloads::folderOf), so the button of "Abrir
     // carpeta" opens exactly the folder where the files are written.
     return downloads::folderOf(QString());
-}
-
-bool DownloadManager::hasFfmpeg()
-{
-    return !findFfmpeg().isEmpty();
 }
 
 QVector<DownloadInfo> DownloadManager::downloads() const
@@ -290,18 +285,13 @@ void DownloadManager::start(const QString &videoId, const QString &title,
 }
 
 
-// The adaptive formats arrived: the plan can be built (the master is
-// already there).
 // The adaptive formats arrived: the plan is built from them.
 //
-// The VIDEO comes from the master HLS (it is already fragmented by YouTube
-// into segments of ~1.3 MB, and those are not throttled) and the AUDIO from
-// the adaptive formats (a clean mp4; the audio of the master is AAC in LATM
-// and the FFmpeg of this system cannot mux that).
-//
-// Both are fetched by byte range, because YouTube throttles a request by its
-// size: the same audio asked for whole runs at 0.011 MB/s and a 2 MB range
-// of it runs at 14 MB/s (measured).
+// BOTH tracks (video and audio) come from here, and both are fetched by byte
+// range, because YouTube throttles a request by its size: the same audio
+// asked for whole runs at 0.011 MB/s and a 2 MB range of it runs at
+// 14 MB/s (measured). The master HLS is NOT used: its audio is AAC in LATM
+// and the FFmpeg of this system cannot mux that.
 void DownloadManager::onAdaptiveFormats(const QString &videoId,
                                        const QJsonArray &formats)
 {
@@ -460,11 +450,6 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
     }
     m_job->start(plan, videoId, already);
     emit changed();
-}
-
-void DownloadManager::buildPlan()
-{
-    onAdaptiveFormats(m_currentId, m_adaptiveFormats);
 }
 
 void DownloadManager::saveProgress(bool force)

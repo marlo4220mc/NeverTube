@@ -318,7 +318,6 @@ private:
 
     QVector<VideoInfo> m_queue;
     int m_queueStart = -1;
-    QVector<VideoInfo> m_nextUp;
     QString m_description;
     qint64 m_likeCount = 0;
     bool m_fetchingDetail = false;

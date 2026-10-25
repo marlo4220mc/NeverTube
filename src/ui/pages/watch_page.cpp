@@ -546,7 +546,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     auto *btnRow = new QHBoxLayout;
     btnRow->setSpacing(6);
 
-    auto makeIconBtn = [this](QWidget *parent) {
+    auto makeIconBtn = [](QWidget *parent) {
         auto *b = new QPushButton(parent);
         b->setObjectName(QStringLiteral("iconBtn"));
         b->setCursor(Qt::PointingHandCursor);
@@ -611,7 +611,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     btnRow->addWidget(m_ovDur);
 
     // Subtle vertical separators (1 px) between the subgroups of the row.
-    auto makeSep = [this](QWidget *parent) {
+    auto makeSep = [](QWidget *parent) {
         auto *sep = new QFrame(parent);
         sep->setObjectName(QStringLiteral("ovSep"));
         sep->setFixedSize(1, 20);
@@ -1453,7 +1453,7 @@ void WatchPage::updateSubscription(const VideoInfo &v, bool subscribe)
 
 void WatchPage::updateActionButtons()
 {
-    auto paint = [this](QPushButton *b, nt::Icon icon, bool active) {
+    auto paint = [](QPushButton *b, nt::Icon icon, bool active) {
         b->setIcon(nt::icon(icon, active ? QColor(nt::accentHex())
                                          : nt::kMuted, 20));
         b->setIconSize(QSize(20, 20));

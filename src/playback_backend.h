@@ -80,9 +80,6 @@ public:
     // attach it after the file is loaded, as a fallback).
     virtual bool playUrl(const QString &url, double startAt,
                          const QString &audioUrl) = 0;
-    // ytdl mode (nothing to do in engines that resolve the URLs
-    // themselves): the caller keeps using playUrl() afterwards.
-    virtual void setYtdlFormat(const QString &format) = 0;
     virtual void stop() = 0;
     virtual void setPaused(bool paused) = 0;
     virtual void seek(double seconds) = 0;
