@@ -629,7 +629,7 @@ all inside `m_ctrlBar` (`#playerOverlay`):
 ./build/nevertube_qt2 --selftest-tls       # REAL TLS handshake against public hosts (not just loading)
 ./build/nevertube_qt2 --selftest-search    # REAL Innertube search: videos with a non-empty id
 ./build/nevertube_qt2 --selftest-browse    # Innertube endpoints: channel + tabs (videos/shorts/live) + detail + playlist
-./build/nevertube_qt2 --selftest-feeds     # channel via Innertube + trending (protocol and chain)
+./build/nevertube_qt2 --selftest-feeds     # channel via Innertube (protocol and chain)
 ./build/nevertube_qt2 --selftest-grid      # grids: column cap (pure) + cell consistent across model/gridSize/section (mounts a VideoListView; no network or GPU: runs in CI)
 ./build/nevertube_qt2 --selftest-theme     # pure QSS: duplicate selector, selector without widget, selection palette and button borders: runs in CI
 ./build/nevertube_qt2 --selftest-glyphs    # every non-ASCII glyph of the UI exists in the app's real font: runs in CI
@@ -946,7 +946,7 @@ for 20 videos, not for 20 rows of which some are reels.
 
 **Where the filter is applied** (all in the source, so no surface forgets it):
 the radio (the panel, the VISIONOS fallback and the WEB list), the
-suggestions (`parseRelated`), the Home shelves and the trending. The radio
+suggestions (`parseRelated`) and the Home shelves. The radio
 that was **saved** in the database is filtered again when it is reused
 (`MainWindow::openWatchAt`), because it may have been saved before the rule
 existed.
@@ -2056,6 +2056,20 @@ the user's screen. 66 files, ~3360 literals, 17 glyphs.
   the signature of subscription ids stored in `settings.feed_subs_sig`. Without that
   check the cached feed (TTL 30 min) would keep showing only the previous
   subscriptions after subscribing.
+
+## Home sections: "Tendencias" does NOT exist (removed 2026-10)
+
+Home is "Continuar viendo" + "Nuevos de tus suscripciones" + "Recomendado" +
+"Descubre". The "Tendencias" section (`Yt::trending` →
+`Innertube::fetchTrending`, browseId `FEtrending`, section `trending` of
+`home_cache`, i18n key `home.trending`) was **removed**, and it was not
+cosmetic: YouTube answers **`400 "Request contains an invalid argument"`** for
+`FEtrending` in both VISIONOS and WEB (with and without `params`), while the
+control `FEwhat_to_watch` answers 200. It was dead, and it was costing time:
+`Ipv4Https` is ONE connection with a FIFO queue, so the ~12 s of that request
+blocked everything behind it and Home's dynamic block was ready at **16,3–17,6 s**
+instead of **0,15 s** (measured). Do not bring it back without a working
+trending source.
 
 ## "Continuar viendo" (duration + position in the history)
 

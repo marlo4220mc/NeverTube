@@ -245,7 +245,7 @@ private:
     AppDatabase &m_db;
 };
 
-// Persistent Home cache per network section (Recomendado/Feed/Tendencias).
+// Persistent Home cache per network section (Recomendado/Feed).
 // Stores only ordered ids + fetched_at; the metadata lives in "videos"
 // (VideoCacheRepo). saveSection REPLACES the whole section: each network
 // response is the current list of that section, content is never appended to

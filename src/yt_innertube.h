@@ -122,11 +122,6 @@ public slots:
     // compactVideoRenderer parser; they arrive via channelVideosReady(). Empty =
     // no videos.
     void fetchChannelVideos(const QString &channelId);
-    // Trending (POST /browse, browseId FEtrending) with VISIONOS. They arrive via
-    // trendingReady(). Nowadays YouTube removes/redirects anonymous trending
-    // (400/redirect to Home), so this phase usually comes back empty and the
-    // app hides the section.
-    void fetchTrending();
 
     // Search (POST /search, VISIONOS). fetchSearch() brings the first page;
     // fetchSearchMore() the continuation. searchReady() delivers only the new
@@ -211,11 +206,9 @@ signals:
     // available).
     void homeReady(const QVector<VideoInfo> &videos);
     void homeMoreReady(const QVector<VideoInfo> &videos);
-    // Videos of a channel (browse "Vídeos" tab) and Trending (browse
-    // FEtrending). Empty = no results.
+    // Videos of a channel (browse "Vídeos" tab). Empty = no results.
     void channelVideosReady(const QString &channelId,
                             const QVector<VideoInfo> &videos);
-    void trendingReady(const QVector<VideoInfo> &videos);
     // Search results page (searchReady) and a channel tab
     // (channelTabReady). hasMore indicates whether YouTube issued a continuation token.
     void searchReady(const QString &query, const QVector<VideoInfo> &videos,
@@ -259,11 +252,9 @@ private:
     void promoteQueuedRadio();
     void requestHome(const QString &continuation);
     void requestChannel();
-    void requestTrending();
     void handleHome(bool ok, const QString &error, const QByteArray &body,
                     bool more);
     void handleChannel(bool ok, const QString &error, const QByteArray &body);
-    void handleTrending(bool ok, const QString &error, const QByteArray &body);
     void requestSearch(bool more);
     void handleSuggest(const QString &query, bool ok, const QByteArray &body);
     void handleSearch(const QString &query, bool ok, const QString &error,
@@ -288,7 +279,7 @@ private:
                      const QByteArray &body);
     void useFallbackVisitorData();
     // One retry per phase of the Home sections: if the browse (Home,
-    // channel, trending) responds 500/empty with the current persisted
+    // channel) responds 500/empty with the current persisted
     // visitorData, visitorData is refreshed ONCE and the phase is re-queued (the
     // dispatcher relaunches it). Avoids the forced sw.js_data refresh on every
     // startup; a real failure adds barely one GET + retry.
@@ -306,7 +297,7 @@ private:
     QVector<VideoInfo> parseRelated(const QJsonObject &root) const;
     // compactVideoRenderer/videoRenderer renderer → VideoInfo. Fills
     // publishedAt with an approximate timestamp if there is only relative
-    // text (e.g. "hace 3 días"). Used in Home, channels and trending.
+    // text (e.g. "hace 3 días"). Used in Home and channels.
     VideoInfo videoFromHomeRenderer(const QJsonObject &item) const;
     // Walks the tree looking for compactVideoRenderer/videoRenderer (without
     // duplicating ids) up to maxCount, respecting the response order.
@@ -390,7 +381,7 @@ private:
     bool m_lastIsLive = false;
     // True if the current visitorData was freshly obtained in this session
     // (sw.js_data). The player/next/radio phases request it at startup; the
-    // Home sections (home/feed/trending) use the persisted current one directly
+    // Home sections (home/feed) use the persisted current one directly
     // and only refresh if a browse responds 500/empty
     // (single retry via m_*VisitorRetried).
     bool m_visitorDataFreshRun = false;
@@ -494,12 +485,6 @@ private:
     QString m_channelId;
     bool m_channelVisitorRetried = false;
 
-    // Trending request (browse FEtrending). Independent; if it fails/
-    // responds empty, the app hides the section.
-    bool m_trendPending = false;
-    bool m_trendInFlight = false;
-    bool m_trendVisitorRetried = false;
-
     // Search (/search). First page and continuation; the stored token
     // enables fetchSearchMore().
     bool m_searchPending = false;
@@ -561,10 +546,10 @@ bool innertubeSelfTest();
 bool homeBrowseSelfTest();
 
 // Selftest of the Home feeds via Innertube: videos of a channel (browse
-// "Vídeos" tab + params; channel configurable with NEVERTUBE_TEST_CHANNEL) and
-// Trending (FEtrending). Verifies HTTP status, size, renderers, real
-// videos (id, title, duration), order, duplicates, limit and the empty/error
-// behavior. Does not touch the player nor SQLite.
+// "Vídeos" tab + params; channel configurable with NEVERTUBE_TEST_CHANNEL).
+// Verifies HTTP status, size, renderers, real videos (id, title, duration),
+// order, duplicates, limit and the empty/error behavior. Does not touch the
+// player nor SQLite.
 bool feedsProtocolSelfTest();
 
 // Selftest of the Innertube browse endpoints: search, channel card,

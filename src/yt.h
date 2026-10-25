@@ -46,7 +46,6 @@ public:
     // is a plain GET that does not touch the Innertube session (see
     // Innertube::fetchSuggest).
     void suggest(const QString &query);
-    void trending(int limit = 30);
     void channelVideos(const QString &channelId, int limit = 20);
     void channelTabVideos(const QString &channelId, const QString &tab,
                           int limit = 100, int offset = 0);
@@ -141,7 +140,6 @@ public:
 signals:
     void searchFinished(const QString &query, const QVector<VideoInfo> &videos);
     void suggestReady(const QString &query, const QVector<Suggestion> &suggestions);
-    void trendingFinished(const QVector<VideoInfo> &videos);
     void channelVideosFinished(const QVector<VideoInfo> &videos);
     void channelTabVideosFinished(const QString &channelId, const QString &tab,
                                   const QVector<VideoInfo> &videos);
@@ -243,9 +241,9 @@ private:
     QHash<QString, int> m_winningClient;
 };
 
-// Self-test of the real feed chain in Yt: channel through Innertube + trending →
-// channelVideosFinished/trendingFinished signals. Checks that a result arrives
-// within a deadline, without hangs. It does not touch the player or SQLite.
+// Self-test of the real feed chain in Yt: channel through Innertube →
+// channelVideosFinished. Checks that a result arrives within a deadline,
+// without hangs. It does not touch the player or SQLite.
 bool feedsChainSelfTest();
 
 // Self-test of the Innertube SEARCH (Yt::search): launches a real search

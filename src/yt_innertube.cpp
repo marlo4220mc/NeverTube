@@ -1087,10 +1087,6 @@ void Innertube::dispatchPending()
         m_channelPending = false;
         requestChannel();
     }
-    if (m_trendPending) {
-        m_trendPending = false;
-        requestTrending();
-    }
     if (m_searchPending) {
         m_searchPending = false;
         requestSearch(false);
@@ -1767,14 +1763,10 @@ constexpr int kHomeShelfVideos = 8;
 // identical on real channels; without it the browse returns the default tab
 // ("Home") instead of the video listing.
 const char kChannelVideosParams[] = "EgZ2aWRlb3PyBgQKAjoA";
-// Trending: real browseId, although today YouTube answers 400/redirect to
-// the Home for anonymous trending (the selftest records the real status).
-const char kTrendingBrowseId[] = "FEtrending";
-// How many videos are collected per channel/trending (then the UI
-// decides/dedupes and limits to 8). Enough to fill the section without
-// asking for more channels.
+// How many videos are collected per channel (then the UI decides/dedupes
+// and limits to 8). Enough to fill the section without asking for more
+// channels.
 constexpr int kChannelTake = 12;
-constexpr int kTrendingTake = 12;
 // Params of the Shorts and Live tabs (channel browse). VISIONOS ignores
 // them and returns the Home; the WEB client does serve them.
 const char kChannelShortsParams[] = "EgZzaG9ydHPyBgUKA5oBAA==";
@@ -1983,81 +1975,6 @@ void Innertube::handleChannel(bool ok, const QString &error,
         return;
     NT_DEBUG("E2E innertube channel ok videos=%d\n", videos.size());
     emit channelVideosReady(m_channelId, videos);
-}
-
-void Innertube::fetchTrending()
-{
-    if (m_trendInFlight) {
-        NT_DEBUG("E2E innertube trending single-flight\n");
-        return;
-    }
-    m_trendInFlight = true;
-    m_trendVisitorRetried = false;
-    NT_DEBUG("E2E innertube fetchTrending\n");
-    if (!hasFreshVisitor()) {
-        m_trendPending = true;
-        fetchVisitorData();
-        return;
-    }
-    requestTrending();
-}
-
-void Innertube::requestTrending()
-{
-    m_http->setResult([this](int status, const QByteArray &body) {
-        NT_DEBUG("E2E innertube trending HTTP status=%d size=%d\n", status,
-                 body.size());
-        handleTrending(status == 200, QString(), body);
-    });
-    m_http->setError([this](const QString &reason) {
-        handleTrending(false, reason, QByteArray());
-    });
-    m_http->setTimeoutMs(kPlayerTimeoutMs);
-    m_http->setVisitorId(m_visitorData);
-
-    const PlayerClient &pc = kPlayerClients[0];
-    const QJsonObject client = clientContext(pc, m_visitorData, m_hl);
-    const QJsonObject body{
-        {QStringLiteral("context"), QJsonObject{{QStringLiteral("client"), client}}},
-        {QStringLiteral("browseId"), QString::fromLatin1(kTrendingBrowseId)},
-    };
-    const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
-    m_http->post(kBrowseEndpoint, json, pc.ua, pc.clientId, pc.version,
-                 nullptr, nullptr, nullptr);
-}
-
-void Innertube::handleTrending(bool ok, const QString &error,
-                               const QByteArray &body)
-{
-    m_trendInFlight = false;
-    if (!ok) {
-        NT_DEBUG("E2E innertube trending HTTP err: %s\n",
-                 error.toUtf8().constData());
-        if (retryBrowseWithFreshVisitor(&m_trendVisitorRetried,
-                                        &m_trendPending))
-            return;
-        emit trendingReady(QVector<VideoInfo>());
-        return;
-    }
-    QJsonObject jsonRoot;
-    const bool jsonOk = parseJsonObject(body, &jsonRoot);
-    if (!jsonOk) {
-        NT_DEBUG("E2E innertube trending json fail size=%d\n", body.size());
-        if (retryBrowseWithFreshVisitor(&m_trendVisitorRetried,
-                                        &m_trendPending))
-            return;
-        emit trendingReady(QVector<VideoInfo>());
-        return;
-    }
-    // The Shorts (the vertical ones) are left out.
-    QVector<VideoInfo> videos =
-        reels::withoutShorts(collectVideoRenderers(jsonRoot, kTrendingTake));
-    if (videos.isEmpty()
-        && retryBrowseWithFreshVisitor(&m_trendVisitorRetried,
-                                       &m_trendPending))
-        return;
-    NT_DEBUG("E2E innertube trending ok videos=%d\n", videos.size());
-    emit trendingReady(videos);
 }
 
 // ---------------------------------------------------------------------------
@@ -5129,8 +5046,6 @@ bool feedsProtocolSelfTest()
         bool ok = true;
         int chanStatus = 0;
         int chanDiagSize = 0;
-        int trendStatus = 0;
-        int trendDiagSize = 0;
         std::function<void()> next;
     } st{&http, &tube, channel};
 
@@ -5187,8 +5102,8 @@ bool feedsProtocolSelfTest()
             {n11, dups}, {withTitle, withDur});
     };
 
-    // phases: 0 visitor | 1 channel diag | 2 channel data (tube) | 3 trending diag
-    // | 4 trending data (tube) | 5 empty case (tube) | 6 end
+    // phases: 0 visitor | 1 channel diag | 2 channel data (tube) | 3 empty case
+    // (tube) | 4 end
     st.next = [&st, &countRenderers]() {
         switch (st.phase) {
         case 0: {
@@ -5245,54 +5160,14 @@ bool feedsProtocolSelfTest()
             st.phase = 3;
             st.tube->fetchChannelVideos(st.channel);
             return;
-        case 3: {
+        case 3:
             st.phase = 4;
-            st.http->setTimeoutMs(kPlayerTimeoutMs);
-            st.http->setResult([&st, &countRenderers](int status,
-                                                      const QByteArray &body) {
-                st.trendStatus = status;
-                st.trendDiagSize = body.size();
-                QJsonObject jsonRoot;
-                const bool jsonOk = parseJsonObject(body, &jsonRoot);
-                const QString renderers =
-                    (jsonOk)
-                        ? countRenderers(jsonRoot)
-                        : QStringLiteral("(sin json)");
-                std::fprintf(stderr,
-                             "FEEDS-PROTO trending HTTP status=%d size=%d "
-                             "renderers=%s\n",
-                             status, body.size(),
-                             renderers.toUtf8().constData());
-                st.next();
-            });
-            st.http->setError([](const QString &) {});
-            st.http->setVisitorId(st.visitor);
-            const PlayerClient &pc = kPlayerClients[0];
-            const QJsonObject client = clientContext(pc, st.visitor);
-            const QJsonObject body{
-                {QStringLiteral("context"),
-                 QJsonObject{{QStringLiteral("client"), client}}},
-                {QStringLiteral("browseId"),
-                 QString::fromLatin1(kTrendingBrowseId)},
-            };
-            const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
-            st.http->post(kBrowseEndpoint, json, pc.ua, pc.clientId, pc.version,
-                          nullptr, nullptr, nullptr);
-            return;
-        }
-        case 4:
-            st.phase = 5;
-            st.tube->fetchTrending();
-            return;
-        case 5:
-            st.phase = 6;
             st.tube->fetchChannelVideos(QStringLiteral("UC00000000000000000000"));
             return;
         default:
-            std::fprintf(stderr, "FEEDS-PROTO RESUMEN canal status=%d size=%d "
-                                 "trending status=%d size=%d ok=%d\n",
-                         st.chanStatus, st.chanDiagSize, st.trendStatus,
-                         st.trendDiagSize, st.ok ? 1 : 0);
+            std::fprintf(stderr,
+                         "FEEDS-PROTO RESUMEN canal status=%d size=%d ok=%d\n",
+                         st.chanStatus, st.chanDiagSize, st.ok ? 1 : 0);
             QCoreApplication::exit(st.ok ? 0 : 1);
         }
     };
@@ -5336,24 +5211,6 @@ bool feedsProtocolSelfTest()
                              st.next();
                          }
                      });
-    QObject::connect(&tube, &Innertube::trendingReady,
-                     [&st, &validIds](const QVector<VideoInfo> &videos) {
-                         const auto ids = validIds(videos);
-                         std::fprintf(stderr,
-                                      "FEEDS-PROTO trending videos=%d id11=%d "
-                                      "dup=%d conTitulo=%d conDur=%d\n",
-                                      videos.size(), ids.first.first,
-                                      ids.first.second, ids.second.first,
-                                      ids.second.second);
-                         if (!videos.isEmpty()) {
-                             st.ok = st.ok && ids.first.first == videos.size()
-                                     && ids.first.second == 0
-                                     && videos.size() <= kTrendingTake
-                                     && ids.second.first == videos.size();
-                         }
-                         st.next();
-                     });
-
     st.next();
     QCoreApplication::exec();
     return st.ok;

@@ -136,8 +136,6 @@ Yt::Yt(QObject *parent)
             [this](const QString &, const QVector<VideoInfo> &videos) {
                 emit channelVideosFinished(videos);
             });
-    connect(&m_innertube, &Innertube::trendingReady, this,
-            &Yt::trendingFinished);
     // Search, channel info/tabs, video detail and playlist via
     // Innertube: they are forwarded to the Yt signals the UI consumes.
     connect(&m_innertube, &Innertube::searchReady, this,
@@ -321,12 +319,6 @@ void Yt::search(const QString &query, int limit, int offset)
 void Yt::suggest(const QString &query)
 {
     m_innertube.fetchSuggest(query);
-}
-
-void Yt::trending(int limit)
-{
-    Q_UNUSED(limit);
-    m_innertube.fetchTrending();
 }
 
 void Yt::channelVideos(const QString &channelId, int limit)
@@ -1290,11 +1282,8 @@ bool feedsChainSelfTest()
     std::fprintf(stderr, "FEEDS-CHAIN canal=%s\n", channel.toUtf8().constData());
 
     bool channelDone = false;
-    bool trendDone = false;
     bool channelOk = false;
-    bool trendOk = false;
     int channelVideos = 0;
-    int trendVideos = 0;
 
     // Global watchdog: network requests can be slow; do not hang the selftest.
     QTimer watchdog;
@@ -1306,7 +1295,7 @@ bool feedsChainSelfTest()
     watchdog.start(90000);
 
     const auto maybeExit = [&]() {
-        if (channelDone && trendDone)
+        if (channelDone)
             QCoreApplication::exit(0);
     };
     QObject::connect(&yt, &Yt::channelVideosFinished,
@@ -1325,32 +1314,13 @@ bool feedsChainSelfTest()
                                           : "innertube");
                          maybeExit();
                      });
-    QObject::connect(&yt, &Yt::trendingFinished,
-                     [&](const QVector<VideoInfo> &videos) {
-                         if (trendDone)
-                             return;
-                         trendDone = true;
-                         trendVideos = videos.size();
-                         trendOk = !videos.isEmpty();
-                         std::fprintf(stderr,
-                                      "FEEDS-CHAIN trending videos=%d "
-                                      "(fuente=%s)\n",
-                                      videos.size(),
-                                      videos.isEmpty()
-                                          ? "vacío"
-                                          : "innertube");
-                         maybeExit();
-                     });
 
     yt.channelVideos(channel, 10);
-    yt.trending(8);
 
     QCoreApplication::exec();
-    std::fprintf(stderr,
-                 "FEEDS-CHAIN RESULT canal=%s videos=%d trend=%s videos=%d\n",
-                 channelOk ? "OK" : "vacío", channelVideos,
-                 trendOk ? "OK" : "vacío", trendVideos);
-    return channelDone && trendDone;
+    std::fprintf(stderr, "FEEDS-CHAIN RESULT canal=%s videos=%d\n",
+                 channelOk ? "OK" : "vacío", channelVideos);
+    return channelDone;
 }
 
 // Selftest of the SEARCH via Innertube (used by search): it launches Yt::search

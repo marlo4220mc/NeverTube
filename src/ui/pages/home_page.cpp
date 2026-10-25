@@ -44,7 +44,6 @@ const int kFeedTargetVideos = kFeedMaxChannels * kFeedPerChannel;
 // background.
 const qint64 kFeedTtlMs = 30 * 60 * 1000;
 const qint64 kHomeTtlMs = 60 * 60 * 1000;
-const qint64 kTrendTtlMs = 2 * 60 * 60 * 1000;
 const qint64 kDiscoverTtlMs = 60 * 60 * 1000;
 // How often the /next re-checks whether a "Continue watching" live stream is
 // still on air (cheap and without touching the player phase). Same as in
@@ -64,7 +63,6 @@ const int kDiscoverMinRadios = 3;
 // which are already persistent, and Discover always re-selects at startup.
 const char kCacheSecHome[] = "recommended";
 const char kCacheSecFeed[] = "feed";
-const char kCacheSecTrend[] = "trending";
 
 qint64 nowMs()
 {
@@ -184,23 +182,12 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     bodyLayout->addWidget(m_homeTitle);
     bodyLayout->addWidget(m_homeGrid);
 
-    // 🔥 Trending
-    m_trendTitle = new QLabel(this);
-    m_trendTitle->setObjectName(QStringLiteral("sectionTitle"));
-    nt::bindText(m_trendTitle, "home.trending");
-    m_trendGrid = new VideoListView(m_thumbs, this);
-    m_trendGrid->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_trendGrid->setFixedHeight(0);
-    bodyLayout->addWidget(m_trendTitle);
-    bodyLayout->addWidget(m_trendGrid);
-
     outer->addWidget(m_scroll);
 
     // Home sections fill the whole available width (stretchy cells) with the
     // videos per row set by the "Thumbnail size" setting (4/5/6, default 5);
     // their height derives from each grid's real width.
-    for (VideoListView *g : {m_contGrid, m_feedGrid, m_homeGrid,
-                             m_discGrid, m_trendGrid}) {
+    for (VideoListView *g : {m_contGrid, m_feedGrid, m_homeGrid, m_discGrid}) {
         g->setGridFillWidth(kGridW);
         g->setGridColumns(m_cellColumns);
     }
@@ -216,7 +203,6 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     connect(refresh, &QPushButton::clicked, this, &HomePage::reload);
     connect(m_discMoreBtn, &QPushButton::clicked, this,
             &HomePage::onDiscoveryAgain);
-    connect(m_yt, &Yt::trendingFinished, this, &HomePage::onTrending);
     connect(m_yt, &Yt::channelVideosFinished, this, &HomePage::onChannelVideos);
     connect(m_yt, &Yt::homeReady, this, &HomePage::onHomeReady);
     connect(m_yt, &Yt::radioReady, this, &HomePage::onRadioReady);
@@ -261,10 +247,6 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
                 if (!video.id.isEmpty())
                     emit openRequested(QVector<VideoInfo>{video}, 0);
             });
-    connect(m_trendGrid, &VideoListView::videoActivated, this,
-            [this](int index, const VideoInfo &) {
-                emit openRequested(m_trending, index);
-            });
 
     m_contTitle->hide();
     m_contGrid->hide();
@@ -275,8 +257,6 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
     m_discTitle->hide();
     m_discMoreBtn->hide();
     m_discGrid->hide();
-    m_trendTitle->hide();
-    m_trendGrid->hide();
     m_busy->show();
 
     buildEmptyState();
@@ -293,8 +273,8 @@ bool HomePage::cachedFresh(qint64 at, qint64 ttlMs) const
 // subscriptions, no Discover radios). In that case the app starts unable to
 // offer Continue watching / Discover / New from your subscriptions, and the
 // panel guides the user instead of leaving them staring at a Home with only
-// "Recommended" and "Trending". It hides as soon as any of those sections
-// appears (refreshBusy controls it).
+// "Recommended". It hides as soon as any of those sections appears
+// (refreshBusy controls it).
 void HomePage::buildEmptyState()
 {
     auto *emptyBox = new QFrame(m_body);
@@ -353,8 +333,8 @@ void HomePage::buildEmptyState()
 
 
 // At startup the persisted Home is loaded to show it instantly:
-// Recommended/Feed/Trending come from home_cache (metadata resolved through
-// the "videos" cache); its loaded fetched_at later decides, in
+// Recommended/Feed come from home_cache (metadata resolved through the
+// "videos" cache); its loaded fetched_at later decides, in
 // loadSections(), whether the section needs a refresh (only an expired one is
 // re-requested).
 void HomePage::loadPersistedSections()
@@ -379,7 +359,6 @@ void HomePage::loadPersistedSections()
     };
     load(kCacheSecHome, m_home, m_homeFetchedAt);
     load(kCacheSecFeed, m_feed, m_feedFetchedAt);
-    load(kCacheSecTrend, m_trending, m_trendFetchedAt);
     if (!m_home.isEmpty()) {
         m_homeGrid->showVideos(m_home, VideoListView::GridMode);
         adjustGridHeight(m_homeGrid);
@@ -392,13 +371,7 @@ void HomePage::loadPersistedSections()
         m_feedTitle->setVisible(true);
         m_feedGrid->setVisible(true);
     }
-    if (!m_trending.isEmpty()) {
-        m_trendGrid->showVideos(m_trending, VideoListView::GridMode);
-        adjustGridHeight(m_trendGrid);
-        m_trendTitle->setVisible(true);
-        m_trendGrid->setVisible(true);
-    }
-    if (!m_home.isEmpty() || !m_feed.isEmpty() || !m_trending.isEmpty())
+    if (!m_home.isEmpty() || !m_feed.isEmpty())
         m_layoutTimer->start();
 }
 
@@ -580,12 +553,6 @@ void HomePage::loadSections()
     // 🎲 Discover (only when there is a valid seed)
     ensureDiscover();
 
-    // 5) 🔥 Trending
-    if (!cachedFresh(m_trendFetchedAt, kTrendTtlMs) && !m_trendBusy) {
-        m_trendBusy = true;
-        m_yt->trending(8);
-    }
-
     refreshBusy();
 }
 
@@ -741,48 +708,13 @@ void HomePage::onHomeReady(const QVector<VideoInfo> &videos)
     ensureDiscover();
 }
 
-void HomePage::onTrending(const QVector<VideoInfo> &videos)
-{
-    NT_DEBUG("E2E trending count=%d\n", (int)videos.size());
-    if (!videos.isEmpty()) {
-        NT_DEBUG("E2E trending first id='%s' size=%d title='%s'\n", 
-                 videos[0].id.toUtf8().constData(), videos[0].id.size(),
-                 videos[0].title.left(40).toUtf8().constData());
-    }
-    m_trendBusy = false;
-    QVector<VideoInfo> fresh = sanitizeVideos(videos);
-    NT_DEBUG("E2E trending after sanitize=%d\n", (int)fresh.size());
-    if (!fresh.isEmpty()) {
-        if (fresh.size() > 8)
-            fresh.resize(8);
-        m_trending = fresh;
-        m_trendFetchedAt = nowMs();
-        saveSection(QLatin1String(kCacheSecTrend), m_trending);
-        m_trendGrid->showVideos(m_trending, VideoListView::GridMode);
-        adjustGridHeight(m_trendGrid);
-        const bool vis = !m_trending.isEmpty();
-        m_trendTitle->setVisible(vis);
-        m_trendGrid->setVisible(vis);
-        NT_DEBUG("E2E trending setVisible=%d height=%d visible=%d\n", vis, m_trendGrid->height(), m_trendGrid->isVisible());
-        m_layoutTimer->start();
-    } else {
-        // Failed/empty refresh: the previously cached section is kept (memory
-        // and UI), without replacing it with an empty one nor touching
-        // fetched_at.
-        NT_DEBUG("E2E trending vacío: se conserva la sección anterior n=%d\n",
-                 (int)m_trending.size());
-    }
-    refreshBusy();
-    ensureDiscover();
-}
-
 // 4) 🎲 Discover: PERSISTENT source (SQLite). Opening Home NEVER generates
 // radios by itself: if the in-memory cache expired, up to 5 videos are
 // re-selected from the ALREADY SAVED radios (pickDiscoverVideos, no network).
 // Radios are saved when videos are played (MainWindow.onRadioReadyDiscover)
 // and, as an initialization EXCEPTION, when no usable radio exists the
 // section itself generates them from available seeds (history/recommended/
-// subscriptions/trending) and saves them before consuming them.
+// subscriptions) and saves them before consuming them.
 void HomePage::ensureDiscover()
 {
     if (m_discoverBusy)
@@ -831,7 +763,7 @@ void HomePage::markDiscoverSeeded()
 
 // Seeds for the radio generation of the initialization exception, varied and
 // shuffled: recent history (reuses the local metadata cache), recommended,
-// subscriptions and trending. The video being played and duplicates are
+// subscriptions. The video being played and duplicates are
 // excluded.
 void HomePage::buildDiscoverSeeds()
 {
@@ -848,7 +780,6 @@ void HomePage::buildDiscoverSeeds()
     };
     addVideos(m_home);
     addVideos(m_feed);
-    addVideos(m_trending);
     const QStringList recent = m_history->recentIds(20);
     for (const QString &id : recent) {
         if (seen.contains(id) || id == m_currentVideoId)
@@ -1010,16 +941,14 @@ void HomePage::refreshBusy()
     const bool hasHistory = m_history && !m_history->recentIds(1).isEmpty();
     const bool anyUserContent = hasHistory || !m_feed.isEmpty()
         || !m_discoverVideos.isEmpty();
-    const bool anyContent = anyUserContent || !m_home.isEmpty()
-        || !m_trending.isEmpty();
-    const bool loading = m_feedBusy || m_homeBusy || m_trendBusy
-        || m_discoverBusy;
+    const bool anyContent = anyUserContent || !m_home.isEmpty();
+    const bool loading = m_feedBusy || m_homeBusy || m_discoverBusy;
     m_busy->setVisible(loading && !anyContent);
     // Empty-state: shown when there is NO personalized user content (history,
-    // subscriptions, Discover radios) — the home only has Recommended and/or
-    // Trending, which come from the network. It covers the visual gap left by
-    // the hidden "Continue watching", "Discover" and "New from your
-    // subscriptions", and guides the user.
+    // subscriptions, Discover radios) — the home only has Recommended, which
+    // comes from the network. It covers the visual gap left by the hidden
+    // "Continue watching", "Discover" and "New from your subscriptions",
+    // and guides the user.
     if (m_emptyState)
         m_emptyState->setVisible(!anyUserContent);
     NT_DEBUG("E2E refreshBusy: history=%d feed=%d disc=%d cont=%d empty=%d\n",
@@ -1095,18 +1024,16 @@ void HomePage::applyGridSizes()
     // Applying it the other way around would leave the heights one step
     // behind.
     const int cols = effectiveCellColumns();
-    for (VideoListView *g : {m_contGrid, m_feedGrid, m_homeGrid,
-                             m_discGrid, m_trendGrid})
+    for (VideoListView *g : {m_contGrid, m_feedGrid, m_homeGrid, m_discGrid})
         if (g)
             g->setGridColumns(cols);
     adjustGridHeight(m_contGrid);
     adjustGridHeight(m_feedGrid);
     adjustGridHeight(m_homeGrid);
     adjustGridHeight(m_discGrid);
-    adjustGridHeight(m_trendGrid);
-    NT_DEBUG("E2E applyGridSizes done: cols=%d cont=%d feed=%d home=%d disc=%d trend=%d\n",
+    NT_DEBUG("E2E applyGridSizes done: cols=%d cont=%d feed=%d home=%d disc=%d\n",
              cols, m_contGrid->height(), m_feedGrid->height(),
-             m_homeGrid->height(), m_discGrid->height(), m_trendGrid->height());
+             m_homeGrid->height(), m_discGrid->height());
 }
 
 void HomePage::resizeEvent(QResizeEvent *event)
