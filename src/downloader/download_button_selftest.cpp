@@ -331,6 +331,40 @@ bool downloadButtonSelfTest()
         }
     }
 
+    // --- the buttons of "all at once" ---
+    //
+    // With a queue, pausing or continuing every download meant pressing the
+    // button of each row. They are found by their MARK, not by their text (the
+    // text is translated).
+    {
+        DownloadsPage *page = window.findChild<DownloadsPage *>();
+        check(page != nullptr, "la pagina de descargas existe");
+        if (page) {
+            QPushButton *pauseAll = nullptr;
+            QPushButton *resumeAll = nullptr;
+            for (QPushButton *b : page->findChildren<QPushButton *>()) {
+                const QString action = b->property("downloadAction").toString();
+                if (action == QLatin1String("pauseAll"))
+                    pauseAll = b;
+                else if (action == QLatin1String("resumeAll"))
+                    resumeAll = b;
+            }
+            check(pauseAll != nullptr, "la pagina tiene el boton de pausar todo");
+            check(resumeAll != nullptr, "la pagina tiene el boton de reanudar todo");
+            if (pauseAll && resumeAll) {
+                int asked = 0;
+                QObject::connect(page, &DownloadsPage::pauseAllRequested,
+                                 [&asked]() { ++asked; });
+                QObject::connect(page, &DownloadsPage::resumeAllRequested,
+                                 [&asked]() { asked += 10; });
+                pauseAll->click();
+                resumeAll->click();
+                check(asked == 11,
+                      "los dos botones emiten su accion (pausar y reanudar todo)");
+            }
+        }
+    }
+
     // --- the button of "Reintentar" ---
     //
     // It used to call remove() (which deletes the row of the repository, and

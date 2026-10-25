@@ -29,6 +29,7 @@
 #include "yt_innertube.h"
 #include "downloader/download_selftest.h"
 #include "downloader/download_button_selftest.h"
+#include "downloader/download_resume_selftest.h"
 #include "downloader/download_folder_selftest.h"
 #include "downloader/download_settings_selftest.h"
 #include "downloader/download_transport_selftest.h"
@@ -796,6 +797,13 @@ int main(int argc, char *argv[])
         std::fprintf(stderr, "SETTINGS-PAGE SELFTEST %s\n",
                      ok ? "OK" : "FAIL");
         return ok ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-download-resume"))) {
+        // Offline: the walk that decides which fragment is asked for (the
+        // rule the resume depends on) and the migration of the rows of the
+        // first version of the downloader, on a temporary database.
+        return downloadResumeSelfTest() ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-download-button"))) {

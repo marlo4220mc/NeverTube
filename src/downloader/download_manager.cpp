@@ -81,7 +81,12 @@ void DownloadManager::setPlaybackActive(bool active)
              m_job ? 1 : 0);
     // Priority is applied per-worker when the transport thread starts; keep it
     // in sync for any job created later.
-    if (m_job) {
+    //
+    // Only for a job that is RUNNING: a job that is still waiting for its
+    // formats has no worker to lower, and its flag is passed at creation
+    // (onAdaptiveFormats). Posting to a thread that does not exist yet only
+    // adds noise to the log.
+    if (m_job && m_job->isRunning()) {
         m_job->setPlaybackActive(m_playbackActive);
     }
 }
@@ -344,6 +349,72 @@ void DownloadManager::resume(const QString &key)
     retry(key);
 }
 
+void DownloadManager::pauseAll()
+{
+    if (!m_repo)
+        return;
+    // The snapshot is a copy (`all()` returns a QVector): pause() writes rows
+    // while this loop reads them.
+    const QVector<DownloadInfo> all = m_repo->all();
+    for (const DownloadInfo &info : all) {
+        const QString key = info.identity();
+        if (info.status == QLatin1String("done")
+            || info.status == QLatin1String("error")
+            || info.status == QLatin1String("paused")) {
+            continue;
+        }
+        pause(key);
+    }
+}
+
+void DownloadManager::resumeAll()
+{
+    if (!m_repo)
+        return;
+    // Oldest first, like resumePending(): the first one starts and the rest
+    // queue behind it.
+    const QVector<DownloadInfo> all = m_repo->all();
+    for (int i = all.size() - 1; i >= 0; --i) {
+        const DownloadInfo &info = all.at(i);
+        if (info.status == QLatin1String("paused"))
+            retry(info.identity());
+    }
+}
+
+int DownloadManager::sweepOrphanParts()
+{
+    if (!m_repo || m_dir.isEmpty())
+        return 0;
+    QDir dir(m_dir);
+    if (!dir.exists())
+        return 0;
+    int removed = 0;
+    const QStringList folders =
+        dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString &name : folders) {
+        const QString suffix = QStringLiteral(".parts");
+        if (!name.endsWith(suffix))
+            continue;
+        const QString key = name.left(name.size() - suffix.size());
+        // The download of that key still exists: its bytes are the resume.
+        DownloadInfo info;
+        if (m_repo->get(key, info))
+            continue;
+        // Belt and braces: the folder of the download in course is never
+        // touched, even if its row could not be read.
+        if (!m_currentId.isEmpty() && key == m_currentId)
+            continue;
+        const QString path = dir.filePath(name);
+        if (!isInsideDownloadFolder(path))
+            continue;
+        if (QDir(path).removeRecursively())
+            ++removed;
+        NT_DEBUG("E2E dl barrido huerfano=%s ok=%d\n",
+                 name.toUtf8().constData(), removed > 0 ? 1 : 0);
+    }
+    return removed;
+}
+
 void DownloadManager::start(const QString &videoId, const QString &title,
                             const QString &channel, int maxHeight,
                             int durationSeconds, int forcedHeight,
@@ -585,6 +656,21 @@ void DownloadManager::onAdaptiveFormats(const QString &videoId,
         if (serial != m_jobSerial || !m_job)
             return;
         saveProgress(true);
+    });
+    // A fragment that failed and is being asked AGAIN. It is written in the
+    // row as a transient note (the column `error`, which the page shows while
+    // the state is "downloading"): for the person the download looked stuck
+    // while the fragments were being retried without a word. `attempt == 0`
+    // clears it (the fragment went through).
+    connect(m_job, &DownloadJob::fragmentRetrying, this,
+            [this, key, serial](int attempt, int max) {
+        if (serial != m_jobSerial || !m_job || !m_repo)
+            return;
+        const QString note = attempt > 0
+            ? nt::tr("downloads.retrying").arg(attempt).arg(max)
+            : QString();
+        m_repo->setStatus(key, QStringLiteral("downloading"), note);
+        emit changed();
     });
     connect(m_job, &DownloadJob::finished, this,
             [this, key, videoId, serial](const QString &path) {

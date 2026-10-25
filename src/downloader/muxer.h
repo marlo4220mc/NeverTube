@@ -45,6 +45,15 @@ QString findFfmpeg();
 // with the app do NOT have it: they cannot synthesize a track).
 bool hasLavfi(const QString &ffmpegPath = QString());
 
+// The file of a finished download is USABLE when it exists and has bytes.
+//
+// A row that says "done" pointing at a 0-byte file is worse than a failure:
+// the person finds out when pressing play, and the downloader already told
+// them it worked. It is checked after the mux AND again before writing the
+// row (a muxing tool that returns 0 having written nothing is rare, but the
+// check costs one stat).
+bool outputIsUsable(const QString &path);
+
 // Whether the ffmpeg has an mp3 encoder. The LGPL builds (the one that
 // ships with the app, the ffmpeg-free of Fedora) do NOT carry libmp3lame
 // (it is GPL), and then the audio falls back to an M4A.

@@ -11,6 +11,7 @@
 #include "arrival_gate.h"
 #include "download_transport.h"
 #include "segment_plan.h"
+#include "speed_window.h"
 
 class QThread;
 
@@ -108,6 +109,11 @@ signals:
     void statusChanged(const QString &status, const QString &error);
     void finished(const QString &outputPath);
     void failed(const QString &error);
+    // A fragment failed and is being asked AGAIN (`attempt` of `max`).
+    // `attempt == 0` means "it worked, stop saying it": the note of the row is
+    // cleared. Without this the retry was silent: the download looked stuck
+    // and the fragments were quietly being asked again.
+    void fragmentRetrying(int attempt, int max);
     // The signed URL ran out of its budget (the server answered 401/403):
     // the formats have to be asked again.
     void urlExpired();
@@ -234,8 +240,9 @@ private:
     qint64 m_bytesDone = 0;
     qint64 m_bytesTotal = 0;
     qint64 m_bytesPerSecond = 0;
-    qint64 m_lastSampleBytes = 0;
-    qint64 m_lastSampleMs = 0;
+    // The speed over the last seconds, not the average since the start (see
+    // speed_window.h: the average does not tell whether it is stuck NOW).
+    SpeedWindow m_speed;
 
     QString m_videoPath;
     QString m_audioPath;

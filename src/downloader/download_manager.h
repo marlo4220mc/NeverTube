@@ -76,6 +76,21 @@ public:
     // Continues a paused download (the same as the retry: it resumes).
     void resume(const QString &key);
 
+    // Pauses every download that is running or waiting. The one in course is
+    // stopped and the queued ones stop waiting: they all go to "paused", which
+    // is the state that the person can see.
+    void pauseAll();
+    // Continues every paused download. The first one starts and the rest wait
+    // in the queue (one download at a time), which is the same path as
+    // pressing "Continuar" on each one.
+    void resumeAll();
+
+    // Deletes the folders of fragments that have no row any more (a download
+    // deleted by a version that did not remove them, or a database that was
+    // restored): they are hundreds of MB that nothing will ever use. Returns
+    // how many were removed. Only INSIDE the folder of the downloads.
+    int sweepOrphanParts();
+
     // Starts again the downloads that were left half way: the rows that say
     // "pending" (they waited in the queue of a previous session and nobody
     // read them) and the ones that say "downloading"/"muxing" (the process

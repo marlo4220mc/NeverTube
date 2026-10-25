@@ -237,7 +237,7 @@ MuxResult runFfmpeg(const QString &ffmpeg, const QStringList &args,
         result.error = out.isEmpty() ? nt::tr("error.dlFfmpegFailed") : out;
         return result;
     }
-    if (!QFileInfo::exists(outputPath)) {
+    if (!outputIsUsable(outputPath)) {
         result.error = nt::tr("error.dlFfmpegNoFile");
         return result;
     }
@@ -245,6 +245,14 @@ MuxResult runFfmpeg(const QString &ffmpeg, const QStringList &args,
     result.outputPath = outputPath;
     result.ok = true;
     return result;
+}
+
+bool outputIsUsable(const QString &path)
+{
+    if (path.isEmpty())
+        return false;
+    const QFileInfo f(path);
+    return f.exists() && f.isFile() && f.size() > 0;
 }
 
 } // namespace dl

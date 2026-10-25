@@ -123,31 +123,78 @@ DownloadJob::DownloadJob(QObject *parent)
 
 namespace {
 
+// The ``nice`` value of a download worker while video is playing. 10 is the
+// usual "below normal" in POSIX (Windows has its own constant).
+constexpr int kDownloadNice = 10;
+
+// The priority the thread had BEFORE the downloader touched it, so the
+// restore can bring it back to THAT one. Restoring a fixed "normal" was
+// wrong in both directions: on Windows a thread started above normal ended up
+// in normal, and on Unix a worker that came from nice 5 was asked to go back
+// to 0, which fails silently without privileges (so it stayed at 10 for ever).
+// The state is per THREAD (thread_local): the pool thread and the finalize
+// thread each keep their own.
+#if defined(Q_OS_WIN)
+thread_local int tOriginalWinPriority = THREAD_PRIORITY_NORMAL;
+thread_local bool tOriginalWinSaved = false;
+#elif defined(Q_OS_UNIX)
+thread_local int tOriginalNice = 0;
+thread_local bool tOriginalNiceSaved = false;
+#endif
+
 void applyThreadPriority(bool belowNormal)
 {
 #if defined(Q_OS_WIN)
     HANDLE h = GetCurrentThread();
-    const BOOL ok = SetThreadPriority(
-        h, belowNormal ? THREAD_PRIORITY_BELOW_NORMAL : THREAD_PRIORITY_NORMAL);
-    // The probe of the scheduling: with NEVERTUBE_DEBUG=1 the log says which
-    // priority the thread of the downloads gets, so "the FPS did not come
-    // back" can be told apart from "the priority was never applied".
-    NT_DEBUG("E2E dlThreadPriority below=%d ok=%d\n", belowNormal ? 1 : 0,
-             ok ? 1 : 0);
+    if (!belowNormal) {
+        const int target = tOriginalWinSaved ? tOriginalWinPriority
+                                             : THREAD_PRIORITY_NORMAL;
+        const BOOL ok = SetThreadPriority(h, target);
+        tOriginalWinSaved = false;
+        // The probe of the scheduling: with NEVERTUBE_DEBUG=1 the log says
+        // which priority the thread of the downloads gets, so "the FPS did
+        // not come back" can be told apart from "the priority was never
+        // applied".
+        NT_DEBUG("E2E dlThreadPriority below=0 ok=%d restored=%d\n",
+                 ok ? 1 : 0, target);
+        return;
+    }
+    // The first time it is lowered the original is remembered; a second
+    // "playback started" must not overwrite it with BELOW_NORMAL.
+    if (!tOriginalWinSaved) {
+        const int current = GetThreadPriority(h);
+        if (current != THREAD_PRIORITY_ERROR_RETURN) {
+            tOriginalWinPriority = current;
+            tOriginalWinSaved = true;
+        }
+    }
+    const BOOL ok = SetThreadPriority(h, THREAD_PRIORITY_BELOW_NORMAL);
+    NT_DEBUG("E2E dlThreadPriority below=1 ok=%d original=%d\n", ok ? 1 : 0,
+             tOriginalWinPriority);
 #elif defined(Q_OS_UNIX)
     errno = 0;
-    int nic = getpriority(PRIO_PROCESS, 0);
+    const int nic = getpriority(PRIO_PROCESS, 0);
     if (nic == -1 && errno != 0)
         return;
-    if (belowNormal) {
-        if (nic < 10)
-            setpriority(PRIO_PROCESS, 0, 10);
-    } else {
-        if (nic > 0)
-            setpriority(PRIO_PROCESS, 0, 0);
+    if (!belowNormal) {
+        // setpriority() cannot RAISE the priority without privileges, so the
+        // restore fails silently when the original was lower than the
+        // current one and the process is not root: it is the OS, not a bug.
+        const int target = tOriginalNiceSaved ? tOriginalNice : 0;
+        setpriority(PRIO_PROCESS, 0, target);
+        tOriginalNiceSaved = false;
+        NT_DEBUG("E2E dlThreadPriority below=0 nice=%d restored=%d\n",
+                 getpriority(PRIO_PROCESS, 0), target);
+        return;
     }
-    NT_DEBUG("E2E dlThreadPriority below=%d nice=%d\n", belowNormal ? 1 : 0,
-             getpriority(PRIO_PROCESS, 0));
+    if (!tOriginalNiceSaved) {
+        tOriginalNice = nic;
+        tOriginalNiceSaved = true;
+    }
+    if (nic < kDownloadNice)
+        setpriority(PRIO_PROCESS, 0, kDownloadNice);
+    NT_DEBUG("E2E dlThreadPriority below=1 nice=%d original=%d\n",
+             getpriority(PRIO_PROCESS, 0), tOriginalNice);
 #else
     Q_UNUSED(belowNormal);
 #endif
@@ -253,6 +300,8 @@ void DownloadJob::start(const Plan &plan, const QString &key,
     m_arrival.reset();
     m_arrivalQueue.clear();
     m_bytesDone = 0;
+    m_speed.clear();
+    m_bytesPerSecond = 0;
     m_bytesTotal = (m_kind == dl::DownloadKind::Audio)
                        ? plan.audio.contentLength
                        : plan.estimatedBytes;
@@ -589,7 +638,7 @@ QVector<int> DownloadJob::doneSegments() const
 // uses).
 int DownloadJob::markOf(const QString &track, int index)
 {
-    return track == QLatin1String("video") ? index : -(index + 2);
+    return dl::fragmentMark(track == QLatin1String("video"), index);
 }
 
 void DownloadJob::startNext()
@@ -614,58 +663,53 @@ void DownloadJob::startNext()
         // eight fragments already downloaded it asked for NOTHING and the
         // download stayed still FOREVER (nothing was in flight, so nothing
         // called startNext again).
-        bool isVideo = false;
-        int index = -1;
-        Range range;
-        bool found = false;
-        for (int guard = 0;
-             guard < m_videoRanges.size() + m_audioRanges.size(); ++guard) {
-            if (m_kind == dl::DownloadKind::Audio) {
-                if (m_nextAudio >= m_audioRanges.size())
-                    break;
-                isVideo = false;
-                index = m_nextAudio;
-                range = m_audioRanges.at(index);
-            } else if (m_nextVideo < m_videoRanges.size()) {
-                isVideo = true;
-                index = m_nextVideo;
-                range = m_videoRanges.at(index);
-            } else if (m_nextAudio < m_audioRanges.size()) {
-                isVideo = false;
-                index = m_nextAudio;
-                range = m_audioRanges.at(index);
-            } else {
-                break;
-            }
-            ++(isVideo ? m_nextVideo : m_nextAudio);
+        // The next fragment that is NOT on the disk yet. The walk (and the
+        // SKIP of the ones that are already there, which is what makes the
+        // resume work) is a pure function with its own selftest:
+        // dl::pickNextFragment. Doing the skip per transport is what left a
+        // resumed download asking for NOTHING (nothing in flight, nothing
+        // calling the allocator again).
+        const FragmentPick pick = pickNextFragment(
+            m_kind == dl::DownloadKind::Audio, m_videoRanges.size(),
+            m_audioRanges.size(), m_nextVideo, m_nextAudio, m_alreadyDone);
 
-            const QString track = isVideo ? QStringLiteral("video")
-                                          : QStringLiteral("audio");
-            const int mark = isVideo ? index : -(index + 2);
-            if (m_alreadyDone.contains(mark)) {
-                // It is on the disk: it is not asked again, and the
-                // transport takes the next fragment.
-                QVector<bool> *flags = isVideo ? &m_videoDone : &m_audioDone;
-                if (index < flags->size())
-                    (*flags)[index] = true;
-                QVector<qint64> *sizes = isVideo ? &m_videoSizes : &m_audioSizes;
-                qint64 size = 0;
-                if (index < sizes->size()) {
-                    size = QFileInfo(fragmentPath(track, index)).size();
-                    (*sizes)[index] = size;
+        // The fragments that the walk went over are on the disk: their flag
+        // and their bytes are accounted here, with ONE stat for each of them
+        // (not a stat of every fragment of the download: this runs once per
+        // fragment, so the whole resume measures n and not n^2).
+        const int skippedVideo =
+            pick.videoAdvance - (pick.found && pick.video ? 1 : 0);
+        const int skippedAudio =
+            pick.audioAdvance - (pick.found && !pick.video ? 1 : 0);
+        if (skippedVideo > 0 || skippedAudio > 0) {
+            auto accountSkipped = [this](bool video, int from, int count) {
+                QVector<bool> *flags = video ? &m_videoDone : &m_audioDone;
+                QVector<qint64> *sizes = video ? &m_videoSizes : &m_audioSizes;
+                const QString track = video ? QStringLiteral("video")
+                                            : QStringLiteral("audio");
+                for (int i = from; i < from + count && i < flags->size(); ++i) {
+                    (*flags)[i] = true;
+                    qint64 size = 0;
+                    if (i < sizes->size()) {
+                        size = QFileInfo(fragmentPath(track, i)).size();
+                        (*sizes)[i] = size;
+                    }
+                    m_bytesDone += size;
                 }
-                // ONE stat for the fragment that is skipped, not a stat of
-                // every fragment of the download (this runs once per
-                // fragment, so the whole resume measures n and not n^2).
-                m_bytesDone += size;
-                emit progressChanged(m_bytesDone, m_bytesTotal);
-                continue;
-            }
-            found = true;
-            break;
+            };
+            accountSkipped(true, m_nextVideo, skippedVideo);
+            accountSkipped(false, m_nextAudio, skippedAudio);
+            emit progressChanged(m_bytesDone, m_bytesTotal);
         }
-        if (!found)
+        m_nextVideo += pick.videoAdvance;
+        m_nextAudio += pick.audioAdvance;
+        if (!pick.found)
             break;
+
+        const bool isVideo = pick.video;
+        const int index = pick.index;
+        const Range range = isVideo ? m_videoRanges.at(index)
+                                    : m_audioRanges.at(index);
 
         const QString track = isVideo ? QStringLiteral("video")
                                       : QStringLiteral("audio");
@@ -701,6 +745,10 @@ void DownloadJob::startNext()
                                m_nextVideo = index;
                            else
                                m_nextAudio = index;
+                           // The retry is SAID: for the person the download
+                           // looked stuck while the fragments were being asked
+                           // again without a word.
+                           emit fragmentRetrying(tries, kFragmentRetries);
                            startNext();
                            return;
                        }
@@ -724,7 +772,10 @@ void DownloadJob::startNext()
                        }
                        return;
                    }
-                   m_fragmentTries.remove(mark);
+                   // The fragment went through: if it was being retried, the
+                   // note of the row stops saying it (attempt 0).
+                   if (m_fragmentTries.remove(mark) > 0)
+                       emit fragmentRetrying(0, kFragmentRetries);
                    onFragmentDone(track, index);
                },
                [this, mark](qint64 bytes) {
@@ -783,24 +834,13 @@ double DownloadJob::progress() const
 
 void DownloadJob::sampleSpeed()
 {
+    // The speed over the last seconds (SpeedWindow): the average since the
+    // start kept a high number for minutes after the CDN had already squeezed
+    // the connection, and after a resume it counted the bytes of the previous
+    // session, which were not moved in this one.
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    if (m_lastSampleMs == 0) {
-        m_lastSampleMs = now;
-        m_lastSampleBytes = m_bytesDone;
-        return;
-    }
-    const qint64 elapsed = now - m_lastSampleMs;
-    if (elapsed < 500)
-        return;
-    const qint64 delta = m_bytesDone - m_lastSampleBytes;
-    if (delta > 0) {
-        const qint64 instant = delta * 1000 / elapsed;
-        m_bytesPerSecond = m_bytesPerSecond > 0
-            ? (m_bytesPerSecond + instant) / 2
-            : instant;
-    }
-    m_lastSampleMs = now;
-    m_lastSampleBytes = m_bytesDone;
+    m_speed.add(now, m_bytesDone);
+    m_bytesPerSecond = m_speed.bytesPerSecond(now);
 }
 
 void DownloadJob::maybeFinishSegments()
@@ -953,6 +993,18 @@ void DownloadJob::onFinalizeDone(bool assembled, bool ok, const QString &error,
         m_running = false;
         m_muxing = false;
         emit failed(error);
+        return;
+    }
+    // The mux said it worked: the FILE has to be there and have bytes. A row
+    // that says "done" pointing at a 0-byte file is worse than a failure (the
+    // person finds out when pressing play), so it is checked here and the
+    // download fails with its own message.
+    if (!dl::outputIsUsable(outputPath)) {
+        const QString reason = nt::tr("error.dlMuxResult");
+        setStatus(QStringLiteral("error"), reason);
+        m_running = false;
+        m_muxing = false;
+        emit failed(reason);
         return;
     }
     if (!outputPath.isEmpty() && outputPath != m_outputPath)

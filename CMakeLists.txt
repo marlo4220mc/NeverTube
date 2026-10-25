@@ -88,6 +88,8 @@ add_executable(nevertube_qt2
   src/yt.h
   src/yt_innertube.cpp
   src/yt_innertube.h
+  src/downloader/speed_window.cpp
+  src/downloader/speed_window.h
   src/downloader/segment_plan.cpp
   src/downloader/segment_plan.h
   src/downloader/download_transport.cpp
@@ -114,6 +116,8 @@ add_executable(nevertube_qt2
   src/downloader/download_selftest.h
   src/downloader/download_button_selftest.cpp
   src/downloader/download_button_selftest.h
+  src/downloader/download_resume_selftest.cpp
+  src/downloader/download_resume_selftest.h
   src/reels_filter.cpp
   src/reels_filter.h
   src/youtube_url.cpp

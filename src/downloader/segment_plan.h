@@ -142,4 +142,39 @@ QVector<Range> rangesFromSidx(const QByteArray &box, qint64 rangeStart,
 // of it runs at 14 MB/s (measured).
 QVector<Range> rangesWithoutIndex(qint64 contentLength, qint64 chunkBytes);
 
+// The mark of one fragment inside the index of the row (`DownloadInfo::parts`):
+// the video ones are 0, 1, 2... and the audio ones are -(index + 2), so the
+// video 0 and the audio 0 do not collide and neither of them is lost.
+int fragmentMark(bool video, int index);
+
+// The fragment that the next free connection gets.
+struct FragmentPick
+{
+    bool found = false;  // false = nothing is left to ask for
+    bool video = false;
+    int index = -1;
+    // How many positions of each cursor were consumed, INCLUDING the picked
+    // fragment (when there is one). The caller adds them to its cursors, so the
+    // walk is exactly the same whether it ends in a fragment or in nothing.
+    int videoAdvance = 0;
+    int audioAdvance = 0;
+};
+
+// The next fragment of the download that is NOT on the disk yet.
+//
+// It walks the video first and then the audio (or only the audio), starting at
+// the cursors, and SKIPS the fragments whose mark is in `alreadyDone`: that is
+// what makes a resumed download ask only for what is missing.
+//
+// This is the rule of a real bug: the pool used to hand ONE fragment to each
+// connection and, when that fragment was already on disk, move on to the next
+// connection. With the first eight fragments already downloaded (a resume),
+// the eight connections found their fragment done, NOTHING was asked for and
+// the download stayed still for ever — nothing was in flight, so nothing
+// called the allocator again. The skip belongs HERE, in the walk, and this
+// function is pure so `--selftest-download-resume` covers it with no network.
+FragmentPick pickNextFragment(bool audioOnly, int videoCount, int audioCount,
+                             int videoCursor, int audioCursor,
+                             const QVector<int> &alreadyDone);
+
 } // namespace dl

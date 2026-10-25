@@ -313,4 +313,55 @@ QVector<Range> rangesFromSidx(const QByteArray &box, qint64 rangeStart,
     return out;
 }
 
+int fragmentMark(bool video, int index)
+{
+    return video ? index : -(index + 2);
+}
+
+FragmentPick pickNextFragment(bool audioOnly, int videoCount, int audioCount,
+                             int videoCursor, int audioCursor,
+                             const QVector<int> &alreadyDone)
+{
+    FragmentPick pick;
+    int video = videoCursor;
+    int audio = audioCursor;
+    // The guard is the number of fragments that exist: every turn consumes one
+    // position, so the walk always ends.
+    for (int guard = 0; guard < videoCount + audioCount; ++guard) {
+        bool isVideo = false;
+        int index = -1;
+        if (audioOnly) {
+            if (audio >= audioCount)
+                break;
+            isVideo = false;
+            index = audio;
+        } else if (video < videoCount) {
+            isVideo = true;
+            index = video;
+        } else if (audio < audioCount) {
+            isVideo = false;
+            index = audio;
+        } else {
+            break;
+        }
+        // The cursor of THIS position advances whatever happens next: the
+        // fragment is either picked (and asked for) or walked over (it is on
+        // the disk).
+        if (isVideo) {
+            ++video;
+            ++pick.videoAdvance;
+        } else {
+            ++audio;
+            ++pick.audioAdvance;
+        }
+        if (alreadyDone.contains(fragmentMark(isVideo, index)))
+            continue;  // it is on the disk: the next one
+        pick.found = true;
+        pick.video = isVideo;
+        pick.index = index;
+        break;
+    }
+    return pick;
+}
+
 } // namespace dl
