@@ -6,7 +6,6 @@
 
 class QNetworkAccessManager;
 class QNetworkReply;
-class QTimer;
 
 class ThumbnailCache : public QObject
 {
@@ -42,7 +41,6 @@ public:
 private:
 
     QNetworkAccessManager *m_nam = nullptr;
-    QTimer *m_sweep = nullptr;
     mutable QHash<QString, QPixmap> m_cache;
     mutable QStringList m_lru;
     QSet<QString> m_inFlight;
