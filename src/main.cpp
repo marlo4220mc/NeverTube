@@ -72,6 +72,34 @@ void ensureConsoleAttached()
 } // namespace
 #endif // Q_OS_WIN
 
+#if defined(Q_OS_WIN) && defined(_WIN64) && !defined(NEVERTUBE_NO_MPV)
+namespace {
+// ANGLE is only useful if it can actually start: it needs its two DLLs next to
+// the exe (windeployqt deploys them) AND the D3D shader compiler, which is a
+// system DLL. Forcing QT_OPENGL=angle when one of them is missing makes Qt fail
+// to create the context and the app dies with
+// "no se encuentra d3dcompiler_47.dll" BEFORE it can show anything (reported on
+// the Lenovo x64). Probing is cheap (three LoadLibrary) and it turns a fatal
+// startup into "the app opens with the default OpenGL".
+bool angleDllsAvailable(QString *missing = nullptr)
+{
+    static const wchar_t *const kNeeded[] = {
+        L"libEGL.dll", L"libGLESv2.dll", L"d3dcompiler_47.dll",
+    };
+    for (const wchar_t *name : kNeeded) {
+        HMODULE h = LoadLibraryW(name);
+        if (!h) {
+            if (missing)
+                *missing = QString::fromWCharArray(name);
+            return false;
+        }
+        FreeLibrary(h);
+    }
+    return true;
+}
+} // namespace
+#endif
+
 // TLS SELFTEST with a REAL handshake. The old --selftest-ssl only loaded the
 // OpenSSL DLLs (supportsSsl): a backend that loads but aborts on the
 // first real use (e.g. "OpenSSL internal error, assertion failed:
@@ -451,27 +479,36 @@ int main(int argc, char *argv[])
 #endif
 #ifdef Q_OS_WIN
 #ifndef NEVERTUBE_NO_MPV
-    // ANGLE experiment (Windows x64, OPT-IN with NEVERTUBE_ANGLE=1): force
-    // the widget's GL context to ANGLE (OpenGL ES over D3D11) so mpv
-    // can decode with zero-copy. With desktop GL (the default on the test
-    // machine — mpv logs "Detected desktop OpenGL") mpv CANNOT import D3D11 textures
-    // and is forced to d3d11va-copy: the VRAM->RAM->GL texture copy-back is the
-    // cost of the 100% CPU on the test machine. With an ANGLE context, mpv (hwdec=auto,
-    // protected invariant intact) picks only the d3d11-egl hwdec: it decodes
-    // in D3D11 and the frame travels via EGLStream to the widget's texture without
-    // copying to CPU. mpv loads LIBEGL.DLL with the LoadLibrary search, so
-    // it uses the SAME ANGLE that Qt loads (same directory) and takes the display
-    // with eglGetCurrentDisplay() in paintGL: no handles need to be passed.
-    // Windows only, and only where mpv exists (the x86/FfmpegBackend build exits via
-    // NEVERTUBE_NO_MPV; its GLES render is not prepared for ANGLE). Respect
-    // a QT_OPENGL the user has already set.
-    if (qEnvironmentVariableIsSet("NEVERTUBE_ANGLE")
-        && !qEnvironmentVariableIsSet("QT_OPENGL")) {
-        qputenv("QT_OPENGL", QByteArrayLiteral("angle"));
-        std::fprintf(stderr,
-                     "ANGLE: QT_OPENGL=angle (contexto Qt -> ANGLE/D3D11) por "
-                     "NEVERTUBE_ANGLE=1; mpv debera elegir hwdec d3d11-egl "
-                     "(zero-copy)\n");
+    // ANGLE (OPT-IN): zero-copy d3d11-egl instead of d3d11va-copy.
+    //
+    // It is NOT the default. It was made the default on x64 and had to be
+    // reverted: while the D3D shader compiler was missing, the app died at
+    // startup and ANGLE never really ran; once the DLL was there it DID run
+    // and the player + download went unresponsive (measured on the Lenovo
+    // x64). The zero-copy gain does not pay for a hang on the machine that
+    // matters, so it stays behind NEVERTUBE_ANGLE=1, with the default OpenGL
+    // of always.
+    //
+    // The probe is still here for the opt-in: forcing ANGLE without its DLLs
+    // does not fall back, it kills the startup before any window exists, so
+    // an opt-in without them opens with the default OpenGL and says why.
+    if (!qEnvironmentVariableIsSet("QT_OPENGL")
+        && qEnvironmentVariableIsSet("NEVERTUBE_ANGLE")) {
+#if defined(_WIN64)
+        QString angleMissing;
+        if (!angleDllsAvailable(&angleMissing)) {
+            std::fprintf(stderr,
+                         "ANGLE: pedido por NEVERTUBE_ANGLE=1 pero falta %s; "
+                         "se usa el OpenGL por defecto\n",
+                         angleMissing.toUtf8().constData());
+        } else {
+            qputenv("QT_OPENGL", QByteArrayLiteral("angle"));
+            std::fprintf(stderr,
+                         "ANGLE: QT_OPENGL=angle (contexto Qt -> ANGLE/D3D11) por "
+                         "NEVERTUBE_ANGLE=1; mpv debera elegir hwdec d3d11-egl "
+                         "(zero-copy)\n");
+        }
+#endif
     }
 #endif // !NEVERTUBE_NO_MPV
 #endif // Q_OS_WIN

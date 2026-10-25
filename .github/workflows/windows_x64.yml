@@ -227,6 +227,14 @@ jobs:
           Copy-Item vulkan-1.dll dist\
           Copy-Item libssl-3-x64.dll dist\
           Copy-Item libcrypto-3-x64.dll dist\
+          # Qt with ANGLE needs the D3D shader compiler ("Updating
+          # D3DCompiler_47.dll" already comes from windeployqt, this is the
+          # belt and braces) and without it ANGLE cannot start at all.
+          $d3d = 'C:\Windows\System32\d3dcompiler_47.dll'
+          if (Test-Path $d3d) { Copy-Item $d3d dist\ -Force }
+          if (-not (Test-Path 'dist\d3dcompiler_47.dll')) {
+            Write-Host 'WARNING: d3dcompiler_47.dll no esta en dist\'
+          }
           # The ffmpeg of OUR build (third_party/ffmpeg-win64/, the same
           # recipe as the x86 one). It is NOT needed to play (this build
           # uses mpv): it is what the DOWNLOADER runs to join the two
@@ -304,7 +312,8 @@ jobs:
           # the default Windows icon and nobody notices locally.
           $need = @('nevertube_qt2.exe', 'qwindows.dll', 'libmpv-2.dll',
             'vulkan-1.dll', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll',
-            'libEGL.dll', 'libGLESv2.dll', 'VC_redist.x64.exe', 'nt.ico',
+            'libEGL.dll', 'libGLESv2.dll', 'd3dcompiler_47.dll',
+            'VC_redist.x64.exe', 'nt.ico',
             'ffmpeg.exe', 'avformat-63.dll', 'libmp3lame-0.dll')
           $missing = $need | Where-Object { $packed -notcontains $_ }
           if ($missing) { Write-Host "el setup NO lleva: $missing"; exit 1 }

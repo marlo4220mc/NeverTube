@@ -1718,6 +1718,76 @@ CI).
 The two CLI entries `--download <id>` and `--play-local <file>` are how
 the downloader is driven without touching the UI.
 
+### CPU: the download yields to playback, and it is recoverable
+
+The report (Lenovo, W11, x64, `h264-hw`): with a download running and a video
+playing, **the FPS dropped from the FIRST second of the download**, before any
+fragment had been muxed, so the mux was not to blame. Chrome does not lose those
+frames doing the same thing: it hands the real-time threads a better position in
+the scheduler than the ones of the download.
+
+The downloader never lowered anything: the transport thread and the finalize
+thread ran in `NORMAL`, exactly like the thread of the interface (the one that
+runs `paintGL` of the `QOpenGLWidget`). With the same priority Windows divides
+the CPU by time-slicing, so the thread that has to present a frame every ~16 ms
+waits behind eight sockets decrypting TLS. That is the mechanism, and it is
+independent of the total CPU: it costs frames even with free cores.
+
+**What is done (nothing else):** while video is playing, the download's threads
+run **below normal**. The concurrency of the download is **NOT touched** (it stays
+at the value of Ajustes): lowering it would punish the machines that can do both,
+and with the throttle measured (~8 MB per request) 8 -> 4 barely changes the
+final speed but for a strong PC it is a loss for no reason. Priority is the
+lever, because it is the one that only costs something when there is actually
+contention.
+
+- **Which state counts as "playback"**: `playing` and `loading` of the
+  `PlayerController` (`MainWindow::updateDownloadPlaybackState`, called from
+  `phaseChanged`, from `currentChanged`, from the page change of the
+  `QStackedWidget`, from the exit of full screen and at the end of the
+  constructor). It covers the Player page, the full screen and the **mini
+  player**: the three paint frames. A `paused`, `stopped` or `error` video does
+  **not** count.
+- **It is fully recoverable and nothing is persisted**: the state is derived
+  from the player on every change. Closing the mini player (or pausing, or the
+  video failing) restores `NORMAL` **immediately**, with no timer, no delay and
+  no saved flag: the next call to `setPlaybackActive(false)` either posts or
+  applies the restore.
+- **It changes WHILE the download runs**, which is the case that matters:
+  `DownloadJob::setPlaybackActive` posts the change to the thread of the
+  transports (`QMetaObject::invokeMethod` on `m_home`, queued), so a download
+  started before pressing play also cedes CPU. Applying it only at
+  thread-start would have missed exactly the reported case.
+- **Per thread, not per process**: `applyThreadPriority` (`download_job.cpp`,
+  the anonymous namespace) does `SetThreadPriority(THREAD_PRIORITY_BELOW_NORMAL)`
+  on Windows and `nice 10` on Unix. The process is not touched: the interface,
+  the player and the audio keep `NORMAL`. The finalize thread (the assembly of
+  ~1 GB plus the `ffmpeg` of the mux) reads the same state when it starts.
+- **`m_playbackActive` is `std::atomic<bool>`**: the pool thread and the finalize
+  thread read it while the thread of the interface writes it.
+- The `ffmpeg` of the mux runs **at normal priority** on purpose: it is a
+  `-c copy` (0.05 s for 30 s of video) and the process priority of a child is
+  inherited from the process, not from the thread that launches it. Lowering it
+  would be speculating without a measurement; if the Lenovo shows frames lost
+  during the mux, that is the next lever (a `BELOW_NORMAL_PRIORITY_CLASS` in the
+  `QProcess` of `runFfmpeg`).
+- **The next lever, if priority alone is not enough**, is the concurrency, and
+  only under measured pressure (CPU high with playback + download), never by
+  default: the aim is not to punish a PC that can do both.
+- **Kill switch for the measurement**: `NEVERTUBE_NO_DL_LOWPRIO=1` makes the
+  downloader ignore the playback state entirely (it behaves exactly as before
+  this feature). It exists so a report of "player + download is slow" can be
+  told apart from "the priority change is to blame" on the machine that
+  reports it, instead of guessing.
+- **A gotcha this already produced**: ANGLE was made the default on x64 in the
+  same batch, and it looked harmless for a while because the D3D shader
+  compiler was reaching the app with the WRONG NAME: the startup died before
+  ANGLE could run, so the "it works" of the first test was the default OpenGL.
+  With the DLL fixed, ANGLE really activated and **the player + download went
+  unresponsive** on the Lenovo. It is back to opt-in (`NEVERTUBE_ANGLE=1`),
+  which is what this document always said. Lesson: a feature that cannot run
+  because of a missing file is NOT a feature that works.
+
 ## AV1 over HLS (synthetic)
 
 YouTube **does not publish AV1 in its HLS master** (`hlsManifestUrl`): only VP9/h264
