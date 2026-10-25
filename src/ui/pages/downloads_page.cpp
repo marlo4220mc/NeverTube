@@ -56,6 +56,27 @@ DownloadsPage::DownloadsPage(DownloadRepo *repo, QWidget *parent)
             emit openFolderRequested(dir);
     });
     header->addWidget(m_openFolder);
+
+    // "Pausar todo" / "Reanudar todo": with a queue the person needed to
+    // press every row one by one. They are only shown when there is something
+    // to do with them (reload() decides).
+    m_pauseAll = new QPushButton(this);
+    m_pauseAll->setObjectName(QStringLiteral("ghost"));
+    m_pauseAll->setCursor(Qt::PointingHandCursor);
+    m_pauseAll->setProperty("downloadAction", QStringLiteral("pauseAll"));
+    nt::bindText(m_pauseAll, "downloads.pauseAll");
+    connect(m_pauseAll, &QPushButton::clicked, this,
+            [this]() { emit pauseAllRequested(); });
+    header->addWidget(m_pauseAll);
+
+    m_resumeAll = new QPushButton(this);
+    m_resumeAll->setObjectName(QStringLiteral("ghost"));
+    m_resumeAll->setCursor(Qt::PointingHandCursor);
+    m_resumeAll->setProperty("downloadAction", QStringLiteral("resumeAll"));
+    nt::bindText(m_resumeAll, "downloads.resumeAll");
+    connect(m_resumeAll, &QPushButton::clicked, this,
+            [this]() { emit resumeAllRequested(); });
+    header->addWidget(m_resumeAll);
     root->addLayout(header);
 
     m_meta = new QLabel(this);
@@ -242,6 +263,11 @@ void DownloadsPage::updateRow(const DownloadInfo &info, const Row &row)
     row.title->setText(info.title.isEmpty() ? info.videoId : info.title);
 
     QString meta = stateText(info);
+    // The transient note of the row (a fragment being retried). It lives in
+    // the `error` column while the state is "downloading": the person saw the
+    // download look stuck while the fragments were quietly asked again.
+    if (info.status == QLatin1String("downloading") && !info.error.isEmpty())
+        meta += QStringLiteral(" · ") + info.error;
     if (!info.quality.isEmpty())
         meta += QStringLiteral(" · ") + info.quality;
     // While it runs, "what it has / what it is going to have"; when it is
@@ -278,12 +304,18 @@ void DownloadsPage::updateRow(const DownloadInfo &info, const Row &row)
     const bool done = info.status == QLatin1String("done");
     const bool failed = info.status == QLatin1String("error");
     const bool paused = info.status == QLatin1String("paused");
+    const bool muxing = info.status == QLatin1String("muxing");
     row.play->setVisible(done);
     row.retry->setVisible(failed);
     row.remove->setVisible(true);
     // The pause button: it is there while the download runs and while it is
     // paused, and its icon says what it does (pause or continue).
-    row.pause->setVisible(working || paused);
+    //
+    // NOT while the mux is running: the fragments are all there and the
+    // download is assembling them in its own thread, so "pause" could only
+    // leave the row saying "paused" with the thread still writing the file.
+    row.pause->setVisible((working && !muxing) || paused);
+    row.meta->setToolTip(muxing ? nt::tr("downloads.muxNoPause") : QString());
     if (paused) {
         row.pause->setIcon(nt::icon(nt::Icon::Play, nt::kMuted, 16));
         row.pause->setToolTip(nt::tr("downloads.resume"));
@@ -349,6 +381,24 @@ void DownloadsPage::reload()
     m_empty->setVisible(all.isEmpty());
     m_rows->setVisible(!all.isEmpty());
     m_openFolder->setVisible(!all.isEmpty());
+
+    // The "all at once" buttons only when there is something for them: a
+    // "Pausar todo" with nothing running does nothing and confuses.
+    bool anyWorking = false;
+    bool anyPaused = false;
+    for (const DownloadInfo &info : all) {
+        if (info.status == QLatin1String("downloading")
+            || info.status == QLatin1String("pending")
+            || info.status == QLatin1String("muxing")) {
+            anyWorking = true;
+        }
+        if (info.status == QLatin1String("paused"))
+            anyPaused = true;
+    }
+    if (m_pauseAll)
+        m_pauseAll->setVisible(!all.isEmpty() && anyWorking);
+    if (m_resumeAll)
+        m_resumeAll->setVisible(!all.isEmpty() && anyPaused);
 }
 
 void DownloadsPage::retranslate()

@@ -672,6 +672,18 @@ MainWindow::MainWindow(QWidget *parent)
             [this](const QString &key) {
                 m_downloadManager->resume(key);
             });
+    connect(m_downloadsPage, &DownloadsPage::pauseAllRequested, this,
+            [this]() {
+                m_downloadManager->pauseAll();
+                if (m_downloadsPage)
+                    m_downloadsPage->reload();
+            });
+    connect(m_downloadsPage, &DownloadsPage::resumeAllRequested, this,
+            [this]() {
+                m_downloadManager->resumeAll();
+                if (m_downloadsPage)
+                    m_downloadsPage->reload();
+            });
     connect(m_downloadsPage, &DownloadsPage::removeRequested, this,
             [this](const QString &key) {
         // The delete asks BEFORE: what it deletes depends on the state of
@@ -1928,8 +1940,15 @@ void MainWindow::resumeDownload(const QString &idOrKey)
 // main.cpp when the app opens (NOT by the constructor: see the header).
 void MainWindow::resumePendingDownloads()
 {
-    if (m_downloadManager)
-        m_downloadManager->resumePending();
+    if (!m_downloadManager)
+        return;
+    // The folders of fragments that no row claims (a download deleted by a
+    // version that did not remove them, or a restored database) are not going
+    // to be used by anybody: hundreds of MB. It goes BEFORE the revive, and
+    // the row of a download that is going to be revived keeps its folder
+    // (the sweep only removes what has no row).
+    m_downloadManager->sweepOrphanParts();
+    m_downloadManager->resumePending();
 }
 
 // Queues a download by id.

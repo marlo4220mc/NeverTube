@@ -53,6 +53,9 @@ signals:
     void pauseRequested(const QString &key);
     // The user wants to continue a paused download.
     void resumeRequested(const QString &key);
+    // The user wants to pause (or continue) ALL the downloads at once.
+    void pauseAllRequested();
+    void resumeAllRequested();
 
 private:
     // The widgets of one row, so it can be UPDATED in place (rebuilding it
@@ -89,6 +92,8 @@ private:
     QLabel *m_empty = nullptr;
     QWidget *m_rows = nullptr;
     QPushButton *m_openFolder = nullptr;
+    QPushButton *m_pauseAll = nullptr;
+    QPushButton *m_resumeAll = nullptr;
     // The folder of the downloads (the one of the downloader).
     QString m_folder;
 };

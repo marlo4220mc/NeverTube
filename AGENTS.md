@@ -640,6 +640,7 @@ all inside `m_ctrlBar` (`#playerOverlay`):
 ./build/nevertube_qt2 --selftest-variants  # the variants of a video (height, codec and real size): runs in CI
 ./build/nevertube_qt2 --selftest-reels     # the filter of the Shorts (the vertical videos): runs in CI
 ./build/nevertube_qt2 --selftest-download  # the plan of a download (the fragments, the sidx, the codec): runs in CI
+./build/nevertube_qt2 --selftest-download-resume  # the walk that asks only for the missing fragments + the legacy mp3 row: runs in CI
 ./build/nevertube_qt2 --selftest-download-folder  # the folder of the downloads and the command that opens it: runs in CI
 ./build/nevertube_qt2 --selftest-download-settings  # the codes of the settings of the downloader: runs in CI
 ./build/nevertube_qt2 --selftest-single-instance  # one instance per user: the second process hands its args over and exits: runs in CI
@@ -678,7 +679,8 @@ the distinction is a hard rule:
   `--selftest-av1hls`, `--selftest-variants`, `--selftest-reels`,
   `--selftest-download`, `--selftest-download-button`,
   `--selftest-download-folder`, `--selftest-download-settings`,
-  `--selftest-download-transport`, `--selftest-single-instance` and
+  `--selftest-download-transport`, `--selftest-download-resume`,
+  `--selftest-single-instance` and
   `--selftest-settings-page`. They run in every build (the three
   `packaging/linux/*` recipes and both Windows smokes) and can fail the
   job.
@@ -1541,6 +1543,14 @@ asks for the fragments that are not on the disk and keeps going.
 Measured after the fix: a download that was cut at 236 MB continued at
 **30-33 MB/s** (about 264 Mbps) from the byte it was at.
 
+**The walk is now a pure function with a selftest** (`dl::pickNextFragment` in
+`src/downloader/segment_plan.*`): it receives the cursors and the index of the
+fragments already on the disk, and returns the next one that is missing (with
+how many positions of each cursor it consumed). The job only adds the advances
+and accounts the skipped ones; the rule cannot go back to "skip to the next
+transport" without `--selftest-download-resume` going red, which was verified
+by removing the skip on purpose: 8 of its cases fail.
+
 ### A fragment that fails is asked AGAIN (and the resolution is kept)
 
 A fragment that fails (a timeout, a connection that dies) **failed the whole
@@ -1769,6 +1779,66 @@ that id is asked for: otherwise the video found the row of the mp3 "done" and
 refused to download, silently. The gate is `quality == "mp3"` **and** the key
 being the plain video id, which no row written by this version can satisfy.
 
+### The feedback of a download, and what it does NOT hide
+
+- **A fragment that is retried is said**: `DownloadJob::fragmentRetrying`
+  (attempt, max) → the manager writes a NOTE in the column `error` while the
+  state is `downloading` (`downloads.retrying`), and `attempt == 0` clears it
+  when the fragment goes through. Before, the download looked stuck while the
+  fragments were being asked again without a word. The note uses a column that
+  already exists (no schema change) and the page only shows it while the state
+  is `downloading`, so it can never be confused with a real error.
+- **The mux cannot be paused and it says so**: while the state is `muxing` the
+  pause button is hidden (the fragments are all there and the thread is writing
+  the file; the row would say "paused" with the thread still working) and the
+  meta line carries the tooltip `downloads.muxNoPause`.
+- **The finished file is verified**: `dl::outputIsUsable` (`muxer.*`) requires
+  exists + is a file + size > 0. It is checked in the mux AND again in
+  `onFinalizeDone`, so a row cannot say "done" pointing at a 0-byte file
+  (`error.dlMuxResult`) — the person found out when pressing play.
+- **The speed is over a WINDOW**: `dl::SpeedWindow` (10 s) instead of the
+  average since the start. The average kept a high number for minutes after the
+  CDN had already squeezed the connection, and after a resume it counted the
+  bytes of the previous session (which were not moved in this one). Under
+  250 ms of data, or with the counter going backwards, it reports 0 instead of
+  a division by noise.
+- **"Pausar todo" / "Reanudar todo"**: `DownloadManager::pauseAll`/
+  `resumeAll`, with two `#ghost` buttons marked `downloadAction`
+  `pauseAll`/`resumeAll` (the tests find them by the mark, never by the
+  translated text). They are only visible when there is something to do with
+  them, and they do not touch a `done` row.
+- **Orphan fragments are swept at startup**: `sweepOrphanParts` removes the
+  `<key>.parts` folders that no row claims (a download deleted by a version that
+  did not remove them, or a restored database: hundreds of MB). It runs from
+  `MainWindow::resumePendingDownloads` (that is: from `main.cpp`, not from the
+  constructor) and only INSIDE the folder of the downloads. The row of a
+  download that is going to be revived keeps its folder.
+
+### Threads: what the audit found (open, on purpose)
+
+The `done` and `progress` callbacks of `DownloadTransport` run in the **thread
+of the transports** (`download_transport.cpp` posts them to its own context),
+so the state machine of the job (`m_videoDone`/`m_audioDone`/`m_fragmentTries`/
+`m_bytesDone`, `startNext`) lives there, while the thread of the interface READS
+it: `saveProgress()` calls `bytesDone`/`progress`/`doneSegments`/`status` on
+every save and `pause()` calls `doneSegments()`/`bytesDone()` before releasing
+the job.
+
+That is a data race with real consequences (a `QVector` read while the other
+thread appends is a crash waiting to happen), and **it was not "fixed" in this
+branch on purpose**: moving `done` to the thread of the job requires moving
+`progress` too, because `m_fragmentBytes` is a `QHash` that the `done` path
+reads and `progress` *inserts into* (a rehash while reading is exactly the
+crash). Moving only one of the two trades a documented race for an
+undocumented one, and there is no network-backed test that would catch it.
+
+The fix, when it is done, is: marshal BOTH callbacks to the job's thread, keep
+the per-fragment bytes in an atomic (indexed by `fragmentMark`, so the size is
+known: `videoCount + audioCount + 2`), and keep the `progress` events throttled
+(the transport reports every ~64 KB, which is ~600 events/s at 40 MB/s: posting
+all of them would flood the event loop that has to repaint the player). It has
+to be measured with `--selftest-player` and a real download, not inferred.
+
 ### The selftests
 
 - `--selftest-download`: the plan is a pure function of the master
@@ -1782,6 +1852,13 @@ being the plain video id, which no row written by this version can satisfy.
   and one variant per (height, codec) with its real size), offline.
 - `--selftest-download-settings`: the codes of the settings of the
   downloader, offline.
+- `--selftest-download-resume`: the walk that asks only for the missing
+  fragments (the bug that left a resumed download asking for NOTHING), the
+  migration of the rows of the first version of the downloader (legacy mp3 with
+  its `.parts` folder), the sliding-window speed, the verification of the
+  muxed file, the sweep of orphan folders and the queue under churn. Offline,
+  with a temporary database. Verified that removing the skip on purpose turns
+  8 of its cases red.
 - `--selftest-settings-page`: the REAL page of Ajustes (the new section of
   the downloads is there).
 
@@ -1833,6 +1910,17 @@ contention.
   on Windows and `nice 10` on Unix. The process is not touched: the interface,
   the player and the audio keep `NORMAL`. The finalize thread (the assembly of
   ~1 GB plus the `ffmpeg` of the mux) reads the same state when it starts.
+- **The restore brings back the ORIGINAL priority of that thread**, not a fixed
+  `NORMAL`: the first time a thread is lowered its value is remembered
+  (`thread_local`, so the pool and the finalize threads each keep their own) and
+  it is what comes back when the video stops. Restoring `NORMAL` was wrong in
+  both directions: on Windows a thread started `ABOVE_NORMAL` ended up in
+  `NORMAL`, and on Unix a worker that came from `nice 5` was asked to go back to
+  0, which fails silently without privileges (so it stayed at 10 for ever).
+  A second "playback started" does NOT overwrite the remembered value with
+  `BELOW_NORMAL`. The change is only posted to a job that is really running:
+  a job waiting for its formats has no worker to lower and gets the flag when it
+  starts.
 - **`m_playbackActive` is `std::atomic<bool>`**: the pool thread and the finalize
   thread read it while the thread of the interface writes it.
 - The `ffmpeg` of the mux runs **at normal priority** on purpose: it is a

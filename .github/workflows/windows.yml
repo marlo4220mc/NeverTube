@@ -443,6 +443,11 @@ jobs:
           if ($rc -ne 0) { exit $rc }
           $rc = Invoke-Selftest '--selftest-download-transport'
           if ($rc -ne 0) { exit $rc }
+          # The resume of a download (which fragments are asked for when some
+          # are already on the disk) and the migration of the rows of the
+          # first version of the downloader: offline, temporary database.
+          $rc = Invoke-Selftest '--selftest-download-resume'
+          if ($rc -ne 0) { exit $rc }
           $rc = Invoke-Selftest '--selftest-settings-page'
           if ($rc -ne 0) { exit $rc }
           # ONE instance per user (offline, and it opens no window of its own):

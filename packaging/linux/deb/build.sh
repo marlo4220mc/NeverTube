@@ -49,7 +49,8 @@ for t in --selftest-db --selftest-discover --selftest-ssl \
          --selftest-av1hls --selftest-variants --selftest-reels \
          --selftest-download --selftest-download-button \
          --selftest-download-folder --selftest-download-settings \
-         --selftest-download-transport --selftest-single-instance \
+         --selftest-download-transport --selftest-download-resume \
+         --selftest-single-instance \
          --selftest-video-url --selftest-search-url \
          --selftest-settings-page; do
   echo "SELFTEST $t"

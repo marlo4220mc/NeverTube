@@ -351,6 +351,7 @@ jobs:
                            '--selftest-download-folder',
                            '--selftest-download-settings',
                            '--selftest-download-transport',
+                           '--selftest-download-resume',
                            '--selftest-single-instance',
                            '--selftest-video-url',
                            '--selftest-search-url',
