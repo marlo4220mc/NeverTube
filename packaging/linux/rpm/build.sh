@@ -41,7 +41,7 @@ for t in --selftest-db --selftest-discover --selftest-ssl \
          --selftest-variants --selftest-reels --selftest-download \
          --selftest-download-button --selftest-download-folder \
          --selftest-download-settings --selftest-download-transport \
-         --selftest-settings-page; do
+         --selftest-single-instance --selftest-settings-page; do
   echo "SELFTEST $t"
   ./build-rpm/nevertube_qt2 "$t"
 done

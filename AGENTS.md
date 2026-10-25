@@ -640,6 +640,7 @@ all inside `m_ctrlBar` (`#playerOverlay`):
 ./build/nevertube_qt2 --selftest-download  # the plan of a download (the fragments, the sidx, the codec): runs in CI
 ./build/nevertube_qt2 --selftest-download-folder  # the folder of the downloads and the command that opens it: runs in CI
 ./build/nevertube_qt2 --selftest-download-settings  # the codes of the settings of the downloader: runs in CI
+./build/nevertube_qt2 --selftest-single-instance  # one instance per user: the second process hands its args over and exits: runs in CI
 ./build/nevertube_qt2 --selftest-settings-page  # the page of Ajustes (the new section of the downloads): runs in CI
 ```
 
@@ -673,7 +674,8 @@ the distinction is a hard rule:
   `--selftest-dates`, `--selftest-suggest-parse/panel/gestures`,
   `--selftest-av1hls`, `--selftest-variants`, `--selftest-reels`,
   `--selftest-download`, `--selftest-download-button`,
-  `--selftest-download-folder`, `--selftest-download-settings` and
+  `--selftest-download-folder`, `--selftest-download-settings`,
+  `--selftest-download-transport`, `--selftest-single-instance` and
   `--selftest-settings-page`. They run in every build (the three
   `packaging/linux/*` recipes and both Windows smokes) and can fail the
   job.
@@ -1853,6 +1855,73 @@ contention.
   which is what this document always said. Lesson: a feature that cannot run
   because of a missing file is NOT a feature that works.
 
+## One instance per user (the second process hands its arguments over)
+
+There was no single instance: every `--download` (and every link opened in the
+browser) started a new process, with its own player and its own connection to
+the SAME database. WAL allows that, but the app had no busy timeout, so the
+second writer got `SQLITE_BUSY` at once and the page of Descargas showed an
+error that means nothing to the person. Two players at the same time make no
+sense either.
+
+`SingleInstance` (`src/single_instance.{h,cpp}`) is a `QLocalServer` +
+`QLocalSocket` with **one name per user** (a named pipe on Windows, a socket in
+the runtime directory on Unix; the user name is sanitized because on Unix the
+name is a file). It is created in `main()` and works like this:
+
+- A process that **finds the socket ACCEPTS** (`waitForConnected`): it sends its
+  `argv` as ONE line of JSON and exits with 0 **before creating a window**. It
+  opens nothing: no player, no database.
+- **It does not close the connection before the other side has read it.** The
+  client waits (2 s at most) for the running instance to CLOSE the connection,
+  which is its ack, and only then exits. It is not decoration: on Windows a
+  client that closes the pipe right after writing can make the server lose the
+  bytes, and that is what the CI measured (the handover and the one after it
+  failed while the first instance was listening the whole time). The server
+  also reads what is left in the socket when the `disconnected` arrives, before
+  dropping it, as the second line of defence. When the running instance is
+  still starting (its loop is not running yet) the wait expires and the second
+  process exits anyway: it cannot take the name, the server has it.
+- **A payload of ZERO arguments is forwarded too**: that is the app opened again
+  from the menu (the icon, no arguments) and what it means is "come to the
+  front". A payload that is not an array of strings is dropped, so a broken
+  client cannot make the window jump.
+- The instance that is already running **brings its window to the front**
+  (`showNormal` if minimized, `raise`, `activateWindow`) and applies the
+  arguments. That is why the block that parsed `argv` was **moved out of
+  `main()` into `applyArgs(window, args)`**: the command line and the socket run
+  the SAME code, with no second copy of the rules.
+- **Where it is created: AFTER the dispatch of the `--selftest-*` and BEFORE
+  `MainWindow`.** A test run must never talk to the app of the user, nor be
+  refused because the app is open. Moving it earlier breaks the selftests in a
+  way that only shows up when the app is open.
+- `window.resumePendingDownloads()` (the revive of the download queue) goes
+  **BEFORE** `applyArgs(window, args)`: a `--download` that arrives on the
+  command line or through the socket is queued BEHIND the rows the session is
+  reviving, which is the order in which they were asked for.
+- If `listen()` fails (a security policy, a name taken by a process of another
+  user) **the app opens anyway**: two instances is what the app did until now,
+  and refusing to open is worse than the problem. A socket file left by a
+  process that died is removed with `QLocalServer::removeServer()` before
+  listening, or the app would never open again.
+- `setSocketOptions(QLocalServer::UserAccessOption)`: the payload is the
+  arguments of THIS user, and no other user has to be able to talk to it.
+- `PRAGMA busy_timeout=5000` (`src/db/app_database.cpp`) is the safety net for
+  the writers that are still possible: a copy of the exe of another version, or
+  the database opened in a tool.
+- **The name is per USER, not per session/display**: two graphical sessions of
+  the same user share the instance and the second one brings the window of the
+  other to the front. That is the decision ("one per user"); it is written down
+  because with X2Go/RDP it is noticeable.
+- `--selftest-single-instance` (offline, in the smoke of the three CI and in the
+  three `packaging/linux/*` recipes): the first process takes the name, a second
+  **real process** hands its arguments over, a third also does, one with no
+  arguments still notifies, and the first one keeps answering. The second and
+  the third are CHILD PROCESSES (`--handover <name> <argv...>`, a hidden entry
+  of `main()`): doing it from this same process would block the event loop that
+  has to answer, and then the test measures nothing of what the app does —that
+  is how it looked green here and red on Windows.
+
 ## AV1 over HLS (synthetic)
 
 YouTube **does not publish AV1 in its HLS master** (`hlsManifestUrl`): only VP9/h264
@@ -2085,7 +2154,7 @@ other one QA has to confirm.
   `--selftest-innertube` / `--selftest-discover` / `--selftest-home` /
   `--selftest-feeds` / `--selftest-av1hls` / `--selftest-hwprobe` / `--selftest-search` /
   `--selftest-grid` / `--selftest-theme` / `--selftest-glyphs` /
-  `--selftest-dates` / `--selftest-i18n` → tests
+  `--selftest-dates` / `--selftest-i18n` / `--selftest-single-instance` → tests
 
 ## Configurable accent color
 

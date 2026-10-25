@@ -438,6 +438,11 @@ jobs:
           if ($rc -ne 0) { exit $rc }
           $rc = Invoke-Selftest '--selftest-settings-page'
           if ($rc -ne 0) { exit $rc }
+          # ONE instance per user (offline, and it opens no window of its own):
+          # the first process takes the name, the second hands its arguments
+          # over and exits, and the first one keeps answering.
+          $rc = Invoke-Selftest '--selftest-single-instance'
+          if ($rc -ne 0) { exit $rc }
           # Search suggestions dropdown (offline, no network): the
           # two groups, the history filtering, the discarding of late
           # responses and the panel height cap.
