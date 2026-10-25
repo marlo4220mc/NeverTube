@@ -847,6 +847,30 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_home, &HomePage::navigateToSearchRequested, this,
             &MainWindow::goSearch);
     connect(m_search, &SearchPage::openRequested, this, &MainWindow::openWatch);
+    // A YouTube link pasted in the search box is a video, not a query: the
+    // PLAYER is opened with it (the page does not search it nor save it in the
+    // history). The queue is a single item with only the id: the title,
+    // channel and the rest arrive from /next.
+    connect(m_search, &SearchPage::videoUrlRequested, this,
+            [this](const QString &videoId, const QString &) {
+                m_searchUrlId = videoId;
+                VideoInfo v;
+                v.id = videoId;
+                openWatch(QVector<VideoInfo>{v}, 0);
+            });
+    // ...and the history gets the NAME, not the address: applyCurrentDetail
+    // fills the empty title of the queue item when /next answers, and that is
+    // when the page replaces the link in the field and writes the query.
+    connect(&m_player, &PlayerController::metadataChanged, this, [this]() {
+        if (m_searchUrlId.isEmpty())
+            return;
+        const VideoInfo cur = m_player.current();
+        if (cur.id != m_searchUrlId || cur.title.isEmpty())
+            return;
+        const QString id = m_searchUrlId;
+        m_searchUrlId.clear();
+        m_search->applyVideoTitle(id, cur.title);
+    });
     connect(m_search, &SearchPage::channelRequested, this,
             [this](const QString &channelId) {
                 m_lastTab = m_currentTab;

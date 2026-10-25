@@ -634,6 +634,8 @@ all inside `m_ctrlBar` (`#playerOverlay`):
 ./build/nevertube_qt2 --selftest-theme     # pure QSS: duplicate selector, selector without widget, selection palette and button borders: runs in CI
 ./build/nevertube_qt2 --selftest-glyphs    # every non-ASCII glyph of the UI exists in the app's real font: runs in CI
 ./build/nevertube_qt2 --selftest-dates     # relative-date parser ("hace 2 semanas" is NOT 2 s → not "hoy"): runs in CI
+./build/nevertube_qt2 --selftest-video-url # YouTube link pasted in the search box (pure: strict forms, and 11 letters are NOT a video): runs in CI
+./build/nevertube_qt2 --selftest-search-url # the same in the REAL SearchPage (offline): opens the video, the URL is not saved, the title is
 ./build/nevertube_qt2 --selftest-i18n      # catalogs: same key set + every key used in the source exists in the base language: runs in CI
 ./build/nevertube_qt2 --selftest-variants  # the variants of a video (height, codec and real size): runs in CI
 ./build/nevertube_qt2 --selftest-reels     # the filter of the Shorts (the vertical videos): runs in CI
@@ -672,6 +674,7 @@ the distinction is a hard rule:
   (only checks that Qt's TLS backend LOADS), `--selftest-grid`,
   `--selftest-theme`, `--selftest-glyphs`, `--selftest-i18n`,
   `--selftest-dates`, `--selftest-suggest-parse/panel/gestures`,
+  `--selftest-video-url`, `--selftest-search-url`,
   `--selftest-av1hls`, `--selftest-variants`, `--selftest-reels`,
   `--selftest-download`, `--selftest-download-button`,
   `--selftest-download-folder`, `--selftest-download-settings`,
@@ -2154,7 +2157,8 @@ other one QA has to confirm.
   `--selftest-innertube` / `--selftest-discover` / `--selftest-home` /
   `--selftest-feeds` / `--selftest-av1hls` / `--selftest-hwprobe` / `--selftest-search` /
   `--selftest-grid` / `--selftest-theme` / `--selftest-glyphs` /
-  `--selftest-dates` / `--selftest-i18n` / `--selftest-single-instance` → tests
+  `--selftest-dates` / `--selftest-i18n` / `--selftest-single-instance` /
+  `--selftest-video-url` / `--selftest-search-url` → tests
 
 ## Configurable accent color
 
@@ -2510,6 +2514,24 @@ DBs, `app_database.cpp`).
   when typing fast and pressing Enter the suggestions request came out later and the
   panel reappeared over the results (also with a request in flight).
   Typing again clears the mark.
+- **A YouTube link pasted in the search box opens the PLAYER, it is not
+  searched**: `youtubeVideoIdFromText` (`src/youtube_url.*`, pure) recognizes
+  `watch?v=`, `youtu.be/<id>`, `/shorts/`, `/embed/`, `/live/` and `/v/`, with
+  or without `www.`/`m.`/`music.`, with extra parameters (`t=`, `list=`, `si=`)
+  and with or without the scheme (the address bar sometimes loses it). It is
+  STRICT on purpose: a bare 11-character id is NOT a link, because a search box
+  must not turn an 11-letter query into a video (`Yt::videoIdFromUrl` is the
+  loose version and it is right for the `http://...` CLI entry, where the whole
+  argument is already an address). `SearchPage::doSearch` returns BEFORE
+  `m_yt->search` on a link, so no request is made, and the URL is **never**
+  written in `search_history` (it would be added again on every opening, and a
+  60-character address among the queries is noise). What the history gets is the
+  **TITLE**, when the player resolves it (`PlayerController::metadataChanged` →
+  `SearchPage::applyVideoTitle`), which also replaces the link in the field but
+  ONLY if the link is still the text there (what the person typed is theirs). If
+  the video never resolves, the history is left as it was: no URL, no id.
+  Covered by `--selftest-video-url` (the parser) and `--selftest-search-url` (the
+  real page, offline: the link path returns before the network).
 - Windows packaging (Win7 x86): the UCRT is NOT copied app-local from the Windows SDK — that version imports `GetSystemTimePreciseAsFileTime` (W8+) and ucrtbase does not load on Win7. Instead the setup bundles `VC_redist.x86.exe` (downloaded in CI) and installs it with `Exec` (`/install /passive /norestart`, codes 0/1638/3010 accepted) with `PrivilegesRequired=admin`. The CRT (msvcp140/vcruntime140) does go next to the exe (`windeployqt --compiler-runtime`). ORDER of the setup: 1) full app → 2) icons (menu + desktop shortcut, `[Tasks] desktopicon` checkbox checked by default) → 3) `InstallVcRedist` from `CurStepChanged` → `ssPostInstall` (not in `AfterInstall` of a `[Files]`, which would run in the middle of the copy). The `[InstallDelete]` keeps purging the app-local UCRT of old installations. The x86 setup **cancels on 64-bit Windows 10/11** (`InitializeSetup` + `IsWin64` + `GetWindowsVersion >= $0A000000`) and directs to the x64 build (the `MsgBox` names `nevertube-setup-x64.exe`: cancelling without saying where the installer that does work is leaves the user with no way out): the x86 there would be capped to h264 HW + VP9 software and without AV1. It is allowed on 32-bit and on 64-bit < 10 (where the x64/modern mpv does not run). **TOOLSET and REDIST (Win7)**: the x86 compiles with `-T v142` (VS2019/14.29) on `runs-on: windows-2022` and the setup installs `vc_redist.x86` **2015-2019** (`aka.ms/vs/16`): the target (Win7) needs that CRT. `windows-latest` is already VS2026 (MSVC 14.5x) and its runtime is NOT Win7-compatible (imports W8+); a 14.5x binary also does not link against vs/16. Do not remove the toolset/image pin nor change the redist to `vs/17`+ without testing on the target. Also, the CI purges `qtaudio_wasapi.dll` from the bundle before the gate: Qt5 Multimedia deploys it but it imports `RoGetActivationFactory` (W8+) and the imports gate aborts it; on Win7 audio goes through `qtaudio_windows.dll` (WaveOut), not WASAPI.
 - Windows x64 packaging (Win10+): the deliverable is an **installable setup.exe**
   (`dist64.iss`, compiled with `iscc` in `windows_x64.yml`), NOT a portable zip.

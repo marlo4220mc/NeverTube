@@ -200,6 +200,11 @@ private:
     // removed when the radio is saved or if the response arrives empty (retry).
     QSet<QString> m_radioSeedsRequested;
 
+    // Video opened from a YouTube link pasted in the search box: until its
+    // title arrives (the player resolves it) the address is still in the field
+    // and the search history does not name it yet. Empty = nothing pending.
+    QString m_searchUrlId;
+
     HomePage *m_home = nullptr;
     SearchPage *m_search = nullptr;
     ChannelPage *m_channel = nullptr;

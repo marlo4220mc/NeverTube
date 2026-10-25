@@ -352,6 +352,8 @@ jobs:
                            '--selftest-download-settings',
                            '--selftest-download-transport',
                            '--selftest-single-instance',
+                           '--selftest-video-url',
+                           '--selftest-search-url',
                            '--selftest-settings-page')) {
             $rc = Invoke-Selftest $t
             if ($rc -ne 0) {

@@ -33,6 +33,7 @@
 #include "../../i18n.h"
 #include "../../models.h"
 #include "../../yt.h"
+#include "../../youtube_url.h"
 #include "../channel_row.h"
 #include "../format.h"
 #include "../confirm_dialog.h"
@@ -277,6 +278,13 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
             hideSuggestPanel();
             return;
         }
+        // A pasted YouTube link is not a query: asking YouTube to autocomplete
+        // an address makes no sense and its "suggestions" would open a panel of
+        // noise over the field. Enter opens the video (see doSearch).
+        if (!youtubeVideoIdFromText(q).isEmpty()) {
+            hideSuggestPanel();
+            return;
+        }
         m_suggestQuery = q;
         m_yt->suggest(q);
     });
@@ -518,6 +526,7 @@ SearchPage::~SearchPage()
 
 void SearchPage::setResultsMode(bool active)
 {
+    m_resultsMode = active;
     if (m_resultBox->isVisible() == active)
         return;
     m_resultBox->setVisible(active);
@@ -548,6 +557,27 @@ void SearchPage::doSearch()
         showHistory();
         return;
     }
+    // A pasted YouTube link is a video, not a query: it is not searched and it
+    // is not written in the history (a 60-character URL among the queries is
+    // noise, and it would be added again on every opening). The PLAYER is
+    // opened and what the history gets is the TITLE, which arrives later (see
+    // applyVideoTitle). Everything that is not a link of YouTube falls through
+    // to the normal search below.
+    const QString videoId = youtubeVideoIdFromText(q);
+    if (!videoId.isEmpty()) {
+        m_pendingUrlId = videoId;
+        m_pendingUrlText = q;
+        // The results belong to the PREVIOUS query and none was run for this
+        // text: back to the history view, which is what the page shows when
+        // nothing is being searched.
+        setResultsMode(false);
+        m_searching = false;
+        showHistory();
+        NT_DEBUG("E2E searchUrl id=%s\n", videoId.toUtf8().constData());
+        emit videoUrlRequested(videoId, q);
+        return;
+    }
+
     setResultsMode(true);
     m_searching = true;
     m_activeQuery = q;
@@ -576,6 +606,37 @@ void SearchPage::doSearch()
     setHistory(hist);
 
     m_yt->search(q);
+}
+
+void SearchPage::applyVideoTitle(const QString &videoId, const QString &title)
+{
+    const QString clean = title.trimmed();
+    if (clean.isEmpty() || m_pendingUrlId.isEmpty() || videoId != m_pendingUrlId)
+        return;
+    const QString url = m_pendingUrlText;
+    m_pendingUrlId.clear();
+    m_pendingUrlText.clear();
+    // The field shows the NAME of what is being played, and only if the address
+    // is still the text of the field: if the person typed something else while
+    // the video was resolving, that text belongs to them.
+    if (!url.isEmpty() && m_field->text().trimmed() == url) {
+        const QSignalBlocker blocker(m_field);
+        m_field->setText(clean);
+        m_clearBtn->setVisible(true);
+    }
+    QStringList hist = history();
+    hist.removeAll(clean);
+    hist.prepend(clean);
+    while (hist.size() > 8)
+        hist.removeLast();
+    setHistory(hist);
+    // The history view is rebuilt NOW and not when coming back to the page,
+    // which has no showEvent: without this the new title only appeared after
+    // the next action that redrew it. Only in history mode, so that a list of
+    // results is never covered by it.
+    if (!m_resultsMode)
+        showHistory();
+    NT_DEBUG("E2E searchUrlTitle save=%s\n", clean.toUtf8().constData());
 }
 
 void SearchPage::onSearchReady(const QString &query, const QVector<VideoInfo> &videos)
@@ -1880,6 +1941,85 @@ bool searchSuggestPanelSelfTestRun()
     page.show();
     QCoreApplication::processEvents();
     return searchSuggestPanelSelfTest(&page);
+}
+
+// OFFLINE selftest of a YouTube link pasted in the search box (no network):
+// the link path returns BEFORE m_yt->search, so nothing is asked. It checks the
+// three things the feature promises:
+//   1) the pasted address opens the video (with the id, and the text as is);
+//   2) the address is NOT written in the search history;
+//   3) the TITLE is, replacing the address in the field, and only when it is
+//      the video that was opened.
+bool searchUrlSelfTest(SearchPage *page)
+{
+    int fail = 0;
+    const auto chk = [&fail](bool ok, const char *what) {
+        std::fprintf(stderr, "  [%s] %s\n", ok ? "OK  " : "FAIL", what);
+        if (!ok)
+            ++fail;
+    };
+    if (!page)
+        return false;
+    page->setHistory({QStringLiteral("gato")});
+
+    QString gotId;
+    QString gotUrl;
+    const QMetaObject::Connection conn = QObject::connect(
+        page, &SearchPage::videoUrlRequested,
+        [&gotId, &gotUrl](const QString &id, const QString &url) {
+            gotId = id;
+            gotUrl = url;
+        });
+
+    const QString link = QStringLiteral("https://youtu.be/dQw4w9WgXcQ?t=10");
+    page->m_field->setText(link);
+    page->doSearch();
+    chk(gotId == QLatin1String("dQw4w9WgXcQ"), "el enlace pegado abre el video");
+    chk(gotUrl == link, "la peticion lleva el enlace tal cual se pego");
+    chk(page->history() == QStringList{QStringLiteral("gato")},
+        "el enlace NO se guarda en el historial");
+    chk(!page->m_resultsMode, "la pagina no se queda en modo resultados");
+
+    // The title arrives from the player.
+    const QString title = QStringLiteral("Never Gonna Give You Up");
+    page->applyVideoTitle(QStringLiteral("dQw4w9WgXcQ"), title);
+    const QStringList afterTitle = page->history();
+    chk(afterTitle.size() == 2 && afterTitle.at(0) == title,
+        "el titulo queda el primero del historial");
+    chk(!afterTitle.contains(link), "la URL no aparece en el historial");
+    chk(page->m_field->text() == title, "el campo muestra el titulo");
+
+    // The link is opened again; a title from ANOTHER video must not touch
+    // either the history or the field.
+    page->m_field->setText(link);
+    page->doSearch();
+    page->applyVideoTitle(QStringLiteral("otroVideo01"), QStringLiteral("Otro"));
+    chk(page->history() == afterTitle, "un titulo de otro video no toca el historial");
+    chk(page->m_field->text() == link, "ni cambia lo que hay en el campo");
+
+    // If the video never resolves, nothing of the link is left behind.
+    chk(page->history() == afterTitle,
+        "sin titulo el enlace NO se guarda (ni la URL ni el id)");
+
+    QObject::disconnect(conn);
+    return fail == 0;
+}
+
+bool searchUrlSelfTestRun()
+{
+    AppDatabase db(QStringLiteral("/tmp/nevertube_selftest_searchurl.db"));
+    if (!db.isOpen() && !db.open()) {
+        std::fprintf(stderr, "SEARCH URL FAIL: no se abre la BD de test\n");
+        return false;
+    }
+    SettingsRepo settings(db);
+    ThumbnailCache thumbs(QStringLiteral("searchurl-selftest"), 1 << 20);
+    Yt yt;
+    SearchPage page(&yt, &settings, &thumbs);
+    page.resize(1000, 700);
+    page.show();
+    QCoreApplication::processEvents();
+    return searchUrlSelfTest(&page);
 }
 
 bool searchSuggestGesturesSelfTestRun()

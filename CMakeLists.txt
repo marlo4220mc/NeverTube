@@ -116,6 +116,8 @@ add_executable(nevertube_qt2
   src/downloader/download_button_selftest.h
   src/reels_filter.cpp
   src/reels_filter.h
+  src/youtube_url.cpp
+  src/youtube_url.h
   src/reels_filter_selftest.cpp
   src/reels_filter_selftest.h
   src/video_variant.cpp

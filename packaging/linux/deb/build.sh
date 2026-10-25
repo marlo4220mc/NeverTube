@@ -50,6 +50,7 @@ for t in --selftest-db --selftest-discover --selftest-ssl \
          --selftest-download --selftest-download-button \
          --selftest-download-folder --selftest-download-settings \
          --selftest-download-transport --selftest-single-instance \
+         --selftest-video-url --selftest-search-url \
          --selftest-settings-page; do
   echo "SELFTEST $t"
   ./build-deb/nevertube_qt2 "$t"

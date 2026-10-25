@@ -39,6 +39,13 @@ public:
     // live-bound.
     void retranslate();
 
+    // The title of the video that a pasted link opened has arrived. It takes
+    // the place of the address in the field and it is the ONLY thing that is
+    // written in the search history (the URL never is). MainWindow calls it
+    // when the player resolves the video; doing it here keeps the history in
+    // the page that owns it.
+    void applyVideoTitle(const QString &videoId, const QString &title);
+
     // Sizes of the dropdown. The endpoint returns up to 14 suggestions and the
     // history adds more; without a cap the panel grew downward and covered the
     // results. The row and the divider are also needed for the height when the
@@ -60,9 +67,18 @@ public:
     // container to test the tab switch.
     friend bool searchSuggestGesturesSelfTest(SearchPage *page, QStackedWidget *stack,
                                               QWidget *otra);
+    // The link pasted in the field: it opens the video, it is NOT saved in the
+    // history and the title is what ends up there. Offline (the link path
+    // returns before asking the network).
+    friend bool searchUrlSelfTest(SearchPage *page);
 
 signals:
     void openRequested(const QVector<VideoInfo> &videos, int startIndex);
+    // A YouTube link pasted in the field (Ctrl+V, Súper+V, right-click paste):
+    // it is not searched and it is not saved in the history, the PLAYER is
+    // opened. `url` is the text exactly as it was pasted, so the title can
+    // replace it when it arrives.
+    void videoUrlRequested(const QString &videoId, const QString &url);
     void channelRequested(const QString &channelId);
     // Click on the "⋯" of a results row: the page has no repos
     // (watch later, playlists), so it asks for the video and MainWindow shows
@@ -160,6 +176,14 @@ private:
     QString m_error;
     bool m_searching = false;
     QString m_activeQuery;
+    // The page is showing results (not the history). Kept apart from the
+    // widgets' visibility: when the page is hidden (the Player is open) both
+    // boxes are invisible and the flag still tells which mode it is in.
+    bool m_resultsMode = false;
+    // The link pasted in the field that is being opened, and its text: the
+    // title that arrives later is applied only if it is still this one.
+    QString m_pendingUrlId;
+    QString m_pendingUrlText;
 
     // Type-ahead. m_suggestPanel floats over the page; m_suggestItems are the
     // YouTube queries (with their entity detail) and m_historyRows the already
@@ -194,6 +218,11 @@ private:
 // two groups, that the history is filtered, and that a late response is
 // ignored. Called from --selftest-suggest-panel.
 bool searchSuggestPanelSelfTestRun();
+
+// OFFLINE selftest of a YouTube link pasted in the field: the video is opened,
+// the URL is not saved in the history and the title is. Called from
+// --selftest-search-url.
+bool searchUrlSelfTestRun();
 
 // Gesture bench of the dropdown in the real hierarchy (page inside a
 // QStackedWidget, with a navigation bar and the real QSS). Checks the

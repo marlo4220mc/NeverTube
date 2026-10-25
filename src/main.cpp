@@ -33,6 +33,7 @@
 #include "downloader/download_settings_selftest.h"
 #include "downloader/download_transport_selftest.h"
 #include "reels_filter_selftest.h"
+#include "youtube_url.h"
 #include "single_instance.h"
 #include "single_instance_selftest.h"
 #include "video_variant_selftest.h"
@@ -974,6 +975,23 @@ int main(int argc, char *argv[])
         // GPU. It pins the regression of "hace N semanas" -> seconds -> "hoy".
         const bool ok = relativeDateSelfTest();
         std::fprintf(stderr, "SELFTEST dates -> %s\n", ok ? "OK" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-video-url"))) {
+        // The link pasted in the search box (youtubeVideoIdFromText): pure
+        // function, no network or GPU. It pins that an 11-letter query is NOT
+        // turned into a video and that the usual forms of the address are.
+        const bool ok = youtubeUrlSelfTest();
+        std::fprintf(stderr, "SELFTEST video-url -> %s\n", ok ? "OK" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-search-url"))) {
+        // A YouTube link pasted in the search box (offline): the video is
+        // opened, the URL is not saved in the history and the title is.
+        const bool ok = searchUrlSelfTestRun();
+        std::fprintf(stderr, "SELFTEST search-url -> %s\n", ok ? "OK" : "FAIL");
         return ok ? 0 : 1;
     }
 

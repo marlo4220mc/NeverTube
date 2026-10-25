@@ -423,6 +423,13 @@ jobs:
           # regression of "hace N semanas" -> seconds -> "hoy".
           $rc = Invoke-Selftest '--selftest-dates'
           if ($rc -ne 0) { exit $rc }
+          # A YouTube link pasted in the search box: the parser (pure) and the
+          # page that opens the video without saving the URL in the history
+          # (the link path returns before the network, so it is offline).
+          $rc = Invoke-Selftest '--selftest-video-url'
+          if ($rc -ne 0) { exit $rc }
+          $rc = Invoke-Selftest '--selftest-search-url'
+          if ($rc -ne 0) { exit $rc }
           # The variants of a video (height, codec and real size) and the
           # filter of the Shorts (the vertical videos): both are pure
           # functions, with no network and no GPU.
