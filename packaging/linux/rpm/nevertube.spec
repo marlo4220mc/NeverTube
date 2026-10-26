@@ -1,9 +1,9 @@
-Name: nevertube-qt2
+Name: nevertube
 Version: __VERSION__
 Release: 1%{?dist}
-Summary: Lightweight YouTube client (Qt5 + libmpv)
+Summary: NeverTube - lightweight YouTube client (Qt5 + libmpv)
 License: GPL-3.0-or-later
-URL: https://github.com/marlo4220mc/nevertube_qt2
+URL: https://github.com/marlo4220mc/NeverTube
 Vendor: marlo4220mc
 Packager: marlo4220mc
 Group: Applications/Multimedia
@@ -51,7 +51,7 @@ A lightweight YouTube client built with Qt5 and the mpv playback core.
 %build
 
 # The workflow (packaging/linux/rpm/build.sh) compiles the app and leaves the
-# install tree under BUILD/nevertube_qt2/ (usr/bin, usr/share). This spec only
+# install tree under BUILD/nevertube/ (usr/bin, usr/share). This spec only
 # packages it; it does not compile. The staging path arrives as the `stage`
 # macro (rpmbuild runs %install in its own subdirectory, so a relative path is
 # not safe).
@@ -60,16 +60,16 @@ mkdir -p %{buildroot}
 cp -a %{stage}/. %{buildroot}/
 
 %files
-%license %{_datadir}/licenses/nevertube-qt2/LICENSE
-%{_bindir}/nevertube_qt2
-%{_datadir}/applications/nevertube_qt2.desktop
-%{_datadir}/icons/hicolor/16x16/apps/nevertube_qt2.png
-%{_datadir}/icons/hicolor/24x24/apps/nevertube_qt2.png
-%{_datadir}/icons/hicolor/32x32/apps/nevertube_qt2.png
-%{_datadir}/icons/hicolor/48x48/apps/nevertube_qt2.png
-%{_datadir}/icons/hicolor/64x64/apps/nevertube_qt2.png
-%{_datadir}/icons/hicolor/128x128/apps/nevertube_qt2.png
-%{_datadir}/icons/hicolor/256x256/apps/nevertube_qt2.png
+%license %{_datadir}/licenses/nevertube/LICENSE
+%{_bindir}/nevertube
+%{_datadir}/applications/nevertube.desktop
+%{_datadir}/icons/hicolor/16x16/apps/nevertube.png
+%{_datadir}/icons/hicolor/24x24/apps/nevertube.png
+%{_datadir}/icons/hicolor/32x32/apps/nevertube.png
+%{_datadir}/icons/hicolor/48x48/apps/nevertube.png
+%{_datadir}/icons/hicolor/64x64/apps/nevertube.png
+%{_datadir}/icons/hicolor/128x128/apps/nevertube.png
+%{_datadir}/icons/hicolor/256x256/apps/nevertube.png
 
 %changelog
 * Sat Oct 10 2026 marlo4220mc <marlo4220mc@users.noreply.github.com> - __VERSION__-1

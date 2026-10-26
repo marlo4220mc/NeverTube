@@ -1,7 +1,7 @@
-; ── Inno Setup script for nevertube_qt2 (installable setup built with Inno) ──
+; ── Inno Setup script for nevertube (installable setup built with Inno) ──────
 ; Like a typical Inno setup, the deliverable for the target machine is this
 ; INSTALLABLE `setup.exe` that is NOT a `dist/` folder with loose DLLs:
-; it carries EVERYTHING inside (nevertube_qt2.exe + Qt5Widgets/Core/Gui.dll +
+; it carries EVERYTHING inside (nevertube.exe + Qt5Widgets/Core/Gui.dll +
 ; plugins platforms/qwindows.dll + VC runtime + mpv-dev DLLs). A single
 ; single file to download.
 ;
@@ -12,12 +12,12 @@
 ; `dist/` produced by the previous steps (windeployqt + DLLs) — that is why the
 ; paths of `[Files]` and `OutputDir` are relative to the workspace root.
 [Setup]
-AppName=nevertube_qt2
+AppName=NeverTube
 AppVersion=1.0.0
-AppPublisher=nevertube
-AppPublisherURL=https://github.com/nevertube
-DefaultDirName={autopf}\nevertube_qt2
-DefaultGroupName=nevertube_qt2
+AppPublisher=NeverTube
+AppPublisherURL=https://github.com/marlo4220mc/NeverTube
+DefaultDirName={autopf}\NeverTube
+DefaultGroupName=NeverTube
 DisableProgramGroupPage=yes
 OutputDir=setup-out
 OutputBaseFilename=nevertube-setup
@@ -102,8 +102,8 @@ Type: filesandordirs; Name: "{localappdata}\nevertube\nevertube"
 ; IconFilename on both: without this the shortcuts come out with the default
 ; Windows icon and the app is not recognizable on the desktop. nt.ico
 ; comes from [Files] and is the same one embedded in the .exe (resources/nt.rc).
-Name: "{group}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"; IconFilename: "{app}\nt.ico"
-Name: "{autodesktop}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"; Tasks: desktopicon; IconFilename: "{app}\nt.ico"
+Name: "{group}\NeverTube"; Filename: "{app}\nevertube.exe"; IconFilename: "{app}\nt.ico"
+Name: "{autodesktop}\NeverTube"; Filename: "{app}\nevertube.exe"; Tasks: desktopicon; IconFilename: "{app}\nt.ico"
 
 [Code]
 // Architecture GUARD (before touching disk): this setup is from the x86 build

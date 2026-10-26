@@ -44,7 +44,7 @@ cmake -B build -DCMAKE_PREFIX_PATH="%CD%\third_party\qt-win32" -G "Visual Studio
 cmake --build build --config Release
 
 # package into a single dir
-windeployqt build/nevertube_qt2.exe
+windeployqt build/nevertube.exe
 # + copy libmpv-2.dll next to the exe (and windeployqt for the rest)
 ```
 
@@ -57,8 +57,8 @@ windeployqt build/nevertube_qt2.exe
 ## Post-build verification (Windows)
 
 ```sh
-./nevertube_qt2.exe --selftest-player   # should print SELFTEST OK
-./nevertube_qt2.exe --selftest-db       # SELFTEST OK
+./nevertube.exe --selftest-player   # should print SELFTEST OK
+./nevertube.exe --selftest-db       # SELFTEST OK
 ```
 
 The player selftest verifies the protected core (hwdec + 33ms timer + render)

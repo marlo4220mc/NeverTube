@@ -2,9 +2,9 @@
   <b>English</b> · <a href="README.es.md">Español</a>
 </div>
 
-# nevertube_qt2
+# NeverTube
 
-A lightweight YouTube client for Windows (7 / 10 / 11) and Linux, built with Qt5 and C++17. It streams directly from YouTube's unofficial web API — no browser, no Electron, and on Linux no bundled runtime: the packages are ~900 KB and pull their dependencies from the distribution's own repositories.
+**NeverTube** is a lightweight YouTube client for Windows (7 / 10 / 11) and Linux, built with Qt5 and C++17. It streams directly from YouTube's unofficial web API — no browser, no Electron, and on Linux no bundled runtime: the packages are ~900 KB and pull their dependencies from the distribution's own repositories.
 
 ## Features
 
@@ -22,17 +22,17 @@ Built per target in CI; Linux packages are x86_64 only.
 
 | Format | Target | File |
 |---|---|---|
-| `.deb` | Ubuntu 22.04 / 24.04 | `nevertube-qt2_<version>_amd64.deb` |
-| `.rpm` | Fedora (RHEL-family with matching sonames) | `nevertube-qt2-<version>-1.x86_64.rpm` |
-| pacman | Arch Linux | `nevertube-qt2-<version>-x86_64.pkg.tar.zst` |
+| `.deb` | Ubuntu 22.04 / 24.04 | `nevertube_<version>_amd64.deb` |
+| `.rpm` | Fedora (RHEL-family with matching sonames) | `nevertube-<version>-1.x86_64.rpm` |
+| pacman | Arch Linux | `nevertube-<version>-x86_64.pkg.tar.zst` |
 | setup.exe | Windows 10 / 11 (x64) | `nevertube-setup-x64.exe` |
 | setup.exe | Windows 7 (x86) | `nevertube-setup.exe` |
 
 ### Install
 
-- Debian / Ubuntu: `sudo apt install ./nevertube-qt2_<version>_amd64.deb` — apt installs the declared dependencies automatically.
-- Fedora: `sudo dnf install ./nevertube-qt2-<version>-1.x86_64.rpm` — dnf resolves the soname requirements (`ffmpeg-free`, or RPM Fusion's ffmpeg if already installed).
-- Arch: `sudo pacman -U nevertube-qt2-<version>-x86_64.pkg.tar.zst`
+- Debian / Ubuntu: `sudo apt install ./nevertube_<version>_amd64.deb` — apt installs the declared dependencies automatically.
+- Fedora: `sudo dnf install ./nevertube-<version>-1.x86_64.rpm` — dnf resolves the soname requirements (`ffmpeg-free`, or RPM Fusion's ffmpeg if already installed).
+- Arch: `sudo pacman -U nevertube-<version>-x86_64.pkg.tar.zst`
 - Windows: run the setup; it installs the VC++ redistributable it needs.
 
 ### Build from source

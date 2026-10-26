@@ -214,14 +214,14 @@ jobs:
       - name: empaquetar setup.exe instalable (windeployqt x64 + mpv + vulkan + openssl + iscc)
         shell: pwsh
         run: |
-          $exe = "build-win\Release\nevertube_qt2.exe"
+          $exe = "build-win\Release\nevertube.exe"
           if (-not (Test-Path $exe)) { Write-Host "no está $exe"; exit 1 }
           Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
           $qtroot = Split-Path (Split-Path $env:Qt5_DIR)
           & "$qtroot\bin\windeployqt.exe" --release --no-translations `
             --compiler-runtime $exe -dir dist
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item $exe dist\nevertube_qt2.exe
+          Copy-Item $exe dist\nevertube.exe
           Copy-Item (Get-ChildItem mpv-dev -Recurse -Filter libmpv-2.dll |
             Select-Object -First 1).FullName dist\
           Copy-Item vulkan-1.dll dist\
@@ -310,7 +310,7 @@ jobs:
           # (and the .exe carries it embedded via resources/nt.rc). If an
           # edit of [Files] leaves it out, the shortcuts are created with
           # the default Windows icon and nobody notices locally.
-          $need = @('nevertube_qt2.exe', 'qwindows.dll', 'libmpv-2.dll',
+          $need = @('nevertube.exe', 'qwindows.dll', 'libmpv-2.dll',
             'vulkan-1.dll', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll',
             'libEGL.dll', 'libGLESv2.dll', 'd3dcompiler_47.dll',
             'VC_redist.x64.exe', 'nt.ico',
@@ -333,7 +333,7 @@ jobs:
           Copy-Item "$qtsrc\plugins\platforms\qoffscreen.dll" dist\platforms\ -Force
           $env:QT_QPA_PLATFORM = 'offscreen'
           function Invoke-Selftest([string]$flag) {
-            $p = Start-Process -FilePath '.\dist\nevertube_qt2.exe' -ArgumentList $flag -Wait -PassThru -NoNewWindow
+            $p = Start-Process -FilePath '.\dist\nevertube.exe' -ArgumentList $flag -Wait -PassThru -NoNewWindow
             Write-Host "smoke $flag exit=$($p.ExitCode)"
             return $p.ExitCode
           }

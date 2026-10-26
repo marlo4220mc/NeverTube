@@ -649,11 +649,11 @@ int main(int argc, char *argv[])
     // Wayland/GNOME association: the compositor identifies the window by its
     // app_id and looks up "<app_id>.desktop" to get the icon and the name.
     // Without this the dock/overview shows a generic icon, because the binary is
-    // "nevertube_qt2" and the .desktop is installed with that name (see
+    // "nevertube" and the .desktop is installed with that name (see
     // packaging/linux/ and the install() rules in CMakeLists.txt). On X11 the
     // window icon comes from setWindowIcon() below (StartupWMClass matches this
     // file); on Windows/macOS it is a no-op.
-    QGuiApplication::setDesktopFileName(QStringLiteral("nevertube_qt2.desktop"));
+    QGuiApplication::setDesktopFileName(QStringLiteral("nevertube.desktop"));
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
 
     // Window icon. ALL sizes are included because QIcon does not scale: it picks

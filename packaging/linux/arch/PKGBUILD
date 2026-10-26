@@ -4,23 +4,23 @@
 # (packaging/linux/arch/build.sh does `git archive` of the checkout). The
 # binary is compiled INSIDE Arch, so it links Arch's own sonames instead of
 # being a package cross-built for another distro.
-pkgname=nevertube-qt2
+pkgname=nevertube
 pkgver=__PKGVER__
 pkgrel=1
-pkgdesc='Lightweight YouTube client (Qt5 + libmpv)'
+pkgdesc='NeverTube - lightweight YouTube client (Qt5 + libmpv)'
 arch=('x86_64')
-url='https://github.com/marlo4220mc/nevertube_qt2'
+url='https://github.com/marlo4220mc/NeverTube'
 license=('GPL-3.0-or-later')
 depends=('qt5-base' 'mpv' 'ffmpeg' 'libpulse' 'libglvnd' 'openssl' 'hicolor-icon-theme')
 # Native Wayland on a Wayland session (otherwise Qt goes through xcb/XWayland).
 optdepends=('qt5-wayland: native Wayland instead of XWayland')
 makedepends=('cmake' 'gcc' 'make' 'pkgconf' 'qt5-base' 'mpv' 'ffmpeg' 'libpulse')
-source=('nevertube_qt2-__PKGVER__.tar.gz')
+source=('nevertube-__PKGVER__.tar.gz')
 sha256sums=('SKIP')
 options=('!debug')
 
 build() {
-  cd "$srcdir/nevertube_qt2"
+  cd "$srcdir/nevertube"
   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
   cmake --build build --parallel "$(nproc)"
 }
@@ -28,7 +28,7 @@ build() {
 # Offline regression tests (no network, no GPU): the same "viability" gate the
 # other distro builds run.
 check() {
-  cd "$srcdir/nevertube_qt2"
+  cd "$srcdir/nevertube"
   export QT_QPA_PLATFORM=offscreen
   for t in --selftest-db --selftest-discover --selftest-ssl \
            --selftest-grid --selftest-theme --selftest-glyphs \
@@ -40,11 +40,11 @@ check() {
            --selftest-video-url \
            --selftest-search-url --selftest-settings-page; do
     echo "SELFTEST $t"
-    ./build/nevertube_qt2 "$t"
+    ./build/nevertube "$t"
   done
 }
 
 package() {
-  cd "$srcdir/nevertube_qt2"
+  cd "$srcdir/nevertube"
   DESTDIR="$pkgdir" cmake --install build --prefix /usr
 }

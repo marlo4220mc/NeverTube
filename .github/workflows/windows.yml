@@ -154,7 +154,7 @@ jobs:
       - name: empaquetar setup.exe instalable (windeployqt + DLLs FFmpeg vendorizadas + iscc)
         shell: pwsh
         run: |
-          $exe = "build-win\Release\nevertube_qt2.exe"
+          $exe = "build-win\Release\nevertube.exe"
           if (-not (Test-Path $exe)) { Write-Host "no está $exe"; exit 1 }
           Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
           $qtroot = Split-Path (Split-Path $env:Qt5_DIR)
@@ -222,7 +222,7 @@ jobs:
           # the two tracks of a downloaded video. Without it the download
           # finishes but the mux fails ("ffmpeg was not found").
           Copy-Item third_party\ffmpeg-win32\bin\ffmpeg.exe dist\
-          Copy-Item $exe dist\nevertube_qt2.exe
+          Copy-Item $exe dist\nevertube.exe
           # OpenSSL 1.1.1 = Qt5Network TLS backend. windeployqt does NOT deploy it:
           # without these DLLs next to the exe, all HTTPS fails on the test machine with
           # "TLS initialization failed" (innertube/YouTube do not load).
@@ -338,7 +338,7 @@ jobs:
           if (-not $packed) {
             Write-Host "no se pudo leer el manifiesto de iscc (¿cambió su formato?)"
             exit 1 }
-          $need = @('nevertube_qt2.exe', 'qwindows.dll', 'nt.ico',
+          $need = @('nevertube.exe', 'qwindows.dll', 'nt.ico',
             'VC_redist.x86.exe', 'ffmpeg.exe')
           $missing = $need | Where-Object { $packed -notcontains $_ }
           if ($missing) { Write-Host "el setup NO lleva: $missing"; exit 1 }
@@ -366,7 +366,7 @@ jobs:
       # --selftest-hwprobe does not apply on x86 either (it probes with mpv, which is not
       # in this build; its offline table stays on Linux/x64).
       #
-      # WATCH OUT for the exit code! nevertube_qt2.exe is a GUI SUBSYSTEM: when
+      # WATCH OUT for the exit code! nevertube.exe is a GUI SUBSYSTEM: when
       # launching it with `&` PowerShell does NOT wait for it to finish NOR set
       # $LASTEXITCODE (it stays empty). The pattern `& exe; $rc=$LASTEXITCODE`
       # produced `if ($null -ne 0) { exit $null }` → code 0 and the step was
@@ -381,7 +381,7 @@ jobs:
           Copy-Item "$qtsrc\plugins\platforms\qoffscreen.dll" dist\platforms\ -Force
           $env:QT_QPA_PLATFORM = 'offscreen'
           function Invoke-Selftest([string]$flag) {
-            $p = Start-Process -FilePath '.\dist\nevertube_qt2.exe' -ArgumentList $flag -Wait -PassThru -NoNewWindow
+            $p = Start-Process -FilePath '.\dist\nevertube.exe' -ArgumentList $flag -Wait -PassThru -NoNewWindow
             $code = $p.ExitCode
             Write-Host "smoke $flag exit=$code"
             return $code

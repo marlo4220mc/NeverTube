@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: nevertube-qt2
-Source: https://github.com/marlo4220mc/nevertube_qt2
+Upstream-Name: nevertube
+Source: https://github.com/marlo4220mc/NeverTube
 
 Files: *
 Copyright: 2026 marlo4220mc <https://github.com/marlo4220mc>

@@ -45,7 +45,7 @@ bool singleInstanceSelfTest()
 
     // A name of its own: a running app (or a second run of the tests) must not
     // be disturbed, and this test must not be refused because the app is open.
-    const QString name = QStringLiteral("nevertube_qt2-selftest-%1")
+    const QString name = QStringLiteral("nevertube-selftest-%1")
                              .arg(QCoreApplication::applicationPid());
 
     SingleInstance first(name);
@@ -95,7 +95,7 @@ bool singleInstanceSelfTest()
 
     // --- the second process: it must NOT own the name, and its arguments must
     // arrive at the first one, unchanged (argv[0] included).
-    const QStringList sent{QStringLiteral("C:/x/nevertube_qt2.exe"),
+    const QStringList sent{QStringLiteral("C:/x/nevertube.exe"),
                            QStringLiteral("--download"),
                            QStringLiteral("dQw4w9WgXcQ"),
                            QStringLiteral("1080")};
@@ -111,7 +111,7 @@ bool singleInstanceSelfTest()
     got.clear();
     const int eventsBefore = events;
     const Second third = runSecond(QStringList{
-        QStringLiteral("C:/x/nevertube_qt2.exe"),
+        QStringLiteral("C:/x/nevertube.exe"),
         QStringLiteral("--search"), QStringLiteral("hola")});
     check(third.exitCode == 0, "el tercero tampoco toma el nombre");
     check(events == eventsBefore + 1 && got.size() == 3

@@ -11,7 +11,7 @@ namespace nt {
 
 // Debug logging gated by the NEVERTUBE_DEBUG environment variable.
 // Off by default so it does not pollute stderr in the player's 33 ms loop.
-// Re-enable without recompiling: NEVERTUBE_DEBUG=1 ./nevertube_qt2
+// Re-enable without recompiling: NEVERTUBE_DEBUG=1 ./nevertube
 // Mimics a variadic macro: nt::debug("E2E phase=%s\n", s).
 inline bool debugEnabled()
 {

@@ -156,7 +156,7 @@ jobs:
       - name: network selftests (informational)
         continue-on-error: true
         run: |
-          bin=/usr/bin/nevertube_qt2
+          bin=/usr/bin/nevertube
           if [ ! -x "$bin" ]; then echo "::warning::$bin no está (el build falló)"; exit 0; fi
           for t in --selftest-tls --selftest-innertube --selftest-search \
                    --selftest-browse --selftest-feeds --selftest-home; do
@@ -172,7 +172,7 @@ jobs:
       - name: GPU selftests (informational)
         continue-on-error: true
         run: |
-          bin=/usr/bin/nevertube_qt2
+          bin=/usr/bin/nevertube
           if [ ! -x "$bin" ]; then echo "::warning::$bin no está (el build falló)"; exit 0; fi
           for t in --selftest-hwprobe --selftest-ffmpeg --selftest-player; do
             echo "::group::selftest $t"

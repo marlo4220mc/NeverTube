@@ -1,4 +1,4 @@
-Package: nevertube-qt2
+Package: nevertube
 Version: __VERSION__
 Architecture: __ARCH__
 Maintainer: marlo4220mc <marlo4220mc@users.noreply.github.com>
@@ -7,8 +7,8 @@ Priority: optional
 Installed-Size: __INSTALLED_SIZE__
 Depends: __DEPENDS__
 Recommends: qtwayland5, qt5-image-formats-plugins
-Homepage: https://github.com/marlo4220mc/nevertube_qt2
-Description: Lightweight YouTube client (Qt5 + libmpv)
+Homepage: https://github.com/marlo4220mc/NeverTube
+Description: NeverTube - lightweight YouTube client (Qt5 + libmpv)
  A lightweight YouTube client built with Qt5 and the mpv playback core.
  The menu entry and the icons are installed in the hicolor theme, so GNOME,
  KDE, XFCE, Cinnamon and MATE pick them up without per-DE files; the binary

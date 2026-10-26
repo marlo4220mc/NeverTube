@@ -210,7 +210,7 @@
     "settings.resetApp": "Restablecer aplicación",
     "settings.resetBody": "Esta acción borrará la base de datos local (historial, búsquedas, suscripciones y ajustes) y el caché de miniaturas. No se eliminarán archivos personales ni vídeos descargados. La aplicación se reiniciará con los valores por defecto. ¿Continuar?",
     "settings.reset": "Restablecer",
-    "settings.version": "Versión 1.0 (nevertube_qt2)",
+    "settings.version": "NeverTube 1.0",
     "settings.aboutNote": "Sin telemetría: esta aplicación no envía datos de uso, búsquedas ni historial a ningún servidor. Todo permanece local en tu dispositivo.",
     "hw.detecting": "Detectando hardware de vídeo",
     "hw.note": "Comprobando la aceleración de vídeo de tu equipo.\nLa reproducción comenzará al terminar.",

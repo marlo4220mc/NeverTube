@@ -1,4 +1,4 @@
-; ── Inno Setup script for nevertube_qt2 x64 (Win10+) ──────────────────────────
+; ── Inno Setup script for nevertube x64 (Win10+) ──────────────────────────────
 ; Twin of `dist.iss` (which is the x86 build / 32-bit Win7 one) with the
 ; differences required by the x64 target. The x86 one cannot be reused as is:
 ; see DIFFERENCES 1..5 below ([Setup], [Files] and the absence of an
@@ -11,15 +11,15 @@
 ; `dist/` produced by the previous steps (windeployqt + DLLs) — that is why the
 ; paths of `[Files]` and `OutputDir` are relative to the workspace root.
 [Setup]
-AppName=nevertube_qt2
+AppName=NeverTube
 AppVersion=1.0.0
-AppPublisher=nevertube
-AppPublisherURL=https://github.com/nevertube
+AppPublisher=NeverTube
+AppPublisherURL=https://github.com/marlo4220mc/NeverTube
 ; DIFFERENCE 1 vs x86: on x64 it installs into 64-bit Program Files. Inno
 ; needs ArchitecturesInstallIn64BitMode so that {autopf} means
 ; "C:\Program Files" (64-bit) and not "C:\Program Files (x86)".
-DefaultDirName={autopf}\nevertube_qt2
-DefaultGroupName=nevertube_qt2
+DefaultDirName={autopf}\NeverTube
+DefaultGroupName=NeverTube
 DisableProgramGroupPage=yes
 OutputDir=setup-out
 OutputBaseFilename=nevertube-setup-x64
@@ -102,8 +102,8 @@ Type: filesandordirs; Name: "{localappdata}\nevertube\nevertube"
 ; IconFilename on both: without this the shortcuts come out with the default
 ; Windows icon and the app is not recognizable on the desktop. nt.ico
 ; comes from [Files] and is the same one embedded in the .exe (resources/nt.rc).
-Name: "{group}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"; IconFilename: "{app}\nt.ico"
-Name: "{autodesktop}\nevertube_qt2"; Filename: "{app}\nevertube_qt2.exe"; Tasks: desktopicon; IconFilename: "{app}\nt.ico"
+Name: "{group}\NeverTube"; Filename: "{app}\nevertube.exe"; IconFilename: "{app}\nt.ico"
+Name: "{autodesktop}\NeverTube"; Filename: "{app}\nevertube.exe"; Tasks: desktopicon; IconFilename: "{app}\nt.ico"
 
 [Code]
 // DIFFERENCE 5 vs x86: here there is NO architecture guard that cancels. The

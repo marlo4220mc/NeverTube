@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build the Debian/Ubuntu package (.deb) for nevertube_qt2.
+# Build the Debian/Ubuntu package (.deb) for nevertube.
 #
 # Run on Debian/Ubuntu (the GitHub runner is ubuntu-22.04). Installs the build
 # dependencies, configures + builds with CMake, runs the offline selftests
@@ -54,13 +54,13 @@ for t in --selftest-db --selftest-discover --selftest-ssl \
          --selftest-video-url --selftest-search-url \
          --selftest-settings-page; do
   echo "SELFTEST $t"
-  ./build-deb/nevertube_qt2 "$t"
+  ./build-deb/nevertube "$t"
 done
 
-ver="$(grep -oP 'project\(nevertube_qt2 VERSION \K[0-9.]+' CMakeLists.txt | head -1)"
+ver="$(grep -oP 'project\(nevertube VERSION \K[0-9.]+' CMakeLists.txt | head -1)"
 arch="$(dpkg --print-architecture)"
 pkgver="${ver}+git$(git rev-parse --short HEAD)"
-echo "== packaging nevertube-qt2 $pkgver ($arch) =="
+echo "== packaging nevertube $pkgver ($arch) =="
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -71,23 +71,23 @@ root="$tmp/root"
 # it does not touch the dynamic section, so dpkg-shlibdeps below still reads the
 # NEEDED libraries from the exe.
 DESTDIR="$root" cmake --install build-deb --prefix /usr --strip
-test -x "$root/usr/bin/nevertube_qt2"
-test -f "$root/usr/share/applications/nevertube_qt2.desktop"
-test -f "$root/usr/share/icons/hicolor/256x256/apps/nevertube_qt2.png"
-desktop-file-validate "$root/usr/share/applications/nevertube_qt2.desktop"
+test -x "$root/usr/bin/nevertube"
+test -f "$root/usr/share/applications/nevertube.desktop"
+test -f "$root/usr/share/icons/hicolor/256x256/apps/nevertube.png"
+desktop-file-validate "$root/usr/share/applications/nevertube.desktop"
 
 # Debian policy: the copyright file goes in /usr/share/doc/<pkg>/copyright. It
 # references /usr/share/common-licenses/GPL-3 instead of embedding the text.
-mkdir -p "$root/usr/share/doc/nevertube-qt2"
-cp packaging/linux/deb/copyright "$root/usr/share/doc/nevertube-qt2/copyright"
-test -f "$root/usr/share/doc/nevertube-qt2/copyright"
+mkdir -p "$root/usr/share/doc/nevertube"
+cp packaging/linux/deb/copyright "$root/usr/share/doc/nevertube/copyright"
+test -f "$root/usr/share/doc/nevertube/copyright"
 
 # NEEDED -> packages. dpkg-shlibdeps reads the package name from a
 # debian/control in the working directory, so it runs from a throwaway one.
 mkdir -p "$tmp/debian"
-printf 'Source: nevertube-qt2\nSection: video\nPriority: optional\nMaintainer: nevertube <noreply@localhost>\nStandards-Version: 4.6.0\n' \
+printf 'Source: nevertube\nSection: video\nPriority: optional\nMaintainer: nevertube <noreply@localhost>\nStandards-Version: 4.6.0\n' \
   > "$tmp/debian/control"
-shlibs="$( cd "$tmp" && dpkg-shlibdeps -O -e"$repo/build-deb/nevertube_qt2" \
+shlibs="$( cd "$tmp" && dpkg-shlibdeps -O -e"$repo/build-deb/nevertube" \
             | sed 's/^shlibs:Depends=//' )"
 # libqt5sql5-sqlite is the SQLite driver plugin: Qt dlopen()s it, so it does
 # not show up as a linked library but the app is unusable without it.
@@ -118,14 +118,14 @@ sed -e "s#__VERSION__#$pkgver#g" \
 cat "$root/DEBIAN/control"
 
 mkdir -p dist
-deb="dist/nevertube-qt2_${pkgver}_${arch}.deb"
+deb="dist/nevertube_${pkgver}_${arch}.deb"
 dpkg-deb --build --root-owner-group "$root" "$deb"
 dpkg-deb -f "$deb" Package Version Architecture Depends
-dpkg-deb -c "$deb" | grep -E 'usr/bin/nevertube_qt2$|applications/nevertube_qt2.desktop$|hicolor/48x48/apps/nevertube_qt2.png$|doc/nevertube-qt2/copyright$'
+dpkg-deb -c "$deb" | grep -E 'usr/bin/nevertube$|applications/nevertube.desktop$|hicolor/48x48/apps/nevertube.png$|doc/nevertube/copyright$'
 
 chk="$tmp/chk"
 dpkg-deb -x "$deb" "$chk"
-test -x "$chk/usr/bin/nevertube_qt2"
+test -x "$chk/usr/bin/nevertube"
 
 # Installability (same "viability" gate as the .rpm and pacman jobs): install the
 # package and run the offline selftests from the INSTALLED path (not the build
@@ -140,13 +140,13 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
 fi
 # ldd catches a package whose Depends do not cover a NEEDED library. grep WITHOUT
 # -q: with pipefail, -q closes the pipe early and ldd dies with SIGPIPE (141).
-if ldd /usr/bin/nevertube_qt2 | grep 'not found' >/dev/null; then
+if ldd /usr/bin/nevertube | grep 'not found' >/dev/null; then
   echo "ERROR: missing shared libraries after install:" >&2
-  ldd /usr/bin/nevertube_qt2 | grep 'not found' >&2
+  ldd /usr/bin/nevertube | grep 'not found' >&2
   exit 1
 fi
 export QT_QPA_PLATFORM=offscreen
-/usr/bin/nevertube_qt2 --selftest-db
-/usr/bin/nevertube_qt2 --selftest-i18n
+/usr/bin/nevertube --selftest-db
+/usr/bin/nevertube --selftest-i18n
 
 echo "OK: $deb ($(du -h "$deb" | cut -f1))"

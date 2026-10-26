@@ -4262,7 +4262,7 @@ bool innertubeSelfTest()
 // The printed list of titles allows manually counting the appearance of a
 // topic (PROOF 2: persisted session A vs fresh session B).
 //
-// Launched with:  ./build/nevertube_qt2 --selftest-home
+// Launched with:  ./build/nevertube --selftest-home
 // (optional)          NEVERTUBE_HOME_VISITOR='<persisted visitorData>'
 
 namespace {

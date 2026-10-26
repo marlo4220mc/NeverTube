@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build the RPM package for nevertube_qt2.
+# Build the RPM package for nevertube.
 #
 # MUST run inside Fedora (e.g. `docker run --rm -v "$PWD:/work" -w /work
 # fedora:latest bash /work/packaging/linux/rpm/build.sh`). The binary is
@@ -45,37 +45,37 @@ for t in --selftest-db --selftest-discover --selftest-ssl \
          --selftest-video-url \
          --selftest-search-url --selftest-settings-page; do
   echo "SELFTEST $t"
-  ./build-rpm/nevertube_qt2 "$t"
+  ./build-rpm/nevertube "$t"
 done
 
-ver="$(grep -oP 'project\(nevertube_qt2 VERSION \K[0-9.]+' CMakeLists.txt | head -1)"
-echo "== packaging nevertube-qt2 $ver (x86_64) =="
+ver="$(grep -oP 'project\(nevertube VERSION \K[0-9.]+' CMakeLists.txt | head -1)"
+echo "== packaging nevertube $ver (x86_64) =="
 
 rpmtop="$repo/rpmbuild"
 rm -rf "$rpmtop"
 mkdir -p "$rpmtop"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 
-# The install tree ends up in BUILD/nevertube_qt2/ (usr/bin, usr/share); the
+# The install tree ends up in BUILD/nevertube/ (usr/bin, usr/share); the
 # spec only copies it into %{buildroot}, it does not compile.
 # --strip: strips the symbol table of the Release binary (same as the .deb and
 # the pacman package, where makepkg strips by itself).
-DESTDIR="$rpmtop/BUILD/nevertube_qt2" cmake --install build-rpm --prefix /usr --strip
+DESTDIR="$rpmtop/BUILD/nevertube" cmake --install build-rpm --prefix /usr --strip
 # %license in the spec ships the GPL-3.0 text under /usr/share/licenses/<name>.
-mkdir -p "$rpmtop/BUILD/nevertube_qt2/usr/share/licenses/nevertube-qt2"
-cp LICENSE "$rpmtop/BUILD/nevertube_qt2/usr/share/licenses/nevertube-qt2/LICENSE"
-sed "s|__VERSION__|$ver|g" packaging/linux/rpm/nevertube_qt2.spec > "$rpmtop/SPECS/nevertube_qt2.spec"
+mkdir -p "$rpmtop/BUILD/nevertube/usr/share/licenses/nevertube"
+cp LICENSE "$rpmtop/BUILD/nevertube/usr/share/licenses/nevertube/LICENSE"
+sed "s|__VERSION__|$ver|g" packaging/linux/rpm/nevertube.spec > "$rpmtop/SPECS/nevertube.spec"
 rpmbuild --define "_topdir $rpmtop" \
-         --define "stage $rpmtop/BUILD/nevertube_qt2" \
-         -bb "$rpmtop/SPECS/nevertube_qt2.spec"
+         --define "stage $rpmtop/BUILD/nevertube" \
+         -bb "$rpmtop/SPECS/nevertube.spec"
 
 mkdir -p dist
-rpm="dist/nevertube-qt2-${ver}-1.x86_64.rpm"
-cp "$rpmtop"/RPMS/x86_64/nevertube-qt2-*.rpm "$rpm"
+rpm="dist/nevertube-${ver}-1.x86_64.rpm"
+cp "$rpmtop"/RPMS/x86_64/nevertube-*.rpm "$rpm"
 # NOTE: grep without -q on purpose (see arch/build.sh): -q + pipefail = SIGPIPE.
-rpm -qpl "$rpm" | grep -x /usr/bin/nevertube_qt2 >/dev/null
-rpm -qpl "$rpm" | grep 'hicolor/256x256/apps/nevertube_qt2.png' >/dev/null
+rpm -qpl "$rpm" | grep -x /usr/bin/nevertube >/dev/null
+rpm -qpl "$rpm" | grep 'hicolor/256x256/apps/nevertube.png' >/dev/null
 # The license must be inside the package (%license in the spec).
-rpm -qpl "$rpm" | grep -x /usr/share/licenses/nevertube-qt2/LICENSE >/dev/null
+rpm -qpl "$rpm" | grep -x /usr/share/licenses/nevertube/LICENSE >/dev/null
 rpm -qp --requires "$rpm" | tee "$rpmtop/requires.txt"
 grep -q '^mpv-libs' "$rpmtop/requires.txt"
 grep -q '^qt5-qtbase' "$rpmtop/requires.txt"
@@ -95,16 +95,16 @@ grep -q '/usr/bin/ffmpeg' "$rpmtop/requires.txt"
 # Installability: install the package in the container and run offline
 # selftests from the INSTALLED path (not the build tree): catches a package
 # that builds and lists its files but does not start.
-dnf remove -y nevertube-qt2 >/dev/null 2>&1 || true
+dnf remove -y nevertube >/dev/null 2>&1 || true
 dnf install -y --nogpgcheck "$rpm"
 # ldd catches a package whose Requires do not cover a NEEDED library. grep WITHOUT
 # -q: with pipefail, -q closes the pipe early and ldd dies with SIGPIPE (141).
-if ldd /usr/bin/nevertube_qt2 | grep 'not found' >/dev/null; then
+if ldd /usr/bin/nevertube | grep 'not found' >/dev/null; then
   echo "ERROR: missing shared libraries after install:" >&2
-  ldd /usr/bin/nevertube_qt2 | grep 'not found' >&2
+  ldd /usr/bin/nevertube | grep 'not found' >&2
   exit 1
 fi
-QT_QPA_PLATFORM=offscreen /usr/bin/nevertube_qt2 --selftest-db
-QT_QPA_PLATFORM=offscreen /usr/bin/nevertube_qt2 --selftest-i18n
+QT_QPA_PLATFORM=offscreen /usr/bin/nevertube --selftest-db
+QT_QPA_PLATFORM=offscreen /usr/bin/nevertube --selftest-i18n
 
 echo "OK: $rpm ($(du -h "$rpm" | cut -f1))"

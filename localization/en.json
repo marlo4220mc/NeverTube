@@ -210,7 +210,7 @@
     "settings.resetApp": "Reset application",
     "settings.resetBody": "This action will erase the local database (history, searches, subscriptions and settings) and the thumbnail cache. No personal files or downloaded videos will be deleted. The application will restart with default values. Continue?",
     "settings.reset": "Reset",
-    "settings.version": "Version 1.0 (nevertube_qt2)",
+    "settings.version": "NeverTube 1.0",
     "settings.aboutNote": "No telemetry: this application sends no usage, search or history data to any server. Everything stays local on your device.",
     "hw.detecting": "Detecting video hardware",
     "hw.note": "Checking your device's video acceleration.\nPlayback will start when it finishes.",

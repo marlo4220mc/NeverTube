@@ -70,7 +70,7 @@ QString SingleInstance::name()
     if (clean.isEmpty())
         clean = QStringLiteral("user");
 
-    return QStringLiteral("nevertube_qt2-") + clean.left(64);
+    return QStringLiteral("nevertube-") + clean.left(64);
 }
 
 SingleInstance::SingleInstance(const QString &name, QObject *parent)
