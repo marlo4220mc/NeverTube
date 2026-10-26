@@ -126,11 +126,26 @@ What changes in the Win7 x86 build with respect to the mpv sections of this docu
 
 ## Windows 10 x86 build WITH mpv (i686, same engine as x64)
 
-The 32-bit build for Windows 10/11 is **not** the Win7 one. shinchiro publishes
-`mpv-dev-i686` for Win10+ (same release as the x64 package), so this build links
+The 32-bit build for Windows 10/11 is **not** the Win7 one. This build links
 libmpv and uses `MpvBackend` exactly like x64: `hwdec=auto`, `HwProbe`, the
 codec ladder and Ajustes → "Volver a detectar hardware". The `FfmpegBackend` is
 not compiled at all (no `Qt5 Multimedia`, no `FFMPEG_DEV_DIR`).
+
+Source of that i686 libmpv (MEASURED, not assumed): the workflow of this
+deliverable pins the package of the Win32 build repository
+`Predidit/libmpv-win32-video-cmake` (release `20251210`, asset
+`mpv-dev-i686-20251210-git-ad59ff1.7z`, sha256 pinned in
+`.github/workflows/windows_x86_win10.yml`): the same build system shinchiro
+publishes, with the i686 target enabled. The `shinchiro/mpv-winbuild-cmake`
+releases from 2026-09 on (`mpv-dev-i686` included) abort with
+`OpenSSL internal error: assertion failed: lock != NULL` while the OpenSSL 3
+statically linked into libmpv initializes its trace lock during the TLS init
+of the network — reproduced locally (Wine) and in the CI smoke of this job;
+the 2026-08 and 2026-09 packages of the Predidit repo are affected too, and the
+2025-12 release is the last one that initializes cleanly (it plays https, h264,
+vp9, opus and AV1 via libdav1d without aborting). The pinned package keeps the
+same `libmpv-2.dll` / `include/mpv/*.h` layout, so the rest of this section does
+not change.
 
 CMake needs the explicit switch, because by default **every** 32-bit Windows
 target is taken to be the Win7 build and sent to FFmpeg:
@@ -156,8 +171,9 @@ cmake --build build --config Release
 - `FFMPEG_DEV_DIR` is not used and `Qt5 Multimedia` is not needed.
 
 Packaging (what `dist_x86_win10.iss` expects in `dist\`): Qt via `windeployqt`
-(x86 tree), `libmpv-2.dll`, the 32-bit `vulkan-1.dll` (modern libmpv imports it
-statically; LunarG runtime, `\x86\`), `libssl-3.dll` + `libcrypto-3.dll`
+(x86 tree), `libmpv-2.dll`, the 32-bit `vulkan-1.dll` (belt-and-braces: MEASURED
+on the pinned i686 libmpv of release `20251210` it does NOT import vulkan-1.dll
+(mpv gets its device via OpenGL/D3D there); LunarG runtime, `\x86\`), `libssl-3.dll` + `libcrypto-3.dll`
 (`third_party/openssl-win32`), `d3dcompiler_47.dll` from `SysWOW64`, the
 downloader's CLI (`third_party\ffmpeg-win32\bin\ffmpeg.exe` + its DLLs, a
 separate process: the app does not link libav here) and `VC_redist.x86.exe` from

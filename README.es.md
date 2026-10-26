@@ -10,7 +10,7 @@
 
 **Reproducción**
 
-- **Dos motores de reproducción**: libmpv en Linux y Windows x64, y un motor FFmpeg/libav propio para Windows x86 (Win7)
+- **Dos motores de reproducción**: libmpv en Linux, Windows x64 y Windows 10 x86, y un motor FFmpeg/libav propio para Windows x86 (Win7)
 - Sondeo de hardware al inicio (AV1 / VP9 / H.264) que elige el perfil de códec que la máquina decodifica de verdad, y baja un escalón solo si un perfil termina decodificando por software
 - Directos (insignia en la miniatura y modo de reproducción en directo), AV1 sintético sobre HLS, retoma donde lo dejaste
 - Cola "A continuación" sembrada con la radio de YouTube (mezcla estilo Music) o con sugerencias estáticas, aleatorio y repetición, mini player

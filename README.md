@@ -10,7 +10,7 @@
 
 **Playback**
 
-- **Two playback engines**: libmpv on Linux and Windows x64, and a from-scratch FFmpeg/libav engine for Windows x86 (Win7)
+- **Two playback engines**: libmpv on Linux, Windows x64 and Windows 10 x86, and a from-scratch FFmpeg/libav engine for Windows x86 (Win7)
 - Startup hardware probe (AV1 / VP9 / H.264) that picks the codec profile the machine really decodes, and steps down by itself when a profile ends up decoding in software
 - Live streams (badge on the thumbnail and live player mode), synthetic AV1 over HLS, resume where you left off
 - "Up next" queue seeded with YouTube radio (Music-style mix) or static suggestions, shuffle and repeat, mini player
