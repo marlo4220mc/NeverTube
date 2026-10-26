@@ -27,10 +27,17 @@ find_package(OpenGL REQUIRED)
 # compiles/verifies the else() branch; the if(WIN32) is build-config and the
 # final Windows build runs on the user's machine/CI.
 #
-# Phase 5: the Windows x86 build (Win7) does NOT link mpv — its only
-# engine is the FfmpegBackend (FFMPEG_DEV_DIR + Qt5 Multimedia, further below).
-# Everything else (Linux and Windows x64) keeps mpv exactly as it was.
-if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+# There are TWO 32-bit Windows builds and they do NOT share an engine:
+#   - Win7 x86 (windows.yml): there is no modern mpv for that target, so its
+#     only engine is the FfmpegBackend (FFMPEG_DEV_DIR + Qt5 Multimedia, below).
+#   - Win10 x86 (windows_x86_win10.yml): shinchiro publishes `mpv-dev-i686` for
+#     Win10+, so it links libmpv exactly like x64 and the FfmpegBackend is not
+#     compiled at all. That build configures with -DNEVERTUBE_MPV_ON_X86=ON.
+# The default (OFF) keeps the Win7 build byte-for-byte on the FFmpeg path.
+option(NEVERTUBE_MPV_ON_X86
+  "Link libmpv on 32-bit Windows (Win10 x86) instead of the FfmpegBackend" OFF)
+
+if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4 AND NOT NEVERTUBE_MPV_ON_X86)
   set(NEVERTUBE_X86_FFMPEG_BUILD ON)
 else()
   set(NEVERTUBE_X86_FFMPEG_BUILD OFF)
@@ -178,8 +185,9 @@ add_executable(nevertube
   localization/localization.qrc
 )
 
-# mpv_backend is only compiled where mpv links (Linux and Windows x64); the
-# x86 build (NEVERTUBE_X86_FFMPEG_BUILD) uses only the FfmpegBackend.
+# mpv_backend is only compiled where mpv links (Linux, Windows x64 and the
+# Windows 10 x86 build with NEVERTUBE_MPV_ON_X86=ON); the Win7 x86 build
+# (NEVERTUBE_X86_FFMPEG_BUILD) uses only the FfmpegBackend.
 if(NOT NEVERTUBE_X86_FFMPEG_BUILD)
   target_sources(nevertube PRIVATE
     src/mpv_backend.cpp

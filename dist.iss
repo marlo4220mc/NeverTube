@@ -1,4 +1,14 @@
-; ── Inno Setup script for nevertube (installable setup built with Inno) ──────
+; ── Inno Setup script for nevertube x86 (32-bit Windows BEFORE 10) ───────────
+; The three installers partition the Windows space and each one refuses the
+; other two (see InitializeSetup in [Code]):
+;
+;   dist.iss              → 32-bit Windows BEFORE 10      → nevertube-setup-win7-x86.exe
+;   dist_x86_win10.iss    → Windows 10/11, 32-bit only    → nevertube-setup-win10-x86.exe
+;   dist64.iss            → Windows 10/11, 64-bit only    → nevertube-setup-x64.exe
+;
+; This one is the Win7 build: NO mpv (its only engine is the FfmpegBackend) and
+; its CRT/imports are pinned to Win7 SP1. Windows 10 x86 has its own bundle with
+; the i686 libmpv, so it is refused here.
 ; Like a typical Inno setup, the deliverable for the target machine is this
 ; INSTALLABLE `setup.exe` that is NOT a `dist/` folder with loose DLLs:
 ; it carries EVERYTHING inside (nevertube.exe + Qt5Widgets/Core/Gui.dll +
@@ -20,7 +30,7 @@ DefaultDirName={autopf}\NeverTube
 DefaultGroupName=NeverTube
 DisableProgramGroupPage=yes
 OutputDir=setup-out
-OutputBaseFilename=nevertube-setup
+OutputBaseFilename=nevertube-setup-win7-x86
 Compression=lzma2
 SolidCompression=yes
 ; Icon of the setup itself (the first thing seen when launching it) and of the
@@ -31,11 +41,14 @@ SetupIconFile=resources\icon\nt.ico
 ; The target machine is Windows x86: the payload is 32-bit and the installer
 ; always installs as 32-bit ({autopf}=Program Files on x86 / Program Files
 ; (x86) on a 64-bit machine). No ArchitecturesInstallIn64BitMode.
-; Architecture GUARD: on 64-bit Windows (10/11) the right thing is the x64
-; build (mpv + HwProbe: VP9/AV1 hardware, 4K); the x86 there is capped to
-; h264 HW + VP9 software and no AV1. See InitializeSetup in [Code]: it cancels
-; with a warning. It is allowed on 32-bit Windows and on 64-bit before 10 (where
-; the x64/modern-mpv build does not run).
+; TARGET GUARD: this bundle is the Win7 one (FfmpegBackend, Win7-pinned CRT and
+; imports), so it refuses EVERY Windows 10 or later. On 64-bit 10/11 the right
+; thing is the x64 build (mpv + HwProbe: VP9/AV1 hardware, 4K) and on 32-bit
+; 10/11 it is the Win10 x86 build (i686 libmpv, same engine as x64); this x86
+; payload on 32-bit Win10 would be the degraded engine for no reason. See
+; InitializeSetup in [Code]: it cancels and NAMES the installer that does work.
+; Still allowed on 32-bit before 10 and on 64-bit before 10 (WOW64, where the
+; x64 build with modern mpv does not run).
 ; admin: needed so ssPostInstall installs VC_redist.x86.exe (Microsoft UCRT
 ; + CRT, the only UCRT with the Win7-compatible variant — the UCRT from the
 ; Windows SDK imports GetSystemTimePreciseAsFileTime, W8+, and does not load on
@@ -106,30 +119,49 @@ Name: "{group}\NeverTube"; Filename: "{app}\nevertube.exe"; IconFilename: "{app}
 Name: "{autodesktop}\NeverTube"; Filename: "{app}\nevertube.exe"; Tasks: desktopicon; IconFilename: "{app}\nt.ico"
 
 [Code]
-// Architecture GUARD (before touching disk): this setup is from the x86 build
-// (32-bit Win7). On 64-bit Windows 10/11 it is cancelled and the user is
-// directed to the x64 build. GetWindowsVersion: Major shl 24 | Minor shl 16 |
-// Build -> Win10/Win11 = $0A000000. It is allowed on 32-bit and on 64-bit < 10
-// (where the x64 build with modern mpv would not run).
-// The message does NOT just say "cancelled": whoever reaches here has 64-bit
-// Windows, i.e. there IS an installer that DOES work for them (the x64 one,
-// the deliverable for Win10/11). Telling them only that it is cancelled
-// leaves them with no way out; no accents or odd characters, like the rest of setup strings.
+// TARGET GUARD (before touching disk). This setup is the x86 build for 32-bit
+// Windows BEFORE 10 (the FfmpegBackend one, Win7-pinned). Windows 10 and later
+// have their own installers, one per architecture, so they are refused here:
+//   - 64-bit 10/11 → dist64.iss (nevertube-setup-x64.exe)
+//   - 32-bit 10/11 → dist_x86_win10.iss (nevertube-setup-win10-x86.exe)
+// GetWindowsVersion: Major shl 24 | Minor shl 16 | Build -> Win10/Win11 =
+// $0A000000. Still allowed on 32-bit before 10 and on 64-bit before 10 (WOW64,
+// where the x64 build with modern mpv would not run).
+// The messages do NOT just say "cancelled": whoever reaches here has a machine
+// where a DIFFERENT installer does work, and cancelling without saying which one
+// leaves the user with no way out. No accents or odd characters, like the rest
+// of the setup strings.
 function InitializeSetup(): Boolean;
+var
+  V: LongWord;
 begin
-  if IsWin64 and (GetWindowsVersion >= $0A000000) then begin
-    MsgBox('Este instalador es solo para Windows 7 de 32 bits.'
-           + #13#10 + #13#10
-           + 'Tu equipo no es un Windows 7 de 32 bits.'
-           + #13#10 + #13#10
-           + 'Para Windows 10/11 de 64 bits usa el instalador x64'
-           + #13#10
-           + '(nevertube-setup-x64.exe) de la pagina de releases.'
-           + #13#10 + #13#10
-           + 'Instalacion cancelada.', mbCriticalError, MB_OK);
+  V := GetWindowsVersion;
+  Result := True;
+
+  if V >= $0A000000 then begin
+    if IsWin64 then begin
+      MsgBox('Este instalador es solo para Windows 7 de 32 bits.'
+             + #13#10 + #13#10
+             + 'Tu equipo tiene Windows 10/11 de 64 bits.'
+             + #13#10 + #13#10
+             + 'Usa el instalador x64'
+             + #13#10
+             + '(nevertube-setup-x64.exe) de la pagina de releases.'
+             + #13#10 + #13#10
+             + 'Instalacion cancelada.', mbCriticalError, MB_OK);
+    end else begin
+      MsgBox('Este instalador es solo para Windows 7 de 32 bits.'
+             + #13#10 + #13#10
+             + 'Tu equipo tiene Windows 10 de 32 bits.'
+             + #13#10 + #13#10
+             + 'Usa el instalador para Windows 10 de 32 bits'
+             + #13#10
+             + '(nevertube-setup-win10-x86.exe) de la pagina de releases.'
+             + #13#10 + #13#10
+             + 'Instalacion cancelada.', mbCriticalError, MB_OK);
+    end;
     Result := False;
-  end else
-    Result := True;
+  end;
 end;
 
 // Microsoft UCRT + CRT for the target machine (Win7 SP1): the Windows SDK UCRT

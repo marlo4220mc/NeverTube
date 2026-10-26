@@ -66,14 +66,15 @@ The player selftest verifies the protected core (hwdec + 33ms timer + render)
 `QOpenGLWidget` just like on Linux; the stall watchdog uses a local micro-seek
 (identical to the `watch_page` fix).
 
-## Phase 5: x86 build WITHOUT mpv (FfmpegBackend)
+## Phase 5: Windows 7 x86 build WITHOUT mpv (FfmpegBackend)
 
-Since Phase 5 the x86 Windows build (32-bit, Win7) does NOT link
+The **Win7** x86 build (32-bit) does NOT link
 libmpv: its only engine is the `FfmpegBackend` (FFmpeg/libav, much lighter:
 ~6 MB of DLLs versus the 64.7 MB of libmpv-2.dll). CMake detects it on its own
 (`WIN32` + 32-bit pointer), also linking `Qt5 Multimedia` (the backend's
 `QAudioSink`). The x64 build (mpv) stays exactly as above
-(`-A x64` + `MPV_DEV_DIR`).
+(`-A x64` + `MPV_DEV_DIR`), and Windows 10 x86 has its own engine choice
+(next section).
 
 **Vendored FFmpeg i686**: there is no public FFmpeg build for 32-bit Windows
 (gyan.dev and BtbN/FFmpeg-Builds are win64 only; MSYS2 retired the i686
@@ -110,7 +111,7 @@ itself) and the DLLs `avcodec-63.dll`, `avformat-63.dll`, `avutil-61.dll`,
 copied: those 5 FFmpeg DLLs go in its place (with no additional external
 dependencies).
 
-What changes in x86 with respect to the mpv sections of this document:
+What changes in the Win7 x86 build with respect to the mpv sections of this document:
 
 - `--selftest-player` verifies only the 33 ms timer and that the backend is
   alive (there is no `hwdec=auto` without mpv); the real playback gate is
@@ -122,6 +123,51 @@ What changes in x86 with respect to the mpv sections of this document:
   (`streamDecodeInfoReady` → `hwdecCurrent()=="no"`) covers the machines
   without HW.
 - Ajustes → "Volver a detectar" does not appear (there is no probe to relaunch).
+
+## Windows 10 x86 build WITH mpv (i686, same engine as x64)
+
+The 32-bit build for Windows 10/11 is **not** the Win7 one. shinchiro publishes
+`mpv-dev-i686` for Win10+ (same release as the x64 package), so this build links
+libmpv and uses `MpvBackend` exactly like x64: `hwdec=auto`, `HwProbe`, the
+codec ladder and Ajustes → "Volver a detectar hardware". The `FfmpegBackend` is
+not compiled at all (no `Qt5 Multimedia`, no `FFMPEG_DEV_DIR`).
+
+CMake needs the explicit switch, because by default **every** 32-bit Windows
+target is taken to be the Win7 build and sent to FFmpeg:
+
+```sh
+# 1) the dev package (headers + libmpv-2.dll), from the release the CI uses
+#    (MPV_TAG / MPV_ASSET at the top of windows_x86_win10.yml)
+# 2) MSVC import-lib from the DLL: the package only ships the MinGW
+#    libmpv.dll.a. dumpbin /exports -> .def -> lib /machine:x86
+#    (find_text = mpv_\w*), saved as mpv-2.lib inside the package folder.
+cmake -B build -A Win32 -DNEVERTUBE_MPV_ON_X86=ON `
+      -DCMAKE_PREFIX_PATH="%CD%\third_party\qt-win32\lib\cmake" `
+      -DMPV_DEV_DIR=<ruta al mpv-dev i686>
+cmake --build build --config Release
+```
+
+`-DNEVERTUBE_MPV_ON_X86=ON` turns `NEVERTUBE_X86_FFMPEG_BUILD` off, so:
+
+- `mpv_backend.cpp` is compiled and `MPV::MPV` is linked (the x64 path).
+- `NEVERTUBE_NO_MPV` is **not** defined: `HwProbe`, the settings page's
+  "redetect" button, the reactive codec ladder and the AV1 handling behave as on
+  x64. In particular AV1 is only requested when the probe found AV1 hardware.
+- `FFMPEG_DEV_DIR` is not used and `Qt5 Multimedia` is not needed.
+
+Packaging (what `dist_x86_win10.iss` expects in `dist\`): Qt via `windeployqt`
+(x86 tree), `libmpv-2.dll`, the 32-bit `vulkan-1.dll` (modern libmpv imports it
+statically; LunarG runtime, `\x86\`), `libssl-3.dll` + `libcrypto-3.dll`
+(`third_party/openssl-win32`), `d3dcompiler_47.dll` from `SysWOW64`, the
+downloader's CLI (`third_party\ffmpeg-win32\bin\ffmpeg.exe` + its DLLs, a
+separate process: the app does not link libav here) and `VC_redist.x86.exe` from
+**vs/17** (`aka.ms/vs/17`; the Win10 line has no Win7 import restriction).
+Toolset: the default of `windows-latest`, no `-T v142` — the v142/SDK-19041 pin
+belongs to Win7.
+
+The installer is exclusive to this target: it cancels on 64-bit Windows (→
+`nevertube-setup-x64.exe`) and on Windows before 10 (→
+`nevertube-setup-win7-x86.exe`).
 
 ## Vendored Qt and OpenSSL
 

@@ -319,9 +319,11 @@ jobs:
           # IconFilename) and the same one embedded in the .exe (resources/nt.rc);
           # without this gate, a [Files] edit that leaves it out would create the
           # shortcuts with the default Windows icon and nobody would notice
-          # locally. VC_redist.x86.exe is also the proof that dist.iss (x86) was
-          # compiled and not dist64.iss (that one packages VC_redist.x64.exe).
-          $setup = 'setup-out\nevertube-setup.exe'
+          # locally. VC_redist.x86.exe is also the proof that dist.iss (Win7 x86)
+          # was compiled and not one of the other two (dist_x86_win10.iss carries
+          # the same redist but a different output name; dist64.iss carries
+          # VC_redist.x64.exe).
+          $setup = 'setup-out\nevertube-setup-win7-x86.exe'
           if (-not (Test-Path $setup)) {
             Write-Host "no está $setup"; exit 1 }
           $sz = (Get-Item $setup).Length
@@ -488,6 +490,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nevertube-windows-setup
-          path: setup-out/
+          name: nevertube-windows-win7-x86-setup
+          path: setup-out/nevertube-setup-win7-x86.exe
           retention-days: 21

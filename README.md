@@ -48,14 +48,15 @@ Built per target in CI; Linux packages are x86_64 only.
 | `.rpm` | Fedora (RHEL-family with matching sonames) | `nevertube-<version>-1.x86_64.rpm` |
 | pacman | Arch Linux | `nevertube-<version>-x86_64.pkg.tar.zst` |
 | setup.exe | Windows 10 / 11 (x64) | `nevertube-setup-x64.exe` |
-| setup.exe | Windows 7 (x86) | `nevertube-setup.exe` |
+| setup.exe | Windows 10 (x86) | `nevertube-setup-win10-x86.exe` |
+| setup.exe | Windows 7 (x86) | `nevertube-setup-win7-x86.exe` |
 
 ### Install
 
 - Debian / Ubuntu: `sudo apt install ./nevertube_<version>_amd64.deb` — apt installs the declared dependencies automatically.
 - Fedora: `sudo dnf install ./nevertube-<version>-1.x86_64.rpm` — dnf resolves the soname requirements (`ffmpeg-free`, or RPM Fusion's ffmpeg if already installed).
 - Arch: `sudo pacman -U nevertube-<version>-x86_64.pkg.tar.zst`
-- Windows: run the setup; it installs the VC++ redistributable it needs.
+- Windows: run the setup for your system — `nevertube-setup-win7-x86.exe` (32-bit Windows 7), `nevertube-setup-win10-x86.exe` (32-bit Windows 10) or `nevertube-setup-x64.exe` (64-bit Windows 10/11). Each one refuses the other two and tells you which to use; they install the VC++ redistributable they need.
 
 The binary is `nevertube`. On Linux the `.desktop` entry and the icons are installed in the `hicolor` theme, so the app shows up in the menu named **NeverTube**.
 
