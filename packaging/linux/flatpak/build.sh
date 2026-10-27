@@ -5,7 +5,8 @@
 # Run on a Linux box with flatpak + flatpak-builder >= 1.4 and appstreamcli
 # >= 1.0 WITH its compose component (on Ubuntu 24.04 that is a second package,
 # appstream-compose). In CI the runner is a plain ubuntu-24.04 with those from apt
-# (see the linux-flatpak job of .github/workflows/release.yml): no container image
+# (see the build-flatpak job of .github/workflows/linux.yml, or linux-flatpak of
+# release.yml): no container image
 # and no privileges involved. Version 1.4 matters: older builders compose the
 # AppStream metadata with a binary that lives INSIDE the SDK, and the SDK this
 # manifest uses does not ship it any more (the preflight below explains it).

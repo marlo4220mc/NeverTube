@@ -1,0 +1,459 @@
+name: Windows 10 x86 (mpv i686 — Win10 32 bits)
+
+# Windows 10/11 **de 32 bits**. It is the third deliverable of the Windows
+# family, and the three partition the space (each installer refuses the other
+# two, see the InitializeSetup of dist*.iss):
+#
+#   dist.iss              → 32-bit Windows BEFORE 10 → nevertube-setup-win7-x86.exe
+#   dist_x86_win10.iss    → Windows 10/11, 32-bit    → nevertube-setup-win10-x86.exe
+#   dist64.iss            → Windows 10/11, 64-bit    → nevertube-setup-x64.exe
+#
+# WHY THIS BUILD EXISTS (it is not the Win7 one re-badged): the Win7 x86 build
+# has no mpv — its only engine is the FfmpegBackend, with the CRT and the
+# imports pinned to Win7 SP1. On the Win10 line that pin is unnecessary, and a
+# modern i686 libmpv exists for Win10+, so here the app links
+# **an i686 libmpv** (MpvBackend, hwdec=auto, HwProbe, AV1/VP9 when the GPU can)
+# and the FfmpegBackend is not even compiled. CMake needs
+# -DNEVERTUBE_MPV_ON_X86=ON for that: by default a 32-bit Windows target is
+# assumed to be the Win7 build and goes to FFmpeg.
+#
+# Source of that i686 libmpv (MEASURED, not assumed): the `mpv-player-windows`
+# project on SourceForge, which is the SAME mpv-winbuild-cmake that shinchiro
+# publishes on GitHub with the i686 target enabled (Predidit's Win32 repo is the
+# same build system, and its 2025-12 release was the previous pin here).
+#
+# The i686 builds break in a WINDOW, and it is an OpenSSL bug, not an mpv one:
+# the OpenSSL 3 that libmpv links statically took commit `1e1ea715` (2026-03-31),
+# whose `CRYPTO_atomic_*` asserts `lock != NULL`; on 32-bit Windows that branch
+# runs (`!OSSL_USE_INTERLOCKEDOR64`) and the process aborts the moment mpv
+# initializes TLS: `OpenSSL internal error: assertion failed: lock != NULL`.
+# x64 never reaches it, which is why only the i686 deliverable is affected.
+# Upstream removed the assert in `5dfc09b1` (2026-09-01), but the OpenSSL release
+# these builds link does not carry that fix yet, so every i686 package from
+# 2026-04-05 on still aborts (7 of them measured, boundaries included, up to the
+# newest published, 2026-10-18). MEASURED 2026-10-26 with a real 32-bit host
+# (mpv_create + loadfile https): 2026-03-01 plays (exit 0,
+# MPV_EVENT_FILE_LOADED); 2026-04-05, 2026-08-30, 2026-09-20, 2026-09-27,
+# 2026-10-04, 2026-10-11 and 2026-10-18 abort, and so do shinchiro's GitHub
+# i686 packages of 2026-09/10 and Predidit's 2026-06/08/09 releases.
+#
+# So the pin is the LAST i686 build that initializes TLS cleanly, not "latest":
+# mpv 0.41.0-243-g05fac7f, same `libmpv-2.dll` / `include/mpv/*.h` layout, so
+# the rest of the pipeline is unchanged. When the upstream OpenSSL fix reaches
+# the builds, bump MPV_URL/MPV_ASSET/MPV_SHA256 and re-run this job: the smoke
+# (`--selftest-ssl`, the offline list) plus a playback check is what tells a
+# good build from a bad one.
+#
+# What it does NOT change: the downloader's mux still runs the vendored i686
+# `ffmpeg.exe` (the CLI, a separate process; the app does not link libav here),
+# and the TLS backend is the same vendored OpenSSL 3.5.9 x86 that Qt5Network
+# needs.
+#
+# Trigger: manual (Actions → Run workflow) plus a push that touches this file.
+# It does NOT run on every push to main: the same policy as windows.yml and
+# windows_x64.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      # The online selftests (real TLS handshake + YouTube search/browse/feeds)
+      # are informational and run ONLY when this box is ticked: they are never
+      # part of the gate, so a rate-limited or empty YouTube response cannot turn
+      # a build red. Leave it off for a normal validation.
+      online_selftests:
+        description: 'Run the online selftests (TLS handshake + YouTube search/browse/feeds). Informational.'
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows_x86_win10.yml'
+
+jobs:
+  windows-x86-win10:
+    # windows-latest (the modern toolset), not the windows-2022 + `-T v142` pin
+    # of the Win7 job: the Win10 line has no MSVC-14.29/UCRT requirement, and the
+    # x64 job already builds with this image. The CRT of the target comes from
+    # `VC_redist.x86.exe` vs/17 (below).
+    runs-on: windows-latest
+    env:
+      NEVERTUBE_DEBUG: 1
+      # i686 libmpv, from `mpv-player-windows` (SourceForge): the mpv-winbuild-cmake
+      # tree with the i686 target enabled. Pinned by URL + SHA-256 on purpose (see
+      # the header): it is the newest i686 build whose TLS init does not abort with
+      # "lock != NULL" (2026-03-01, mpv 0.41.0-243-g05fac7f); everything published
+      # after it links an OpenSSL 3 with the broken `1e1ea715` assert. The package
+      # brings `libmpv-2.dll` + `include/mpv/*.h`; its `libmpv.dll.a` is MinGW, so
+      # the MSVC import-lib is generated from the DLL.
+      MPV_URL: 'https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-i686-20260301-git-05fac7f.7z/download'
+      MPV_ASSET: 'mpv-dev-i686-20260301-git-05fac7f.7z'
+      MPV_SHA256: '5141065921137677de1511d6535555cafe2ae74fd7a43c23a484b9d46b1975a7'
+      # Qt x86 (the same tree the Win7 build uses: it is what runs on 32-bit
+      # Windows, and it works on Win10 too). Downloaded from a release of a
+      # separate build repository, never compiled here; the digest is pinned so
+      # a rebuilt archive cannot pass as the tested one.
+      QT_TAG: qt-5.15.19-kde-r96
+      QT_SHA256: fb1320b5cadeabebc8c4c151d1379923da46a4736a09844f9a9f9d98d236cbc9
+      QT_REPO: marlo4220mc/qt5-kde-win-build
+    steps:
+      - uses: actions/checkout@v4
+
+      # Qt tree from the build repository's release, verified by SHA-256. The
+      # archive carries the tree inside a top-level qt-win32/ folder, so it is
+      # flattened BEFORE looking for anything (checking first is the trap: the
+      # gate would fire on a perfectly good archive).
+      - name: Fetch the prebuilt Qt tree (x86)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = Join-Path $env:GITHUB_WORKSPACE 'third_party\qt-win32'
+          $url = "https://github.com/$env:QT_REPO/releases/download/$env:QT_TAG/qt-win32.7z"
+          $arc = Join-Path $env:RUNNER_TEMP 'qt-win32.7z'
+          "-> $url"
+          Invoke-WebRequest -Uri $url -OutFile $arc -UseBasicParsing
+          $got = (Get-FileHash -Algorithm SHA256 $arc).Hash.ToLowerInvariant()
+          if ($env:QT_SHA256 -notmatch '^[0-9a-f]{64}$' -or $got -ne $env:QT_SHA256) {
+            throw "sha256 mismatch for qt-win32.7z: got $got, pinned $env:QT_SHA256"
+          }
+          "sha256 OK: $got"
+          $sevenZip = "${env:ProgramFiles}\7-Zip\7z.exe"
+          if (-not (Test-Path $sevenZip)) { throw "7z.exe not found (expected at $sevenZip)" }
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          & $sevenZip x $arc "-o$dest" -y | Out-Null
+          $inner = Join-Path $dest 'qt-win32'
+          if (Test-Path $inner) {
+            Get-ChildItem $inner -Force | Move-Item -Destination $dest -Force
+            Remove-Item $inner -Recurse -Force
+          }
+          if (-not (Test-Path (Join-Path $dest 'bin\Qt5Core.dll'))) {
+            throw "extracted tree has no bin\Qt5Core.dll: $dest"
+          }
+          "Qt tree ready: $((Get-ChildItem $dest -Recurse -File).Count) files"
+          "Qt5_DIR=$(Join-Path $dest 'lib\cmake')" >> $env:GITHUB_ENV
+
+      # i686 libmpv, newest build whose TLS init is clean (see the header). The
+      # dev package already brings `libmpv-2.dll` with the right name and
+      # `include/mpv/*.h`; it does NOT bring an MSVC import-lib (its
+      # `libmpv.dll.a` is MinGW), so it is generated from the DLL in the
+      # configure step.
+      - name: bajar mpv-dev i686 (2026-03-01, Win10 32 bits)
+        shell: pwsh
+        run: |
+          $url = $env:MPV_URL
+          if (-not $url -or -not $env:MPV_SHA256) { Write-Host 'MPV_URL/MPV_SHA256 vacíos'; exit 1 }
+          # The asset name is part of the pin too: a URL that does not carry it
+          # means the two were bumped apart (the SourceForge URL ends in
+          # `<asset>/download`, so this is a Contains, not an EndsWith).
+          if (-not $url.Contains($env:MPV_ASSET)) {
+            Write-Host "MPV_URL no lleva MPV_ASSET ($($env:MPV_ASSET))"; exit 1 }
+          Write-Host "mpv: $($env:MPV_ASSET) <- $url"
+          $arc = Join-Path $env:RUNNER_TEMP 'mpv-dev.7z'
+          # -L is mandatory: SourceForge answers with a redirect to a mirror. A
+          # dead link returns an HTML page instead of the archive, and the
+          # sha256 below is what turns that into a red build.
+          curl.exe -sL --retry 3 --retry-delay 5 -o $arc $url
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $got = (Get-FileHash -Algorithm SHA256 $arc).Hash.ToLowerInvariant()
+          if ($env:MPV_SHA256 -notmatch '^[0-9a-f]{64}$' -or $got -ne $env:MPV_SHA256) {
+            throw "sha256 mismatch for mpv-dev: got $got, pinned $env:MPV_SHA256"
+          }
+          "sha256 OK: $got"
+          & "$env:ProgramFiles/7-Zip/7z.exe" x -y -ompv-dev $arc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # .FullName, not the object: PS 5.1's FileInfo.ToString() is the name
+          # only, and `Get-Item` on it resolves against the CWD (PS 7 prints the
+          # full path, which is why this only broke outside CI).
+          $dll = (Get-ChildItem mpv-dev -Recurse -Filter libmpv-2.dll |
+            Select-Object -First 1).FullName
+          if (-not $dll) { Write-Host 'el paquete i686 no trae libmpv-2.dll'; exit 1 }
+          $hdr = (Get-ChildItem mpv-dev -Recurse -Filter client.h |
+            Where-Object { $_.FullName -match '\\mpv\\' } |
+            Select-Object -First 1).FullName
+          if (-not $hdr) { Write-Host 'el paquete i686 no trae include/mpv/client.h'; exit 1 }
+          Get-Item $dll, $hdr | Select-Object FullName, Length
+
+      # vulkan-1.dll: some modern libmpv builds import it STATICALLY, and the
+      # 32-bit loader needs the 32-bit copy. On Win10 it usually comes with the
+      # GPU driver, but it is bundled so as not to depend on that (official
+      # LunarG runtime, without installing anything on the runner). MEASURED on
+      # the pinned i686 libmpv (2026-03-01): it does NOT import vulkan-1.dll
+      # (mpv gets its device via OpenGL / D3D there), so the step is kept as
+      # belt-and-braces; the 2026-10 builds DO import it, so the day the pin
+      # moves forward this DLL becomes mandatory (the missing-gate and the
+      # import table would catch a bad step).
+      - name: bajar vulkan-1.dll (runtime LunarG x86)
+        shell: pwsh
+        run: |
+          curl.exe -sL -o vulkan-rt.zip `
+            https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime-components.zip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:ProgramFiles/7-Zip/7z.exe" x -y -ovulkan-rt vulkan-rt.zip | Out-Null
+          $vk = Get-ChildItem vulkan-rt -Recurse -Filter vulkan-1.dll |
+            Where-Object { $_.FullName -match '\\x86\\' } | Select-Object -First 1
+          if (-not $vk) { Write-Host 'vulkan-1.dll x86 no encontrada'; exit 1 }
+          Copy-Item $vk.FullName vulkan-1.dll
+          Get-Item vulkan-1.dll | Select-Object Name, Length
+
+      # OpenSSL 3.5.9 x86, from the repository (third_party/openssl-win32, the
+      # same tree the Win7 job uses). Qt5Network is built with
+      # -openssl-runtime, so it resolves libssl-3.dll / libcrypto-3.dll at run
+      # time; windeployqt does NOT deploy them and without them every HTTPS
+      # fails with "TLS initialization failed".
+      - name: copiar OpenSSL 3.5.9 x86 (DLLs TLS de Qt5Network)
+        shell: pwsh
+        run: |
+          $src = Join-Path $env:GITHUB_WORKSPACE 'third_party\openssl-win32'
+          foreach ($n in @('libssl-3.dll','libcrypto-3.dll')) {
+            $f = Join-Path $src $n
+            if (-not (Test-Path $f)) { Write-Host "falta $f"; exit 1 }
+            Copy-Item $f .
+          }
+          Get-Item libssl-3.dll, libcrypto-3.dll | Select-Object Name, Length
+
+      # MSVC x86 import-lib from the DLL: dumpbin /exports -> .def ->
+      # lib /machine:x86 -> mpv-2.lib (and libmpv-2.lib, in case CMake's
+      # find_library looks for the other name). Then configure with -A Win32 and
+      # -DNEVERTUBE_MPV_ON_X86=ON, which is what tells CMake that THIS 32-bit
+      # build links mpv instead of the FfmpegBackend.
+      - name: configure (Win32 + MPV_DEV_DIR + import-lib MSVC x86)
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { Write-Host "vswhere no está"; exit 1 }
+          $vspath = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $vspath) { Write-Host "VS con toolset VC no hallado"; exit 1 }
+          $msvc = Get-ChildItem (Join-Path $vspath 'VC\Tools\MSVC') -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+          $bindir = Join-Path $msvc.FullName 'bin\Hostx64\x64'
+          $dumpbin = Join-Path $bindir 'dumpbin.exe'
+          $libexe  = Join-Path $bindir 'lib.exe'
+          if (-not (Test-Path $dumpbin) -or -not (Test-Path $libexe)) {
+            Write-Host "dumpbin/lib no hallados en $bindir"; exit 1 }
+
+          $dll = (Get-ChildItem mpv-dev -Recurse -Filter libmpv-2.dll |
+            Select-Object -First 1).FullName
+          if (-not $dll) { Write-Host "libmpv-2.dll no está en mpv-dev"; exit 1 }
+          $def = Join-Path $env:RUNNER_TEMP 'libmpv.def'
+          Set-Content -Encoding ASCII $def 'LIBRARY libmpv-2.dll'
+          Add-Content -Encoding ASCII $def 'EXPORTS'
+          $exports = & $dumpbin /exports $dll
+          if ($LASTEXITCODE -ne 0) { Write-Host "dumpbin falló"; exit $LASTEXITCODE }
+          foreach ($l in $exports) {
+            if ($l -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(mpv_\w*)\s*$') {
+              $Matches[1] | Add-Content -Encoding ASCII $def
+            }
+          }
+          $dir = (Resolve-Path mpv-dev).Path
+          foreach ($n in @('mpv-2.lib', 'libmpv-2.lib')) {
+            & $libexe /machine:x86 /def:$def "/out:$dir\$n" *> libmpv-lib.log
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "lib falló ($n):"; Get-Content libmpv-lib.log; exit $LASTEXITCODE }
+          }
+          cmake -S . -B build-win `
+            -DCMAKE_BUILD_TYPE=Release `
+            -A Win32 `
+            -DNEVERTUBE_MPV_ON_X86=ON `
+            -DCMAKE_PREFIX_PATH="$env:Qt5_DIR" `
+            "-DMPV_DEV_DIR=$dir"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: build Release (x86)
+        shell: pwsh
+        run: |
+          cmake --build build-win --config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem build-win/Release -ErrorAction SilentlyContinue |
+            Select-Object Name, Length
+
+      - name: instalar Inno Setup (choco)
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # INSTALLABLE package (setup.exe with Inno Setup), not a portable zip.
+      # dist_x86_win10.iss (NOT dist.iss, which is the Win7 one and refuses
+      # Windows 10, and NOT dist64.iss, which packages the x64 payload).
+      - name: empaquetar setup.exe instalable (windeployqt x86 + mpv + vulkan + openssl + iscc)
+        shell: pwsh
+        run: |
+          $exe = "build-win\Release\nevertube.exe"
+          if (-not (Test-Path $exe)) { Write-Host "no está $exe"; exit 1 }
+          Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
+          $qtroot = Split-Path (Split-Path $env:Qt5_DIR)
+          & "$qtroot\bin\windeployqt.exe" --release --no-translations `
+            --compiler-runtime $exe -dir dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # windeployqt may drop a vc_redist folder; the setup installs the
+          # real redistributable (VC_redist.x86.exe, vs/17) from ssPostInstall.
+          Remove-Item dist\vc_redist -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item $exe dist\nevertube.exe
+          Copy-Item (Get-ChildItem mpv-dev -Recurse -Filter libmpv-2.dll |
+            Select-Object -First 1).FullName dist\
+          Copy-Item vulkan-1.dll dist\
+          Copy-Item libssl-3.dll dist\
+          Copy-Item libcrypto-3.dll dist\
+          # 32-bit D3D shader compiler: Qt with ANGLE needs it and SysWOW64 is
+          # where the 32-bit copy lives on the runner. windeployqt usually
+          # deploys it; the copy is the belt and braces, and a missing one is a
+          # warning (ANGLE is opt-in on x64 only).
+          $d3d = "$env:SystemRoot\SysWOW64\d3dcompiler_47.dll"
+          if (Test-Path $d3d) { Copy-Item $d3d dist\ -Force }
+          if (-not (Test-Path 'dist\d3dcompiler_47.dll')) {
+            Write-Host 'WARNING: d3dcompiler_47.dll no esta en dist\'
+          }
+          # The ffmpeg of OUR build (third_party/ffmpeg-win32): it is NOT
+          # needed to play (this build uses mpv), it is what the DOWNLOADER
+          # runs to join the two tracks of a downloaded video. Without it the
+          # download finishes but the mux fails ("ffmpeg was not found").
+          Copy-Item third_party\ffmpeg-win32\bin\*.dll dist\
+          Copy-Item third_party\ffmpeg-win32\bin\ffmpeg.exe dist\
+          curl.exe -sL -o dist\VC_redist.x86.exe `
+            https://aka.ms/vs/17/release/vc_redist.x86.exe
+          if ($LASTEXITCODE -ne 0) { Write-Host 'VC_redist.x86 no bajó'; exit 1 }
+          $missing = @('libmpv-2.dll', 'vulkan-1.dll', 'libssl-3.dll',
+            'libcrypto-3.dll', 'VC_redist.x86.exe', 'ffmpeg.exe') |
+            Where-Object { -not (Test-Path (Join-Path 'dist' $_)) }
+          if ($missing) { Write-Host "dist incompleto: faltan $missing"; exit 1 }
+          Get-ChildItem dist | Select-Object Name, Length
+          $iscc = Get-ChildItem "$env:ProgramFiles\Inno Setup*\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $iscc) { Write-Host "ISCC.exe no encontrado"; exit 1 }
+          # iscc prints its own manifest: one `Compressing: <path>` line per
+          # file it puts into the setup. It is saved to iscc.log because what is
+          # in dist\ and what ACTUALLY ends up inside setup.exe need not match
+          # (a pattern misspelled in [Files] compiles the same).
+          & $iscc.FullName dist_x86_win10.iss 2>&1 | Tee-Object -FilePath iscc.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $setup = "setup-out\nevertube-setup-win10-x86.exe"
+          if (-not (Test-Path $setup)) { Write-Host "no se generó $setup"; exit 1 }
+          Get-Item $setup | Select-Object Name, Length
+
+      # THREE gates, and each one covers a way this package can be silently
+      # wrong:
+      # 1) The payload is REALLY 32-bit. It is the whole point of the job: if
+      #    the CMake arch or the mpv import-lib were wrong, an x64 binary would
+      #    compile and run on the runner and only fail on the target machine.
+      #    `dumpbin /headers` prints `machine (x86)` for i386.
+      # 2) The .iss still REFUSES the other two systems. Deleting the guard does
+      #    not break the build, so the strings are pinned here: a Windows 10 x86
+      #    setup that installs on x64 (or on Win7) is exactly the bug this
+      #    deliverable exists to avoid.
+      # 3) SIZE + MANIFEST of the setup, read from iscc.log (not from dist\):
+      #    a [Files] pattern that misses a file compiles the same.
+      - name: gates del paquete (32 bits real + guard del .iss + manifiesto de iscc)
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vspath = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $msvc = Get-ChildItem (Join-Path $vspath 'VC\Tools\MSVC') -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+          $dumpbin = Join-Path $msvc.FullName 'bin\Hostx64\x64\dumpbin.exe'
+          foreach ($f in @('dist\nevertube.exe', 'dist\libmpv-2.dll')) {
+            $h = & $dumpbin /headers $f
+            if ($LASTEXITCODE -ne 0) { Write-Host "dumpbin falló en $f"; exit $LASTEXITCODE }
+            if (-not ($h | Select-String -SimpleMatch 'machine (x86)')) {
+              Write-Host "¡$f NO es un PE de 32 bits! (el job es x86)"
+              exit 1
+            }
+          }
+          Write-Host 'gate 32 bits OK: nevertube.exe y libmpv-2.dll son machine (x86)'
+
+          # The guard of the installer, pinned as source text. `$0A000000` is the
+          # Win10 marker of GetWindowsVersion and `IsWin64` is what refuses the
+          # 64-bit machines; both must stay in the .iss, and the output name
+          # proves which script is the one being compiled.
+          $iss = Get-Content dist_x86_win10.iss -Raw
+          foreach ($needle in @('IsWin64', '$0A000000',
+                                'OutputBaseFilename=nevertube-setup-win10-x86',
+                                'nevertube-setup-x64.exe',
+                                'nevertube-setup-win7-x86.exe')) {
+            if (-not $iss.Contains($needle)) {
+              Write-Host "el .iss perdió '$needle': el instalador dejaría de ser exclusivo de Win10 x86"
+              exit 1
+            }
+          }
+          Write-Host 'gate del guard OK: el setup rechaza x64 y Windows anterior a 10'
+
+          $setup = "setup-out\nevertube-setup-win10-x86.exe"
+          $sz = (Get-Item $setup).Length
+          Write-Host ("setup: {0:N1} MB" -f ($sz / 1MB))
+          if ($sz -lt 5MB) {
+            Write-Host "el setup son menos de 5 MB: el paquete va vacío o incompleto"
+            exit 1 }
+          $packed = foreach ($l in (Get-Content iscc.log)) {
+            if ($l -match 'Compressing:\s+(.+)$') {
+              $p = $matches[1].Trim() -replace '\s+\([^)]*\)$',''
+              [System.IO.Path]::GetFileName($p)
+            }
+          }
+          if (-not $packed) {
+            Write-Host "no se pudo leer el manifiesto de iscc (¿cambió su formato?)"
+            exit 1 }
+          $need = @('nevertube.exe', 'qwindows.dll', 'libmpv-2.dll',
+            'vulkan-1.dll', 'libssl-3.dll', 'libcrypto-3.dll',
+            'VC_redist.x86.exe', 'nt.ico',
+            'ffmpeg.exe', 'avformat-63.dll', 'libmp3lame-0.dll')
+          $missing = $need | Where-Object { $packed -notcontains $_ }
+          if ($missing) { Write-Host "el setup NO lleva: $missing"; exit 1 }
+          Write-Host "gate del setup OK: el instalador lleva los $($need.Count) ficheros clave"
+
+      # Smoke test from dist\ (with all its DLL rigging). EVERYTHING in this step
+      # is OFFLINE: the network selftests are separated at the end and only run
+      # on a manual dispatch with the online_selftests input ticked, because
+      # YouTube can rate-limit a runner or answer without a channel and that
+      # must never fail a build.
+      # WITHOUT --selftest-hwprobe / --selftest-player: no GPU on the VM. WITH
+      # libmpv next to the exe, so this also catches a missing DLL of the engine
+      # (the app would still start, but the player selftests would not).
+      - name: smoke test (offscreen, offline) desde dist
+        shell: pwsh
+        run: |
+          $qtsrc = Split-Path (Split-Path $env:Qt5_DIR)
+          Copy-Item "$qtsrc\plugins\platforms\qoffscreen.dll" dist\platforms\ -Force
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          function Invoke-Selftest([string]$flag) {
+            $p = Start-Process -FilePath '.\dist\nevertube.exe' -ArgumentList $flag -Wait -PassThru -NoNewWindow
+            Write-Host "smoke $flag exit=$($p.ExitCode)"
+            return $p.ExitCode
+          }
+          foreach ($t in @('--selftest-ssl', '--selftest-db', '--selftest-grid',
+                           '--selftest-theme', '--selftest-glyphs',
+                           '--selftest-i18n',
+                           '--selftest-suggest-parse', '--selftest-suggest-panel',
+                           '--selftest-suggest-gestures', '--selftest-dates',
+                           '--selftest-variants', '--selftest-reels',
+                           '--selftest-download', '--selftest-download-button',
+                           '--selftest-download-folder',
+                           '--selftest-download-settings',
+                           '--selftest-download-transport',
+                           '--selftest-download-resume',
+                           '--selftest-single-instance',
+                           '--selftest-video-url',
+                           '--selftest-search-url',
+                           '--selftest-settings-page')) {
+            $rc = Invoke-Selftest $t
+            if ($rc -ne 0) {
+              Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
+              exit $rc }
+          }
+          $online = ('${{ inputs.online_selftests }}' -eq 'true')
+          if ($online) {
+            foreach ($t in @('--selftest-tls', '--selftest-search',
+                             '--selftest-browse', '--selftest-feeds')) {
+              $rc = Invoke-Selftest $t
+              if ($rc -ne 0) { Write-Host "::warning::online $t failed (informational, not a gate)" }
+            }
+          } else {
+            Write-Host 'online selftests (tls/search/browse/feeds) SKIPPED: only on manual dispatch with online_selftests=true'
+          }
+          Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nevertube-windows-win10-x86-setup
+          path: setup-out/nevertube-setup-win10-x86.exe
+          retention-days: 21

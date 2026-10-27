@@ -28,9 +28,9 @@ find_package(OpenGL REQUIRED)
 # final Windows build runs on the user's machine/CI.
 #
 # There are TWO 32-bit Windows builds and they do NOT share an engine:
-#   - Win7 x86 (windows-win7-x86 job): there is no modern mpv for that target, so its
+#   - Win7 x86 (windows.yml): there is no modern mpv for that target, so its
 #     only engine is the FfmpegBackend (FFMPEG_DEV_DIR + Qt5 Multimedia, below).
-#   - Win10 x86 (windows-win10-x86 job): an i686 mpv dev-package does exist for
+#   - Win10 x86 (windows_x86_win10.yml): an i686 mpv dev-package does exist for
 #     Win10+ (mpv-player-windows / mpv-winbuild-cmake), so it links libmpv
 #     exactly like x64 and the FfmpegBackend is not compiled at all. That build
 #     configures with -DNEVERTUBE_MPV_ON_X86=ON. The pin there is the newest

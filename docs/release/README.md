@@ -1,8 +1,17 @@
 # Cutting a release
 
-One workflow, one commit, one release: `.github/workflows/release.yml` builds
-the eight deliverables, computes their checksums and publishes the GitHub
-Release with the notes of [`notes.md`](notes.md).
+One commit, one release: `.github/workflows/release.yml` builds the eight
+deliverables, computes their checksums and publishes the GitHub Release with the
+notes of [`notes.md`](notes.md).
+
+It is the fifth workflow of the repository, not a replacement: `linux.yml`,
+`windows.yml`, `windows_x86_win10.yml` and `windows_x64.yml` still exist and
+carry the same steps, and they are what you run when you only want to re-check
+one platform (`gh workflow run linux.yml --ref main`, or a push that touches
+that file). They never publish. What only `release.yml` can do is: build
+**everything from one commit**, check the version, and publish.
+
+
 
 | job | runner | produces |
 |---|---|---|
@@ -19,7 +28,9 @@ Release with the notes of [`notes.md`](notes.md).
 | `release` | `ubuntu-24.04` | renames, `SHA256SUMS.txt`, the GitHub Release |
 
 The `release` job `needs` all eight builds: a tag that publishes with one of
-them missing is not possible. That is the whole point of the single file.
+them missing is not possible. Publishing in one file is what makes that
+guarantee: the per-platform workflows are the same builds, but no one of them
+can publish.
 
 ## 1. Set the version
 
@@ -48,7 +59,9 @@ alpha banner). Each ecosystem gets the spelling it accepts:
 ## 2. Dry run (no release is created)
 
 Before tagging, build everything from the branch you are on and look at the
-artifacts:
+artifacts. To redo a single platform, prefer the per-platform workflow of that
+platform (`gh workflow run linux.yml --ref main`): it is the same build without
+paying for the other jobs. This is the full pipeline:
 
 ```sh
 gh workflow run release.yml --ref main
@@ -58,7 +71,7 @@ gh run watch
 Without `publish` ticked nothing is published: the packages are left as
 artifacts of the run (21 days), named `linux-deb-2204`, `linux-rpm`,
 `nevertube-windows-x64-setup`, ... This is the mode to use while touching this
-workflow or a packaging recipe. Add `-f online_selftests=true` if you also want
+workflow or several packaging recipes at once. Add `-f online_selftests=true` if you also want
 the report of the network/GPU selftests (they never fail the job).
 
 The version of a dry run is `0.2.0-dev.<run number>`, so the packages do not
@@ -80,6 +93,11 @@ rather than failing, so a flaky runner does not cost a new version number.
 Publishing by hand without a tag also works: `gh workflow run release.yml
 -f version=0.2.0-alpha.1 -f publish=true` creates `v0.2.0-alpha.1` on the
 commit that was run.
+
+Note that a push to `main` starts nothing: the per-platform workflows only
+re-run when they themselves are touched, and `release.yml` only on a tag or by
+dispatch. A change to a packaging recipe is therefore validated by dispatching
+its workflow, not by the push.
 
 ## 4. The notes
 

@@ -1,10 +1,13 @@
 name: Release
 
-# THE ONLY WORKFLOW. It builds every deliverable of a release from ONE commit
-# and, when asked, publishes them as a GitHub Release with the notes of
-# docs/release/notes.md. The four per-platform workflows it replaces allowed a
-# tag to be published in pieces, which is exactly what must not happen: a
-# release is only valid if every asset comes out of the same tree.
+# THE RELEASE WORKFLOW. It builds every deliverable of a release from ONE
+# commit and, when asked, publishes them as a GitHub Release with the notes of
+# docs/release/notes.md. The four per-platform workflows (linux.yml, windows.yml,
+# windows_x86_win10.yml, windows_x64.yml) still exist and carry the same steps:
+# they validate ONE platform, and none of them can publish. Only this file can,
+# and that is what stops a tag being published in pieces -- a release where the
+# Windows assets exist and the .deb of one base does not is exactly the accident
+# the `needs` of the `release` job prevents.
 #
 # Triggers:
 #   - PUSH A TAG `v*` -> builds the eight deliverables and publishes the
@@ -13,7 +16,9 @@ name: Release
 #     pre-release.
 #   - MANUAL -> the same build, publishing only if `publish` is ticked. Without
 #     it, it is a dry run: the packages stay as artifacts, which is how a change
-#     to this file or to a packaging recipe is validated.
+#     to this file or to several packaging recipes is validated.
+# A push to a branch starts nothing (same policy as the per-platform workflows,
+# which only re-run when they themselves are touched or dispatched).
 #
 # The tag's CORE has to be the version of CMakeLists.txt (0.2.0), checked BEFORE
 # anything is built: a binary that says 0.2.0 inside a release called 0.3.0 is
@@ -38,7 +43,7 @@ name: Release
 # (Win7 has no libmpv, Windows 10 x86 does). See packaging/linux/flatpak/
 # README.md, BUILD_WINDOWS.md and the header of each job.
 #
-# Policy taken from the old workflows, unchanged: every GATE is offline. The
+# Policy taken from the per-platform workflows, unchanged: every GATE is offline. The
 # selftests that need the network (a real TLS handshake, YouTube search/browse/
 # feeds) run only behind the `online_selftests` input, report with ::warning::,
 # and never fail the job -- YouTube can rate-limit a runner or answer without a
@@ -378,8 +383,9 @@ jobs:
   # engine and the player invariants). Reported, NEVER a gate, and only when the
   # box is ticked: YouTube can rate-limit a runner or answer a video without a
   # channel, and no runner has a GPU. Every step is continue-on-error and the
-  # failures come out as ::warning::. This is the old `online-report` job of
-  # linux.yml, and it is not in the `needs` of the release on purpose.
+  # failures come out as ::warning::. It mirrors the `online-report` job of
+  # linux.yml (same steps), and it is not in the `needs` of the release on
+  # purpose: a rate-limited runner must not stop a release.
   # ---------------------------------------------------------------------------
   linux-online:
     name: online selftests (informational)
