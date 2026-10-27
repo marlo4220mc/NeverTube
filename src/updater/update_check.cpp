@@ -173,6 +173,30 @@ QString installerAssetNameFor(const QString &flavor, const QString &version)
 {
     if (flavor.isEmpty() || version.isEmpty())
         return QString();
+    // The platform token of each installer. The words carry the meaning for a
+    // human ("Windows 10/11, 32-bit" vs "Windows 7 SP1"), because the three
+    // setups partition the Windows space and picking the wrong one installs a
+    // build that does not run on that machine.
+    QString platform;
+    if (flavor == QLatin1String("x64"))
+        platform = QStringLiteral("Windows-10-11-x64");
+    else if (flavor == QLatin1String("win10-x86"))
+        platform = QStringLiteral("Windows-10-11-x86");
+    else if (flavor == QLatin1String("win7-x86"))
+        platform = QStringLiteral("Windows-7-SP1-x86");
+    else
+        return QString(); // not one of the three published installers
+    return QStringLiteral("NeverTube-%1-%2-Setup.exe").arg(version, platform);
+}
+
+QString legacyInstallerAssetNameFor(const QString &flavor,
+                                    const QString &version)
+{
+    if (flavor.isEmpty() || version.isEmpty())
+        return QString();
+    if (flavor != QLatin1String("x64") && flavor != QLatin1String("win10-x86")
+        && flavor != QLatin1String("win7-x86"))
+        return QString();
     return QStringLiteral("nevertube-%1-setup-%2.exe").arg(version, flavor);
 }
 
@@ -181,15 +205,25 @@ QString installerAssetName(const QString &version)
     return installerAssetNameFor(installerFlavorForBuild(), version);
 }
 
+UpdateAsset UpdateRelease::installerAssetFor(const QString &flavor) const
+{
+    const QString wanted[] = {
+        installerAssetNameFor(flavor, version),
+        legacyInstallerAssetNameFor(flavor, version),
+    };
+    for (const QString &name : wanted) {
+        if (name.isEmpty())
+            continue; // unknown flavor or no version: nothing to look for
+        for (const UpdateAsset &a : assets)
+            if (a.name == name)
+                return a;
+    }
+    return UpdateAsset{};
+}
+
 UpdateAsset UpdateRelease::installerAsset() const
 {
-    const QString wanted = installerAssetName(version);
-    if (wanted.isEmpty())
-        return UpdateAsset{};
-    for (const UpdateAsset &a : assets)
-        if (a.name == wanted)
-            return a;
-    return UpdateAsset{};
+    return installerAssetFor(installerFlavorForBuild());
 }
 
 UpdateAsset UpdateRelease::sumsAsset() const
@@ -346,7 +380,7 @@ bool checksumFor(const QByteArray &sumsText, const QString &fileName,
         if (name.startsWith(QLatin1Char('*')))
             name.remove(0, 1);
         if (name != fileName)
-            continue; // EXACT name: "…-setup-x64.exe.asc" is another file
+            continue; // EXACT name: "…-Setup.exe.asc" is another file
         ++hits;
         found = hash.toLower();
     }

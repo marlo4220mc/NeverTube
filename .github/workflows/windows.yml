@@ -323,7 +323,7 @@ jobs:
           # was compiled and not one of the other two (dist_x86_win10.iss carries
           # the same redist but a different output name; dist64.iss carries
           # VC_redist.x64.exe).
-          $setup = 'setup-out\nevertube-setup-win7-x86.exe'
+          $setup = 'setup-out/NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup.exe'
           if (-not (Test-Path $setup)) {
             Write-Host "no está $setup"; exit 1 }
           $sz = (Get-Item $setup).Length
@@ -496,5 +496,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nevertube-windows-win7-x86-setup
-          path: setup-out/nevertube-setup-win7-x86.exe
+          path: setup-out/NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup.exe
           retention-days: 21

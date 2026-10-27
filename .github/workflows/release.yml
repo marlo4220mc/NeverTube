@@ -26,16 +26,25 @@ name: Release
 #
 # What each job produces (and what the release attaches):
 #
-#   linux-deb-2204     nevertube-<v>-ubuntu22.04-amd64.deb
-#   linux-deb-2404     nevertube-<v>-ubuntu24.04-amd64.deb
-#   linux-rpm          nevertube-<v>-1.x86_64.rpm
-#   linux-arch         nevertube-<v>-x86_64.pkg.tar.zst
-#   linux-flatpak      nevertube-<v>-x86_64.flatpak
-#                      nevertube-repo-<v>-x86_64.tar.gz  (the OSTree repo)
-#   windows-win7-x86   nevertube-<v>-setup-win7-x86.exe
-#   windows-win10-x86  nevertube-<v>-setup-win10-x86.exe
-#   windows-win10-x64  nevertube-<v>-setup-x64.exe
+# ONE convention for every asset, so a person scanning the release page can
+# pick their file: `NeverTube-<version>-<platform>-...` (the rename step below
+# is where a name is born; the build jobs keep their internal artifact names):
+#
+#   linux-deb-2204     NeverTube-<v>-Ubuntu-22.04-amd64.deb
+#   linux-deb-2404     NeverTube-<v>-Ubuntu-24.04-amd64.deb
+#   linux-rpm          NeverTube-<v>-Fedora-x86_64.rpm
+#   linux-arch         NeverTube-<v>-Arch-Linux-x86_64.pkg.tar.zst
+#   linux-flatpak      NeverTube-<v>-Linux-Flatpak.flatpak
+#                      NeverTube-<v>-Linux-Flatpak-Repo.tar.gz  (the OSTree repo)
+#   windows-win7-x86   NeverTube-<v>-Windows-7-SP1-x86-Setup.exe
+#   windows-win10-x86  NeverTube-<v>-Windows-10-11-x86-Setup.exe
+#   windows-win10-x64  NeverTube-<v>-Windows-10-11-x64-Setup.exe
 #   release            SHA256SUMS.txt + the GitHub Release itself
+#
+# These three Windows names are the INTERFACE of the updater
+# (installerAssetNameFor in src/updater/): renaming one means changing the
+# updater and docs/release/notes.md too, or the update refuses the download and
+# the notes lie. --selftest-update cross-checks that triangle from the checkout.
 #
 # The two .deb are not redundant (Ubuntu 24.04 renamed the Qt5 runtime packages
 # to the t64 ones and ships FFmpeg 6.1, so a package built on 22.04 cannot
@@ -800,7 +809,7 @@ jobs:
           # was compiled and not one of the other two (dist_x86_win10.iss carries
           # the same redist but a different output name; dist64.iss carries
           # VC_redist.x64.exe).
-          $setup = 'setup-out\nevertube-setup-win7-x86.exe'
+          $setup = 'setup-out/NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup.exe'
           if (-not (Test-Path $setup)) {
             Write-Host "no está $setup"; exit 1 }
           $sz = (Get-Item $setup).Length
@@ -973,7 +982,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nevertube-windows-win7-x86-setup
-          path: setup-out/nevertube-setup-win7-x86.exe
+          path: setup-out/NeverTube-{{ needs.version.outputs.version }}-Windows-7-SP1-x86-Setup.exe
           retention-days: 21
 
   windows-win10-x86:
@@ -1236,7 +1245,7 @@ jobs:
           # (a pattern misspelled in [Files] compiles the same).
           & $iscc.FullName "/DAppVersion=${{ needs.version.outputs.version }}" dist_x86_win10.iss 2>&1 | Tee-Object -FilePath iscc.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $setup = "setup-out\nevertube-setup-win10-x86.exe"
+          $setup = "setup-out/NeverTube-{#AppVersion}-Windows-10-11-x86-Setup.exe"
           if (-not (Test-Path $setup)) { Write-Host "no se generó $setup"; exit 1 }
           Get-Item $setup | Select-Object Name, Length
 
@@ -1273,12 +1282,14 @@ jobs:
           # The guard of the installer, pinned as source text. `$0A000000` is the
           # Win10 marker of GetWindowsVersion and `IsWin64` is what refuses the
           # 64-bit machines; both must stay in the .iss, and the output name
-          # proves which script is the one being compiled.
+          # proves which script is the one being compiled. The two
+          # `...-Setup.exe` needles are the installers the cancel-message points
+          # at (the names a user downloads, without the version).
           $iss = Get-Content dist_x86_win10.iss -Raw
           foreach ($needle in @('IsWin64', '$0A000000',
-                                'OutputBaseFilename=nevertube-setup-win10-x86',
-                                'nevertube-setup-x64.exe',
-                                'nevertube-setup-win7-x86.exe')) {
+                                'OutputBaseFilename=NeverTube-{{ needs.version.outputs.version }}-Windows-10-11-x86-Setup',
+                                'Windows-10-11-x64-Setup.exe',
+                                'Windows-7-SP1-x86-Setup.exe')) {
             if (-not $iss.Contains($needle)) {
               Write-Host "el .iss perdió '$needle': el instalador dejaría de ser exclusivo de Win10 x86"
               exit 1
@@ -1286,7 +1297,7 @@ jobs:
           }
           Write-Host 'gate del guard OK: el setup rechaza x64 y Windows anterior a 10'
 
-          $setup = "setup-out\nevertube-setup-win10-x86.exe"
+          $setup = "setup-out/NeverTube-{#AppVersion}-Windows-10-11-x86-Setup.exe"
           $sz = (Get-Item $setup).Length
           Write-Host ("setup: {0:N1} MB" -f ($sz / 1MB))
           if ($sz -lt 5MB) {
@@ -1364,7 +1375,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nevertube-windows-win10-x86-setup
-          path: setup-out/nevertube-setup-win10-x86.exe
+          path: setup-out/NeverTube-{{ needs.version.outputs.version }}-Windows-10-11-x86-Setup.exe
           retention-days: 21
 
   windows-win10-x64:
@@ -1606,7 +1617,7 @@ jobs:
           Get-ChildItem dist | Select-Object Name, Length
           # dist64.iss (NOT dist.iss: that one is the x86/Win7 setup and its
           # architecture guard cancels precisely on 64-bit 10/11, which is the target
-          # of this workflow). iscc compiles to setup-out\nevertube-setup-x64.exe.
+          # of this workflow). iscc compiles to setup-out/NeverTube-{#AppVersion}-Windows-10-11-x64-Setup.exe.
           $iscc = Get-ChildItem "$env:ProgramFiles\Inno Setup*\ISCC.exe",
             "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
             Select-Object -First 1
@@ -1617,7 +1628,7 @@ jobs:
           # of the next step validates against THIS log.
           & $iscc.FullName "/DAppVersion=${{ needs.version.outputs.version }}" dist64.iss 2>&1 | Tee-Object -FilePath iscc.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $setup = "setup-out\nevertube-setup-x64.exe"
+          $setup = "setup-out/NeverTube-{#AppVersion}-Windows-10-11-x64-Setup.exe"
           if (-not (Test-Path $setup)) { Write-Host "no se generó $setup"; exit 1 }
           Get-Item $setup | Select-Object Name, Length
 
@@ -1634,7 +1645,7 @@ jobs:
       - name: gate del instalador (tamaño + manifiesto de iscc)
         shell: pwsh
         run: |
-          $setup = "setup-out\nevertube-setup-x64.exe"
+          $setup = "setup-out/NeverTube-{#AppVersion}-Windows-10-11-x64-Setup.exe"
           $sz = (Get-Item $setup).Length
           Write-Host ("setup: {0:N1} MB" -f ($sz / 1MB))
           if ($sz -lt 5MB) {
@@ -1731,7 +1742,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nevertube-windows-x64-setup
-          path: setup-out/nevertube-setup-x64.exe
+          path: setup-out/NeverTube-{{ needs.version.outputs.version }}-Windows-10-11-x64-Setup.exe
           retention-days: 21
 
   # ---------------------------------------------------------------------------
@@ -1782,25 +1793,27 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf out; mkdir -p out
-          cp artifacts/linux-deb-2204/*.deb           "out/nevertube-$VERSION-ubuntu22.04-amd64.deb"
-          cp artifacts/linux-deb-2404/*.deb           "out/nevertube-$VERSION-ubuntu24.04-amd64.deb"
-          cp artifacts/linux-rpm/*.rpm                "out/nevertube-$VERSION-1.x86_64.rpm"
-          cp artifacts/linux-arch/*.pkg.tar.zst       "out/nevertube-$VERSION-x86_64.pkg.tar.zst"
-          cp artifacts/linux-flatpak/*.flatpak        "out/nevertube-$VERSION-x86_64.flatpak"
-          cp artifacts/linux-flatpak/*.tar.gz         "out/nevertube-repo-$VERSION-x86_64.tar.gz"
-          cp artifacts/nevertube-windows-win7-x86-setup/nevertube-setup-win7-x86.exe \
-             "out/nevertube-$VERSION-setup-win7-x86.exe"
-          cp artifacts/nevertube-windows-win10-x86-setup/nevertube-setup-win10-x86.exe \
-             "out/nevertube-$VERSION-setup-win10-x86.exe"
-          cp artifacts/nevertube-windows-x64-setup/nevertube-setup-x64.exe \
-             "out/nevertube-$VERSION-setup-x64.exe"
+          cp artifacts/linux-deb-2204/*.deb           "out/NeverTube-$VERSION-Ubuntu-22.04-amd64.deb"
+          cp artifacts/linux-deb-2404/*.deb           "out/NeverTube-$VERSION-Ubuntu-24.04-amd64.deb"
+          cp artifacts/linux-rpm/*.rpm                "out/NeverTube-$VERSION-Fedora-x86_64.rpm"
+          cp artifacts/linux-arch/*.pkg.tar.zst       "out/NeverTube-$VERSION-Arch-Linux-x86_64.pkg.tar.zst"
+          cp artifacts/linux-flatpak/*.flatpak        "out/NeverTube-$VERSION-Linux-Flatpak.flatpak"
+          cp artifacts/linux-flatpak/*.tar.gz         "out/NeverTube-$VERSION-Linux-Flatpak-Repo.tar.gz"
+          cp artifacts/NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup.exe \
+             "out/NeverTube-$VERSION-Windows-7-SP1-x86-Setup.exe"
+          cp artifacts/NeverTube-{#AppVersion}-Windows-10-11-x86-Setup.exe \
+             "out/NeverTube-$VERSION-Windows-10-11-x86-Setup.exe"
+          cp artifacts/NeverTube-{#AppVersion}-Windows-10-11-x64-Setup.exe \
+             "out/NeverTube-$VERSION-Windows-10-11-x64-Setup.exe"
           ls -l out
-          # The sums come from the explicit glob of the assets and are written
+          # The sums come from the explicit glob of the assets (every one of
+          # them starts with `NeverTube-`; SHA256SUMS.txt does not exist yet at
+          # that point) and are written
           # OUTSIDE out/ before being moved in: writing the file inside the
           # directory that is being hashed makes a re-run hash the previous
           # SHA256SUMS.txt, and `sha256sum -c` on the download folder would then
           # complain about an entry that is not a package.
-          ( cd out && LC_ALL=C sha256sum nevertube-* > "$RUNNER_TEMP/sums.txt" )
+          ( cd out && LC_ALL=C sha256sum NeverTube-* > "$RUNNER_TEMP/sums.txt" )
           mv "$RUNNER_TEMP/sums.txt" out/SHA256SUMS.txt
           cat out/SHA256SUMS.txt
 

@@ -30,7 +30,7 @@ DefaultDirName={autopf}\NeverTube
 DefaultGroupName=NeverTube
 DisableProgramGroupPage=yes
 OutputDir=setup-out
-OutputBaseFilename=nevertube-setup-x64
+OutputBaseFilename=NeverTube-{#AppVersion}-Windows-10-11-x64-Setup
 Compression=lzma2
 SolidCompression=yes
 ; Icon of the setup itself (the first thing seen when launching it) and of the

@@ -57,15 +57,15 @@ Released on @@DATE@@ (tag `@@TAG@@`).
 
 | File | Platform |
 |---|---|
-| `nevertube-@@VERSION@@-setup-x64.exe` | Windows 10 / 11, 64-bit |
-| `nevertube-@@VERSION@@-setup-win10-x86.exe` | Windows 10 / 11, 32-bit |
-| `nevertube-@@VERSION@@-setup-win7-x86.exe` | Windows 7 SP1, 32-bit |
-| `nevertube-@@VERSION@@-ubuntu22.04-amd64.deb` | Ubuntu 22.04, Linux Mint 21, Pop!_OS 22.04, Debian 12 |
-| `nevertube-@@VERSION@@-ubuntu24.04-amd64.deb` | Ubuntu 24.04+, Linux Mint 22, Debian 13 |
-| `nevertube-@@VERSION@@-1.x86_64.rpm` | Fedora (and RHEL-family with those sonames) |
-| `nevertube-@@VERSION@@-x86_64.pkg.tar.zst` | Arch Linux |
-| `nevertube-@@VERSION@@-x86_64.flatpak` | Any distribution, including the immutable ones |
-| `nevertube-repo-@@VERSION@@-x86_64.tar.gz` | The OSTree repo, for `flatpak update` |
+| `NeverTube-@@VERSION@@-Windows-10-11-x64-Setup.exe` | Windows 10 / 11, 64-bit |
+| `NeverTube-@@VERSION@@-Windows-10-11-x86-Setup.exe` | Windows 10 / 11, 32-bit |
+| `NeverTube-@@VERSION@@-Windows-7-SP1-x86-Setup.exe` | Windows 7 SP1, 32-bit |
+| `NeverTube-@@VERSION@@-Ubuntu-22.04-amd64.deb` | Ubuntu 22.04, Linux Mint 21, Pop!_OS 22.04, Debian 12 |
+| `NeverTube-@@VERSION@@-Ubuntu-24.04-amd64.deb` | Ubuntu 24.04+, Linux Mint 22, Debian 13 |
+| `NeverTube-@@VERSION@@-Fedora-x86_64.rpm` | Fedora (and RHEL-family with those sonames) |
+| `NeverTube-@@VERSION@@-Arch-Linux-x86_64.pkg.tar.zst` | Arch Linux |
+| `NeverTube-@@VERSION@@-Linux-Flatpak.flatpak` | Any distribution, including the immutable ones |
+| `NeverTube-@@VERSION@@-Linux-Flatpak-Repo.tar.gz` | The OSTree repo, for `flatpak update` |
 | `SHA256SUMS.txt` | Checksums of everything above |
 
 There are **two `.deb`** on purpose. They are the same program, built against
@@ -77,8 +77,8 @@ versa. Take the one that matches your distribution.
 
 **Windows.** Run the setup for your system. Each one refuses the other two and
 tells you which to use, so picking the wrong file cannot break anything:
-`win7-x86` is 32-bit Windows 7 SP1, `win10-x86` is 32-bit Windows 10/11 and
-`x64` is 64-bit Windows 10/11. They install the Visual C++ runtime they need and
+`Windows-7-SP1-x86` is 32-bit Windows 7 SP1, `Windows-10-11-x86` is 32-bit
+Windows 10/11 and `Windows-10-11-x64` is 64-bit Windows 10/11. They install the Visual C++ runtime they need and
 create a menu entry and a desktop shortcut. Once installed, the app checks for
 new versions by itself (Ajustes -> "Buscar actualizaciones") and installs the
 next one over this same copy: your history, subscriptions, settings and downloads
@@ -88,7 +88,7 @@ are outside the program's folder and are never touched. The installer is unsigne
 **Debian / Ubuntu.**
 
 ```sh
-sudo apt install ./nevertube-@@VERSION@@-ubuntu22.04-amd64.deb
+sudo apt install ./NeverTube-@@VERSION@@-Ubuntu-22.04-amd64.deb
 ```
 
 The project also publishes an APT repository (`jammy` for 22.04, `noble` for
@@ -108,20 +108,20 @@ apt update && apt install nevertube
 **Fedora.**
 
 ```sh
-sudo dnf install ./nevertube-@@VERSION@@-1.x86_64.rpm
+sudo dnf install ./NeverTube-@@VERSION@@-Fedora-x86_64.rpm
 ```
 
 **Arch.**
 
 ```sh
-sudo pacman -U nevertube-@@VERSION@@-x86_64.pkg.tar.zst
+sudo pacman -U NeverTube-@@VERSION@@-Arch-Linux-x86_64.pkg.tar.zst
 ```
 
 **Flatpak** (the way in on Silverblue / Kinoite / Bazzite, MicroOS / Aeon and
 SteamOS, where an `rpm` or a `.deb` is not an option):
 
 ```sh
-flatpak install --user nevertube-@@VERSION@@-x86_64.flatpak
+flatpak install --user NeverTube-@@VERSION@@-Linux-Flatpak.flatpak
 flatpak run io.github.marlo4220mc.NeverTube
 ```
 
@@ -136,7 +136,7 @@ flatpak remote-add --user --if-not-exists nevertube \
 flatpak install --user nevertube io.github.marlo4220mc.NeverTube
 
 # 2. or the repository of THIS release (unpack and add it)
-tar -xzf nevertube-repo-@@VERSION@@-x86_64.tar.gz
+tar -xzf NeverTube-@@VERSION@@-Linux-Flatpak-Repo.tar.gz
 flatpak remote-add --user --no-gpg-verify nevertube ./repo
 ```
 
@@ -245,28 +245,31 @@ Publicado el @@DATE@@ (tag `@@TAG@@`).
 
 ### Descargas
 
-Mismos ficheros que la tabla de arriba: `setup-x64.exe` (Windows 10/11 64 bits),
-`setup-win10-x86.exe` (Windows 10/11 32 bits), `setup-win7-x86.exe` (Windows 7
-SP1 32 bits), los dos `.deb` (el de `ubuntu22.04` para 22.04 / Mint 21 / Debian
-12 y el de `ubuntu24.04` para 24.04+ / Mint 22 / Debian 13: son el mismo
-programa compilado contra cada base), el `.rpm`, el paquete de pacman, el
-`.flatpak` (para cualquier distribución, incluidas las inmutables) y el tar del
-repositorio OSTree para `flatpak update`.
+Mismos ficheros que la tabla de arriba: `Windows-10-11-x64-Setup.exe`
+(Windows 10/11 64 bits), `Windows-10-11-x86-Setup.exe` (Windows 10/11 32
+bits), `Windows-7-SP1-x86-Setup.exe` (Windows 7 SP1 32 bits), los dos `.deb`
+(`Ubuntu-22.04` para 22.04 / Mint 21 / Debian 12 y `Ubuntu-24.04` para 24.04+ /
+Mint 22 / Debian 13: son el mismo programa compilado contra cada base), el
+`.rpm` de Fedora, el paquete de Arch Linux, el bundle `Linux-Flatpak` (para
+cualquier distribución, incluidas las inmutables) y el tar
+`Linux-Flatpak-Repo` del repositorio OSTree para `flatpak update`. Todos
+llevan por delante `NeverTube-<versión>-`, la misma convención en los nueve
+ficheros.
 
 ### Instalación
 
 ```sh
 # Debian / Ubuntu
-sudo apt install ./nevertube-@@VERSION@@-ubuntu22.04-amd64.deb
+sudo apt install ./NeverTube-@@VERSION@@-Ubuntu-22.04-amd64.deb
 
 # Fedora
-sudo dnf install ./nevertube-@@VERSION@@-1.x86_64.rpm
+sudo dnf install ./NeverTube-@@VERSION@@-Fedora-x86_64.rpm
 
 # Arch
-sudo pacman -U nevertube-@@VERSION@@-x86_64.pkg.tar.zst
+sudo pacman -U NeverTube-@@VERSION@@-Arch-Linux-x86_64.pkg.tar.zst
 
 # Flatpak
-flatpak install --user nevertube-@@VERSION@@-x86_64.flatpak
+flatpak install --user NeverTube-@@VERSION@@-Linux-Flatpak.flatpak
 flatpak run io.github.marlo4220mc.NeverTube
 ```
 

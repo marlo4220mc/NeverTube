@@ -131,7 +131,7 @@ than none.
 To see the body before publishing:
 
 ```sh
-mkdir -p /tmp/sums && echo "abc  nevertube-1.0.0-alpha.1-setup-x64.exe" > /tmp/sums/SHA256SUMS.txt
+mkdir -p /tmp/sums && echo "abc  NeverTube-1.0.0-alpha.1-Windows-10-11-x64-Setup.exe" > /tmp/sums/SHA256SUMS.txt
 python3 tools/release_notes.py --version 1.0.0-alpha.1 --tag v1.0.0-alpha.1 \
   --date 2026-10-26 --prerelease --checksums /tmp/sums/SHA256SUMS.txt
 ```
@@ -157,8 +157,10 @@ changes, both move together or `sha256sum -c` in the notes stops matching.
 - The app's own updater offers this release to the installed copies (Windows):
   it reads `releases/latest`, compares with the version compiled into the binary
   and verifies the installer against `SHA256SUMS.txt`. A release whose installer
-  asset is renamed (or that carries no `SHA256SUMS.txt`) is a release the updater
-  refuses to install, saying why.
+  asset matches neither its current name
+  (`NeverTube-<version>-Windows-...-Setup.exe`) nor the legacy one
+  (`nevertube-<version>-setup-<flavor>.exe`) -- or that carries no
+  `SHA256SUMS.txt` -- is a release the updater refuses to install, saying why.
 - `flatpak run io.github.marlo4220mc.NeverTube` on a real desktop is the one
   check that no runner can do (icon association by `FLATPAK_ID`, the database in
   `~/Documentos` of the host, `hwdec=auto` with `--device=dri`). It is in the

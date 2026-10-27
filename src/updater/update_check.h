@@ -52,11 +52,22 @@ QString versionFromTag(const QString &tag);
 // (NEVERTUBE_NO_MPV, its only engine is the FfmpegBackend) and the 32-bit
 // build with mpv is the Windows 10 x86 one.
 QString installerFlavorForBuild();
-// The asset name of a flavor: "nevertube-<version>-setup-<flavor>.exe". Kept
-// as a function of the flavor (not of the build) so the three names are
-// testable from any platform.
+// The asset name of a flavor, spelled so a person scanning the release page
+// can pick their file without knowing what "x86" means:
+// "NeverTube-<version>-Windows-10-11-x64-Setup.exe", "...-Windows-10-11-x86-
+// Setup.exe" or "...-Windows-7-SP1-x86-Setup.exe". Kept as a function of the
+// flavor (not of the build) so the three names are testable from any platform.
+// A flavor that is not one of the three has NO name: a typo must not produce
+// an asset that does not exist.
 QString installerAssetNameFor(const QString &flavor, const QString &version);
-// Same for the build this binary is: empty when there is no installer.
+// The spelling the releases carried BEFORE this convention
+// ("nevertube-<version>-setup-<flavor>.exe"). The selection still accepts it,
+// so a release published under the old names keeps installing; the checksum is
+// always looked up under the name that was actually selected.
+QString legacyInstallerAssetNameFor(const QString &flavor,
+                                    const QString &version);
+// Same as installerAssetNameFor for the build this binary is: empty when there
+// is no installer.
 QString installerAssetName(const QString &version);
 
 struct UpdateAsset
@@ -79,8 +90,13 @@ struct UpdateRelease
     bool draft = false;
     QList<UpdateAsset> assets;
 
-    // The installer of this build and the manifest, by EXACT name. Empty when
-    // the release does not carry them.
+    // The installer of a GIVEN flavor, by EXACT name: the current convention
+    // first and the legacy spelling as a fallback. Empty when the release
+    // carries neither (or the flavor is unknown): the selection never guesses,
+    // and the checksum is looked up under the name that was selected.
+    UpdateAsset installerAssetFor(const QString &flavor) const;
+    // The installer of this build: installerAssetFor() with the flavor of the
+    // binary (empty on Linux, where the packages update themselves).
     UpdateAsset installerAsset() const;
     UpdateAsset sumsAsset() const;
 };

@@ -46,25 +46,25 @@ En Linux solo x86_64.
 
 | Formato | Destino | Fichero |
 |---|---|---|
-| `.deb` | Ubuntu 22.04 / Mint 21 / Debian 12 | `nevertube-<versión>-ubuntu22.04-amd64.deb` |
-| `.deb` | Ubuntu 24.04 / Mint 22 / Debian 13 | `nevertube-<versión>-ubuntu24.04-amd64.deb` |
-| `.rpm` | Fedora (familia RHEL con esos sonames) | `nevertube-<versión>-1.x86_64.rpm` |
-| pacman | Arch Linux | `nevertube-<versión>-x86_64.pkg.tar.zst` |
-| Flatpak | cualquier distribución, incluidas las inmutables | `nevertube-<versión>-x86_64.flatpak` |
-| Repo OSTree | `flatpak update` desde un repo alojado | `nevertube-repo-<versión>-x86_64.tar.gz` |
-| setup.exe | Windows 10 / 11 (x64) | `nevertube-<versión>-setup-x64.exe` |
-| setup.exe | Windows 10 / 11 (x86) | `nevertube-<versión>-setup-win10-x86.exe` |
-| setup.exe | Windows 7 SP1 (x86) | `nevertube-<versión>-setup-win7-x86.exe` |
+| `.deb` | Ubuntu 22.04 / Mint 21 / Debian 12 | `NeverTube-<versión>-Ubuntu-22.04-amd64.deb` |
+| `.deb` | Ubuntu 24.04 / Mint 22 / Debian 13 | `NeverTube-<versión>-Ubuntu-24.04-amd64.deb` |
+| `.rpm` | Fedora (familia RHEL con esos sonames) | `NeverTube-<versión>-Fedora-x86_64.rpm` |
+| pacman | Arch Linux | `NeverTube-<versión>-Arch-Linux-x86_64.pkg.tar.zst` |
+| Flatpak | cualquier distribución, incluidas las inmutables | `NeverTube-<versión>-Linux-Flatpak.flatpak` |
+| Repo OSTree | `flatpak update` desde un repo alojado | `NeverTube-<versión>-Linux-Flatpak-Repo.tar.gz` |
+| setup.exe | Windows 10 / 11 (x64) | `NeverTube-<versión>-Windows-10-11-x64-Setup.exe` |
+| setup.exe | Windows 10 / 11 (x86) | `NeverTube-<versión>-Windows-10-11-x86-Setup.exe` |
+| setup.exe | Windows 7 SP1 (x86) | `NeverTube-<versión>-Windows-7-SP1-x86-Setup.exe` |
 
 Hay **dos `.deb`** a propósito: 24.04 renombró los paquetes de Qt5 al esquema `t64` y trae FFmpeg 6.1, así que un paquete compilado en 22.04 no se instala ahí ni al revés. Es el mismo programa compilado contra cada base.
 
 ### Instalación
 
-- Debian / Ubuntu: `sudo apt install ./nevertube-<versión>-ubuntu24.04-amd64.deb` — apt instala automáticamente las dependencias declaradas.
-- Fedora: `sudo dnf install ./nevertube-<versión>-1.x86_64.rpm` — dnf resuelve los requisitos por sonames (`ffmpeg-free`, o el ffmpeg de RPM Fusion si ya está instalado).
-- Arch: `sudo pacman -U nevertube-<versión>-x86_64.pkg.tar.zst`
-- Flatpak: `flatpak install --user nevertube-<versión>-x86_64.flatpak` — el entregable para las distribuciones donde un `rpm`/`deb` no es una opción (Silverblue / Kinoite / Bazzite, MicroOS / Aeon, SteamOS): el bundle lleva su propio Qt, libmpv y ffmpeg, así que es el mismo binario en todas. También se puede publicar como repositorio OSTree propio para que funcione `flatpak update` (sin firmar: `--no-gpg-verify`); los permisos, las actualizaciones y las comprobaciones manuales están en `packaging/linux/flatpak/README.md`.
-- Windows: ejecuta el setup de tu sistema — `nevertube-<versión>-setup-win7-x86.exe` (Windows 7 de 32 bits), `nevertube-<versión>-setup-win10-x86.exe` (Windows 10/11 de 32 bits) o `nevertube-<versión>-setup-x64.exe` (Windows 10/11 de 64 bits). Cada uno rechaza los otros dos y te dice cuál usar; instalan el re-distribuible de VC++ que necesitan. Los instaladores no están firmados, así que SmartScreen avisa la primera vez.
+- Debian / Ubuntu: `sudo apt install ./NeverTube-<versión>-Ubuntu-24.04-amd64.deb` — apt instala automáticamente las dependencias declaradas.
+- Fedora: `sudo dnf install ./NeverTube-<versión>-Fedora-x86_64.rpm` — dnf resuelve los requisitos por sonames (`ffmpeg-free`, o el ffmpeg de RPM Fusion si ya está instalado).
+- Arch: `sudo pacman -U NeverTube-<versión>-Arch-Linux-x86_64.pkg.tar.zst`
+- Flatpak: `flatpak install --user NeverTube-<versión>-Linux-Flatpak.flatpak` — el entregable para las distribuciones donde un `rpm`/`deb` no es una opción (Silverblue / Kinoite / Bazzite, MicroOS / Aeon, SteamOS): el bundle lleva su propio Qt, libmpv y ffmpeg, así que es el mismo binario en todas. También se puede publicar como repositorio OSTree propio para que funcione `flatpak update` (sin firmar: `--no-gpg-verify`); los permisos, las actualizaciones y las comprobaciones manuales están en `packaging/linux/flatpak/README.md`.
+- Windows: ejecuta el setup de tu sistema — `NeverTube-<versión>-Windows-7-SP1-x86-Setup.exe` (Windows 7 de 32 bits), `NeverTube-<versión>-Windows-10-11-x86-Setup.exe` (Windows 10/11 de 32 bits) o `NeverTube-<versión>-Windows-10-11-x64-Setup.exe` (Windows 10/11 de 64 bits). Cada uno rechaza los otros dos y te dice cuál usar; instalan el re-distribuible de VC++ que necesitan. Los instaladores no están firmados, así que SmartScreen avisa la primera vez.
 
 El binario es `nevertube`. En Linux la entrada `.desktop` y los iconos se instalan en el tema `hicolor`, así que la app aparece en el menú como **NeverTube**.
 

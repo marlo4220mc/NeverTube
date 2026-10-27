@@ -38,7 +38,7 @@ DefaultDirName={autopf}\NeverTube
 DefaultGroupName=NeverTube
 DisableProgramGroupPage=yes
 OutputDir=setup-out
-OutputBaseFilename=nevertube-setup-win7-x86
+OutputBaseFilename=NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup
 Compression=lzma2
 SolidCompression=yes
 ; Icon of the setup itself (the first thing seen when launching it) and of the
@@ -195,7 +195,7 @@ begin
              + #13#10 + #13#10
              + 'Usa el instalador x64'
              + #13#10
-             + '(nevertube-setup-x64.exe) de la pagina de releases.'
+             + '(NeverTube-{#AppVersion}-Windows-10-11-x64-Setup.exe) de la pagina de releases.'
              + #13#10 + #13#10
              + 'Instalacion cancelada.', mbCriticalError, MB_OK);
     end else begin
@@ -205,7 +205,7 @@ begin
              + #13#10 + #13#10
              + 'Usa el instalador para Windows 10 de 32 bits'
              + #13#10
-             + '(nevertube-setup-win10-x86.exe) de la pagina de releases.'
+             + '(NeverTube-{#AppVersion}-Windows-10-11-x86-Setup.exe) de la pagina de releases.'
              + #13#10 + #13#10
              + 'Instalacion cancelada.', mbCriticalError, MB_OK);
     end;

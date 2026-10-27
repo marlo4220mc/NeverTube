@@ -97,22 +97,31 @@ bool updateSelfTest()
 
     check(nt::installerAssetNameFor(QStringLiteral("win7-x86"),
                                     QStringLiteral("1.0.0"))
-              == QLatin1String("nevertube-1.0.0-setup-win7-x86.exe"),
+              == QLatin1String("NeverTube-1.0.0-Windows-7-SP1-x86-Setup.exe"),
           "el instalador de Win7 x86");
     check(nt::installerAssetNameFor(QStringLiteral("win10-x86"),
                                     QStringLiteral("1.0.0-alpha.1"))
-              == QLatin1String("nevertube-1.0.0-alpha.1-setup-win10-x86.exe"),
+              == QLatin1String(
+                     "NeverTube-1.0.0-alpha.1-Windows-10-11-x86-Setup.exe"),
           "el instalador de Win10 x86, con sufijo de pre-lanzamiento");
     check(nt::installerAssetNameFor(QStringLiteral("x64"),
                                     QStringLiteral("1.0.0"))
-              == QLatin1String("nevertube-1.0.0-setup-x64.exe"),
+              == QLatin1String("NeverTube-1.0.0-Windows-10-11-x64-Setup.exe"),
           "el instalador de x64");
+    check(nt::installerAssetNameFor(QStringLiteral("arm64"),
+                                    QStringLiteral("1.0.0"))
+              .isEmpty(),
+          "una plataforma que no se publica no tiene nombre");
     check(nt::installerAssetNameFor(QString(), QStringLiteral("1.0.0"))
               .isEmpty(),
           "sin cocina (Linux) no hay nombre de instalador");
     check(nt::installerAssetNameFor(QStringLiteral("x64"), QString())
               .isEmpty(),
           "sin version no hay nombre de instalador");
+    check(nt::legacyInstallerAssetNameFor(QStringLiteral("x64"),
+                                          QStringLiteral("1.0.0"))
+              == QLatin1String("nevertube-1.0.0-setup-x64.exe"),
+          "el nombre antiguo se sigue pudiendo calcular");
 
     {
         // Whatever this build is, the flavor has to be one of the three that
@@ -124,12 +133,86 @@ bool updateSelfTest()
             || flavor == QLatin1String("win10-x86")
             || flavor == QLatin1String("win7-x86");
         check(known, "la cocina de este build es una de las publicadas");
-        if (!flavor.isEmpty()) {
+        if (flavor.isEmpty()) {
+            check(nt::installerAssetName(QStringLiteral("1.0.0")).isEmpty(),
+                  "en Linux no hay instalador que buscar");
+        } else {
             const QString name =
                 nt::installerAssetName(QStringLiteral("1.0.0"));
-            check(name.endsWith(QStringLiteral("-setup-%1.exe").arg(flavor)),
+            check(name.startsWith(QStringLiteral("NeverTube-1.0.0-"))
+                      && name.endsWith(QStringLiteral("-Setup.exe")),
                   "el instalador de este build lleva su cocina en el nombre");
         }
+    }
+
+    // --- selection: the release hands out the installer of THIS machine ---
+    {
+        auto asset = [](const char *name) {
+            nt::UpdateAsset a;
+            a.name = QString::fromLatin1(name);
+            a.url = QUrl(QStringLiteral(
+                "https://github.com/marlo4220mc/NeverTube/releases/download/"
+                "v9.9.9/x"));
+            a.size = 1;
+            return a;
+        };
+
+        nt::UpdateRelease rel;
+        rel.found = true;
+        rel.tag = QStringLiteral("v9.9.9");
+        rel.version = QStringLiteral("9.9.9");
+        rel.assets << asset("NeverTube-9.9.9-Windows-10-11-x64-Setup.exe")
+                   << asset("NeverTube-9.9.9-Windows-10-11-x86-Setup.exe")
+                   << asset("NeverTube-9.9.9-Windows-7-SP1-x86-Setup.exe")
+                   << asset("SHA256SUMS.txt");
+        check(rel.installerAssetFor(QStringLiteral("x64")).name
+                  == QLatin1String(
+                         "NeverTube-9.9.9-Windows-10-11-x64-Setup.exe"),
+              "con los tres en el release, x64 se lleva el suyo");
+        check(rel.installerAssetFor(QStringLiteral("win10-x86")).name
+                  == QLatin1String(
+                         "NeverTube-9.9.9-Windows-10-11-x86-Setup.exe"),
+              "el de Windows 10/11 de 32 bits no confunde con el de Win7");
+        check(rel.installerAssetFor(QStringLiteral("win7-x86")).name
+                  == QLatin1String(
+                         "NeverTube-9.9.9-Windows-7-SP1-x86-Setup.exe"),
+              "el de Win7 se lleva el suyo");
+        check(rel.installerAssetFor(QString()).name.isEmpty(),
+              "sin cocina no se elige nada");
+        check(rel.installerAssetFor(QStringLiteral("arm64")).name.isEmpty(),
+              "una cocina que no se publica no elige nada");
+
+        // A release published under the OLD names keeps installing: the
+        // selection accepts both spellings (compatibility with the releases
+        // that exist today).
+        nt::UpdateRelease oldRel;
+        oldRel.found = true;
+        oldRel.tag = QStringLiteral("v9.9.9");
+        oldRel.version = QStringLiteral("9.9.9");
+        oldRel.assets << asset("nevertube-9.9.9-setup-x64.exe")
+                      << asset("nevertube-9.9.9-setup-win10-x86.exe")
+                      << asset("nevertube-9.9.9-setup-win7-x86.exe");
+        check(oldRel.installerAssetFor(QStringLiteral("x64")).name
+                  == QLatin1String("nevertube-9.9.9-setup-x64.exe"),
+              "el nombre antiguo sigue seleccionandose");
+
+        // When both spellings are present the current one wins.
+        nt::UpdateRelease both = rel;
+        both.assets << asset("nevertube-9.9.9-setup-x64.exe");
+        check(both.installerAssetFor(QStringLiteral("x64")).name
+                  == QLatin1String(
+                         "NeverTube-9.9.9-Windows-10-11-x64-Setup.exe"),
+              "con los dos nombres en el release, manda el actual");
+
+        // The name carries the version: another release never hands out this
+        // one's file, whatever spellings exist.
+        nt::UpdateRelease other;
+        other.found = true;
+        other.tag = QStringLiteral("v1.0.0");
+        other.version = QStringLiteral("1.0.0");
+        other.assets << asset("NeverTube-9.9.9-Windows-10-11-x64-Setup.exe");
+        check(other.installerAssetFor(QStringLiteral("x64")).name.isEmpty(),
+              "el instalador de OTRA version no se elige");
     }
 
     // --- the shape of the answer of the API ---
@@ -138,10 +221,10 @@ bool updateSelfTest()
             "{\"tag_name\":\"v1.2.0\",\"body\":\"notes\","
             "\"published_at\":\"2026-10-27T00:00:00Z\",\"prerelease\":false,"
             "\"draft\":false,\"assets\":["
-            "{\"name\":\"nevertube-1.2.0-setup-x64.exe\","
+            "{\"name\":\"NeverTube-1.2.0-Windows-10-11-x64-Setup.exe\","
             "\"browser_download_url\":\"https://github.com/marlo4220mc/"
             "NeverTube/releases/download/v1.2.0/"
-            "nevertube-1.2.0-setup-x64.exe\",\"size\":123},"
+            "NeverTube-1.2.0-Windows-10-11-x64-Setup.exe\",\"size\":123},"
             "{\"name\":\"SHA256SUMS.txt\",\"browser_download_url\":"
             "\"https://github.com/marlo4220mc/NeverTube/releases/download/"
             "v1.2.0/SHA256SUMS.txt\",\"size\":10}]}");
@@ -156,7 +239,8 @@ bool updateSelfTest()
               "el manifiesto se encuentra por su nombre exacto");
         const nt::UpdateAsset installer = rel.assets.at(0);
         check(installer.name
-                  == QLatin1String("nevertube-1.2.0-setup-x64.exe"),
+                  == QLatin1String(
+                         "NeverTube-1.2.0-Windows-10-11-x64-Setup.exe"),
               "el instalador se encuentra por su nombre exacto");
 
         QString bad;
@@ -178,33 +262,40 @@ bool updateSelfTest()
     {
         const QByteArray sums = QByteArrayLiteral(
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-            "  nevertube-1.0.0-setup-x64.exe\n"
+            "  NeverTube-1.0.0-Windows-10-11-x64-Setup.exe\n"
             "1b4f0e9851971998e732078544c96b36c3d01cedf7caa332359d6f1d83567014"
-            " *nevertube-1.0.0-setup-win7-x86.exe\n"
+            " *NeverTube-1.0.0-Windows-7-SP1-x86-Setup.exe\n"
             "# un comentario\n"
             "\n");
         QString hash;
         QString error;
-        check(nt::checksumFor(sums, QStringLiteral("nevertube-1.0.0-setup-x64.exe"),
-                              &hash, &error)
+        check(nt::checksumFor(
+                  sums,
+                  QStringLiteral("NeverTube-1.0.0-Windows-10-11-x64-Setup.exe"),
+                  &hash, &error)
                   && hash == QLatin1String("ba7816bf8f01cfea414140de5dae2223"
                                            "b00361a396177a9cb410ff61f20015ad"),
               "el hash del instalador sale del manifiesto");
         // The binary-mode form `sha256sum` writes ("*name").
-        check(nt::checksumFor(sums,
-                              QStringLiteral("nevertube-1.0.0-setup-win7-x86.exe"),
-                              &hash, &error)
+        check(nt::checksumFor(
+                  sums,
+                  QStringLiteral("NeverTube-1.0.0-Windows-7-SP1-x86-Setup.exe"),
+                  &hash, &error)
                   && hash == QLatin1String("1b4f0e9851971998e732078544c96b3"
                                            "6c3d01cedf7caa332359d6f1d83567014"),
               "la forma con asterisco tambien vale");
         // A name that is a PREFIX of another entry is not an entry: the
         // comparison is exact, never a substring match.
-        check(!nt::checksumFor(sums, QStringLiteral("nevertube-1.0.0-setup-x64"),
-                               &hash, &error),
+        check(!nt::checksumFor(
+                  sums,
+                  QStringLiteral("NeverTube-1.0.0-Windows-10-11-x64-Setup"),
+                  &hash, &error),
               "un nombre que solo es prefijo no cuenta");
-        check(!nt::checksumFor(sums,
-                               QStringLiteral("nevertube-1.0.0-setup-x64.exe.asc"),
-                               &hash, &error),
+        check(!nt::checksumFor(
+                  sums,
+                  QStringLiteral(
+                      "NeverTube-1.0.0-Windows-10-11-x64-Setup.exe.asc"),
+                  &hash, &error),
               "un fichero de firma del instalador no cuenta como el instalador");
         check(!nt::checksumFor(sums, QStringLiteral("otro.exe"), &hash, &error),
               "un fichero que no esta en el manifiesto no tiene hash");
@@ -213,11 +304,13 @@ bool updateSelfTest()
 
         const QByteArray twice = QByteArrayLiteral(
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-            "  nevertube-1.0.0-setup-x64.exe\n"
+            "  NeverTube-1.0.0-Windows-10-11-x64-Setup.exe\n"
             "1b4f0e9851971998e732078544c96b36c3d01cedf7caa332359d6f1d83567014"
-            "  nevertube-1.0.0-setup-x64.exe\n");
-        check(!nt::checksumFor(twice, QStringLiteral("nevertube-1.0.0-setup-x64.exe"),
-                               &hash, &error),
+            "  NeverTube-1.0.0-Windows-10-11-x64-Setup.exe\n");
+        check(!nt::checksumFor(
+                  twice,
+                  QStringLiteral("NeverTube-1.0.0-Windows-10-11-x64-Setup.exe"),
+                  &hash, &error),
               "un manifiesto que nombra el fichero dos veces no es una respuesta");
         check(error == nt::tr("update.err.sumsAmbiguous"),
               "y el motivo dice que era ambiguo");
@@ -226,10 +319,23 @@ bool updateSelfTest()
         // what makes the `.sig`/`SHA256SUMS.txt.asc` noise around a manifest
         // harmless.
         check(!nt::checksumFor(
-                  QByteArrayLiteral("deadbeef  nevertube-1.0.0-setup-x64.exe\n"),
-                  QStringLiteral("nevertube-1.0.0-setup-x64.exe"), &hash,
-                  &error),
+                  QByteArrayLiteral(
+                      "deadbeef  NeverTube-1.0.0-Windows-10-11-x64-Setup.exe\n"),
+                  QStringLiteral("NeverTube-1.0.0-Windows-10-11-x64-Setup.exe"),
+                  &hash, &error),
               "una linea que no es un SHA-256 no cuenta");
+
+        // The manifest must name the file the release actually carries: one
+        // that still lists the OLD spelling does not verify the asset under
+        // the new name (the release job writes the sums FROM the final names).
+        check(!nt::checksumFor(
+                  QByteArrayLiteral(
+                      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff6"
+                      "1f20015ad  nevertube-1.0.0-setup-x64.exe\n"),
+                  QStringLiteral("NeverTube-1.0.0-Windows-10-11-x64-Setup.exe"),
+                  &hash, &error)
+                  && error == nt::tr("update.err.sumsEntryMissing"),
+              "un manifiesto con el nombre antiguo no verifica el asset nuevo");
     }
 
     // --- the SHA-256 of a file ---
@@ -351,6 +457,43 @@ bool updateSelfTest()
                       && failures.first() == nt::tr("update.err.sumsMissing"),
                   "un manifiesto fuera de GitHub no vale");
         }
+    }
+
+    // --- the names this updater looks for are the names the pipeline
+    // publishes and the notes promise. The recipes run this selftest with the
+    // repository as the working directory, so the cross-check runs in CI; from
+    // an installed copy those files are not there and it says so and skips.
+    {
+        const QStringList sources = {
+            QStringLiteral(".github/workflows/release.yml"),
+            QStringLiteral("docs/release/notes.md"),
+        };
+        static const char *const kFragments[] = {
+            "NeverTube-",
+            "Windows-10-11-x64-Setup.exe",
+            "Windows-10-11-x86-Setup.exe",
+            "Windows-7-SP1-x86-Setup.exe",
+            "SHA256SUMS.txt",
+        };
+        int present = 0;
+        for (const QString &path : sources) {
+            QFile f(path);
+            if (!f.open(QIODevice::ReadOnly))
+                continue;
+            ++present;
+            const QString text = QString::fromUtf8(f.readAll());
+            for (const char *fragment : kFragments) {
+                const bool has = text.contains(QLatin1String(fragment));
+                if (!has)
+                    std::printf("  UPDATE FAIL: %s no contiene '%s'\n",
+                                path.toUtf8().constData(), fragment);
+                check(has, "el pipeline y las notas publican los nombres "
+                           "que el updater busca");
+            }
+        }
+        if (present == 0)
+            std::printf(
+                "  UPDATE SKIP: sin checkout, no hay nombres que cruzar\n");
     }
 
     // Every string of the updater has to exist in the catalogs: a key that is

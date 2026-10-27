@@ -328,7 +328,7 @@ jobs:
           # (a pattern misspelled in [Files] compiles the same).
           & $iscc.FullName dist_x86_win10.iss 2>&1 | Tee-Object -FilePath iscc.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $setup = "setup-out\nevertube-setup-win10-x86.exe"
+          $setup = "setup-out/NeverTube-{#AppVersion}-Windows-10-11-x86-Setup.exe"
           if (-not (Test-Path $setup)) { Write-Host "no se generó $setup"; exit 1 }
           Get-Item $setup | Select-Object Name, Length
 
@@ -368,9 +368,9 @@ jobs:
           # proves which script is the one being compiled.
           $iss = Get-Content dist_x86_win10.iss -Raw
           foreach ($needle in @('IsWin64', '$0A000000',
-                                'OutputBaseFilename=nevertube-setup-win10-x86',
-                                'nevertube-setup-x64.exe',
-                                'nevertube-setup-win7-x86.exe')) {
+                                'OutputBaseFilename=NeverTube-{#AppVersion}-Windows-10-11-x86-Setup',
+                                'Windows-10-11-x64-Setup.exe',
+                                'Windows-7-SP1-x86-Setup.exe')) {
             if (-not $iss.Contains($needle)) {
               Write-Host "el .iss perdió '$needle': el instalador dejaría de ser exclusivo de Win10 x86"
               exit 1
@@ -378,7 +378,7 @@ jobs:
           }
           Write-Host 'gate del guard OK: el setup rechaza x64 y Windows anterior a 10'
 
-          $setup = "setup-out\nevertube-setup-win10-x86.exe"
+          $setup = "setup-out/NeverTube-{#AppVersion}-Windows-10-11-x86-Setup.exe"
           $sz = (Get-Item $setup).Length
           Write-Host ("setup: {0:N1} MB" -f ($sz / 1MB))
           if ($sz -lt 5MB) {
@@ -456,5 +456,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nevertube-windows-win10-x86-setup
-          path: setup-out/nevertube-setup-win10-x86.exe
+          path: setup-out/NeverTube-{#AppVersion}-Windows-10-11-x86-Setup.exe
           retention-days: 21

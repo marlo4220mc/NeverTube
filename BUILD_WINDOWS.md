@@ -227,8 +227,9 @@ Toolset: the default of `windows-latest`, no `-T v142` — the v142/SDK-19041 pi
 belongs to Win7.
 
 The installer is exclusive to this target: it cancels on 64-bit Windows (→
-`nevertube-setup-x64.exe`) and on Windows before 10 (→
-`nevertube-setup-win7-x86.exe`).
+`NeverTube-<v>-Windows-10-11-x64-Setup.exe`) and on Windows before 10 (→
+`NeverTube-<v>-Windows-7-SP1-x86-Setup.exe`), spelling out the version of the
+release the user is downloading from.
 
 ## Vendored Qt and OpenSSL
 

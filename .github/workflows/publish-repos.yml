@@ -86,9 +86,9 @@ jobs:
           set -euo pipefail
           mkdir -p assets
           gh release download "v$VERSION" --dir assets \
-            --pattern "nevertube-$VERSION-ubuntu22.04-amd64.deb" \
-            --pattern "nevertube-$VERSION-ubuntu24.04-amd64.deb" \
-            --pattern "nevertube-repo-$VERSION-x86_64.tar.gz" \
+            --pattern "NeverTube-$VERSION-Ubuntu-22.04-amd64.deb" \
+            --pattern "NeverTube-$VERSION-Ubuntu-24.04-amd64.deb" \
+            --pattern "NeverTube-$VERSION-Linux-Flatpak-Repo.tar.gz" \
             --pattern "SHA256SUMS.txt"
           ( cd assets && sha256sum -c SHA256SUMS.txt --ignore-missing )
 
@@ -101,8 +101,8 @@ jobs:
         run: |
           set -euo pipefail
           bash packaging/linux/deb/repo.sh out/apt \
-            "jammy=assets/nevertube-$VERSION-ubuntu22.04-amd64.deb" \
-            "noble=assets/nevertube-$VERSION-ubuntu24.04-amd64.deb"
+            "jammy=assets/NeverTube-$VERSION-Ubuntu-22.04-amd64.deb" \
+            "noble=assets/NeverTube-$VERSION-Ubuntu-24.04-amd64.deb"
           # The public key, so the instructions are one curl away and nobody
           # has to look it up.
           gpg --batch --armor --export "$KEY_ID" > out/apt/key.asc
@@ -117,7 +117,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out/flatpak
-          tar -xzf assets/nevertube-repo-*.tar.gz -C out/flatpak
+          tar -xzf assets/NeverTube-*-Linux-Flatpak-Repo.tar.gz -C out/flatpak
           test -d out/flatpak/repo
           flatpak build-update-repo --gpg-sign="$KEY_ID" --generate-static-deltas out/flatpak/repo
           gpg --batch --armor --export "$KEY_ID" > out/flatpak/key.asc

@@ -11,7 +11,7 @@ AppImage](#why-not-an-appimage-measured)).
 | tier | what the user does | updates | when |
 |---|---|---|---|
 | **Native package** | `rpm-ostree install nevertube.rpm` (Fedora Atomic), `dnf`, `apt`, `pacman` | with the OS / the distro repo | already works, no code needed. Only for the traditional distros; on an immutable one it needs a reboot and it is layered over the image |
-| **Flatpak bundle** | download `nevertube-<ver>-x86_64.flatpak` and `flatpak install` it | manual (a new file per release) | **now** — this directory |
+| **Flatpak bundle** | download `NeverTube-<ver>-Linux-Flatpak.flatpak` and `flatpak install` it | manual (a new file per release) | **now** — this directory |
 | **Flatpak + own OSTree repo** | `flatpak remote-add nevertube <url>` once | `flatpak update`, automatic | **now**, as a CI artifact; publish it when there is a URL (GitHub Pages) |
 | **Flathub** | search in the software center | automatic | later: it needs a human review, the manifest rebuilt from source in their infra, and `flatpak-builder-lint` clean |
 
@@ -32,7 +32,7 @@ are produced here and can be handed out from a release page.
 ### The bundle (no repository)
 
 ```sh
-flatpak install --user nevertube-1.0.0-x86_64.flatpak
+flatpak install --user NeverTube-1.0.0-Linux-Flatpak.flatpak
 flatpak run io.github.marlo4220mc.NeverTube
 ```
 
@@ -291,7 +291,7 @@ inside a container is fragile and there is no display. It is a manual check on a
 real machine (or on the immutable test box):
 
 ```sh
-flatpak install --user nevertube-<ver>-x86_64.flatpak
+flatpak install --user NeverTube-<ver>-Linux-Flatpak.flatpak
 flatpak run io.github.marlo4220mc.NeverTube
 # hardware decode check:
 flatpak run io.github.marlo4220mc.NeverTube --selftest-player   # needs a GPU
