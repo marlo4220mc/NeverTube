@@ -1,5 +1,10 @@
 Name: nevertube
-Version: __VERSION__
+# The version is a REAL one by default (not a placeholder): this .spec is
+# published with the repository and a Copr build takes it as it is. The release
+# pipeline overrides it with the version of the tag (--define "pkg_version …",
+# see packaging/linux/rpm/build.sh), which is where the pre-release suffix and
+# the ~ of rpm live. Bump this default together with CMakeLists.txt.
+Version: %{?pkg_version}%{!?pkg_version:1.0.0}
 Release: 1%{?dist}
 Summary: NeverTube - lightweight YouTube client (Qt5 + libmpv)
 License: GPL-3.0-or-later
@@ -37,6 +42,26 @@ Requires: hicolor-icon-theme
 # would want to remove their ffmpeg). The path is satisfied by whichever of
 # the two the user has, and it forces nobody to enable RPM Fusion.
 Requires: /usr/bin/ffmpeg
+# ── Two ways of building this spec, and they are not interchangeable ─────────
+#   1. The CI (packaging/linux/rpm/build.sh) compiles the tree OUTSIDE and
+#      passes the install tree with --define "stage <dir>": this spec only
+#      packages it. That is what the Fedora job of the pipeline does.
+#   2. FROM SOURCE (a source RPM, Copr building this spec from the GitHub
+#      repository): no `stage` is defined, so the release tarball is unpacked
+#      here and cmake configures and compiles it inside the build environment,
+#      against Fedora's own Qt5/mpv/libav.
+%global staged %{?stage:1}%{!?stage:0}
+
+%if !%{staged}
+# The tarball of a GitHub tag extracts to NeverTube-<version> (the repository
+# name) and the one rpkg generates from a checkout to nevertube-<version>;
+# %prep accepts both (see below).
+Source0: https://github.com/marlo4220mc/NeverTube/archive/v%{version}.tar.gz
+BuildRequires: cmake gcc-c++ make
+BuildRequires: qt5-qtbase-devel mpv-devel
+BuildRequires: ffmpeg-free-devel libavformat-free-devel libavcodec-free-devel
+BuildRequires: pulseaudio-libs-devel mesa-libGL-devel openssl-devel
+%endif
 # Wayland session (Fedora Workstation's default): without this plugin Qt falls
 # back to xcb through XWayland. Recommends, not Requires: on a pure X11 desktop
 # (or with XWayland present) the app works without it.
@@ -47,17 +72,33 @@ BuildArch: x86_64
 A lightweight YouTube client built with Qt5 and the mpv playback core.
 
 %prep
+%if !%{staged}
+# -c -T: create the build directory and DO NOT untar; the tar below unpacks
+# whatever the top directory of the archive is called inside it (--strip).
+%setup -q -c -T
+%{__tar} -xzf %{SOURCE0} --strip-components=1
+%endif
 
 %build
+%if !%{staged}
+%cmake -DCMAKE_BUILD_TYPE=Release
+%cmake_build
+%endif
 
-# The workflow (packaging/linux/rpm/build.sh) compiles the app and leaves the
-# install tree under BUILD/nevertube/ (usr/bin, usr/share). This spec only
-# packages it; it does not compile. The staging path arrives as the `stage`
-# macro (rpmbuild runs %install in its own subdirectory, so a relative path is
-# not safe).
+# 1) The workflow (packaging/linux/rpm/build.sh) compiles the app and leaves the
+#    install tree under BUILD/nevertube/ (usr/bin, usr/share). The staging path
+#    arrives as the `stage` macro (rpmbuild runs %install in its own
+#    subdirectory, so a relative path is not safe).
+# 2) From source, cmake installs into %{buildroot} and the license is copied
+#    where %files declares it (the CMake install does not put it there).
 %install
+%if %{staged}
 mkdir -p %{buildroot}
 cp -a %{stage}/. %{buildroot}/
+%else
+%cmake_install
+install -D -m 0644 LICENSE %{buildroot}%{_datadir}/licenses/nevertube/LICENSE
+%endif
 
 %files
 %license %{_datadir}/licenses/nevertube/LICENSE
@@ -72,5 +113,6 @@ cp -a %{stage}/. %{buildroot}/
 %{_datadir}/icons/hicolor/256x256/apps/nevertube.png
 
 %changelog
-* Sat Oct 10 2026 marlo4220mc <marlo4220mc@users.noreply.github.com> - __VERSION__-1
+* Sat Oct 10 2026 marlo4220mc <marlo4220mc@users.noreply.github.com> - 1.0.0-1
 - Initial package
+- The spec can also build from source (no `stage`): that is the Copr path

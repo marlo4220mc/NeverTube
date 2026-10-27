@@ -1,0 +1,186 @@
+name: Publish the package repositories (APT + Flatpak on GitHub Pages)
+
+# Publishes the package repositories of an ALREADY PUBLISHED release:
+#
+#   https://<user>.github.io/NeverTube/apt/       the APT repository (jammy, noble)
+#   https://<user>.github.io/NeverTube/flatpak/   the OSTree repository of the Flatpak
+#
+# It is a workflow of its own and NOT part of release.yml on purpose: a release
+# is an immutable thing, and publishing (or failing to publish) a repository
+# must not be able to modify, block or invalidate it. This job only READS the
+# assets of the release and writes the `gh-pages` branch.
+#
+# Two things need to be set up by hand, ONCE (docs/release/README.md tells the
+# whole procedure):
+#
+#   1. a GPG key of the project, stored as the secrets GPG_PRIVATE_KEY (the
+#      armored SECRET key; it must have no passphrase, it is a CI key) and
+#      GPG_KEY_ID (its id or fingerprint). Without them this workflow stops in
+#      the first seconds: the metadata of an APT repository and the summary of
+#      a Flatpak repository are exactly what the client verifies, and a
+#      repository published "official" but unsigned is worse than none.
+#   2. GitHub Pages enabled on the `gh-pages` branch (Settings -> Pages ->
+#      Source: Deploy from a branch -> gh-pages / root). Until that is done,
+#      this workflow still publishes the branch; Pages just does not serve it.
+#
+# Signing is also what makes the updates verifiable end to end: apt verifies
+# the Release of the suite (InRelease) and flatpak verifies the summary of the
+# repository. The Windows installers are still unsigned, and that is said in
+# the notes: these two repositories do not change that.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version of the published release (1.0.0, 1.0.0-alpha.1, ...)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-repos
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: repositories -> gh-pages
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      KEY_ID: ${{ secrets.GPG_KEY_ID }}
+      KEY_ARMORED: ${{ secrets.GPG_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Before downloading anything: without a key there is no repository to
+      # publish (only an unsigned one, which is not what this job is for).
+      - name: require the signing key
+        run: |
+          set -euo pipefail
+          if [ -z "${KEY_ARMORED:-}" ] || [ -z "${KEY_ID:-}" ]; then
+            echo "::error::GPG_PRIVATE_KEY / GPG_KEY_ID are not set. Generate the key of the project, store the SECRET (armored, without a passphrase) as GPG_PRIVATE_KEY and its id as GPG_KEY_ID; then run this workflow again."
+            exit 1
+          fi
+          echo "key present (id ${KEY_ID})"
+
+      - name: tools (dpkg-dev, apt-utils, gnupg, flatpak)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            dpkg-dev apt-utils gnupg flatpak ca-certificates
+
+      - name: import the key
+        run: |
+          set -euo pipefail
+          printf '%s' "$KEY_ARMORED" | gpg --batch --import
+          gpg --batch --list-secret-keys "$KEY_ID" >/dev/null
+
+      # The repositories are built from the BYTES OF THE RELEASE, not from a
+      # fresh build: the checksums of the release are what says that what goes
+      # into the repositories is what was published and smoke-tested.
+      - name: download the assets of the release and verify them
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          gh release download "v$VERSION" --dir assets \
+            --pattern "nevertube-$VERSION-ubuntu22.04-amd64.deb" \
+            --pattern "nevertube-$VERSION-ubuntu24.04-amd64.deb" \
+            --pattern "nevertube-repo-$VERSION-x86_64.tar.gz" \
+            --pattern "SHA256SUMS.txt"
+          ( cd assets && sha256sum -c SHA256SUMS.txt --ignore-missing )
+
+      # Two suites, not one: the 22.04 and the 24.04 package share the name and
+      # the version but not their dependencies (the ...t64 rename), so each one
+      # has its own suite and its own `Depends`.
+      - name: APT repository (jammy + noble), signed
+        env:
+          NEVERTUBE_APT_GPG_KEY: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          set -euo pipefail
+          bash packaging/linux/deb/repo.sh out/apt \
+            "jammy=assets/nevertube-$VERSION-ubuntu22.04-amd64.deb" \
+            "noble=assets/nevertube-$VERSION-ubuntu24.04-amd64.deb"
+          # The public key, so the instructions are one curl away and nobody
+          # has to look it up.
+          gpg --batch --armor --export "$KEY_ID" > out/apt/key.asc
+          ls -R out/apt | head -30
+
+      # The Flatpak repository travels as a release asset (one tar, because an
+      # OSTree repo is thousands of objects and symlinks). Its summary is
+      # signed HERE: the asset came out of a build without secrets, so without
+      # this step the published repo would have to be added with
+      # --no-gpg-verify.
+      - name: Flatpak repository, signed
+        run: |
+          set -euo pipefail
+          mkdir -p out/flatpak
+          tar -xzf assets/nevertube-repo-*.tar.gz -C out/flatpak
+          test -d out/flatpak/repo
+          flatpak build-update-repo --gpg-sign="$KEY_ID" --generate-static-deltas out/flatpak/repo
+          gpg --batch --armor --export "$KEY_ID" > out/flatpak/key.asc
+          base64 -w0 <(gpg --batch --export "$KEY_ID") > out/flatpak/key.base64
+          {
+            echo '[Flatpak Repo]'
+            echo 'Title=NeverTube'
+            echo "Url=https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/flatpak/repo"
+            echo "GPGKey=$(cat out/flatpak/key.base64)"
+          } > out/flatpak/nevertube.flatpakrepo
+          rm -f out/flatpak/key.base64
+          ls -la out/flatpak
+
+      # The branch is published from a clone of itself: the checkout of this
+      # job (main) is never used as the source of the published tree, so
+      # nothing of the repository's source can leak into Pages.
+      - name: publish the gh-pages branch
+        run: |
+          set -euo pipefail
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          rm -rf pages
+          if git clone --depth 1 --branch gh-pages "$url" pages 2>/dev/null; then
+            echo "gh-pages: updating the existing branch"
+          else
+            mkdir pages
+            git -C pages init -q
+            git -C pages checkout -q -b gh-pages
+            git -C pages remote add origin "$url"
+          fi
+          rm -rf pages/apt pages/flatpak
+          cp -r out/apt pages/apt
+          cp -r out/flatpak pages/flatpak
+          git -C pages add -A
+          if git -C pages diff --cached --quiet; then
+            echo "nothing changed since the last publication"
+          else
+            git -C pages commit -q -m "Publish the $VERSION package repositories"
+            git -C pages push -q origin gh-pages
+          fi
+          echo "published: https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/"
+
+      - name: instructions (also in the run summary)
+        run: |
+          set -euo pipefail
+          pages="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}"
+          {
+            echo "## Package repositories published ($VERSION)"
+            echo
+            echo "### APT (Ubuntu 22.04 / 24.04)"
+            echo '```sh'
+            echo "sudo curl -fsSL $pages/apt/key.asc -o /etc/apt/keyrings/nevertube.asc"
+            echo "sudo gpg --dearmor -o /etc/apt/keyrings/nevertube.gpg /etc/apt/keyrings/nevertube.asc"
+            echo "# jammy on 22.04, noble on 24.04"
+            echo "echo 'deb [signed-by=/etc/apt/keyrings/nevertube.gpg] $pages/apt/ jammy main' | sudo tee /etc/apt/sources.list.d/nevertube.list"
+            echo 'sudo apt update && sudo apt install nevertube'
+            echo '```'
+            echo "### Flatpak"
+            echo '```sh'
+            echo "flatpak remote-add --user --if-not-exists nevertube $pages/flatpak/nevertube.flatpakrepo"
+            echo 'flatpak install --user nevertube io.github.marlo4220mc.NeverTube'
+            echo '```'
+            echo
+            echo "Remote: \`flatpak update\` picks up the next version on its own."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -315,6 +315,12 @@ modules:
     buildsystem: cmake-ninja
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
+      # No -DNEVERTUBE_VERSION here: the sandbox does not inherit the host
+      # environment and the manifest is a static file, so this module compiles
+      # with the version of CMakeLists.txt. The `version` job of release.yml
+      # guarantees that its core IS the core of the tag, so a Flatpak only
+      # differs from the other packages in the pre-release suffix, which no
+      # Flathub build ships.
     sources:
       - type: dir
         path: ../../..

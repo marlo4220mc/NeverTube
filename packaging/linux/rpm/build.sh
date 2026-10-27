@@ -30,7 +30,14 @@ dnf install -y cmake gcc-c++ make pkgconf-pkg-config \
   rpm-build desktop-file-utils findutils
 
 echo "== configure + build =="
-cmake -S . -B build-rpm -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+# The version shown by the app (Ajustes, updater): the display form of the
+# release when the workflow passes it (1.0.0-alpha.1), the one of
+# CMakeLists.txt otherwise.
+extra=()
+if [ -n "${NEVERTUBE_VERSION:-}" ]; then
+  extra+=("-DNEVERTUBE_VERSION=$NEVERTUBE_VERSION")
+fi
+cmake -S . -B build-rpm -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr "${extra[@]}"
 cmake --build build-rpm --parallel "$(nproc)"
 
 echo "== offline selftests (gate) =="
@@ -43,7 +50,8 @@ for t in --selftest-db --selftest-discover --selftest-ssl \
          --selftest-download-settings --selftest-download-transport \
          --selftest-download-resume --selftest-single-instance \
          --selftest-video-url \
-         --selftest-search-url --selftest-settings-page; do
+         --selftest-search-url --selftest-update \
+         --selftest-settings-page; do
   echo "SELFTEST $t"
   ./build-rpm/nevertube "$t"
 done
@@ -53,6 +61,9 @@ done
 # The value comes already normalized for rpm: a pre-release is "1.0.0~alpha.1"
 # because a hyphen is the Version/Release separator and rpm rejects it there.
 ver="${NEVERTUBE_PKG_VERSION:-$(grep -oP 'project\(nevertube VERSION \K[0-9.]+' CMakeLists.txt | head -1)}"
+# The app's own version (display spelling) is not the rpm one when there is a
+# suffix; it is the one the binary shows and the updater compares.
+appver="${NEVERTUBE_VERSION:-$ver}"
 echo "== packaging nevertube $ver (x86_64) =="
 
 rpmtop="$repo/rpmbuild"
@@ -67,8 +78,13 @@ DESTDIR="$rpmtop/BUILD/nevertube" cmake --install build-rpm --prefix /usr --stri
 # %license in the spec ships the GPL-3.0 text under /usr/share/licenses/<name>.
 mkdir -p "$rpmtop/BUILD/nevertube/usr/share/licenses/nevertube"
 cp LICENSE "$rpmtop/BUILD/nevertube/usr/share/licenses/nevertube/LICENSE"
-sed "s|__VERSION__|$ver|g" packaging/linux/rpm/nevertube.spec > "$rpmtop/SPECS/nevertube.spec"
+# The spec is used AS IT IS (it is the published one, with its real default
+# version): the version of the release arrives as a macro. The `stage` macro is
+# what tells it that the tree is already compiled (the CI path); without it the
+# same spec builds from source, which is the Copr path.
+cp packaging/linux/rpm/nevertube.spec "$rpmtop/SPECS/nevertube.spec"
 rpmbuild --define "_topdir $rpmtop" \
+         --define "pkg_version $ver" \
          --define "stage $rpmtop/BUILD/nevertube" \
          -bb "$rpmtop/SPECS/nevertube.spec"
 
