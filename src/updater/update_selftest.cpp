@@ -251,14 +251,29 @@ bool updateSelfTest()
         check(hash == QLatin1String("ba7816bf8f01cfea414140de5dae2223b00361a3"
                                     "96177a9cb410ff61f20015ad"),
               "el SHA-256 de un fichero se calcula bien");
-        check(hash
-                  != QLatin1String("1b4f0e9851971998e732078544c96b36c3d0"
-                                   "1cedf7caa332359d6f1d83567014"),
+        const QString other = QLatin1String("1b4f0e9851971998e732078544c96b3"
+                                            "6c3d01cedf7caa332359d6f1d83567014");
+        check(hash != other,
               "un hash que no es el suyo NO pasa la verificacion");
+
+        // The one gate that decides: verifyDownloadedFile() is what the
+        // download calls, and it is where a signature check would be added.
+        check(nt::verifyDownloadedFile(file, hash, &error),
+              "un fichero con el hash del manifiesto es apto para ejecutarse");
+        check(!nt::verifyDownloadedFile(file, other, &error)
+                  && error == nt::tr("update.err.hashMismatch"),
+              "un hash distinto lo descarta y dice por que");
+        check(!nt::verifyDownloadedFile(file, QString(), &error)
+                  && error == nt::tr("update.err.sumsEntryMissing"),
+              "sin hash con el que comparar no se acepta nada");
+
         QFile::remove(file);
         check(nt::sha256OfFile(file, &error).isEmpty()
                   && !error.isEmpty(),
               "un fichero que no existe no tiene hash y lo dice");
+        check(!nt::verifyDownloadedFile(file, hash, &error)
+                  && !error.isEmpty(),
+              "un fichero que no existe tampoco pasa la verificacion");
     }
 
     // --- the download refuses to start when it cannot be verified ---

@@ -22,9 +22,9 @@ class QNetworkReply;
 // What the updater does NOT do: it does not claim the download is authentic.
 // The installers are unsigned (there is no Authenticode certificate yet), so
 // SHA-256 proves the file arrived whole and matches the manifest of the
-// release, not who built it. That is what the dialog says, and the shape of
-// verifyDownloadedFile() is ready for a future signature check to be added
-// next to it.
+// release, not who built it. That is what the dialog says, and
+// verifyDownloadedFile() is the single seam where a signature check is added
+// when there is a certificate to check against.
 namespace nt {
 
 // The version of this binary. A release build is configured with
@@ -132,6 +132,14 @@ bool checksumFor(const QByteArray &sumsText, const QString &fileName,
 // SHA-256 of a file (lowercase hex); empty with *error set when it cannot be
 // read.
 QString sha256OfFile(const QString &path, QString *error);
+
+// The ONE decision that a downloaded file is fit to run, so that a future
+// signature check has a single place to go: today it is the SHA-256 against the
+// manifest of the release, and when the installers are signed (they are not:
+// the project has no certificate) the signature is verified HERE, next to this
+// one, and nothing else in the download path changes.
+bool verifyDownloadedFile(const QString &path, const QString &expectedSha256,
+                          QString *error);
 
 // The download of the installer, with the verification against the release's
 // SHA256SUMS.txt. The sums travel FIRST (they are a few hundred bytes): a

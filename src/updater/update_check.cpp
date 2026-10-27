@@ -382,6 +382,34 @@ QString sha256OfFile(const QString &path, QString *error)
     return QString::fromLatin1(hash.result().toHex());
 }
 
+bool verifyDownloadedFile(const QString &path, const QString &expectedSha256,
+                          QString *error)
+{
+    // A file with nothing to compare against cannot be verified, and an
+    // unverified installer is not run.
+    if (expectedSha256.isEmpty()) {
+        if (error)
+            *error = nt::tr("update.err.sumsEntryMissing");
+        return false;
+    }
+    QString why;
+    const QString actual = sha256OfFile(path, &why);
+    if (actual.isEmpty()) {
+        if (error)
+            *error = nt::tr("update.err.write").arg(why);
+        return false;
+    }
+    // Byte-exact against the manifest of the release. It proves the file
+    // arrived whole and is the one the manifest describes; it does NOT prove
+    // who published it (the installers are unsigned, and the dialog says so).
+    if (actual.compare(expectedSha256, Qt::CaseInsensitive) != 0) {
+        if (error)
+            *error = nt::tr("update.err.hashMismatch");
+        return false;
+    }
+    return true;
+}
+
 UpdateDownloader::UpdateDownloader(QObject *parent) : QObject(parent) {}
 
 UpdateDownloader::~UpdateDownloader() = default;
@@ -527,18 +555,11 @@ void UpdateDownloader::finishReply()
     }
 
     QString error;
-    const QString actual = sha256OfFile(m_filePath, &error);
-    if (actual.isEmpty()) {
+    // One place decides that the file is fit to run (see the header): today the
+    // hash of the release's manifest, tomorrow the hash AND the signature.
+    if (!verifyDownloadedFile(m_filePath, m_expectedSha, &error)) {
         cleanupPartialFile();
-        emit failed(nt::tr("update.err.write").arg(error));
-        return;
-    }
-    // byte-exact against the manifest of the release. It proves the file
-    // arrived whole and is the one the manifest describes; it does NOT prove
-    // who published it (the installers are unsigned), and the dialog says so.
-    if (actual.compare(m_expectedSha, Qt::CaseInsensitive) != 0) {
-        cleanupPartialFile();
-        emit failed(nt::tr("update.err.hashMismatch"));
+        emit failed(error);
         return;
     }
     m_stage = Idle;
