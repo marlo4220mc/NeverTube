@@ -665,7 +665,7 @@ the player.
 
 | workflow | triggers |
 |---|---|
-| `linux.yml` (2x `.deb` + `.rpm` + pacman; the `online-report` job in the same file is report only) | **manual** (`gh workflow run linux.yml --ref main`), or a push that touches **the workflow file itself** (filter `paths:`). It does NOT run on every push to `main`; the online job runs only on manual dispatch with the `online_selftests` box ticked. |
+| `linux.yml` (2x `.deb` + `.rpm` + pacman + Flatpak; the `online-report` job in the same file is report only) | **manual** (`gh workflow run linux.yml --ref main`), or a push that touches **the workflow file itself** (filter `paths:`). It does NOT run on every push to `main`; the online job runs only on manual dispatch with the `online_selftests` box ticked. |
 | `windows.yml` (x86 / Win7) | **manual** (`gh workflow run windows.yml --ref main`) or if the push touches **the workflow file itself** (filter `paths:`). It does NOT run on every push to `main`. |
 | `windows_x86_win10.yml` (Windows 10/11 **32-bit**, mpv i686) | **manual** (`gh workflow run windows_x86_win10.yml --ref main`) or if the push touches **the workflow file itself** (filter `paths:`). Same policy: never per commit. |
 | `windows_x64.yml` (Win10+) | only if the push touches **the workflow file itself** (filter `paths:`), or manually with `gh workflow run windows_x64.yml --ref main` |
@@ -722,6 +722,32 @@ included: dnf resolves them to `ffmpeg-free` in Fedora base, or to RPM Fusion's
 `PKGBUILD` lists them by name. The binary is STRIPPED in the deb and rpm
 (`cmake --install --strip`; `makepkg` already strips in Arch): the symbol table
 alone was 18 % of the binary.
+
+**Flatpak** (`packaging/linux/flatpak/`): the fifth Linux deliverable, and the only
+one that is NOT built against the distro's libraries. It is for the IMMUTABLE
+distributions (Silverblue/Kinoite/Bazzite, MicroOS/Aeon, SteamOS), where an
+`rpm`/`deb` needs a layering + reboot and an AppImage is not an option (no
+`libfuse.so.2`, and it would take libmpv and the GPU stack from the host). The
+manifest (app id `io.github.marlo4220mc.NeverTube`) builds FFmpeg + lame + libass
++ libplacebo + libXpresent + libmpv (`-Dlibmpv=true -Dcplayer=false`) from source
+against `org.kde.Platform//5.15-25.08`, and `build.sh` produces the `.flatpak`
+bundle AND an OSTree repo (with static deltas) for `flatpak update`. Two rules
+that are easy to break:
+
+- **`src/main.cpp` must keep reading `FLATPAK_ID`** for
+  `setDesktopFileName()`: under Flatpak the exported `.desktop` is named after the
+  app id, and the Wayland `app_id` has to match it or the compositor shows a
+  generic icon. The `appdata` module of the manifest renames the files to the app
+  id and deletes the native `nevertube.*` copies (two entries in the menu otherwise).
+- **The builder and the AppStream composer move together.** `flatpak-builder`
+  1.2 (Ubuntu 22.04) composes the metainfo with `appstream-compose` INSIDE the
+  SDK, and freedesktop-sdk 24.08+ (the base of 5.15-25.08) no longer ships it:
+  the run died in the last step with everything already built. `flatpak-builder`
+  1.4 composes with `appstreamcli compose` on the host, which is why the CI job is
+  `ubuntu-24.04` (1.4.2 + appstream 1.0.2) and `build.sh` refuses to start with
+  the old pair. 24.04 restricts unprivileged user namespaces through AppArmor and
+  every module runs in `bwrap`, so the job lifts
+  `kernel.apparmor_restrict_unprivileged_userns` first.
 
 Also mind the toolset: x86 uses **v142** (VS2019) because of the Win7 target and
 x64 the one of `windows-latest` (newer). They do not compile the same: a literal

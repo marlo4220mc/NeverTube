@@ -112,9 +112,15 @@ available mpv falls back to software and the app's codec ladder notices it
 packaging/linux/flatpak/build.sh
 ```
 
-It needs `flatpak` and `flatpak-builder`; it adds Flathub as a user remote,
-installs `org.kde.Platform//5.15-25.08` and `org.kde.Sdk//5.15-25.08` if they
-are missing, builds, validates the desktop integration, runs the **offline
+It needs `flatpak`, `flatpak-builder` **>= 1.4** and `appstreamcli` **>=
+1.0 with its compose component** — the `appstream` package, plus
+`appstream-compose` when the distribution splits it (Ubuntu 24.04 does: the CLI
+only dispatches `compose` to `/usr/libexec/appstreamcli-compose`). The script
+checks the three before starting and refuses with the reason instead of
+discovering it at the end of the build. It adds Flathub as a user remote,
+installs
+`org.kde.Platform//5.15-25.08` and `org.kde.Sdk//5.15-25.08` if they are
+missing, builds, validates the desktop integration, runs the **offline
 selftests inside the sandbox** and leaves:
 
 ```
@@ -139,8 +145,11 @@ Signing is opt-in: `FLATPAK_GPG_KEY=<key id> packaging/linux/flatpak/build.sh`
 signs both the bundle and the repo. Without a key the repo has to be added with
 `--no-gpg-verify`.
 
-The first build takes a while (FFmpeg, libplacebo and mpv are compiled from
-source). Subsequent builds reuse the ccache in `build-flatpak/`.
+The build takes a while (FFmpeg, libplacebo and mpv are compiled from source):
+about 12 minutes on a CI runner. Every run rebuilds those three modules
+(`--force-clean`; ccache is not enabled), so what is reused between runs is the
+download of the runtime and the SDK, which flatpak keeps in
+`~/.local/share/flatpak`.
 
 ## What is inside (and why it is built here)
 
@@ -232,10 +241,12 @@ versions of the same distro can differ).
 `.github/workflows/linux.yml` has a `build-flatpak` job, next to the `.deb`,
 `.rpm` and pacman ones:
 
-- **Runner**: a plain `ubuntu-22.04` with `flatpak` and `flatpak-builder`
+- **Runner**: a plain `ubuntu-24.04` with `flatpak`, `flatpak-builder`,
+  `elfutils`, `appstream`, `appstream-compose` and `desktop-file-utils`
   installed from apt, then `bash packaging/linux/flatpak/build.sh`. There is
-  **no** container image and no privileged mode: the script passes
-  `--disable-rofiles-fuse` itself, so no FUSE setup is needed either.
+  **no** container image and no
+  privileged mode: the script passes `--disable-rofiles-fuse` itself, so no FUSE
+  setup is needed either.
   (The `ghcr.io/flathub-infra/flatpak-builder` image was the first attempt and it
   was dropped: the registry answers `403 invalid token` for its tags, so the tag
   could not be verified from here, and a job that dies on an unverifiable image
@@ -258,11 +269,22 @@ versions of the same distro can differ).
 - **Timeout**: 120 minutes. The first build compiles FFmpeg, libplacebo and mpv
   from source and nothing is cached between runs.
 
-The runner is **22.04 and not 24.04** for a concrete reason: 24.04 restricts
-unprivileged user namespaces through AppArmor
-(`kernel.apparmor_restrict_unprivileged_userns=1`) and `flatpak-builder` needs
-`bwrap`, which is built on exactly that; on 24.04 the build dies before the first
-module.
+The runner is **24.04 and not 22.04**, and that is measured, not taste. The
+export step composes the AppStream metadata, and the tool that does it changed
+owner: 22.04 ships `flatpak-builder` 1.2.2, which runs `appstream-compose`
+**inside the SDK sandbox**, and freedesktop-sdk 24.08+ (the base of
+`org.kde.Sdk//5.15-25.08`) no longer ships that binary -- the first CI run died
+in the *last* step, with FFmpeg, libplacebo, mpv and the app already built:
+`bwrap: execvp appstream-compose: No such file or directory`. `flatpak-builder`
+1.4 (24.04 ships 1.4.2) calls `appstreamcli compose` on the host instead, and
+`appstreamcli` 1.0 arrived with that subcommand. `build.sh` checks both versions
+before starting, so the failure is a sentence instead of 15 minutes.
+
+24.04 has one cost, handled in the workflow: it restricts unprivileged user
+namespaces through AppArmor (`kernel.apparmor_restrict_unprivileged_userns=1`)
+and every module of the build runs inside `bwrap`, which is built on exactly
+that. The `build-flatpak` job lifts the restriction on the throwaway runner
+(conditionally: the sysctl is absent on kernels without it) before building.
 
 A full `flatpak run` of the installed bundle is **not** part of CI: `bwrap`
 inside a container is fragile and there is no display. It is a manual check on a

@@ -47,6 +47,7 @@ Compilados por objetivo en CI; en Linux solo x86_64.
 | `.deb` | Ubuntu 22.04 / 24.04 | `nevertube_<versión>_amd64.deb` |
 | `.rpm` | Fedora (familia RHEL con esos sonames) | `nevertube-<versión>-1.x86_64.rpm` |
 | pacman | Arch Linux | `nevertube-<versión>-x86_64.pkg.tar.zst` |
+| Flatpak | cualquier distribución, incluidas las inmutables | `nevertube-<versión>-x86_64.flatpak` |
 | setup.exe | Windows 10 / 11 (x64) | `nevertube-setup-x64.exe` |
 | setup.exe | Windows 10 (x86) | `nevertube-setup-win10-x86.exe` |
 | setup.exe | Windows 7 (x86) | `nevertube-setup-win7-x86.exe` |
@@ -56,6 +57,7 @@ Compilados por objetivo en CI; en Linux solo x86_64.
 - Debian / Ubuntu: `sudo apt install ./nevertube_<versión>_amd64.deb` — apt instala automáticamente las dependencias declaradas.
 - Fedora: `sudo dnf install ./nevertube-<versión>-1.x86_64.rpm` — dnf resuelve los requisitos por sonames (`ffmpeg-free`, o el ffmpeg de RPM Fusion si ya está instalado).
 - Arch: `sudo pacman -U nevertube-<versión>-x86_64.pkg.tar.zst`
+- Flatpak: `flatpak install --user nevertube-<versión>-x86_64.flatpak` — el entregable para las distribuciones donde un `rpm`/`deb` no es una opción (Silverblue / Kinoite / Bazzite, MicroOS / Aeon, SteamOS): el bundle lleva su propio Qt, libmpv y ffmpeg, así que es el mismo binario en todas. También se puede publicar como repositorio OSTree propio para que funcione `flatpak update`; los permisos, las actualizaciones y las comprobaciones manuales están en `packaging/linux/flatpak/README.md`.
 - Windows: ejecuta el setup de tu sistema — `nevertube-setup-win7-x86.exe` (Windows 7 de 32 bits), `nevertube-setup-win10-x86.exe` (Windows 10 de 32 bits) o `nevertube-setup-x64.exe` (Windows 10/11 de 64 bits). Cada uno rechaza los otros dos y te dice cuál usar; instalan el re-distribuible de VC++ que necesitan.
 
 El binario es `nevertube`. En Linux la entrada `.desktop` y los iconos se instalan en el tema `hicolor`, así que la app aparece en el menú como **NeverTube**.
