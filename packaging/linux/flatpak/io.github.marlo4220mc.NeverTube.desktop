@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=NeverTube
+GenericName=YouTube client
+Comment=Lightweight YouTube client
+Comment[es]=Cliente ligero de YouTube
+# Inside the Flatpak the binary is on /app/bin, which is on PATH for the
+# sandbox, so the bare name is enough.
+Exec=nevertube
+# The icon is installed by the `appdata` module of the manifest as
+# share/icons/hicolor/<N>x<N>/apps/io.github.marlo4220mc.NeverTube.png.
+Icon=io.github.marlo4220mc.NeverTube
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=youtube;video;player;media;
+StartupNotify=true
+# Window <-> launcher association on X11. On Wayland it comes from the app_id,
+# which under Flatpak is FLATPAK_ID (src/main.cpp).
+StartupWMClass=nevertube

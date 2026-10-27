@@ -1,4 +1,4 @@
-name: Linux viability (build + selftests + deb/rpm/arch)
+name: Linux viability (build + selftests + deb/rpm/arch/flatpak)
 
 # Trigger: MANUAL (Actions -> Run workflow), plus a push that touches this file
 # itself. Uploading this workflow from the GitHub web UI fires one run so the
@@ -13,7 +13,7 @@ on:
       # they never gate anything, so a rate-limited or empty YouTube response
       # cannot turn a push red. They are one extra job of THIS workflow
       # (online-report) that runs ONLY when this box is ticked on a manual
-      # dispatch; a push runs the four package builds and nothing else.
+      # dispatch; a push runs the five package builds and nothing else.
       online_selftests:
         description: 'Also run the online selftests (TLS handshake + YouTube search/browse/feeds + GPU). Informational.'
         type: boolean
@@ -23,15 +23,22 @@ on:
     paths:
       - '.github/workflows/linux.yml'
 
-# Four package builds, one job each: two Ubuntu bases (22.04 and 24.04, because
+# Five package builds, one job each: two Ubuntu bases (22.04 and 24.04, because
 # the t64 package rename and FFmpeg 6.1 of Noble are a real second combination)
-# plus Fedora and Arch. The app is a native Qt5/CMake binary that links the
-# distro's own sonames (Qt5, mpv, FFmpeg, pulse, GL), so each package has to be
-# compiled in its distro: there is no portable Ubuntu binary that can go into an
-# .rpm or a pacman package. The packaging recipes live in the repo under
-# packaging/linux/<distro>/ and are the same ones you can run by hand.
+# plus Fedora, Arch and the Flatpak. The app is a native Qt5/CMake binary that
+# links the distro's own sonames (Qt5, mpv, FFmpeg, pulse, GL), so each native
+# package has to be compiled in its distro: there is no portable Ubuntu binary
+# that can go into an .rpm or a pacman package. The packaging recipes live in the
+# repo under packaging/linux/<distro>/ and are the same ones you can run by hand.
 #
-# The four package jobs run ONLY offline, deterministic selftests. The ones that
+# The Flatpak job is the exception to that rule and it is not a native package:
+# it is the deliverable for the IMMUTABLE distributions (Silverblue/Kinoite/
+# Bazzite, MicroOS/Aeon, SteamOS), where neither an rpm/deb nor an AppImage can
+# be used. It builds against org.kde.Platform//5.15-25.08, brings its own Qt and
+# libmpv (no host sonames) and leaves a .flatpak bundle + an OSTree repo. See
+# packaging/linux/flatpak/README.md for why the AppImage was rejected.
+#
+# The five package jobs run ONLY offline, deterministic selftests. The ones that
 # need the network (a real TLS handshake, Innertube search/browse/feeds) are NOT
 # part of any gate: they are the optional `online-report` job at the bottom of
 # THIS workflow, which runs only on a manual dispatch with the online_selftests
@@ -128,6 +135,90 @@ jobs:
           name: linux-arch
           path: dist/*.pkg.tar.zst
           retention-days: 21
+
+  # The deliverable for the IMMUTABLE distributions (Silverblue/Kinoite/Bazzite,
+  # MicroOS/Aeon, SteamOS). Unlike the three jobs above it does NOT use the
+  # distro's libraries: flatpak-builder compiles FFmpeg, lame, libass, libplacebo
+  # and libmpv from source against org.kde.Platform//5.15-25.08, so the result is
+  # the same binary on every distribution. That is the whole point: the old
+  # AppImage failed because it took the host's libmpv and GPU stack.
+  #
+  # It runs on a plain ubuntu-22.04 with flatpak + flatpak-builder from apt
+  # instead of the flathub builder image on purpose: the GHCR image names could
+  # not be verified from here (they answer 403 invalid token), and a job that
+  # fails on an unverifiable image tag teaches nothing. --disable-rofiles-fuse is
+  # passed by the script itself, so no FUSE is needed.
+  #
+  # 22.04 and NOT 24.04: Ubuntu 24.04 restricts unprivileged user namespaces
+  # through AppArmor (kernel.apparmor_restrict_unprivileged_userns=1), and bwrap
+  # -- which is what flatpak-builder uses to build every module -- needs them.
+  # On 24.04 the build dies before the first module; 22.04 still allows them.
+  #
+  # What is NOT part of CI: `flatpak run` of the installed bundle. bwrap inside a
+  # container is fragile and it would need a display; the script validates the
+  # installed tree and runs the offline selftests INSIDE the sandbox with
+  # `flatpak-builder --run`, which is the part that proves libmpv/libav/Qt sqlite
+  # resolve from the runtime. The real launch is a manual check on a real machine
+  # (documented in packaging/linux/flatpak/README.md).
+  build-flatpak:
+    name: Flatpak (immutable distros)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      # git >= 2.38.1 (what the runner ships) refuses the file:// transport that
+      # flatpak-builder uses to update a module's submodules from its local git
+      # mirror: "fatal: transport 'file' not allowed" while cloning libplacebo's
+      # demos/3rdparty/nuklear, which aborted the build. Upstream flatpak-builder
+      # now passes "-c protocol.file.allow=always" to that git call itself, but
+      # Ubuntu 22.04's packaged builder predates the fix. GIT_ALLOW_PROTOCOL is
+      # git's own allow-list and overrides the protocol.*.allow default; the
+      # system/global config in the install step below covers any git subprocess
+      # that does not inherit this environment.
+      GIT_ALLOW_PROTOCOL: file:https:ssh:git
+    steps:
+      - uses: actions/checkout@v4
+
+      # elfutils is NOT a luxury: after a module is installed, flatpak-builder
+      # strips its ELF files itself and moves the debuginfo to files/debug
+      # ("stripping .../libmp3lame.so.0.0.0 to .../libmp3lame.so.0.0.0.debug").
+      # That step runs eu-strip and eu-elfcompress, and Ubuntu's flatpak-builder
+      # does not pull elfutils in, so the job died with "Failed to execute child
+      # process \"eu-strip\" (No such file or directory)" right after LAME built.
+      - name: Install flatpak, flatpak-builder and elfutils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
+          # Same file:// refusal as the note above, at the config level so it
+          # also applies to git processes with a scrubbed HOME. A throwaway CI
+          # runner has nothing to protect from CVE-2022-39253.
+          sudo git config --system protocol.file.allow always
+          git config --global protocol.file.allow always
+
+      # The script installs the runtime and the SDK from Flathub if they are
+      # missing, builds the manifest, validates the desktop integration, runs the
+      # offline selftests inside the sandbox and leaves dist/flatpak/{repo,bundle}.
+      - name: Build the Flatpak (manifest + selftests in the sandbox + bundle + repo)
+        run: bash packaging/linux/flatpak/build.sh
+
+      # The bundle is the "install this file" deliverable; the OSTree repo is what
+      # `flatpak remote-add` points at for updates. Both come out of one build.
+      #
+      # The repo travels as the TAR the script produces and not as the directory:
+      # an OSTree repo is thousands of objects plus SYMLINKS in refs/heads, and
+      # upload-artifact does not preserve symlinks (it stores the target's
+      # content), so what came back from a directory upload was not a valid repo.
+      # The tarball also turns a many-thousand-file upload into one. The repo is
+      # not signed in CI (no key), which is why the README documents
+      # --no-gpg-verify for it.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-flatpak
+          path: |
+            dist/flatpak/*.flatpak
+            dist/flatpak/nevertube-repo-*.tar.gz
+          retention-days: 21
+          if-no-files-found: error
 
   # INFORMATIONAL, manual dispatch only. It is a JOB of this workflow on purpose
   # (not a workflow of its own): these selftests need the network and no runner

@@ -1,0 +1,360 @@
+# NeverTube as a Flatpak.
+#
+# Why a Flatpak and not an AppImage (measured, see README.md in this
+# directory): an AppImage type 2 needs libfuse.so.2, which the immutable
+# distributions no longer ship (Silverblue/Kinoite/Bazzite 40+ dropped fuse2
+# with rpm-ostree 2024.7, Ubuntu 24.04 renamed it to libfuse2t64), and even
+# extracted it still takes libmpv, the GL stack and the VA-API drivers from the
+# HOST -- which is exactly the "works on one distro and not on the next"
+# failure the old AppImage had. A Flatpak brings its own glibc and Qt (the
+# runtime) and gets the GPU stack from the org.freedesktop.Platform GL/VAAPI
+# extensions, so the same bundle runs everywhere.
+#
+# Runtime: org.kde.Platform//5.15-25.08 is the last KDE Qt5 line and it is what
+# this app needs (Qt 5.15 Core/Gui/Widgets/Network/Sql). The KDE SDK extends the
+# freedesktop SDK, which is where gnutls, libdav1d, libva and the Vulkan tooling
+# used by the modules below come from.
+app-id: io.github.marlo4220mc.NeverTube
+runtime: org.kde.Platform
+runtime-version: '5.15-25.08'
+sdk: org.kde.Sdk
+command: nevertube
+
+finish-args:
+  # X11 shared memory (Qt and the GL driver use it); harmless on Wayland.
+  - --share=ipc
+  # YouTube itself.
+  - --share=network
+  # Wayland first, X11 through XWayland. Both are needed: the app publishes its
+  # app_id through QGuiApplication::setDesktopFileName(), which under Flatpak is
+  # the app id (FLATPAK_ID, see src/main.cpp), and on X11 it also sets
+  # StartupWMClass=nevertube.
+  - --socket=wayland
+  - --socket=fallback-x11
+  # Audio goes through PulseAudio/PipeWire (mpv's pulse AO).
+  - --socket=pulseaudio
+  # Hardware decode: VAAPI needs /dev/dri. Without this mpv falls back to
+  # software, which still plays (the app's codec ladder handles it).
+  - --device=dri
+  # The downloader writes to <downloads>/NeverTube (src/downloader/
+  # download_folder.cpp) and the database lives in <documents>/mini_tube
+  # (src/db/app_database.cpp). Both are the folders of the SYSTEM (translated),
+  # so the sandbox has to expose the paths the app resolves inside.
+  #
+  # BOTH spellings are granted, and it is not redundancy. In the sandbox
+  # XDG_CONFIG_HOME is ~/.var/app/<app-id>/config, and flatpak GENERATES the
+  # user-dirs.dirs of that directory from the real folders of the host. So the
+  # app asks for the TRANSLATED folder ("Descargas", "Documentos") and that is
+  # exactly what xdg-download/xdg-documents expose: the downloads go to the
+  # folder the rest of the system uses, in any language.
+  #
+  # The English literals are the net for a host without a (usable) mapping:
+  # then the app falls back to ~/Downloads and ~/Documents, and without the grant
+  # the files would land in the private home of the app, where the file manager
+  # never looks. They carry NO :create on purpose: they only apply when the host
+  # already has those folders, so a Spanish (or any localized) host does not get
+  # an empty ~/Downloads created next to its real ~/Descargas.
+  #
+  # :create is on the xdg-* entries because of the fresh immutable install
+  # (Silverblue/Kinoite/Bazzite, MicroOS/Aeon, SteamOS): the folder may not exist
+  # yet, flatpak would then have nothing to expose, and the database would be
+  # recreated EMPTY on every launch. With :create the host directory is created
+  # on the first run.
+  - --filesystem=xdg-download:create
+  - --filesystem=xdg-documents:create
+  - --filesystem=~/Downloads
+  - --filesystem=~/Documents
+
+modules:
+  # ---------------------------------------------------------------------------
+  # LAME: the mp3 encoder for "audio only" downloads. LGPL v2, not GPL (see
+  # FFmpeg's own list of GPL libraries: libmp3lame is not on it), so it is
+  # compatible with the LGPL build of FFmpeg below. Only the ffmpeg CLI links
+  # it; the app never does.
+  #
+  # 4.0 and NOT 3.101: that one does not compile with GCC 14/15, the toolchain
+  # of the 25.08 SDK, because -Wincompatible-pointer-types became an ERROR by
+  # default and id3tag.c passed `unsigned short *` where id3v2_add_utf8_lng()
+  # declares `char const *` (the job died in id3tag.c:661). 3.101 lived two days
+  # (2026-07-09) and 4.0 (2026-07-11) is the release that fixes exactly that
+  # type: id3tag_set_genre_utf8() takes `char const*` there instead of the wide
+  # pointer. Its COPYING is still the LGPL v2 above, so the licence note holds.
+  # The sha256 was taken from the same SourceForge URL.
+  # ---------------------------------------------------------------------------
+  - name: lame
+    config-opts:
+      - --disable-static
+      - --disable-frontend
+      - --disable-gtktest
+      - --disable-dependency-tracking
+    cleanup:
+      - /bin
+      - /include
+      - /lib/pkgconfig
+      - /share
+    sources:
+      - type: archive
+        url: https://downloads.sourceforge.net/project/lame/lame/4.0/lame-4.0.tar.gz
+        sha256: 3df5124d5ad3a98312ffd7ba6a9b36230e4f8a3e66d3ce0f425e336c32d216eb
+
+  # ---------------------------------------------------------------------------
+  # FFmpeg: ONE module serves the two consumers.
+  #   - libmpv links libavcodec/avformat/avutil/swresample/swscale to demux and
+  #     decode the streams (h264/vp9/av1 + aac/opus).
+  #   - the DOWNLOADER runs /app/bin/ffmpeg to mux the two tracks (-c copy) and
+  #     to encode the mp3.
+  # The component list mirrors tools/build_ffmpeg_i686.sh (the Win7 package), so
+  # the two builds expose the same formats; the Linux-only additions are gnutls
+  # (TLS without OpenSSL), libdav1d (software AV1) and VAAPI.
+  #
+  # Do NOT copy Celluloid's --disable-programs/--disable-encoders/--disable-muxers:
+  # this build NEEDS the CLI, the matroska/mp4 muxers and the aac/libmp3lame
+  # encoders.
+  # ---------------------------------------------------------------------------
+  - name: ffmpeg
+    config-opts:
+      - --enable-shared
+      - --disable-static
+      - --disable-doc
+      - --disable-avdevice
+      - --disable-everything
+      - --disable-gpl
+      - --disable-nonfree
+      - --disable-autodetect
+      - --enable-gnutls
+      - --enable-libdav1d
+      - --enable-libmp3lame
+      - --enable-vaapi
+      - --enable-hwaccel=h264_vaapi,vp9_vaapi,av1_vaapi
+      - --enable-protocol=file,http,https,tcp,tls,crypto,data,cache,httpproxy,concat,pipe
+      - --enable-demuxer=hls,mov,matroska,mpegts,aac,mp3,ogg,flv,concat
+      - --enable-decoder=h264,vp9,av1,aac,opus,mp3,vorbis,flac,pcm_s16le,pcm_f32le
+      - --enable-parser=h264,aac,av1,opus,mpegaudio,vorbis
+      - --enable-bsf=h264_mp4toannexb,aac_adtstoasc,extract_extradata,vp9_superframe,vp9_superframe_split,av1_frame_merge,av1_frame_split
+      - --enable-muxer=matroska,mp4,mp3
+      - --enable-encoder=aac,libmp3lame
+      - --enable-filter=aformat,anull,atrim,crop,format,hflip,null,rotate,transpose,trim,vflip
+      - --enable-ffmpeg
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/doc
+      - /share/ffmpeg
+    sources:
+      - type: archive
+        url: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+        sha256: 8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
+
+  # ---------------------------------------------------------------------------
+  # libass: a HARD dependency of mpv 0.41 (it cannot be disabled). It renders
+  # the subtitles; the app does not fetch YouTube captions today, but mpv links
+  # it unconditionally. fontconfig is enabled on purpose: the fonts come from
+  # the host through the runtime's fontconfig configuration.
+  # ---------------------------------------------------------------------------
+  - name: libass
+    config-opts:
+      - --disable-static
+      - --disable-compare
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/doc
+    sources:
+      - type: archive
+        url: https://github.com/libass/libass/releases/download/0.17.5/libass-0.17.5.tar.xz
+        sha256: 2dca25c0e0c837ddf00b52011b3f82cac1e4ddd3ad018227806b0c2288864acc
+
+  # ---------------------------------------------------------------------------
+  # libplacebo: the other hard dependency of mpv 0.41 (the GPU renderer).
+  # `demos` defaults to TRUE upstream and installs plplay, so it is turned off
+  # explicitly together with the tests.
+  # ---------------------------------------------------------------------------
+  - name: libplacebo
+    buildsystem: meson
+    # libdir is pinned here, and it is not cosmetic: Ubuntu 22.04 ships
+    # flatpak-builder 1.2.2, which only passes --libdir to meson when it is
+    # set in build-options. Without it meson falls back to the "system
+    # default" libdir of the SDK's python (mesonbuild/coredata.py:
+    # "getting the system default"), which is lib64, and libplacebo installed
+    # into /app/lib64/pkgconfig -- a directory the sandbox's PKG_CONFIG_PATH
+    # does not search (only /app/lib/pkgconfig). The mpv module then died with
+    # 'Dependency "libplacebo" not found, tried pkgconfig and cmake'. Newer
+    # flatpak-builder defaults meson to --libdir=<prefix>/lib itself; pinning
+    # it keeps the layout identical on both, and /app/lib is where the loader
+    # looks at runtime anyway.
+    build-options:
+      libdir: /app/lib
+    config-opts:
+      - -Ddemos=false
+      - -Dtests=false
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/doc
+    sources:
+      - type: git
+        url: https://github.com/haasn/libplacebo.git
+        tag: v7.360.1
+        commit: cee9b076f2c63104ccfd497fa79c39a867293ec4
+
+  # ---------------------------------------------------------------------------
+  # libXpresent: the one piece of mpv's X11 support that the SDK does NOT ship.
+  # mpv's `features['x11']` needs FIVE .pc files (x11, xscrnsaver, xext,
+  # xpresent, xrandr) and it stops at the first one that is missing, so without
+  # this the mpv module dies in configure with
+  # `Dependency "xpresent" not found, tried pkgconfig and cmake`.
+  # Measured against the freedesktop SDK (which the KDE SDK extends): the
+  # elements xorg-lib-x11, xorg-lib-xext, xorg-lib-xrandr and
+  # xorg-lib-xscrnsaver exist and THERE IS NO xorg-lib-xpresent -- the Flathub
+  # mpv manifest builds this library for the same reason. The release tarball
+  # already carries ./configure, so no autogen and no xorg-macros are involved.
+  # ---------------------------------------------------------------------------
+  - name: libXpresent
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share
+    sources:
+      - type: archive
+        url: https://www.x.org/releases/individual/lib/libXpresent-1.0.2.tar.xz
+        sha256: 4e5b21b4812206a4b223013606ae31170502c1043038777a1ef8f70c09d37602
+
+  # ---------------------------------------------------------------------------
+  # mpv: ONLY libmpv (the app is the player UI, it never uses mpv's own
+  # window/OSC). Options:
+  #   -Dlibmpv=true -Dcplayer=false  build the library, not the mpv binary
+  #   -Dgpl=true                     required by x11 below, see the note
+  #   -Dbuild-date=false             reproducible builds
+  #   lua/javascript off             no scripting, no OSC, no ytdl hook: the app
+  #                                  resolves the streams itself
+  #   uchardet/rubberband off        not used by the app
+  #   alsa off, pulse on             Flatpak audio is PulseAudio/PipeWire
+  #   vaapi on                       the protected piece is hwdec=auto, and on
+  #                                  Linux that means VAAPI + dmabuf
+  #   wayland/x11 on                 the two sessions we ship for
+  #
+  # GPL: it is not a taste decision, x11 depends on it. mpv's meson.build gates
+  # the X11 support behind the `gpl` option
+  # (`get_option('x11').require(get_option('gpl'), 'the build is not GPL!')`),
+  # and meson does not degrade when the pair contradicts itself: it aborts with
+  # `ERROR: Feature x11 cannot be disabled: the build is not GPL!` (reproduced
+  # with meson 1.12.1 and those two options alone). X11 is not optional here:
+  # `vaapi-x11` requires `features['x11']`, and libva-x11 is what gives
+  # hwdec_vaapi the VA display it opens from MPV_RENDER_PARAM_X11_DISPLAY --
+  # the path src/mpv_backend.cpp uses on an xcb session. Without it an LGPL mpv
+  # would fall back to software decoding on every X11 desktop. The app is
+  # GPL-3.0-or-later anyway (metainfo.xml) and LGPL FFmpeg inside a GPL binary
+  # is what every distribution ships, so the bundle stays coherent: FFmpeg keeps
+  # its own `--disable-gpl` above.
+  #
+  # drm and vulkan are deliberately NOT passed, and it is not an oversight:
+  #
+  #   drm: `-Ddrm` only adds vo_drm and drmprime, which the app never uses (the
+  #   video goes through libmpv into the QOpenGLWidget). Its auto-detection
+  #   requires libdrm + libdisplay-info + a VT header, and forcing `enabled`
+  #   would add a build failure for zero benefit. What the app DOES need is the
+  #   GL dmabuf interop (dmabuf_interop_gl.c), and in mpv 0.41 that is gated by
+  #   `features['egl'] and drm.found()` -- libdrm.pc alone, which the SDK has
+  #   and meson finds on its own.
+  #
+  #   vulkan: libplacebo's `vulkan` option defaults to `auto` and it publishes
+  #   `pl_has_vulkan`; mpv's `vulkan` option defaults to `auto` too and keys off
+  #   that variable plus vulkan.pc. So the SDK decides, which is what we want:
+  #   `hwdec=auto` tries VAAPI first on Linux and Vulkan only matters as a
+  #   fallback (NVIDIA). Forcing `enabled` would make the build fail on a
+  #   runtime branch without vulkan.pc for a path that is not the primary one.
+  # ---------------------------------------------------------------------------
+  - name: mpv
+    buildsystem: meson
+    # Same libdir as libplacebo: libmpv.so and mpv.pc have to land in /app/lib
+    # (not /app/lib64) so the app's CMake pkg-config lookup finds them at build
+    # time and the loader finds them at runtime.
+    build-options:
+      libdir: /app/lib
+    config-opts:
+      - -Dlibmpv=true
+      - -Dcplayer=false
+      - -Dgpl=true
+      - -Dbuild-date=false
+      - -Dmanpage-build=disabled
+      - -Dlua=disabled
+      - -Djavascript=disabled
+      - -Duchardet=disabled
+      - -Drubberband=disabled
+      - -Dalsa=disabled
+      - -Dpulse=enabled
+      - -Dvaapi=enabled
+      # The VAAPI path of an X11 session, pinned: `vaapi-x11` is the only
+      # backend hwdec_vaapi can use from MPV_RENDER_PARAM_X11_DISPLAY (the app
+      # does not pass a Wayland display), and the SDK does ship libva-x11.pc
+      # (its libva element is built -Dwith_x11=yes). Making it explicit turns a
+      # silent software-decode fallback into a red build.
+      - -Dvaapi-x11=enabled
+      - -Dwayland=enabled
+      - -Dx11=enabled
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/applications
+      - /share/bash-completion
+      - /share/doc
+      - /share/icons
+      - /share/man
+      - /share/zsh
+    sources:
+      - type: archive
+        url: https://github.com/mpv-player/mpv/archive/v0.41.0.tar.gz
+        sha256: ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209
+
+  # ---------------------------------------------------------------------------
+  # The app. CMake compiles the FfmpegBackend too (pkg-config finds the libav
+  # .pc files above) and validates it with --selftest-ffmpeg, but the runtime
+  # backend stays MpvBackend (protected piece).
+  # ---------------------------------------------------------------------------
+  - name: nevertube
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+    sources:
+      - type: dir
+        path: ../../..
+        # The tree is copied into the build dir, so everything that is not
+        # source has to stay out of it:
+        #   .git            the history (22 MB, useless here)
+        #   build/dist      local build and packaging output
+        #   build-flatpak   flatpak-builder's own --state-dir for THIS build:
+        #                   without this it copies itself, recursively
+        #   third_party     29 MB of Win32 dev packages (ffmpeg-win32/-win64:
+        #                   headers, .lib and DLLs for the Windows builds).
+        #                   Nothing on Linux reads them; the Linux modules above
+        #                   provide libav and the CLI.
+        skip:
+          - .git
+          - build
+          - build-flatpak
+          - dist
+          - third_party
+
+  # ---------------------------------------------------------------------------
+  # Desktop integration under the APP ID. CMake installs the NATIVE names
+  # (nevertube.desktop, hicolor/.../nevertube.png); a Flatpak exports what is in
+  # /app/share and the Wayland app_id is the app id, so the files have to be
+  # named after it. The native copies are removed so the launcher does not show
+  # two entries.
+  # ---------------------------------------------------------------------------
+  - name: appdata
+    buildsystem: simple
+    build-commands:
+      - install -Dm644 io.github.marlo4220mc.NeverTube.desktop /app/share/applications/io.github.marlo4220mc.NeverTube.desktop
+      - install -Dm644 io.github.marlo4220mc.NeverTube.metainfo.xml /app/share/metainfo/io.github.marlo4220mc.NeverTube.metainfo.xml
+      - for s in 16 24 32 48 64 128 256; do install -Dm644 "icons/nt_${s}.png" "/app/share/icons/hicolor/${s}x${s}/apps/io.github.marlo4220mc.NeverTube.png"; done
+      - rm -f /app/share/applications/nevertube.desktop
+      - rm -f /app/share/icons/hicolor/*/apps/nevertube.png
+    sources:
+      - type: file
+        path: io.github.marlo4220mc.NeverTube.desktop
+      - type: file
+        path: io.github.marlo4220mc.NeverTube.metainfo.xml
+      - type: dir
+        path: ../../../resources/icon
+        dest: icons

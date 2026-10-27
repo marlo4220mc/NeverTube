@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata for the Flatpak. The id and the launchable MUST match
+     the app id: flatpak exports the desktop file as
+     io.github.marlo4220mc.NeverTube.desktop and the compositor looks up that
+     name through FLATPAK_ID (src/main.cpp). -->
+<component type="desktop-application">
+  <id>io.github.marlo4220mc.NeverTube</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>NeverTube</name>
+  <summary>Lightweight YouTube client</summary>
+
+  <description>
+    <p>
+      NeverTube is a lightweight YouTube client built with Qt5 and C++17. It
+      streams directly from YouTube with libmpv: no browser, no Electron and no
+      bundled web engine.
+    </p>
+    <p>It can:</p>
+    <ul>
+      <li>Play videos and live streams, with hardware decoding when the GPU supports it.</li>
+      <li>Search with live suggestions, and open a pasted YouTube link directly.</li>
+      <li>Browse channels, playlists and the watch history.</li>
+      <li>Keep an "up next" queue seeded with YouTube radio, with shuffle and repeat.</li>
+      <li>Resume where you left off and show the progress on the thumbnails.</li>
+      <li>Download a video (or only its audio as mp3) and play the file back locally.</li>
+      <li>Use a mini player while you browse.</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.marlo4220mc.NeverTube.desktop</launchable>
+
+  <url type="homepage">https://github.com/marlo4220mc/NeverTube</url>
+  <url type="bugtracker">https://github.com/marlo4220mc/NeverTube/issues</url>
+
+  <developer id="io.github.marlo4220mc">
+    <name>marlo4220mc</name>
+  </developer>
+
+  <content_rating type="oars-1.1"/>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+    <category>Player</category>
+  </categories>
+
+  <keywords>
+    <keyword>youtube</keyword>
+    <keyword>video</keyword>
+    <keyword>player</keyword>
+    <keyword>media</keyword>
+  </keywords>
+
+  <provides>
+    <binary>nevertube</binary>
+  </provides>
+
+  <releases>
+    <release version="0.2.0" date="2026-10-26">
+      <description>
+        <p>First Flatpak build: bundled libmpv, FFmpeg and the downloader's ffmpeg CLI.</p>
+      </description>
+    </release>
+  </releases>
+</component>

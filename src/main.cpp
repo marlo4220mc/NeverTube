@@ -653,7 +653,17 @@ int main(int argc, char *argv[])
     // packaging/linux/ and the install() rules in CMakeLists.txt). On X11 the
     // window icon comes from setWindowIcon() below (StartupWMClass matches this
     // file); on Windows/macOS it is a no-op.
-    QGuiApplication::setDesktopFileName(QStringLiteral("nevertube.desktop"));
+    //
+    // Inside a Flatpak sandbox the desktop file is NOT nevertube.desktop: it is
+    // named after the app id (io.github.marlo4220mc.NeverTube.desktop), which is
+    // what the runtime exports to the host, and flatpak sets FLATPAK_ID to it.
+    // The Wayland app_id has to match that name or GNOME/KDE show a generic
+    // icon and do not associate the window with the launcher. The native
+    // packages keep the plain name, so the fallback stays nevertube.desktop.
+    const QString flatpakId = qEnvironmentVariable("FLATPAK_ID");
+    QGuiApplication::setDesktopFileName(
+        flatpakId.isEmpty() ? QStringLiteral("nevertube.desktop")
+                            : flatpakId + QStringLiteral(".desktop"));
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
 
     // Window icon. ALL sizes are included because QIcon does not scale: it picks
