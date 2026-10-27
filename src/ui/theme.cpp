@@ -223,6 +223,19 @@ QFrame#popupDialog {
     border: 1px solid @BORDER@;
     border-radius: 12px;
 }
+
+/* The update dialog (nt::UpdateDialog) is a window of its own: it can be open
+   while something plays and it is NOT the app's overlay. Without a background
+   of its own it came out with the desktop palette (light) over a dark app, so
+   it declares one. Its text uses the same tokens as the rest of the app. */
+QDialog#updateDialog { background-color: #0F0F0F; }
+QLabel#updateValue { color: @TEXT@; font-size: 14px; font-weight: 600; }
+QLabel#updateStatus { color: @METATEXT@; font-size: 12px; }
+/* The notes of the release are Markdown rendered into rich text: they are a
+   QLabel inside a scroll area, and the area must not paint a frame of its
+   own (the label already reads as a block). */
+QLabel#updateNotes { color: @TEXT@; font-size: 12px; }
+QScrollArea#updateNotesScroll { background: transparent; border: none; }
 /* The confirmation dialog (nt::confirm) is NOT a QDialog: it is a QWidget child
    of the window (a window of its own is a toplevel and steals focus and the
    pointer from the user). That is why the QDialog { background: transparent }

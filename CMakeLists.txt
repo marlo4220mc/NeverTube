@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.16)
 project(nevertube VERSION 1.0.0 LANGUAGES CXX)
 
+# The version the APP shows (Ajustes -> "NeverTube X.Y.Z", the About note and
+# the updater, which compares it against the newest release). One source only:
+# CMakeLists.txt. A release build passes the tag's version here
+# (-DNEVERTUBE_VERSION=1.0.0-alpha.1, .github/workflows/release.yml), so a
+# pre-release reaches the binary with its suffix; a development build keeps the
+# numeric one. The `version` job of the release workflow already refuses a tag
+# whose core differs from `${PROJECT_VERSION}`, so this variable cannot drift
+# from the tag: it only adds the suffix.
+set(NEVERTUBE_VERSION "${PROJECT_VERSION}" CACHE STRING
+    "Version shown by the app (default: PROJECT_VERSION of CMakeLists.txt)")
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -133,6 +144,17 @@ add_executable(nevertube
   src/reels_filter.h
   src/youtube_url.cpp
   src/youtube_url.h
+  # The built-in updater: the version of the binary, the async query of the
+  # GitHub release, the download of the installer of this build with the
+  # verification against SHA256SUMS.txt, and its dialog (Windows installs from
+  # it; Linux only shows the available version: its packages update through
+  # the package manager).
+  src/updater/update_check.cpp
+  src/updater/update_check.h
+  src/updater/update_dialog.cpp
+  src/updater/update_dialog.h
+  src/updater/update_selftest.cpp
+  src/updater/update_selftest.h
   src/reels_filter_selftest.cpp
   src/reels_filter_selftest.h
   src/video_variant.cpp
@@ -210,6 +232,13 @@ target_link_libraries(nevertube PRIVATE
   Qt5::Sql
   OpenGL::GL
 )
+
+# nt::appVersion() reads this: the version on screen and the one the updater
+# compares against the releases. It is a #define and not a runtime string so
+# that no code can change it (and so it cannot disagree with the packages).
+target_compile_definitions(nevertube PRIVATE
+  "NEVERTUBE_VERSION=\"${NEVERTUBE_VERSION}\"")
+
 if(NOT NEVERTUBE_X86_FFMPEG_BUILD)
   target_link_libraries(nevertube PRIVATE MPV::MPV)
 endif()

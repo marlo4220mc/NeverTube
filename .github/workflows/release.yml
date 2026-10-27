@@ -168,6 +168,10 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       NEVERTUBE_PKG_VERSION: ${{ needs.version.outputs.deb_version }}
+      # Display form (1.0.0-alpha.1): what the binary shows in Ajustes and what
+      # it would compare against a release. The package metadata keeps the
+      # dpkg spelling (1.0.0~alpha.1) above.
+      NEVERTUBE_VERSION: ${{ needs.version.outputs.version }}
       NEVERTUBE_DEBUG: 1
       DEBIAN_FRONTEND: noninteractive
     steps:
@@ -213,6 +217,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       NEVERTUBE_PKG_VERSION: ${{ needs.version.outputs.deb_version }}
+      NEVERTUBE_VERSION: ${{ needs.version.outputs.version }}
       NEVERTUBE_DEBUG: 1
       DEBIAN_FRONTEND: noninteractive
     steps:
@@ -248,6 +253,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       NEVERTUBE_PKG_VERSION: ${{ needs.version.outputs.rpm_version }}
+      NEVERTUBE_VERSION: ${{ needs.version.outputs.version }}
       NEVERTUBE_DEBUG: 1
     steps:
       - uses: actions/checkout@v4
@@ -274,6 +280,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       NEVERTUBE_PKG_VERSION: ${{ needs.version.outputs.arch_version }}
+      NEVERTUBE_VERSION: ${{ needs.version.outputs.version }}
       NEVERTUBE_DEBUG: 1
     steps:
       - uses: actions/checkout@v4
@@ -603,6 +610,7 @@ jobs:
             -A Win32 `
             -T v142 `
             -DCMAKE_PREFIX_PATH="$env:Qt5_DIR" `
+            "-DNEVERTUBE_VERSION=${{ needs.version.outputs.version }}" `
             "-DFFMPEG_DEV_DIR=$((Get-Location).Path)\third_party\ffmpeg-win32"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -921,6 +929,11 @@ jobs:
           if ($rc -ne 0) { exit $rc }
           $rc = Invoke-Selftest '--selftest-settings-page'
           if ($rc -ne 0) { exit $rc }
+          # The updater (offline): the order of two versions, the installer of
+          # each Windows build, the reading of SHA256SUMS.txt and the SHA-256
+          # of a file. No network: the query is not exercised here.
+          $rc = Invoke-Selftest '--selftest-update'
+          if ($rc -ne 0) { exit $rc }
           # ONE instance per user (offline, and it opens no window of its own):
           # the first process takes the name, the second hands its arguments
           # over and exits, and the first one keeps answering.
@@ -1150,6 +1163,7 @@ jobs:
             -A Win32 `
             -DNEVERTUBE_MPV_ON_X86=ON `
             -DCMAKE_PREFIX_PATH="$env:Qt5_DIR" `
+            "-DNEVERTUBE_VERSION=${{ needs.version.outputs.version }}" `
             "-DMPV_DEV_DIR=$dir"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -1328,6 +1342,7 @@ jobs:
                            '--selftest-single-instance',
                            '--selftest-video-url',
                            '--selftest-search-url',
+                           '--selftest-update',
                            '--selftest-settings-page')) {
             $rc = Invoke-Selftest $t
             if ($rc -ne 0) {
@@ -1515,6 +1530,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release `
             -A x64 `
             -DCMAKE_PREFIX_PATH="$env:Qt5_DIR" `
+            "-DNEVERTUBE_VERSION=${{ needs.version.outputs.version }}" `
             "-DMPV_DEV_DIR=$dir"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -1688,6 +1704,7 @@ jobs:
                            '--selftest-single-instance',
                            '--selftest-video-url',
                            '--selftest-search-url',
+                           '--selftest-update',
                            '--selftest-settings-page')) {
             $rc = Invoke-Selftest $t
             if ($rc -ne 0) {

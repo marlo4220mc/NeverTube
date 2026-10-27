@@ -16,6 +16,7 @@
 
 #include "../../db/repositories.h"
 #include "../../i18n.h"
+#include "../../updater/update_check.h"
 #include "../confirm_dialog.h"
 #include "../theme.h"
 
@@ -775,13 +776,25 @@ void SettingsPage::buildUI()
     // --- ABOUT ---
     addSectionTitle(nt::tr("settings.section.about"));
 
-    auto *verLabel = new QLabel(nt::tr("settings.version"), content);
+    // The version is NOT a text of the catalog: it comes from CMakeLists.txt
+    // (-DNEVERTUBE_VERSION, set by the release workflow with the tag's
+    // version). The catalog only carries the shape of the line.
+    auto *verLabel =
+        new QLabel(nt::tr("settings.version").arg(nt::appVersion()), content);
     verLabel->setObjectName(QStringLiteral("settingsVersion"));
 
     auto *aboutBlock = new QVBoxLayout;
     aboutBlock->setSpacing(4);
     aboutBlock->addWidget(verLabel);
     aboutBlock->addWidget(addNote(nt::tr("settings.aboutNote")));
+    // Manual search for updates. The automatic one happens once per session
+    // (throttled to once a day in the settings) and never on top of a video:
+    // this button is the one that always answers, update or not.
+    auto *updateBtn = makeActionButton(nt::tr("settings.checkUpdates"));
+    updateBtn->setProperty("updateAction", QStringLiteral("check"));
+    connect(updateBtn, &QPushButton::clicked, this,
+            [this]() { emit checkUpdatesRequested(); });
+    aboutBlock->addWidget(updateBtn, 0, Qt::AlignLeft);
     cardLay->addLayout(aboutBlock);
 
     // The vertical remainder goes at the END: sections stay glued to the top with

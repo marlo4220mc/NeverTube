@@ -58,6 +58,7 @@
 #include "ui/pages/settings_page.h"
 #include "ui/pages/downloads_page.h"
 #include "downloader/download_manager.h"
+#include "updater/update_dialog.h"
 #include "ui/pages/history_page.h"
 #include "ui/pages/search_page.h"
 #include "ui/pages/watch_page.h"
@@ -834,6 +835,10 @@ MainWindow::MainWindow(QWidget *parent)
     // accepted) until it finishes.
     connect(m_settingsPage, &SettingsPage::redetectHwRequested,
             this, [this]() { startHwProbe(); });
+    // The updater (the manual button of Ajustes and the one automatic check
+    // of the session): wired here, where the Settings page already exists and
+    // the player is built.
+    setupUpdater();
     // Language change from Settings. nt::setLanguage applies the catalog and
     // re-applies every live binding (bottom nav, mini tooltips) on its own;
     // applyLanguage adds what is not a binding.
@@ -2490,4 +2495,146 @@ void MainWindow::openChannel(const QString &channelId)
     m_currentTab = 2;
     m_channel->openChannel(channelId);
     m_pages->setCurrentWidget(m_channel);
+}
+
+// ---------------------------------------------------------------------------
+// Updater
+//
+// The rules, and why each one is here:
+//   - the query is ASYNC (Qt5 Network) and there is never more than one in
+//     flight: nothing of the interface blocks;
+//   - the automatic check runs once per session, 20 s after opening, and only
+//     if the last one (persisted in "update_last_check") is older than 24 h:
+//     the API is not polled and a restart does not ask GitHub again;
+//   - it is NEVER shown on top of a video that is playing: the release stays
+//     pending and the dialog appears when the player is at rest;
+//   - "Mas tarde" silences that version for the automatic check
+//     ("update_skip_version"); the manual button always answers;
+//   - only a NEWER version is offered: GitHub's "latest" excludes pre-releases
+//     and drafts, and isNewerVersion applies the SemVer order on top (a
+//     pre-release is older than its own final version, so a beta can never be
+//     offered as a stable update).
+// ---------------------------------------------------------------------------
+void MainWindow::setupUpdater()
+{
+    connect(m_settingsPage, &SettingsPage::checkUpdatesRequested, this,
+            [this]() { checkForUpdates(true); });
+
+    // A video that STOPS releases the pending update: doing it from the
+    // handler of stateChanged would run the dialog's event loop inside the
+    // player's own signal, so it is deferred one turn of the loop.
+    connect(m_playerWidget, &PlayerWidget::stateChanged, this, [this]() {
+        if (m_updateDialogPending)
+            QTimer::singleShot(0, this, [this]() { showUpdateDialog(true); });
+    });
+
+    QTimer::singleShot(20000, this, [this]() {
+        const qint64 last =
+            m_settings.getInt(QStringLiteral("update_last_check"), 0);
+        const qint64 now = QDateTime::currentSecsSinceEpoch();
+        if (last > 0 && now - last < 24 * 3600)
+            return; // it was checked recently: no need to ask again
+        checkForUpdates(false);
+    });
+}
+
+void MainWindow::checkForUpdates(bool manual)
+{
+    if (!m_updateChecker) {
+        m_updateChecker = new nt::UpdateChecker(this);
+        connect(m_updateChecker, &nt::UpdateChecker::finished, this,
+                [this](const nt::UpdateRelease &release) {
+                    onUpdateCheckFinished(release);
+                });
+        connect(m_updateChecker, &nt::UpdateChecker::failed, this,
+                [this](const QString &message) {
+                    onUpdateCheckFailed(message);
+                });
+    }
+    if (m_updateChecker->isRunning())
+        return;
+    m_updateCheckManual = manual;
+    // The timestamp is written when the query STARTS: a machine that is
+    // offline every time must not retry in a loop on every start.
+    m_settings.set(QStringLiteral("update_last_check"),
+                   QString::number(QDateTime::currentSecsSinceEpoch()));
+    m_updateChecker->check();
+}
+
+void MainWindow::onUpdateCheckFinished(const nt::UpdateRelease &release)
+{
+    m_updateRelease = release;
+    const bool newer = release.found && !release.prerelease && !release.draft
+        && nt::isNewerVersion(release.version, nt::appVersion());
+
+    if (m_updateCheckManual) {
+        // The manual check always answers, and it does it now: the person
+        // pressed the button and is looking at the screen.
+        m_updateDialogPending = true;
+        showUpdateDialog(false);
+        return;
+    }
+    if (!newer)
+        return; // silent: nobody asked
+    if (m_settings.getString(QStringLiteral("update_skip_version"))
+        == release.version)
+        return; // postponed for this version
+    m_updateDialogPending = true;
+    showUpdateDialog(true);
+}
+
+void MainWindow::showUpdateDialog(bool waitForIdle)
+{
+    if (!m_updateDialogPending)
+        return;
+    // Never on top of a video: the update waits (the pending flag keeps it
+    // alive and the player's stateChanged brings it back).
+    if (waitForIdle && m_playerWidget
+        && m_playerWidget->state() == QLatin1String("playing"))
+        return;
+    m_updateDialogPending = false;
+
+    nt::UpdateDialog dialog(m_updateRelease, nt::appVersion(), this);
+    connect(&dialog, &nt::UpdateDialog::postponed, this,
+            [this](const QString &version) {
+                m_settings.set(QStringLiteral("update_skip_version"), version);
+            });
+    connect(&dialog, &nt::UpdateDialog::installRequested, this,
+            &MainWindow::onUpdateInstallRequested);
+    dialog.exec();
+}
+
+void MainWindow::onUpdateCheckFailed(const QString &message)
+{
+    // The automatic check is silent: an update that cannot be checked is not
+    // an error worth interrupting anybody with. The manual one says what
+    // happened (no network, rate limit, ...).
+    if (!m_updateCheckManual)
+        return;
+    nt::confirm(this, nt::tr("update.title"), message, nt::tr("common.close"),
+                []() {});
+}
+
+void MainWindow::onUpdateInstallRequested(const QString &installerPath)
+{
+    // Order: stop the player, launch the installer, leave. Nothing is
+    // force-killed and nothing is deleted:
+    //   - the database writes are immediate (settings, history, subscriptions
+    //     and the state of every download live in SQLite, outside {app});
+    //   - a download in progress keeps its row in "downloading"/"muxing" and
+    //     resumePendingDownloads() revives it at the next start, with the
+    //     fragments already on disk;
+    //   - the installer only rewrites {app} (and removes an old app-local
+    //     UCRT): the personal data and the downloaded files are elsewhere, and
+    //     the [UninstallDelete] of the .iss only runs on an uninstall.
+    if (m_playerWidget)
+        m_playerWidget->stop();
+    // The installer is the one that asks Windows for administrator rights
+    // when it needs them (/NORESTART: the restarts are not ours to trigger)
+    // and it has the "run NeverTube" option on its last page, so the app
+    // comes back with one click.
+    QProcess::startDetached(installerPath,
+                            QStringList() << QStringLiteral("/NORESTART"),
+                            QDir::tempPath());
+    QTimer::singleShot(0, this, []() { qApp->quit(); });
 }

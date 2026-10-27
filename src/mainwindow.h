@@ -12,6 +12,7 @@
 #include "player_controller.h"
 #include "ui/icons.h"
 #include "ui/live_detect.h"
+#include "updater/update_check.h"
 
 class HomePage;
 class ChannelPage;
@@ -167,6 +168,24 @@ private:
     void showHwPopup();
     void centerHwPopup();
 
+    // --- Updater ---------------------------------------------------------
+    // Wires the "Buscar actualizaciones" button and schedules the ONE
+    // automatic check of the session (never repeated: the timestamp of the
+    // last one is persisted and a session that already checked does not ask
+    // GitHub again).
+    void setupUpdater();
+    // `manual` = the person asked from Ajustes: it always answers (even with
+    // "there is nothing new" or an error). The automatic one is silent unless
+    // there is a newer version, and it is never shown on top of a video.
+    void checkForUpdates(bool manual);
+    void showUpdateDialog(bool waitForIdle);
+    void onUpdateCheckFinished(const nt::UpdateRelease &release);
+    void onUpdateCheckFailed(const QString &message);
+    // Runs the verified installer and closes: the app cannot be running while
+    // its own files are being replaced. Nothing is force-killed and no data is
+    // deleted (the DB writes are immediate and the downloads keep their state).
+    void onUpdateInstallRequested(const QString &installerPath);
+
     AppDatabase m_db;
     Yt *m_yt = nullptr;
     ThumbnailCache *m_homeThumbs = nullptr;
@@ -187,6 +206,11 @@ private:
     SettingsRepo m_settings{m_db};
     HomeCacheRepo m_homeCache{m_db};
     DownloadRepo m_downloads{m_db};
+
+    nt::UpdateChecker *m_updateChecker = nullptr;
+    nt::UpdateRelease m_updateRelease;
+    bool m_updateCheckManual = false;
+    bool m_updateDialogPending = false;
 
     // Auto-restart for gated sessions: in-memory guard against double
     // restarts of the same episode, and position (ms) to resume at in the new

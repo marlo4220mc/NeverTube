@@ -37,7 +37,15 @@ $SUDO apt-get install -y --no-install-recommends \
   desktop-file-utils
 
 echo "== configure + build =="
-cmake -S . -B build-deb -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+# The version shown by the app (Ajustes, updater): the display form of the
+# release when the workflow passes it (1.0.0-alpha.1), the one of
+# CMakeLists.txt otherwise. It is NOT the dpkg one (1.0.0~alpha.1) that goes
+# into the package metadata below: apt and the About box speak differently.
+extra=()
+if [ -n "${NEVERTUBE_VERSION:-}" ]; then
+  extra+=("-DNEVERTUBE_VERSION=$NEVERTUBE_VERSION")
+fi
+cmake -S . -B build-deb -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr "${extra[@]}"
 cmake --build build-deb --parallel "$(nproc)"
 
 echo "== offline selftests (gate) =="
@@ -52,6 +60,7 @@ for t in --selftest-db --selftest-discover --selftest-ssl \
          --selftest-download-transport --selftest-download-resume \
          --selftest-single-instance \
          --selftest-video-url --selftest-search-url \
+         --selftest-update \
          --selftest-settings-page; do
   echo "SELFTEST $t"
   ./build-deb/nevertube "$t"

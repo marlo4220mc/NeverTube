@@ -216,6 +216,7 @@ flatpak-builder --run "$BUILD" "$MANIFEST" sh -c '
            --selftest-download-transport --selftest-download-resume \
            --selftest-single-instance \
            --selftest-video-url --selftest-search-url \
+           --selftest-update \
            --selftest-settings-page; do
     echo "SELFTEST $t"
     /app/bin/nevertube "$t"

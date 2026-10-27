@@ -4,6 +4,7 @@
 #include "ui/pages/settings_page.h"
 
 #include <QApplication>
+#include <QLabel>
 #include <QMenu>
 #include <QPushButton>
 #include <QDir>
@@ -34,6 +35,8 @@
 #include "downloader/download_settings_selftest.h"
 #include "downloader/download_transport_selftest.h"
 #include "reels_filter_selftest.h"
+#include "updater/update_check.h"
+#include "updater/update_selftest.h"
 #include "youtube_url.h"
 #include "single_instance.h"
 #include "single_instance_selftest.h"
@@ -720,6 +723,19 @@ int main(int argc, char *argv[])
         return av1HlsSelfTest() ? 0 : 1;
     }
 
+    if (args.contains(QLatin1String("--selftest-update"))) {
+        // OFFLINE and deterministic: the order of two versions (SemVer, with
+        // the pre-release rule that keeps a beta from being offered as the
+        // stable release), the installer that belongs to each of the three
+        // Windows builds, the reading of SHA256SUMS.txt (missing entry,
+        // ambiguous entry, near-miss name), the SHA-256 of a file and the
+        // refusal to download something that cannot be verified. No network
+        // and no GPU: it runs in the CI.
+        const bool ok = updateSelfTest();
+        std::fprintf(stderr, "SELFTEST update -> %s\n", ok ? "OK" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
     if (args.contains(QLatin1String("--selftest-settings-page"))) {
         // The page of Settings with the REAL window: the new section of the
         // downloads (the folder and the codec) is there.
@@ -732,6 +748,7 @@ int main(int argc, char *argv[])
         if (ok) {
             bool sawFolder = false;
             bool sawConnections = false;
+            bool sawUpdate = false;
             for (QPushButton *b : page->findChildren<QPushButton *>()) {
                 const QString kind =
                     b->property("downloadSetting").toString();
@@ -739,12 +756,26 @@ int main(int argc, char *argv[])
                     sawFolder = true;
                 if (kind == QLatin1String("connections"))
                     sawConnections = true;
+                if (b->property("updateAction").toString()
+                    == QLatin1String("check"))
+                    sawUpdate = true;
             }
             std::fprintf(stderr, "SETTINGS-PAGE %s: hay fila de carpeta\n",
                          sawFolder ? "OK" : "FAIL");
             std::fprintf(stderr, "SETTINGS-PAGE %s: hay fila de conexiones\n",
                          sawConnections ? "OK" : "FAIL");
-            ok = sawFolder && sawConnections;
+            // The About section now carries the version (from CMake) and the
+            // button of the updater: the manual check lives there.
+            std::fprintf(stderr, "SETTINGS-PAGE %s: hay boton de actualizaciones\n",
+                         sawUpdate ? "OK" : "FAIL");
+            const QLabel *verLabel =
+                page->findChild<QLabel *>(QStringLiteral("settingsVersion"));
+            const bool sawVersion =
+                verLabel && verLabel->text().contains(nt::appVersion());
+            std::fprintf(stderr,
+                         "SETTINGS-PAGE %s: la version mostrada es la del build\n",
+                         sawVersion ? "OK" : "FAIL");
+            ok = sawFolder && sawConnections && sawUpdate && sawVersion;
         }
         // The menu of the download with the codec of the REAL setting: the
         // one that is marked is the default.

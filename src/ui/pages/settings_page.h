@@ -63,6 +63,11 @@ signals:
     void clearThumbsRequested();
     void resetRequested();
     void redetectHwRequested();
+    // "Buscar actualizaciones" (About section): the query and the dialog are
+    // MainWindow's, which owns the player (the automatic check holds the
+    // dialog while a video plays) and the settings (it remembers when the
+    // last check was and which version was postponed).
+    void checkUpdatesRequested();
 
 private:
     void buildUI();
