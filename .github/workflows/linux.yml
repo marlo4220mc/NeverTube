@@ -143,16 +143,28 @@ jobs:
   # the same binary on every distribution. That is the whole point: the old
   # AppImage failed because it took the host's libmpv and GPU stack.
   #
-  # It runs on a plain ubuntu-22.04 with flatpak + flatpak-builder from apt
+  # It runs on a plain ubuntu-24.04 with flatpak + flatpak-builder from apt
   # instead of the flathub builder image on purpose: the GHCR image names could
   # not be verified from here (they answer 403 invalid token), and a job that
   # fails on an unverifiable image tag teaches nothing. --disable-rofiles-fuse is
   # passed by the script itself, so no FUSE is needed.
   #
-  # 22.04 and NOT 24.04: Ubuntu 24.04 restricts unprivileged user namespaces
-  # through AppArmor (kernel.apparmor_restrict_unprivileged_userns=1), and bwrap
-  # -- which is what flatpak-builder uses to build every module -- needs them.
-  # On 24.04 the build dies before the first module; 22.04 still allows them.
+  # 24.04 and NOT 22.04, because the export step composes the AppStream metadata
+  # and the two halves of that have to match. 22.04 ships flatpak-builder 1.2.2,
+  # which runs `appstream-compose` INSIDE the SDK sandbox -- a binary that
+  # freedesktop-sdk 24.08+ (the base of org.kde.Sdk//5.15-25.08) no longer
+  # ships, so the run died in the LAST step, with everything already built:
+  # `bwrap: execvp appstream-compose: No such file or directory`. 24.04 ships
+  # flatpak-builder 1.4.2, which composes with `appstreamcli compose` on the
+  # HOST, and the `appstream` package brings appstreamcli 1.0.2, which has that
+  # subcommand. packaging/linux/flatpak/build.sh refuses to start with the old
+  # pair instead of burning 15 minutes to fail at export.
+  #
+  # The one thing 24.04 restricts is unprivileged user namespaces (AppArmor,
+  # kernel.apparmor_restrict_unprivileged_userns=1), and bwrap -- what
+  # flatpak-builder uses to build every module -- is built on them. On a
+  # throwaway runner the restriction is lifted in the install step below;
+  # without it the build dies before the first module.
   #
   # What is NOT part of CI: `flatpak run` of the installed bundle. bwrap inside a
   # container is fragile and it would need a display; the script validates the
@@ -162,19 +174,19 @@ jobs:
   # (documented in packaging/linux/flatpak/README.md).
   build-flatpak:
     name: Flatpak (immutable distros)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
       DEBIAN_FRONTEND: noninteractive
       # git >= 2.38.1 (what the runner ships) refuses the file:// transport that
       # flatpak-builder uses to update a module's submodules from its local git
       # mirror: "fatal: transport 'file' not allowed" while cloning libplacebo's
-      # demos/3rdparty/nuklear, which aborted the build. Upstream flatpak-builder
-      # now passes "-c protocol.file.allow=always" to that git call itself, but
-      # Ubuntu 22.04's packaged builder predates the fix. GIT_ALLOW_PROTOCOL is
-      # git's own allow-list and overrides the protocol.*.allow default; the
-      # system/global config in the install step below covers any git subprocess
-      # that does not inherit this environment.
+      # demos/3rdparty/nuklear, which aborted the build. flatpak-builder 1.4 does
+      # pass "-c protocol.file.allow=always" to that git call itself; this stays
+      # for the git processes it does NOT wrap (the SDK's, a module's own build).
+      # GIT_ALLOW_PROTOCOL is git's own allow-list and overrides the
+      # protocol.*.allow default; the system/global config in the install step
+      # below covers any git subprocess that does not inherit this environment.
       GIT_ALLOW_PROTOCOL: file:https:ssh:git
     steps:
       - uses: actions/checkout@v4
@@ -185,15 +197,33 @@ jobs:
       # That step runs eu-strip and eu-elfcompress, and Ubuntu's flatpak-builder
       # does not pull elfutils in, so the job died with "Failed to execute child
       # process \"eu-strip\" (No such file or directory)" right after LAME built.
-      - name: Install flatpak, flatpak-builder and elfutils
+      #
+      # appstream is the OTHER half of the export: flatpak-builder 1.4 composes
+      # the metainfo with appstreamcli (>= 1.0), not with the SDK. And on Ubuntu
+      # 24.04 appstreamcli is only a dispatcher: the `compose` subcommand execs
+      # /usr/libexec/appstreamcli-compose, which ships in the appstream-compose
+      # package. Without it the CLI answers "AppStream assembly binary not found"
+      # and the export fails after the whole build. desktop-file-utils is what
+      # makes the .desktop validation in build.sh run instead of being skipped
+      # with an [info].
+      - name: Install flatpak, flatpak-builder, elfutils, appstream and desktop-file-utils
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
+          sudo apt-get install -y --no-install-recommends \
+            flatpak flatpak-builder elfutils \
+            appstream appstream-compose desktop-file-utils
           # Same file:// refusal as the note above, at the config level so it
           # also applies to git processes with a scrubbed HOME. A throwaway CI
           # runner has nothing to protect from CVE-2022-39253.
           sudo git config --system protocol.file.allow always
           git config --global protocol.file.allow always
+          # bwrap (the sandbox flatpak-builder builds every module in) needs
+          # unprivileged user namespaces, and 24.04 restricts them through
+          # AppArmor. The file is absent on a kernel without the restriction, so
+          # this is conditional; a throwaway runner has nothing to protect.
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
 
       # The script installs the runtime and the SDK from Flathub if they are
       # missing, builds the manifest, validates the desktop integration, runs the

@@ -2,9 +2,13 @@
 #
 # Build the Flatpak for nevertube.
 #
-# Run on a Linux box with flatpak + flatpak-builder. In CI the runner is a plain
-# ubuntu-22.04 with those two installed from apt (see the build-flatpak job of
-# .github/workflows/linux.yml): no container image and no privileges involved.
+# Run on a Linux box with flatpak + flatpak-builder >= 1.4 and appstreamcli
+# >= 1.0 WITH its compose component (on Ubuntu 24.04 that is a second package,
+# appstream-compose). In CI the runner is a plain ubuntu-24.04 with those from apt
+# (see the build-flatpak job of .github/workflows/linux.yml): no container image
+# and no privileges involved. Version 1.4 matters: older builders compose the
+# AppStream metadata with a binary that lives INSIDE the SDK, and the SDK this
+# manifest uses does not ship it any more (the preflight below explains it).
 # The script installs the runtime and the SDK from Flathub if they are missing,
 # builds the manifest, runs the OFFLINE selftests inside the build sandbox, and
 # produces:
@@ -57,6 +61,52 @@ command -v flatpak-builder >/dev/null || {
 }
 flatpak --version
 flatpak-builder --version
+
+# flatpak-builder 1.2 (what Ubuntu 22.04 ships) composes the metainfo with
+# `appstream-compose` INSIDE the SDK sandbox. freedesktop-sdk 24.08+ -- the base
+# of org.kde.Sdk//5.15-25.08 -- dropped that binary, so the export step dies
+# AFTER the whole build with "bwrap: execvp appstream-compose: No such file or
+# directory". 1.4 composes it with `appstreamcli` on the host instead. Checking
+# the pair up front turns a 15-minute wait into an error that says what to do.
+# The output is not the same everywhere: the packaged builder prints
+# "flatpak-builder-1.4.2" (a hyphen) and a locally built one prints
+# "flatpak-builder 1.4.2" (a space), so the prefix is stripped either way.
+FB_VERSION="$(flatpak-builder --version | sed -n 's/^flatpak-builder[ -]*//p' | head -1)"
+version_at_least() { # $1 >= $2
+  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$2" ]
+}
+if [ -z "$FB_VERSION" ] || ! version_at_least "$FB_VERSION" 1.4.0; then
+  echo "ERROR: flatpak-builder $FB_VERSION is too old for this manifest." >&2
+  echo "       Its export step runs appstream-compose inside the SDK, and" >&2
+  echo "       org.kde.Sdk//5.15-25.08 does not ship that binary any more," >&2
+  echo "       so the build would fail at the very end. Use >= 1.4.0" >&2
+  echo "       (Ubuntu 24.04, Fedora 40+, Arch) or org.flatpak.Builder." >&2
+  exit 1
+fi
+if ! command -v appstreamcli >/dev/null 2>&1; then
+  echo "ERROR: appstreamcli is missing, and flatpak-builder >= 1.4 composes the" >&2
+  echo "       AppStream metadata with it (apt install appstream, or the appstream" >&2
+  echo "       package of your distribution)." >&2
+  exit 1
+fi
+# The subcommand is not enough: on some distributions appstreamcli only
+# DISPATCHES `compose` to a helper binary. On Ubuntu 24.04 that helper is
+# /usr/libexec/appstreamcli-compose, shipped in the appstream-compose package;
+# without it the CLI exits with "AppStream assembly binary ... not found", which
+# flatpak-builder reports as a failed export at the very end. Running the
+# subcommand's help is the cheapest way to know the whole chain works, and its
+# own message says what is missing.
+ASC_LOG="$(mktemp)"
+if ! appstreamcli compose --help >/dev/null 2>"$ASC_LOG"; then
+  echo "ERROR: appstreamcli cannot compose: either it is older than AppStream 1.0" >&2
+  echo "       (there was no 'compose' yet) or the compose component is not" >&2
+  echo "       installed separately (Ubuntu 24.04: apt install appstream-compose)." >&2
+  echo "       It said:" >&2
+  sed 's/^/         /' "$ASC_LOG" >&2
+  rm -f "$ASC_LOG"
+  exit 1
+fi
+rm -f "$ASC_LOG"
 
 # Flathub is where the runtime and the SDK live. In CI the image already has the
 # remote; --if-not-exists keeps it idempotent.
