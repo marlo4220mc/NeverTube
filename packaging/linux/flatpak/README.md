@@ -238,7 +238,7 @@ versions of the same distro can differ).
 
 ## CI
 
-`.github/workflows/linux.yml` has a `build-flatpak` job, next to the `.deb`,
+`.github/workflows/release.yml` has a `linux-flatpak` job, next to the `.deb`,
 `.rpm` and pacman ones:
 
 - **Runner**: a plain `ubuntu-24.04` with `flatpak`, `flatpak-builder`,
@@ -251,7 +251,7 @@ versions of the same distro can differ).
   was dropped: the registry answers `403 invalid token` for its tags, so the tag
   could not be verified from here, and a job that dies on an unverifiable image
   teaches nothing.)
-- **Trigger**: manual (`gh workflow run linux.yml --ref main`) or a push that
+- **Trigger**: manual (`gh workflow run release.yml --ref main`) or a push that
   touches the workflow file itself — the same policy as the other Linux jobs. It
   does not run on every push to `main`.
 - **What it does**: builds the manifest, validates the `.desktop` and the

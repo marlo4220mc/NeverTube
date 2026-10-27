@@ -475,7 +475,7 @@ base, y los catálogos tienen que tener el mismo conjunto de claves.
 | `tools/gen_nav_accent.cpp` | la clave "downloads" en su lista de `keys` |
 | `localization/{es,en}.json` | las claves nuevas |
 | `CMakeLists.txt` | los .cpp nuevos |
-| `.github/workflows/windows.yml` y `windows_x64.yml` | el selftest nuevo en el smoke |
+| los jobs `windows-win7-x86` y `windows-win10-x64` de `.github/workflows/release.yml` | el selftest nuevo en el smoke |
 | `packaging/linux/{deb,rpm,arch}` | el selftest nuevo en el smoke |
 
 ### 7.1 Los sprites de la barra (un detalle que se pasó por alto)

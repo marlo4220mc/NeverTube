@@ -34,9 +34,9 @@ and the rest stays the same (Qt5, OpenGL, SQLite). This section only runs if
    (`mpv-dev-i686-20210530-git-fd8c673.7z`, `libmpv-1.dll` renamed to
    `libmpv-2.dll`) is retired together with that engine.
    - **x64**: `shinchiro/mpv-winbuild-cmake`, `mpv-dev-x86_64-20260924-…`
-     (tag + asset + sha256 pinned in `.github/workflows/windows_x64.yml`).
+     (tag + asset + sha256 pinned in the `windows-win10-x64` job of `.github/workflows/release.yml`).
    - **Windows 10 x86**: the i686 package pinned in
-     `.github/workflows/windows_x86_win10.yml`. It is deliberately NOT the latest
+     the `windows-win10-x86` job of `.github/workflows/release.yml`. It is deliberately NOT the latest
      one: every i686 build published after 2026-03-01 aborts with `OpenSSL
      internal error: assertion failed: lock != NULL`, because the OpenSSL 3 they
      link statically carries commit `1e1ea715` (added 2026-03-31, removed
@@ -53,7 +53,7 @@ The tree is not in the repository, so bring it first — that is the same thing
 the CI does, minus the automation:
 
 ```sh
-# fetch the Qt tree (tag + sha256 pinned in .github/workflows/windows.yml)
+# fetch the Qt tree (tag + sha256 pinned in .github/workflows/release.yml)
 curl -L -o qt-win32.7z https://github.com/marlo4220mc/qt5-kde-win-build/releases/download/qt-5.15.19-kde-r96/qt-win32.7z
 7z x qt-win32.7z -othird_party -y && mv third_party/qt-win32/* third_party/ && rmdir third_party/qt-win32
 ```
@@ -154,7 +154,7 @@ not compiled at all (no `Qt5 Multimedia`, no `FFMPEG_DEV_DIR`).
 Source of that i686 libmpv (MEASURED, not assumed): the workflow of this
 deliverable pins the `mpv-dev-i686-20260301-git-05fac7f.7z` package of the
 `mpv-player-windows` project on SourceForge (mpv 0.41.0-243-g05fac7f; URL +
-sha256 pinned in `.github/workflows/windows_x86_win10.yml`). That project is the
+sha256 pinned in the `windows-win10-x86` job). That project is the
 same mpv-winbuild-cmake tree shinchiro publishes on GitHub, with the i686 target
 enabled; Predidit's `libmpv-win32-video-cmake` is the same build system too (its
 `20251210` release was the previous pin here, and its 2026-06/08/09 releases are
@@ -196,7 +196,7 @@ target is taken to be the Win7 build and sent to FFmpeg:
 
 ```sh
 # 1) the dev package (headers + libmpv-2.dll), from the release the CI uses
-#    (MPV_URL / MPV_ASSET / MPV_SHA256 at the top of windows_x86_win10.yml)
+#    (MPV_URL / MPV_ASSET / MPV_SHA256 at the top of the windows-win10-x86 job)
 # 2) MSVC import-lib from the DLL: the package only ships the MinGW
 #    libmpv.dll.a. dumpbin /exports -> .def -> lib /machine:x86
 #    (find_text = mpv_\w*), saved as mpv-2.lib inside the package folder.

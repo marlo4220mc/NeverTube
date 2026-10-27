@@ -38,27 +38,33 @@
 - Grid (4 / 5 / 6 columns) and list views, three thumbnail sizes, seven accent colors, hot language switching (English / Spanish; a new language is one JSON file in `localization/`)
 - One instance per user: a second launch (a link, a `--download`) hands its arguments to the running window instead of opening a second copy of the database
 
-## Packages
+## Download
 
-Built per target in CI; Linux packages are x86_64 only.
+The builds are on the [Releases](https://github.com/marlo4220mc/NeverTube/releases) page, all from the same commit, with `SHA256SUMS.txt` next to them (`sha256sum -c SHA256SUMS.txt` verifies a download). Every asset is produced by `.github/workflows/release.yml`; what the pipeline does and how a release is cut is in [`docs/release/README.md`](docs/release/README.md).
+
+Linux packages are x86_64 only.
 
 | Format | Target | File |
 |---|---|---|
-| `.deb` | Ubuntu 22.04 / 24.04 | `nevertube_<version>_amd64.deb` |
+| `.deb` | Ubuntu 22.04 / Mint 21 / Debian 12 | `nevertube-<version>-ubuntu22.04-amd64.deb` |
+| `.deb` | Ubuntu 24.04 / Mint 22 / Debian 13 | `nevertube-<version>-ubuntu24.04-amd64.deb` |
 | `.rpm` | Fedora (RHEL-family with matching sonames) | `nevertube-<version>-1.x86_64.rpm` |
 | pacman | Arch Linux | `nevertube-<version>-x86_64.pkg.tar.zst` |
 | Flatpak | any distribution, including the immutable ones | `nevertube-<version>-x86_64.flatpak` |
-| setup.exe | Windows 10 / 11 (x64) | `nevertube-setup-x64.exe` |
-| setup.exe | Windows 10 (x86) | `nevertube-setup-win10-x86.exe` |
-| setup.exe | Windows 7 (x86) | `nevertube-setup-win7-x86.exe` |
+| OSTree repo | `flatpak update` from a hosted repo | `nevertube-repo-<version>-x86_64.tar.gz` |
+| setup.exe | Windows 10 / 11 (x64) | `nevertube-<version>-setup-x64.exe` |
+| setup.exe | Windows 10 / 11 (x86) | `nevertube-<version>-setup-win10-x86.exe` |
+| setup.exe | Windows 7 SP1 (x86) | `nevertube-<version>-setup-win7-x86.exe` |
+
+There are **two `.deb`** on purpose: 24.04 renamed the Qt5 runtime packages to the `t64` ones and ships FFmpeg 6.1, so a package built on 22.04 cannot install there and vice versa. They are the same program built against each base.
 
 ### Install
 
-- Debian / Ubuntu: `sudo apt install ./nevertube_<version>_amd64.deb` — apt installs the declared dependencies automatically.
+- Debian / Ubuntu: `sudo apt install ./nevertube-<version>-ubuntu24.04-amd64.deb` — apt installs the declared dependencies automatically.
 - Fedora: `sudo dnf install ./nevertube-<version>-1.x86_64.rpm` — dnf resolves the soname requirements (`ffmpeg-free`, or RPM Fusion's ffmpeg if already installed).
 - Arch: `sudo pacman -U nevertube-<version>-x86_64.pkg.tar.zst`
-- Flatpak: `flatpak install --user nevertube-<version>-x86_64.flatpak` — the deliverable for the distributions where an `rpm`/`deb` is not an option (Silverblue / Kinoite / Bazzite, MicroOS / Aeon, SteamOS): the bundle brings its own Qt, libmpv and ffmpeg, so it is the same binary everywhere. It can also be shipped as its own OSTree repository so `flatpak update` works; permissions, updates and the manual checks are in `packaging/linux/flatpak/README.md`.
-- Windows: run the setup for your system — `nevertube-setup-win7-x86.exe` (32-bit Windows 7), `nevertube-setup-win10-x86.exe` (32-bit Windows 10) or `nevertube-setup-x64.exe` (64-bit Windows 10/11). Each one refuses the other two and tells you which to use; they install the VC++ redistributable they need.
+- Flatpak: `flatpak install --user nevertube-<version>-x86_64.flatpak` — the deliverable for the distributions where an `rpm`/`deb` is not an option (Silverblue / Kinoite / Bazzite, MicroOS / Aeon, SteamOS): the bundle brings its own Qt, libmpv and ffmpeg, so it is the same binary everywhere. It can also be shipped as its own OSTree repository so `flatpak update` works (unsigned: `--no-gpg-verify`); permissions, updates and the manual checks are in `packaging/linux/flatpak/README.md`.
+- Windows: run the setup for your system — `nevertube-<version>-setup-win7-x86.exe` (32-bit Windows 7), `nevertube-<version>-setup-win10-x86.exe` (32-bit Windows 10/11) or `nevertube-<version>-setup-x64.exe` (64-bit Windows 10/11). Each one refuses the other two and tells you which to use; they install the VC++ redistributable they need. The installers are not code-signed, so SmartScreen warns on first run.
 
 The binary is `nevertube`. On Linux the `.desktop` entry and the icons are installed in the `hicolor` theme, so the app shows up in the menu named **NeverTube**.
 
