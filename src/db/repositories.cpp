@@ -418,6 +418,43 @@ bool databaseSelfTest(const QString &dbPath)
                   "download get de uno borrado");
     }
 
+    // --- the folder of the database, in any language ---
+    // A database that an OLD resolution left in the English "Documents" has to
+    // MOVE to the documents folder of the system, not be recreated empty and not
+    // overwrite another one. The move is the only part that touches the disk, so
+    // it is checked here with two temp folders.
+    {
+        const QString root = QFileInfo(dbPath).absolutePath()
+                             + QLatin1String("/db_folder_test");
+        QDir(root).removeRecursively();
+        const QString legacy = root + QLatin1String("/Documents/mini_tube");
+        const QString target = root + QLatin1String("/Documentos/mini_tube");
+        QDir().mkpath(legacy);
+        {
+            QFile f(legacy + QLatin1String("/mini_tube.db"));
+            if (f.open(QIODevice::WriteOnly)) {
+                f.write("historial");
+                f.close();
+            }
+        }
+        ok &= yes(migrateLegacyDatabase(legacy, target), "db legacy moves");
+        ok &= yes(QFileInfo::exists(target + QLatin1String("/mini_tube.db"))
+                      && !QFileInfo::exists(legacy),
+                  "db: the history ends in the folder of the system");
+        ok &= yes(!migrateLegacyDatabase(legacy, target),
+                  "db: a second attempt moves nothing (no origin any more)");
+        // Two databases are never mixed: with the destination already there, it
+        // refuses and the caller keeps the old folder.
+        QDir().mkpath(legacy);
+        ok &= yes(!migrateLegacyDatabase(legacy, target),
+                  "db: with the destination present nothing is mixed");
+        // And a path that does not exist does not invent anything.
+        ok &= yes(!migrateLegacyDatabase(root + QLatin1String("/nada"),
+                                         root + QLatin1String("/otra")),
+                  "db: a missing origin is not moved");
+        QDir(root).removeRecursively();
+    }
+
     db.close();
     if (ok)
         fprintf(stderr, "SELFTEST OK\n");

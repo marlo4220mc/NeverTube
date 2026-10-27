@@ -1536,6 +1536,16 @@ a surrogate pair is never split. A stem that is a **Windows device name** (`CON`
 one underscore: on Windows `CON.mkv` cannot be created. The accents and the ñ are
 NOT folded to ASCII. `--selftest-download-folder` covers all of it.
 
+**The database uses the SAME resolution** (`xdg::documentsFolder`, the
+`XDG_DOCUMENTS_DIR` of the same file): the SQLite lives in
+`<documents>/mini_tube/mini_tube.db`, so with the old code and a custom
+`XDG_CONFIG_HOME` it was created in an English `~/Documents`. A database that the
+old resolution left there is **MOVED** once, before opening anything
+(`migrateLegacyDatabase`, from the constructor of `AppDatabase`), and when the
+move is not possible the old folder is kept: a history in the wrong folder is
+bad, a lost history is worse. `--selftest-db` covers the move (destination
+already there, origin missing, second attempt).
+
 ### The button of "Reintentar" (the resume was lost, twice)
 
 **The retry DELETED the row of the repository** (`remove()`), and with it the

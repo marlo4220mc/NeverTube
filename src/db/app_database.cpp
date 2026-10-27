@@ -1,5 +1,8 @@
 #include "app_database.h"
 
+#include "../debug.h"
+#include "../xdg_dirs.h"
+
 #include <QDir>
 #include <QFileInfo>
 #include <QSqlError>
@@ -7,16 +10,63 @@
 #include <QStandardPaths>
 #include <QVariant>
 
+namespace {
+
+// The folder that the OLD resolution used (Qt's DocumentsLocation) when it is not
+// the one of the system AND it really has a database: that is what has to move.
+QString legacyDatabaseFolder(const QString &systemDocs)
+{
+    const QString qtDocs =
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (qtDocs.isEmpty() || qtDocs == systemDocs)
+        return QString();
+    const QString legacy = qtDocs + QStringLiteral("/mini_tube");
+    const QString db = legacy + QStringLiteral("/mini_tube.db");
+    return QFileInfo::exists(db) ? legacy : QString();
+}
+
+} // namespace
+
+bool migrateLegacyDatabase(const QString &from, const QString &to)
+{
+    if (from.isEmpty() || to.isEmpty() || from == to)
+        return false;
+    if (!QFileInfo(from).isDir() || QFileInfo::exists(to))
+        return false;
+    if (!QDir().mkpath(QFileInfo(to).absolutePath()))
+        return false;
+    if (!QDir().rename(from, to))
+        return false;
+    NT_DEBUG("E2E db de %s movida a %s\n", from.toUtf8().constData(),
+             to.toUtf8().constData());
+    return true;
+}
+
 AppDatabase::AppDatabase(const QString &explicitPath)
 {
     if (!explicitPath.isEmpty()) {
         m_path = explicitPath;
         return;
     }
-    const QString docs =
-        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    const QString base = docs.isEmpty() ? QDir::homePath() : docs;
-    m_path = base + QStringLiteral("/mini_tube/mini_tube.db");
+    // The documents folder of the SYSTEM, in any language. It is the SAME
+    // resolution as the folder of the downloads (../xdg_dirs.h): plain
+    // QStandardPaths answers the English "Documents" when XDG_CONFIG_HOME is
+    // custom, and the database is the other thing the app writes in a folder of
+    // the person.
+    QString base = xdg::documentsFolder();
+    if (base.isEmpty())
+        base = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (base.isEmpty())
+        base = QDir::homePath();
+    QString folder = base + QStringLiteral("/mini_tube");
+    // A database that an old version left in the English "Documents" is MOVED
+    // (once) to the folder of the system. If the move is not possible the old
+    // folder is kept: the history is never lost.
+    const QString legacy = legacyDatabaseFolder(base);
+    if (!legacy.isEmpty() && !QFileInfo::exists(folder)
+        && !migrateLegacyDatabase(legacy, folder))
+        folder = legacy;
+    m_path = folder + QStringLiteral("/mini_tube.db");
 }
 
 AppDatabase::~AppDatabase()
