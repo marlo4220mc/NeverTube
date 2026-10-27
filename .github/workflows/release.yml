@@ -172,6 +172,21 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
     steps:
       - uses: actions/checkout@v4
+      # The Ubuntu runner images point apt at azure.archive.ubuntu.com, which lags
+      # behind the stock mirror: it has answered 404 for packages that are already
+      # published, which turns into a red run that says nothing about the code.
+      # Pointing apt at archive.ubuntu.com costs nothing (the runner's network
+      # makes the distance irrelevant) and is idempotent: if a future image drops
+      # the azure mirror the step logs "none" and does nothing. No `apt-get
+      # update` here on purpose: the step that installs does its own.
+      - name: Use the stock Ubuntu mirror, not the runner's azure one
+        run: |
+          files="$(grep -rl azure.archive.ubuntu.com /etc/apt || true)"
+          echo "apt sources on the azure mirror: ${files:-none}"
+          if [ -n "$files" ]; then
+            echo "$files" \
+              | xargs -r sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g'
+          fi
 
       - name: Build, selftests and package (.deb)
         run: bash packaging/linux/deb/build.sh
@@ -202,6 +217,21 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
     steps:
       - uses: actions/checkout@v4
+      # The Ubuntu runner images point apt at azure.archive.ubuntu.com, which lags
+      # behind the stock mirror: it has answered 404 for packages that are already
+      # published, which turns into a red run that says nothing about the code.
+      # Pointing apt at archive.ubuntu.com costs nothing (the runner's network
+      # makes the distance irrelevant) and is idempotent: if a future image drops
+      # the azure mirror the step logs "none" and does nothing. No `apt-get
+      # update` here on purpose: the step that installs does its own.
+      - name: Use the stock Ubuntu mirror, not the runner's azure one
+        run: |
+          files="$(grep -rl azure.archive.ubuntu.com /etc/apt || true)"
+          echo "apt sources on the azure mirror: ${files:-none}"
+          if [ -n "$files" ]; then
+            echo "$files" \
+              | xargs -r sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g'
+          fi
 
       - name: Build, selftests and package (.deb)
         run: bash packaging/linux/deb/build.sh
@@ -317,6 +347,21 @@ jobs:
       GIT_ALLOW_PROTOCOL: file:https:ssh:git
     steps:
       - uses: actions/checkout@v4
+      # The Ubuntu runner images point apt at azure.archive.ubuntu.com, which lags
+      # behind the stock mirror: it has answered 404 for packages that are already
+      # published, which turns into a red run that says nothing about the code.
+      # Pointing apt at archive.ubuntu.com costs nothing (the runner's network
+      # makes the distance irrelevant) and is idempotent: if a future image drops
+      # the azure mirror the step logs "none" and does nothing. No `apt-get
+      # update` here on purpose: the step that installs does its own.
+      - name: Use the stock Ubuntu mirror, not the runner's azure one
+        run: |
+          files="$(grep -rl azure.archive.ubuntu.com /etc/apt || true)"
+          echo "apt sources on the azure mirror: ${files:-none}"
+          if [ -n "$files" ]; then
+            echo "$files" \
+              | xargs -r sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g'
+          fi
 
       # elfutils is NOT a luxury: after a module is installed, flatpak-builder
       # strips its ELF files itself and moves the debuginfo to files/debug
@@ -397,6 +442,21 @@ jobs:
       QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
+      # The Ubuntu runner images point apt at azure.archive.ubuntu.com, which lags
+      # behind the stock mirror: it has answered 404 for packages that are already
+      # published, which turns into a red run that says nothing about the code.
+      # Pointing apt at archive.ubuntu.com costs nothing (the runner's network
+      # makes the distance irrelevant) and is idempotent: if a future image drops
+      # the azure mirror the step logs "none" and does nothing. No `apt-get
+      # update` here on purpose: the step that installs does its own.
+      - name: Use the stock Ubuntu mirror, not the runner's azure one
+        run: |
+          files="$(grep -rl azure.archive.ubuntu.com /etc/apt || true)"
+          echo "apt sources on the azure mirror: ${files:-none}"
+          if [ -n "$files" ]; then
+            echo "$files" \
+              | xargs -r sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g'
+          fi
       - name: build + install (same recipe as the .deb job)
         continue-on-error: true
         run: bash packaging/linux/deb/build.sh
