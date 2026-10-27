@@ -122,9 +122,18 @@ bool DownloadManager::isInsideDownloadFolder(const QString &path) const
         return false;
     const QString root = QDir(m_dir).absolutePath();
     const QString target = QDir(QFileInfo(path).absolutePath()).absolutePath();
-    // The same folder, or a subfolder of it.
-    return target == root
-           || target.startsWith(root + QLatin1Char('/'));
+    // The same folder, or a subfolder of it. On Windows the SAME folder can be
+    // spelled with another case ("C:/Users/Ana/Downloads" against
+    // "c:/users/ana/downloads") and the file system does not care, so the
+    // comparison does not either; on Linux the case is part of the name and it
+    // is compared exactly.
+#ifdef Q_OS_WIN
+    const Qt::CaseSensitivity cs = Qt::CaseInsensitive;
+#else
+    const Qt::CaseSensitivity cs = Qt::CaseSensitive;
+#endif
+    return target.compare(root, cs) == 0
+           || target.startsWith(root + QLatin1Char('/'), cs);
 }
 
 bool DownloadManager::cancelInFlight(const QString &key)
