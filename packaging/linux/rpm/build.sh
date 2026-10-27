@@ -48,7 +48,11 @@ for t in --selftest-db --selftest-discover --selftest-ssl \
   ./build-rpm/nevertube "$t"
 done
 
-ver="$(grep -oP 'project\(nevertube VERSION \K[0-9.]+' CMakeLists.txt | head -1)"
+# Release builds pass the version of the tag (NEVERTUBE_PKG_VERSION, see
+# .github/workflows/release.yml); a development build reads CMakeLists.txt.
+# The value comes already normalized for rpm: a pre-release is "0.2.0~alpha.1"
+# because a hyphen is the Version/Release separator and rpm rejects it there.
+ver="${NEVERTUBE_PKG_VERSION:-$(grep -oP 'project\(nevertube VERSION \K[0-9.]+' CMakeLists.txt | head -1)}"
 echo "== packaging nevertube $ver (x86_64) =="
 
 rpmtop="$repo/rpmbuild"

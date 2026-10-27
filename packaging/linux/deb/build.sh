@@ -57,9 +57,18 @@ for t in --selftest-db --selftest-discover --selftest-ssl \
   ./build-deb/nevertube "$t"
 done
 
-ver="$(grep -oP 'project\(nevertube VERSION \K[0-9.]+' CMakeLists.txt | head -1)"
+# The version comes from CMakeLists.txt, EXCEPT on a release build: the tag is
+# the authority there (NEVERTUBE_PKG_VERSION, set by .github/workflows/
+# release.yml) and it already carries the pre-release suffix. The +git marker
+# is for development builds only; on a release it would make every build of the
+# same tag a different package.
+ver="${NEVERTUBE_PKG_VERSION:-$(grep -oP 'project\(nevertube VERSION \K[0-9.]+' CMakeLists.txt | head -1)}"
 arch="$(dpkg --print-architecture)"
-pkgver="${ver}+git$(git rev-parse --short HEAD)"
+if [ -n "${NEVERTUBE_PKG_VERSION:-}" ]; then
+  pkgver="$NEVERTUBE_PKG_VERSION"
+else
+  pkgver="${ver}+git$(git rev-parse --short HEAD)"
+fi
 echo "== packaging nevertube $pkgver ($arch) =="
 
 tmp="$(mktemp -d)"

@@ -5,7 +5,7 @@
 # Run on a Linux box with flatpak + flatpak-builder >= 1.4 and appstreamcli
 # >= 1.0 WITH its compose component (on Ubuntu 24.04 that is a second package,
 # appstream-compose). In CI the runner is a plain ubuntu-24.04 with those from apt
-# (see the build-flatpak job of .github/workflows/linux.yml): no container image
+# (see the linux-flatpak job of .github/workflows/release.yml): no container image
 # and no privileges involved. Version 1.4 matters: older builders compose the
 # AppStream metadata with a binary that lives INSIDE the SDK, and the SDK this
 # manifest uses does not ship it any more (the preflight below explains it).
@@ -42,7 +42,11 @@ BUILD="$repo/build-flatpak"
 ARCH="${FLATPAK_ARCH:-x86_64}"
 GPG_KEY="${FLATPAK_GPG_KEY:-}"
 
-VERSION="$(sed -n 's/^project(nevertube VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"
+# A release build passes the version of the tag (NEVERTUBE_PKG_VERSION, set by
+# .github/workflows/release.yml), which is the one that must appear in the
+# bundle: the Flatpak ref uses it and so does the file name. The OSTree branch
+# is derived from it too, so bumping the version creates a new ref to update to.
+VERSION="${NEVERTUBE_PKG_VERSION:-$(sed -n 's/^project(nevertube VERSION \([0-9.]*\) .*/\1/p' CMakeLists.txt)}"
 if [ -z "$VERSION" ]; then
   echo "ERROR: cannot read the version from CMakeLists.txt" >&2
   exit 1

@@ -20,6 +20,14 @@
 ; the GitHub Actions YAML). This .iss lives at the repo root, next to the
 ; `dist/` produced by the previous steps (windeployqt + DLLs) — that is why the
 ; paths of `[Files]` and `OutputDir` are relative to the workspace root.
+; AppVersion is the version of the RELEASE and arrives from the workflow as
+; /DAppVersion=<version> (dist*.iss is compiled by .github/workflows/release.yml).
+; The value below is the fallback so a hand-run `iscc dist.iss` still produces a
+; usable installer instead of failing on an undefined identifier.
+#ifndef AppVersion
+#define AppVersion "1.0.0"
+#endif
+
 [Setup]
 ; Same AppName (and no explicit AppId) on the three setups ON PURPOSE: Inno
 ; derives the AppId from AppName, so an install of this build lands on the same
@@ -28,7 +36,7 @@
 ; upgrade (the Win7 setup installed on 32-bit Win10 before this split existed)
 ; instead of two NeverTube entries in Programs and Features.
 AppName=NeverTube
-AppVersion=1.0.0
+AppVersion={#AppVersion}
 AppPublisher=NeverTube
 AppPublisherURL=https://github.com/marlo4220mc/NeverTube
 DefaultDirName={autopf}\NeverTube

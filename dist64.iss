@@ -10,9 +10,17 @@
 ; the GitHub Actions YAML). This .iss lives at the repo root, next to the
 ; `dist/` produced by the previous steps (windeployqt + DLLs) — that is why the
 ; paths of `[Files]` and `OutputDir` are relative to the workspace root.
+; AppVersion is the version of the RELEASE and arrives from the workflow as
+; /DAppVersion=<version> (dist*.iss is compiled by .github/workflows/release.yml).
+; The value below is the fallback so a hand-run `iscc dist.iss` still produces a
+; usable installer instead of failing on an undefined identifier.
+#ifndef AppVersion
+#define AppVersion "1.0.0"
+#endif
+
 [Setup]
 AppName=NeverTube
-AppVersion=1.0.0
+AppVersion={#AppVersion}
 AppPublisher=NeverTube
 AppPublisherURL=https://github.com/marlo4220mc/NeverTube
 ; DIFFERENCE 1 vs x86: on x64 it installs into 64-bit Program Files. Inno
