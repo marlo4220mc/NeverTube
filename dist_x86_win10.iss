@@ -9,7 +9,8 @@
 ; This one exists because the x86 payload is NOT the same on both sides of the
 ; Windows 10 line: the Win7 build has no mpv (its only engine is the
 ; FfmpegBackend, and its UCRT/imports are pinned to Win7 SP1), while Win10 x86
-; CAN link the i686 libmpv that shinchiro publishes and therefore uses the same
+; CAN link an i686 libmpv (mpv-player-windows / mpv-winbuild-cmake, pinned to the
+; newest build whose TLS init is clean) and therefore uses the same
 ; engine as x64 (MpvBackend, HwProbe, hwdec=auto). Shipping the Win7 bundle on
 ; Win10 x86 would give those users the degraded engine for no reason.
 ;

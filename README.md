@@ -66,7 +66,7 @@ The binary is `nevertube`. On Linux the `.desktop` entry and the icons are insta
 cmake -B build && cmake --build build
 ```
 
-Dependencies: Qt5 (Core, Gui, Widgets, Network, Sql), OpenGL, libmpv. The Windows x86 build uses the vendored FFmpeg package in `third_party/ffmpeg-win32/` (see `BUILD_WINDOWS.md`); downloads need the `ffmpeg` **command line** at runtime (the Linux packages declare it, the Windows installers ship it).
+Dependencies: Qt5 (Core, Gui, Widgets, Network, Sql), OpenGL, libmpv. The Windows 7 x86 build uses the vendored FFmpeg package in `third_party/ffmpeg-win32/` (see `BUILD_WINDOWS.md`); downloads need the `ffmpeg` **command line** at runtime (the Linux packages declare it, the Windows installers ship it).
 
 Offline regression tests (no network, no GPU) — 23 of them, one per subsystem:
 

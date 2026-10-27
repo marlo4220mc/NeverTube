@@ -30,9 +30,13 @@ find_package(OpenGL REQUIRED)
 # There are TWO 32-bit Windows builds and they do NOT share an engine:
 #   - Win7 x86 (windows.yml): there is no modern mpv for that target, so its
 #     only engine is the FfmpegBackend (FFMPEG_DEV_DIR + Qt5 Multimedia, below).
-#   - Win10 x86 (windows_x86_win10.yml): shinchiro publishes `mpv-dev-i686` for
-#     Win10+, so it links libmpv exactly like x64 and the FfmpegBackend is not
-#     compiled at all. That build configures with -DNEVERTUBE_MPV_ON_X86=ON.
+#   - Win10 x86 (windows_x86_win10.yml): an i686 mpv dev-package does exist for
+#     Win10+ (mpv-player-windows / mpv-winbuild-cmake), so it links libmpv
+#     exactly like x64 and the FfmpegBackend is not compiled at all. That build
+#     configures with -DNEVERTUBE_MPV_ON_X86=ON. The pin there is the newest
+#     i686 build whose TLS init is clean (2026-03-01): everything published
+#     after it links an OpenSSL 3 with the broken `lock != NULL` assert, which
+#     only the 32-bit code path reaches (see the header of that workflow).
 # The default (OFF) keeps the Win7 build byte-for-byte on the FFmpeg path.
 option(NEVERTUBE_MPV_ON_X86
   "Link libmpv on 32-bit Windows (Win10 x86) instead of the FfmpegBackend" OFF)

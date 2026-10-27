@@ -17,18 +17,32 @@ name: Windows 10 x86 (mpv i686 — Win10 32 bits)
 # -DNEVERTUBE_MPV_ON_X86=ON for that: by default a 32-bit Windows target is
 # assumed to be the Win7 build and goes to FFmpeg.
 #
-# Source of that i686 libmpv (MEASURED, not assumed): shinchiro/mpv-winbuild-cmake
-# publishes `mpv-dev-i686` too, but EVERY release available there from 2026-09
-# on aborts on load with `OpenSSL internal error: assertion failed: lock !=
-# NULL` coming from the OpenSSL 3 that libmpv statically links, during the TLS
-# init that avformat performs on opening a network URL (reproduced under Wine
-# locally and in the CI smoke). The same provider, via the Win32 build repo
-# Predidit/libmpv-win32-video-cmake, publishes an i686 package whose TLS init is
-# clean: the 2026-08/2026-09 ones are broken (same abort), the 2025-12 one works
-# (plays https + h264 + vp9 + opus + AV1(dav1d) without aborting). It is pinned to
-# that last-good release on purpose; it is still a modern mpv (0.40) with the
-# same libmpv-2.dll / include/mpv layout, so the rest of the pipeline is
-# unchanged.
+# Source of that i686 libmpv (MEASURED, not assumed): the `mpv-player-windows`
+# project on SourceForge, which is the SAME mpv-winbuild-cmake that shinchiro
+# publishes on GitHub with the i686 target enabled (Predidit's Win32 repo is the
+# same build system, and its 2025-12 release was the previous pin here).
+#
+# The i686 builds break in a WINDOW, and it is an OpenSSL bug, not an mpv one:
+# the OpenSSL 3 that libmpv links statically took commit `1e1ea715` (2026-03-31),
+# whose `CRYPTO_atomic_*` asserts `lock != NULL`; on 32-bit Windows that branch
+# runs (`!OSSL_USE_INTERLOCKEDOR64`) and the process aborts the moment mpv
+# initializes TLS: `OpenSSL internal error: assertion failed: lock != NULL`.
+# x64 never reaches it, which is why only the i686 deliverable is affected.
+# Upstream removed the assert in `5dfc09b1` (2026-09-01), but the OpenSSL release
+# these builds link does not carry that fix yet, so every i686 package from
+# 2026-04-05 on still aborts (7 of them measured, boundaries included, up to the
+# newest published, 2026-10-18). MEASURED 2026-10-26 with a real 32-bit host
+# (mpv_create + loadfile https): 2026-03-01 plays (exit 0,
+# MPV_EVENT_FILE_LOADED); 2026-04-05, 2026-08-30, 2026-09-20, 2026-09-27,
+# 2026-10-04, 2026-10-11 and 2026-10-18 abort, and so do shinchiro's GitHub
+# i686 packages of 2026-09/10 and Predidit's 2026-06/08/09 releases.
+#
+# So the pin is the LAST i686 build that initializes TLS cleanly, not "latest":
+# mpv 0.41.0-243-g05fac7f, same `libmpv-2.dll` / `include/mpv/*.h` layout, so
+# the rest of the pipeline is unchanged. When the upstream OpenSSL fix reaches
+# the builds, bump MPV_URL/MPV_ASSET/MPV_SHA256 and re-run this job: the smoke
+# (`--selftest-ssl`, the offline list) plus a playback check is what tells a
+# good build from a bad one.
 #
 # What it does NOT change: the downloader's mux still runs the vendored i686
 # `ffmpeg.exe` (the CLI, a separate process; the app does not link libav here),
@@ -64,18 +78,16 @@ jobs:
     runs-on: windows-latest
     env:
       NEVERTUBE_DEBUG: 1
-      # i686 libmpv, from the Win32 build repo of Predidit
-      # (Predidit/libmpv-win32-video-cmake; the same build system shinchiro uses,
-      # but with the i686 target enabled). Tag pinned on purpose: the mpv
-      # releases of that source from 2026-08 on abort with
-      # "lock != NULL" (OpenSSL internal error) during mpv's TLS init, and the
-      # 2025-12 release is the last one that works. The package brings
-      # `libmpv-2.dll` + `include/mpv/*.h`; its `libmpv.dll.a` is MinGW, so the
-      # MSVC import-lib is generated from the DLL.
-      MPV_REPO: 'Predidit/libmpv-win32-video-cmake'
-      MPV_TAG: '20251210'
-      MPV_ASSET: 'mpv-dev-i686-20251210-git-ad59ff1.7z'
-      MPV_SHA256: '80e0459d1ad2f136d95624395ccb4a81726f3ad188e4d7ab223e1aa7c389fbf9'
+      # i686 libmpv, from `mpv-player-windows` (SourceForge): the mpv-winbuild-cmake
+      # tree with the i686 target enabled. Pinned by URL + SHA-256 on purpose (see
+      # the header): it is the newest i686 build whose TLS init does not abort with
+      # "lock != NULL" (2026-03-01, mpv 0.41.0-243-g05fac7f); everything published
+      # after it links an OpenSSL 3 with the broken `1e1ea715` assert. The package
+      # brings `libmpv-2.dll` + `include/mpv/*.h`; its `libmpv.dll.a` is MinGW, so
+      # the MSVC import-lib is generated from the DLL.
+      MPV_URL: 'https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-i686-20260301-git-05fac7f.7z/download'
+      MPV_ASSET: 'mpv-dev-i686-20260301-git-05fac7f.7z'
+      MPV_SHA256: '5141065921137677de1511d6535555cafe2ae74fd7a43c23a484b9d46b1975a7'
       # Qt x86 (the same tree the Win7 build uses: it is what runs on 32-bit
       # Windows, and it works on Win10 too). Downloaded from a release of a
       # separate build repository, never compiled here; the digest is pinned so
@@ -119,17 +131,27 @@ jobs:
           "Qt tree ready: $((Get-ChildItem $dest -Recurse -File).Count) files"
           "Qt5_DIR=$(Join-Path $dest 'lib\cmake')" >> $env:GITHUB_ENV
 
-      # MODERN i686 libmpv. The dev package already brings `libmpv-2.dll` with
-      # the right name and `include/mpv/*.h`; it does NOT bring an MSVC
-      # import-lib (its `libmpv.dll.a` is MinGW), so it is generated from the DLL
-      # in the configure step.
-      - name: bajar mpv-dev i686 (moderno, Win10 32 bits)
+      # i686 libmpv, newest build whose TLS init is clean (see the header). The
+      # dev package already brings `libmpv-2.dll` with the right name and
+      # `include/mpv/*.h`; it does NOT bring an MSVC import-lib (its
+      # `libmpv.dll.a` is MinGW), so it is generated from the DLL in the
+      # configure step.
+      - name: bajar mpv-dev i686 (2026-03-01, Win10 32 bits)
         shell: pwsh
         run: |
-          $url = "https://github.com/$env:MPV_REPO/releases/download/$env:MPV_TAG/$env:MPV_ASSET"
-          Write-Host "mpv: $url"
+          $url = $env:MPV_URL
+          if (-not $url -or -not $env:MPV_SHA256) { Write-Host 'MPV_URL/MPV_SHA256 vacíos'; exit 1 }
+          # The asset name is part of the pin too: a URL that does not carry it
+          # means the two were bumped apart (the SourceForge URL ends in
+          # `<asset>/download`, so this is a Contains, not an EndsWith).
+          if (-not $url.Contains($env:MPV_ASSET)) {
+            Write-Host "MPV_URL no lleva MPV_ASSET ($($env:MPV_ASSET))"; exit 1 }
+          Write-Host "mpv: $($env:MPV_ASSET) <- $url"
           $arc = Join-Path $env:RUNNER_TEMP 'mpv-dev.7z'
-          curl.exe -sL -o $arc $url
+          # -L is mandatory: SourceForge answers with a redirect to a mirror. A
+          # dead link returns an HTML page instead of the archive, and the
+          # sha256 below is what turns that into a red build.
+          curl.exe -sL --retry 3 --retry-delay 5 -o $arc $url
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $got = (Get-FileHash -Algorithm SHA256 $arc).Hash.ToLowerInvariant()
           if ($env:MPV_SHA256 -notmatch '^[0-9a-f]{64}$' -or $got -ne $env:MPV_SHA256) {
@@ -138,22 +160,27 @@ jobs:
           "sha256 OK: $got"
           & "$env:ProgramFiles/7-Zip/7z.exe" x -y -ompv-dev $arc
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $dll = Get-ChildItem mpv-dev -Recurse -Filter libmpv-2.dll |
-            Select-Object -First 1
+          # .FullName, not the object: PS 5.1's FileInfo.ToString() is the name
+          # only, and `Get-Item` on it resolves against the CWD (PS 7 prints the
+          # full path, which is why this only broke outside CI).
+          $dll = (Get-ChildItem mpv-dev -Recurse -Filter libmpv-2.dll |
+            Select-Object -First 1).FullName
           if (-not $dll) { Write-Host 'el paquete i686 no trae libmpv-2.dll'; exit 1 }
-          $hdr = Get-ChildItem mpv-dev -Recurse -Filter client.h |
-            Where-Object { $_.FullName -match '\\mpv\\' } | Select-Object -First 1
+          $hdr = (Get-ChildItem mpv-dev -Recurse -Filter client.h |
+            Where-Object { $_.FullName -match '\\mpv\\' } |
+            Select-Object -First 1).FullName
           if (-not $hdr) { Write-Host 'el paquete i686 no trae include/mpv/client.h'; exit 1 }
           Get-Item $dll, $hdr | Select-Object FullName, Length
 
-      # vulkan-1.dll: a modern libmpv imports it STATICALLY, and the 32-bit
-      # loader needs the 32-bit copy. On Win10 it usually comes with the GPU
-      # driver, but it is bundled so as not to depend on that (official LunarG
-      # runtime, without installing anything on the runner). MEASURED on the
-      # pinned i686 libmpv (Predidit 20251210): it does NOT import vulkan-1.dll
-      # (mpv gets its device via OpenGL / D3D there), so the step is kept only as
-      # belt-and-braces; if a future build does import it, the extra DLL is
-      # required and the missing-gate will catch a bad step.
+      # vulkan-1.dll: some modern libmpv builds import it STATICALLY, and the
+      # 32-bit loader needs the 32-bit copy. On Win10 it usually comes with the
+      # GPU driver, but it is bundled so as not to depend on that (official
+      # LunarG runtime, without installing anything on the runner). MEASURED on
+      # the pinned i686 libmpv (2026-03-01): it does NOT import vulkan-1.dll
+      # (mpv gets its device via OpenGL / D3D there), so the step is kept as
+      # belt-and-braces; the 2026-10 builds DO import it, so the day the pin
+      # moves forward this DLL becomes mandatory (the missing-gate and the
+      # import table would catch a bad step).
       - name: bajar vulkan-1.dll (runtime LunarG x86)
         shell: pwsh
         run: |

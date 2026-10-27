@@ -29,9 +29,13 @@ jobs:
     env:
       NEVERTUBE_DEBUG: 1
       # mpv x86_64 build (baseline, without the 'v3' suffix: the x64 test
-      # machine has no AVX2 — Apollo Lake). If the smoke test fails with abort/"lock != NULL" when
-      # initializing mpv (shinchiro's broken OpenSSL 3 >= may-2026), change these
-      # two to an earlier build (tag + release asset name).
+      # machine has no AVX2 — Apollo Lake). If the smoke test fails with abort/
+      # "lock != NULL" when initializing mpv, that is the OpenSSL 3 that libmpv
+      # links statically (commit `1e1ea715`, 2026-03-31: its CRYPTO_atomic_*
+      # asserts the lock); it only aborts on 32-bit Windows, so it should never
+      # fire here — the i686 deliverable is the one that carries the pinned
+      # 2026-03 build for that reason (windows_x86_win10.yml). If it ever fires,
+      # move these two to an earlier build (tag + release asset name).
       MPV_TAG: '20260924'
       MPV_ASSET: 'mpv-dev-x86_64-20260924-git-2a4eb8067c.7z'
       # Qt is DOWNLOADED from a release of a separate build repository, not read
