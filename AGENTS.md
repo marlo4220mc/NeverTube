@@ -654,6 +654,7 @@ all inside `m_ctrlBar` (`#playerOverlay`):
 ./build/nevertube --selftest-download-folder  # the folder of the downloads and the command that opens it: runs in CI
 ./build/nevertube --selftest-download-settings  # the codes of the settings of the downloader: runs in CI
 ./build/nevertube --selftest-single-instance  # one instance per user: the second process hands its args over and exits: runs in CI
+./build/nevertube --selftest-update     # the updater, offline: order of two versions (SemVer + pre-release), the installer of THIS build, SHA256SUMS.txt and the SHA-256 of a file: runs in CI
 ./build/nevertube --selftest-settings-page  # the page of Ajustes (the new section of the downloads): runs in CI
 ```
 
@@ -662,7 +663,7 @@ playing any file. Run both before considering stable a change that touches
 the player.
 
 **What triggers each workflow (important for interpreting a red dashboard): there
-are FIVE, and they are all opt-in.**
+are SIX, and they are all opt-in.**
 
 | workflow | what it is for | triggers |
 |---|---|---|
@@ -671,6 +672,7 @@ are FIVE, and they are all opt-in.**
 | `windows.yml` (x86 / Win7) | validate the Win7 installer alone | **manual** (`gh workflow run windows.yml --ref main`) or if the push touches **the workflow file itself** |
 | `windows_x86_win10.yml` (Windows 10/11 **32-bit**, mpv i686) | validate the Win10 x86 installer alone | same policy: manual, or a push that touches the file itself |
 | `windows_x64.yml` (Win10/11 64-bit) | validate the x64 installer alone | same policy: manual, or a push that touches the file itself |
+| `publish-repos.yml` | publish the APT repository and the Flatpak repository on GitHub Pages from the assets of an already published release (never a gate, never a build) | **manual only** (`gh workflow run publish-repos.yml -f version=1.0.0`); it needs the two GPG secrets and Pages enabled |
 
 That is, a push to `main` normally starts **no** CI job. The four per-platform
 files were the original ones and are still the cheapest way to redo one platform
@@ -698,20 +700,63 @@ The full procedure (bump, dry run, tag, what to verify afterwards) is in
   `+git<sha>` marker. Two versions are still written **by hand**, and both are
   gated: the first `<release version>` of the Flatpak metainfo (the flatpak
   recipe refuses to build when its core differs from the version it is building)
-  and `settings.version` of the localization catalogs, which is the line Ajustes
-  shows inside the app (`NeverTube 1.0` while the packages say `1.0.0`). Bumping
-  the project is `CMakeLists.txt` plus those two, or the app and its own packages
-  announce different versions.
+  and the `pkgver` of the published `packaging/linux/arch/PKGBUILD` (its source
+  is pinned to the tag of that version and `arch/build.sh` refuses a pkgver that
+  disagrees with `CMakeLists.txt`). `settings.version` is NO LONGER a version
+  written by hand: the catalog only carries the shape of the line (`NeverTube
+  %1`) and the number comes from the binary. Bumping the project is
+  `CMakeLists.txt` plus the Flatpak metainfo and the AUR recipe, or the app and
+  its own packages announce different versions.
 - **The release body is a file of the repository** (`docs/release/notes.md`,
   English with the Spanish inside a `<details>`), not a heredoc in the YAML, so
   it is reviewed with the docs. `tools/release_notes.py` fills the placeholders
   and appends the `SHA256SUMS.txt` of that build, and it FAILS if a placeholder
   would be left; the file names it promises are the ones the `release` job
   renames to, so renaming an asset means touching both or the notes lie.
-- **Nothing is signed**: the Flatpak repo is unsigned (`--no-gpg-verify`) and the
-  three installers are unsigned (SmartScreen warns on first run). It is said in
-  the notes and in `docs/release/README.md`; signing needs certificates the
-  project does not have, and pretending otherwise would be worse.
+- **The app knows its own version and the updater is built on it**:
+  `NEVERTUBE_VERSION` (a CMake cache variable, default `${PROJECT_VERSION}`) is
+  compiled into the binary as a `#define`, so Ajustes -> "NeverTube X.Y.Z", the
+  About note and `nt::appVersion()` cannot drift from the packages. The release
+  pipeline passes the display spelling (`-DNEVERTUBE_VERSION=1.0.0-alpha.1`, the
+  same value the file names carry); the Flatpak and the AUR recipe build WITHOUT
+  it on purpose, because their `pkgver` is the distro spelling
+  (`1.0.0.alpha.1`) and the app would then announce a version nobody published.
+  `src/updater/` is the only updater: async query of
+  `https://api.github.com/repos/marlo4220mc/NeverTube/releases/latest`, at most
+  one automatic check per day (`update_last_check`; "Mas tarde" writes
+  `update_skip_version`), only a NEWER non-prerelease version is offered, the
+  automatic check waits until the player is at rest, and the installer is
+  verified against the release's `SHA256SUMS.txt` (exact file name, byte-exact)
+  and run only after a confirmation. The dialog says what the hash proves and
+  what it does not (it is not a signature). The installer it looks for is the
+  one of THIS build, chosen at compile time: `NEVERTUBE_NO_MPV` = Win7 x86,
+  32-bit-with-mpv = Win10 x86, else x64. **The asset names of the `release` job
+  are the interface of the updater**: renaming them (or dropping
+  `SHA256SUMS.txt`) breaks it, and the updater says so instead of installing
+  something else.
+- **Nothing is signed, except the two package repositories**: the three
+  installers are unsigned (SmartScreen warns on first run) and so is the
+  `.flatpak` bundle, and the update dialog says it. What IS signed is the
+  metadata of the two repositories published on GitHub Pages (the APT `Release`
+  of each suite and the Flatpak summary), and only when the GPG key is
+  configured: publishing a repository that claims to be signed without a
+  signature is worse than not publishing it, so the workflow refuses to run
+  without the key. Signing the Windows payloads needs certificates the project
+  does not have, and pretending otherwise would be worse.
+- **The package repositories are published by a workflow of their own**
+  (`.github/workflows/publish-repos.yml`, manual, `workflow_dispatch` with the
+  version of an ALREADY published release as input): it downloads the assets of
+  that release, verifies them against its `SHA256SUMS.txt`, builds the APT
+  repository (`packaging/linux/deb/repo.sh`, the suites `jammy` and `noble` --
+  one per Ubuntu base, because the two `.deb` share the name and version but not
+  their dependencies -- with `InRelease`/`Release.gpg`) and re-signs the OSTree
+  repository of the Flatpak, then commits both trees to `gh-pages`, which is what
+  Pages serves. It is NOT part of `release.yml` on purpose: a release is
+  immutable and a repository that fails to publish must not be able to modify,
+  block or invalidate it. Two things are set up by hand ONCE (the procedure is in
+  `docs/release/README.md`): the secrets `GPG_PRIVATE_KEY` (the armored SECRET
+  key, no passphrase: it is a CI key) and `GPG_KEY_ID`, and Pages enabled on the
+  `gh-pages` branch.
 
 **NO workflow runs a selftest that needs the network as a GATE.** Two families, and
 the distinction is a hard rule:
@@ -725,7 +770,7 @@ the distinction is a hard rule:
   `--selftest-download`, `--selftest-download-button`,
   `--selftest-download-folder`, `--selftest-download-settings`,
   `--selftest-download-transport`, `--selftest-download-resume`,
-  `--selftest-single-instance` and
+  `--selftest-single-instance`, `--selftest-update` and
   `--selftest-settings-page`. They run in every build (the three
   `packaging/linux/*` recipes and both Windows smokes) and can fail the
   job.
@@ -754,7 +799,12 @@ Ubuntu bases (22.04 and 24.04, with the `t64` rename and FFmpeg 6.1) do not need
 hand-kept list; the `.rpm` relies on rpm's automatic soname requires (FFmpeg
 included: dnf resolves them to `ffmpeg-free` in Fedora base, or to RPM Fusion's
 `ffmpeg` if the user already has it -- no repo is forced on anyone); the
-`PKGBUILD` lists them by name. The binary is STRIPPED in the deb and rpm
+`PKGBUILD` lists them by name (and the PUBLISHED Arch recipe, the one that goes
+to the AUR, carries a real `pkgver` and a source pinned to the release tag:
+`arch/build.sh` validates it and fails on a placeholder, on a version that
+disagrees with `CMakeLists.txt` or on a moving branch). The `.spec` of
+Fedora builds from source when it is not handed an already built tree with
+`--define stage=<dir>`, which is the Copr path. The binary is STRIPPED in the deb and rpm
 (`cmake --install --strip`; `makepkg` already strips in Arch): the symbol table
 alone was 18 % of the binary.
 

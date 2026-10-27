@@ -49,10 +49,21 @@ Two more places carry a version **by hand**, and each is checked by the build
 that would otherwise lie: the first `<release version="...">` of
 `packaging/linux/flatpak/io.github.marlo4220mc.NeverTube.metainfo.xml` (what the
 software centre shows; `packaging/linux/flatpak/build.sh` refuses to build a
-Flatpak whose core disagrees with the version of the build) and the
-`settings.version` key of `localization/*.json` (what Ajustes shows inside the
-app). The packages and the file names take their version from the tag and cannot
-drift.
+Flatpak whose core disagrees with the version of the build) and the `pkgver` of
+the published `packaging/linux/arch/PKGBUILD` (the AUR recipe; its source is
+pinned to `v$pkgver` and `packaging/linux/arch/build.sh` refuses a pkgver that
+disagrees with `CMakeLists.txt`, a placeholder or a moving branch). The packages
+and the file names take their version from the tag and cannot drift.
+
+**The app inside** does not: `NEVERTUBE_VERSION` (a CMake cache variable, default
+`${PROJECT_VERSION}`) is compiled into the binary, and Ajustes, the About note
+and the updater read it from there. The pipeline passes the display spelling
+(`-DNEVERTUBE_VERSION=1.0.0-alpha.1`, the one the file names carry) to the five
+builds that take it, and the Flatpak and the AUR recipe deliberately build
+without it: their `pkgver` is the distro spelling (`1.0.0.alpha.1`), which is not
+a version that was ever published, so the app would announce something that does
+not exist. There is nothing to keep in sync for it; `settings.version` of the
+catalogs is only the shape of the line (`NeverTube %1`).
 
 Pre-releases carry the suffix after a hyphen: `v1.0.0-alpha.1`,
 `v1.0.0-beta.1`, `v1.1.0-rc.1`. The suffix marks the release as a pre-release
@@ -136,21 +147,68 @@ changes, both move together or `sha256sum -c` in the notes stops matching.
 - `gh release view v1.0.0-alpha.1 --json assets --jq '[.assets[].name]'` must
   list the ten names (nine files + `SHA256SUMS.txt`).
 - Download one and check it: `sha256sum -c SHA256SUMS.txt`.
-- The Flatpak bundle is **unsigned**, so `flatpak install` of a `.flatpak` file
-  works but a hosted repo needs `--no-gpg-verify`. The notes say so.
-- Windows installers are **unsigned**: SmartScreen warns on first run. Signing
-  needs certificates that the project does not have yet; it is documented and
-  not pretended.
+- The Flatpak bundle (the `.flatpak` file) is **unsigned**: it installs, but
+  there is no signature on it. The REPOSITORY is the thing that can be signed,
+  and it is, when it is published (step 6). Before that, adding it by hand needs
+  `--no-gpg-verify`.
+- Windows installers are **unsigned**: SmartScreen warns on first run, and the
+  update dialog says so. Signing needs certificates that the project does not
+  have yet; it is documented and not pretended.
+- The app's own updater offers this release to the installed copies (Windows):
+  it reads `releases/latest`, compares with the version compiled into the binary
+  and verifies the installer against `SHA256SUMS.txt`. A release whose installer
+  asset is renamed (or that carries no `SHA256SUMS.txt`) is a release the updater
+  refuses to install, saying why.
 - `flatpak run io.github.marlo4220mc.NeverTube` on a real desktop is the one
   check that no runner can do (icon association by `FLATPAK_ID`, the database in
   `~/Documentos` of the host, `hwdec=auto` with `--device=dri`). It is in the
   manual checklist of `packaging/linux/flatpak/README.md`.
 
+## 6. Publish the package repositories (optional, after the release)
+
+`apt update` / `apt upgrade` and `flatpak update` need a REPOSITORY, and it is
+published by a workflow of its own:
+
+```sh
+gh workflow run publish-repos.yml --ref main -f version=1.0.0
+```
+
+It downloads the `.deb` files, the Flatpak repository tar and `SHA256SUMS.txt`
+**of that release**, verifies them against it, builds the APT trees
+(`jammy` for 22.04, `noble` for 24.04: the two packages share their name and
+version but not their dependencies), signs both with the project's key and
+commits the result to `gh-pages`, which is what GitHub Pages serves. It is not
+part of `release.yml` on purpose: the release is immutable, and a repository that
+fails to publish must not be able to modify or block it. It never rebuilds
+anything, so what it serves is the bytes that were tested.
+
+Two things are set up by hand, **once**:
+
+```sh
+# 1. a key for the project (no passphrase: it is a CI key and an empty one is
+#    what makes it usable non-interactively)
+gpg --batch --quick-generate-key "NeverTube packages <marlo4220mc@users.noreply.github.com>" rsa3072 sign never
+gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}'   # the id
+
+# 2. the two secrets, and then Pages (Settings -> Pages -> Deploy from a branch
+#    -> gh-pages / root)
+gpg --armor --export-secret-keys <id> | gh secret set GPG_PRIVATE_KEY
+gh secret set GPG_KEY_ID --body "<id>"
+```
+
+The workflow refuses to start without them: metadata that says "signed" with no
+signature is worse than no repository at all. Without a key it can still be run
+locally for a throwaway test with `--unsigned-test`
+(`packaging/linux/deb/repo.sh out/apt jammy=...deb --unsigned-test`), which
+writes a file that says the tree is unsigned. What the users then do is printed
+in the run summary (and `key.asc` is served next to the repository, so nobody has
+to look the key up).
+
 ## What is a gate and what is a report
 
 Every **gate** is offline: the thirty-odd `--selftest-*` that the recipes run
 (db, grid, theme, glyphs, i18n, dates, reels, variants, downloads, single
-instance, settings page...), plus the packaging smokes (install the package, `ldd`
+instance, update, settings page...), plus the packaging smokes (install the package, `ldd`
 clean, the selftests from `/usr/bin`), the byte-checks of the Windows payloads
 (really 32/64-bit `dumpbin /machine`, the `.iss` guards, the Inno manifest) and
 the Flatpak's install-tree validation inside the sandbox.
@@ -173,3 +231,6 @@ there says "look at it", never "the release is broken".
 | `linux-flatpak` dies in `appstream-compose` | `flatpak-builder` < 1.4 with a freedesktop-sdk ≥ 24.08, or `appstream-compose` missing (the preflight says which) |
 | a package installs but the binary does not start | a missing runtime dependency: the `.deb` derives it with `dpkg-shlibdeps`, the `.rpm` from sonames, the `PKGBUILD` lists it by name |
 | `release` cannot find an asset | an artifact name changed in a build job but not in the rename step |
+| `linux-arch` fails validating the published PKGBUILD | its `pkgver` no longer matches `CMakeLists.txt` (they move together), or a placeholder/SKIP came back |
+| `publish-repos` stops in the first seconds | the `GPG_PRIVATE_KEY` / `GPG_KEY_ID` secrets are not set (it says so) |
+| the `.deb` mirror fails before building | the runner's `azure.archive.ubuntu.com` mirror was down: the jobs point apt at `archive.ubuntu.com` for that reason |

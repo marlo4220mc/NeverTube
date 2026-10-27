@@ -79,12 +79,30 @@ versa. Take the one that matches your distribution.
 tells you which to use, so picking the wrong file cannot break anything:
 `win7-x86` is 32-bit Windows 7 SP1, `win10-x86` is 32-bit Windows 10/11 and
 `x64` is 64-bit Windows 10/11. They install the Visual C++ runtime they need and
-create a menu entry and a desktop shortcut.
+create a menu entry and a desktop shortcut. Once installed, the app checks for
+new versions by itself (Ajustes -> "Buscar actualizaciones") and installs the
+next one over this same copy: your history, subscriptions, settings and downloads
+are outside the program's folder and are never touched. The installer is unsigned
+(see the limitations), so Windows may warn the first time.
 
 **Debian / Ubuntu.**
 
 ```sh
 sudo apt install ./nevertube-@@VERSION@@-ubuntu22.04-amd64.deb
+```
+
+The project also publishes an APT repository (`jammy` for 22.04, `noble` for
+24.04) on GitHub Pages, signed with its own key, so that `apt update && apt
+upgrade` keeps the app current. If it is not published yet, the `.deb` above is
+the whole story:
+
+```sh
+curl -fsSL https://marlo4220mc.github.io/NeverTube/apt/key.asc -o /tmp/nevertube.asc
+gpg --dearmor -o /tmp/nevertube.gpg /tmp/nevertube.asc        # then, as root:
+install -Dm644 /tmp/nevertube.gpg /etc/apt/keyrings/nevertube.gpg
+echo 'deb [signed-by=/etc/apt/keyrings/nevertube.gpg] https://marlo4220mc.github.io/NeverTube/apt/ jammy main' \
+  > /etc/apt/sources.list.d/nevertube.list
+apt update && apt install nevertube
 ```
 
 **Fedora.**
@@ -108,15 +126,24 @@ flatpak run io.github.marlo4220mc.NeverTube
 ```
 
 The Flatpak carries its own Qt, libmpv and ffmpeg, so it is the same binary on
-every distribution. The bundle has no update channel by itself; if you want
-`flatpak update` to work, unpack the repo tarball and add it:
+every distribution. The `.flatpak` file is a bundle with no update channel: for
+`flatpak update` to work you need the repository. Two ways:
 
 ```sh
+# 1. the published repository (signed; the .flatpakrepo file carries the key)
+flatpak remote-add --user --if-not-exists nevertube \
+  https://marlo4220mc.github.io/NeverTube/flatpak/nevertube.flatpakrepo
+flatpak install --user nevertube io.github.marlo4220mc.NeverTube
+
+# 2. or the repository of THIS release (unpack and add it)
 tar -xzf nevertube-repo-@@VERSION@@-x86_64.tar.gz
 flatpak remote-add --user --no-gpg-verify nevertube ./repo
 ```
 
-(The repo is **unsigned** for now, which is why it needs `--no-gpg-verify`.)
+Option 1 needs the repository to have been published (it is signed with the
+project's GPG key, and `flatpak` verifies that signature). Option 2 works with
+the file attached here, and it is the one that needs `--no-gpg-verify`: that
+tarball travels before the signature is applied.
 
 ## Which engine runs where
 
@@ -138,7 +165,13 @@ software one either, so YouTube is asked for H.264/VP9 there.
   theirs can break playback, search or the queue until this app catches up.
 - A download needs the `ffmpeg` **command line** at runtime. The Windows
   installers ship it; on Linux the packages declare it as a dependency.
-- The Flatpak repo is unsigned and the app is not on Flathub (yet).
+- The `.flatpak` bundle and the Windows installers are **unsigned**: only their
+  SHA-256 is published (`SHA256SUMS.txt`), which proves the file arrived whole
+  and is the one that was built, not who built it. The repositories (APT and
+  Flatpak) are signed, and that is what `apt` and `flatpak` verify. The app is
+  not on Flathub (yet).
+- On Windows the app updates itself from its own GitHub releases; on Linux the
+  package manager does (Ajustes only shows the available version).
 - Windows 7: the app is 32-bit only there, and its engine is the FFmpeg one (see
   the table above).
 - The 32-bit Windows 10 build pins an older libmpv (2026-03) because newer
@@ -238,7 +271,16 @@ flatpak run io.github.marlo4220mc.NeverTube
 ```
 
 En Windows, ejecuta el setup de tu sistema: cada uno rechaza los otros dos y te
-dice cuál usar.
+dice cuál usar. Una vez instalado, la aplicación busca actualizaciones por su
+cuenta (Ajustes -> "Buscar actualizaciones") e instala la siguiente encima de la
+misma copia: el historial, las suscripciones, los ajustes y las descargas están
+fuera de la carpeta del programa y no se tocan.
+
+También hay repositorios publicados en GitHub Pages, firmados con la clave del
+proyecto, para que actualicen `apt` y `flatpak`: el de APT tiene dos suites
+(`jammy` para 22.04, `noble` para 24.04) y el de Flatpak se añade con su
+`.flatpakrepo`. Si todavía no están publicados, los ficheros de arriba son todo
+lo necesario.
 
 ### Límites conocidos
 
@@ -253,7 +295,14 @@ dice cuál usar.
 - El build de 32 bits de Windows 10 lleva un libmpv de 2026-03 porque los
   posteriores abortan al arrancar por un fallo de OpenSSL en su ruta de 32 bits.
 - Los Shorts se filtran de la cola, de Descubre y de Continuar viendo.
-- El repositorio del Flatpak no está firmado (de ahí `--no-gpg-verify`).
+- El `.flatpak` y los instaladores de Windows **no están firmados**: solo se
+  publica su SHA-256 (`SHA256SUMS.txt`), que prueba que el archivo llegó entero y
+  es el que se compiló, no quién lo compiló. Los repositorios (APT y Flatpak) sí
+  están firmados, y es lo que verifican `apt` y `flatpak`. La aplicación no está
+  en Flathub (todavía).
+- En Windows la aplicación se actualiza sola desde sus propios releases de
+  GitHub; en Linux actualiza el gestor de paquetes (Ajustes solo muestra la
+  versión disponible).
 - Una instancia por **usuario/sesión**: con dos sesiones gráficas, la segunda
   apertura trae al frente la ventana de la primera.
 
