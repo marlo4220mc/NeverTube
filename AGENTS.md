@@ -690,12 +690,18 @@ The full procedure (bump, dry run, tag, what to verify afterwards) is in
 `docs/release/README.md`.
 
 - **The version is one string with three spellings**, and the `version` job is
-  the only place that builds them: `0.2.0-alpha.1` for the files, the notes and
-  the installers (`/DAppVersion`), `0.2.0~alpha.1` for dpkg and rpm (`~` is what
+  the only place that builds them: `1.0.0-alpha.1` for the files, the notes and
+  the installers (`/DAppVersion`), `1.0.0~alpha.1` for dpkg and rpm (`~` is what
   sorts a pre-release BEFORE the final one; `-` is the revision separator there)
-  and `0.2.0.alpha.1` for pacman (its `pkgver` forbids both characters). The
+  and `1.0.0.alpha.1` for pacman (its `pkgver` forbids both characters). The
   recipes read it from `NEVERTUBE_PKG_VERSION`, and a build without it keeps the
-  `+git<sha>` marker.
+  `+git<sha>` marker. Two versions are still written **by hand**, and both are
+  gated: the first `<release version>` of the Flatpak metainfo (the flatpak
+  recipe refuses to build when its core differs from the version it is building)
+  and `settings.version` of the localization catalogs, which is the line Ajustes
+  shows inside the app (`NeverTube 1.0` while the packages say `1.0.0`). Bumping
+  the project is `CMakeLists.txt` plus those two, or the app and its own packages
+  announce different versions.
 - **The release body is a file of the repository** (`docs/release/notes.md`,
   English with the Spanish inside a `<details>`), not a heredoc in the YAML, so
   it is reviewed with the docs. `tools/release_notes.py` fills the placeholders

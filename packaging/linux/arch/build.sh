@@ -23,7 +23,7 @@ pacman -S --noconfirm --needed \
 # Release builds pass the version of the tag (NEVERTUBE_PKG_VERSION, see
 # .github/workflows/release.yml); a development build reads CMakeLists.txt.
 # It arrives normalized for pacman, which forbids '-' in pkgver (it is the
-# pkgver/pkgrel separator): a pre-release is "0.2.0.alpha.1" here.
+# pkgver/pkgrel separator): a pre-release is "1.0.0.alpha.1" here.
 ver="${NEVERTUBE_PKG_VERSION:-$(grep -oP 'project\(nevertube VERSION \K[0-9.]+' CMakeLists.txt | head -1)}"
 echo "== packaging nevertube $ver (x86_64) =="
 

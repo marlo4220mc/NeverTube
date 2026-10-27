@@ -57,7 +57,7 @@
   </provides>
 
   <releases>
-    <release version="0.2.0" date="2026-10-26">
+    <release version="1.0.0" date="2026-10-27">
       <description>
         <p>First Flatpak build: bundled libmpv, FFmpeg and the downloader's ffmpeg CLI.</p>
       </description>

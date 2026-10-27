@@ -6,7 +6,7 @@ reviewed like the rest); this only replaces the placeholders and appends the
 SHA256SUMS of the build that is being published. Everything it does is
 deterministic: the same inputs give the same text, byte for byte.
 
-    tools/release_notes.py --version 0.2.0-alpha.1 --tag v0.2.0-alpha.1 \
+    tools/release_notes.py --version 1.0.0-alpha.1 --tag v1.0.0-alpha.1 \
         --date 2026-10-26 --prerelease --checksums out/SHA256SUMS.txt \
         > release-notes.md
 

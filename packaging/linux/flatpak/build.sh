@@ -53,6 +53,19 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 
+# The metainfo carries its OWN <release version> and nothing patches it: the ref,
+# the branch and the file names take $VERSION, but the AppStream metadata keeps
+# announcing whatever is written there (that is how a 1.0.0 bundle came out
+# saying 0.2.0 in the software centre). The cores have to agree, so a dry run
+# (1.0.0-dev.42) passes and a release of a bumped CMakeLists.txt without the
+# metainfo stops here instead of publishing a version nobody can find.
+META_VERSION="$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' "$here/${APP_ID}.metainfo.xml" | head -1)"
+if [ "${VERSION%%-*}" != "${META_VERSION%%-*}" ]; then
+  echo "ERROR: ${APP_ID}.metainfo.xml announces ${META_VERSION:-nothing} and this build is ${VERSION}." >&2
+  echo "       Bump the first <release> of the metainfo together with CMakeLists.txt." >&2
+  exit 1
+fi
+
 say() { echo; echo "== $* =="; }
 
 say "checking flatpak"

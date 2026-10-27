@@ -32,7 +32,7 @@ are produced here and can be handed out from a release page.
 ### The bundle (no repository)
 
 ```sh
-flatpak install --user nevertube-0.2.0-x86_64.flatpak
+flatpak install --user nevertube-1.0.0-x86_64.flatpak
 flatpak run io.github.marlo4220mc.NeverTube
 ```
 

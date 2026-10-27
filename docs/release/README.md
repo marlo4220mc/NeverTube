@@ -38,23 +38,32 @@ The version of a release is decided by the **tag**, and its core has to be the
 version of `CMakeLists.txt`:
 
 ```sh
-grep -n "project(nevertube VERSION" CMakeLists.txt   # 0.2.0
+grep -n "project(nevertube VERSION" CMakeLists.txt   # 1.0.0
 ```
 
 The `version` job stops with an error in the first seconds if they disagree, so
-an inconsistency costs ten seconds and not an hour of builds. To cut `0.3.0`
+an inconsistency costs ten seconds and not an hour of builds. To cut `1.1.0`
 first bump `CMakeLists.txt`, commit it, and only then tag.
 
-Pre-releases carry the suffix after a hyphen: `v0.2.0-alpha.1`,
-`v0.2.0-beta.1`, `v0.3.0-rc.1`. The suffix marks the release as a pre-release
+Two more places carry a version **by hand**, and each is checked by the build
+that would otherwise lie: the first `<release version="...">` of
+`packaging/linux/flatpak/io.github.marlo4220mc.NeverTube.metainfo.xml` (what the
+software centre shows; `packaging/linux/flatpak/build.sh` refuses to build a
+Flatpak whose core disagrees with the version of the build) and the
+`settings.version` key of `localization/*.json` (what Ajustes shows inside the
+app). The packages and the file names take their version from the tag and cannot
+drift.
+
+Pre-releases carry the suffix after a hyphen: `v1.0.0-alpha.1`,
+`v1.0.0-beta.1`, `v1.1.0-rc.1`. The suffix marks the release as a pre-release
 automatically (GitHub hides it behind "Pre-release", and the notes get the
 alpha banner). Each ecosystem gets the spelling it accepts:
 
-| | `v0.2.0-alpha.1` |
+| | `v1.0.0-alpha.1` |
 |---|---|
-| files, notes, Windows installers | `0.2.0-alpha.1` |
-| dpkg / rpm | `0.2.0~alpha.1` (so it sorts *before* `0.2.0`) |
-| pacman (`pkgver`) | `0.2.0.alpha.1` (`-` and `~` are not allowed there) |
+| files, notes, Windows installers | `1.0.0-alpha.1` |
+| dpkg / rpm | `1.0.0~alpha.1` (so it sorts *before* `1.0.0`) |
+| pacman (`pkgver`) | `1.0.0.alpha.1` (`-` and `~` are not allowed there) |
 
 ## 2. Dry run (no release is created)
 
@@ -74,15 +83,15 @@ artifacts of the run (21 days), named `linux-deb-2204`, `linux-rpm`,
 workflow or several packaging recipes at once. Add `-f online_selftests=true` if you also want
 the report of the network/GPU selftests (they never fail the job).
 
-The version of a dry run is `0.2.0-dev.<run number>`, so the packages do not
-pretend to be a release; pass `-f version=0.2.0-alpha.1` to build exactly the
+The version of a dry run is `1.0.0-dev.<run number>`, so the packages do not
+pretend to be a release; pass `-f version=1.0.0-alpha.1` to build exactly the
 bytes of the release you are about to cut.
 
 ## 3. Cut the release
 
 ```sh
-git tag -a v0.2.0-alpha.1 -m "NeverTube 0.2.0-alpha.1"
-git push origin v0.2.0-alpha.1
+git tag -a v1.0.0-alpha.1 -m "NeverTube 1.0.0-alpha.1"
+git push origin v1.0.0-alpha.1
 ```
 
 The push of the tag starts the workflow and, when all eight builds are green,
@@ -91,7 +100,7 @@ tag again after `git tag -f`) **replaces the assets** of the existing release
 rather than failing, so a flaky runner does not cost a new version number.
 
 Publishing by hand without a tag also works: `gh workflow run release.yml
--f version=0.2.0-alpha.1 -f publish=true` creates `v0.2.0-alpha.1` on the
+-f version=1.0.0-alpha.1 -f publish=true` creates `v1.0.0-alpha.1` on the
 commit that was run.
 
 Note that a push to `main` starts nothing: the per-platform workflows only
@@ -111,8 +120,8 @@ than none.
 To see the body before publishing:
 
 ```sh
-mkdir -p /tmp/sums && echo "abc  nevertube-0.2.0-alpha.1-setup-x64.exe" > /tmp/sums/SHA256SUMS.txt
-python3 tools/release_notes.py --version 0.2.0-alpha.1 --tag v0.2.0-alpha.1 \
+mkdir -p /tmp/sums && echo "abc  nevertube-1.0.0-alpha.1-setup-x64.exe" > /tmp/sums/SHA256SUMS.txt
+python3 tools/release_notes.py --version 1.0.0-alpha.1 --tag v1.0.0-alpha.1 \
   --date 2026-10-26 --prerelease --checksums /tmp/sums/SHA256SUMS.txt
 ```
 
@@ -124,7 +133,7 @@ changes, both move together or `sha256sum -c` in the notes stops matching.
 
 ## 5. After publishing
 
-- `gh release view v0.2.0-alpha.1 --json assets --jq '[.assets[].name]'` must
+- `gh release view v1.0.0-alpha.1 --json assets --jq '[.assets[].name]'` must
   list the ten names (nine files + `SHA256SUMS.txt`).
 - Download one and check it: `sha256sum -c SHA256SUMS.txt`.
 - The Flatpak bundle is **unsigned**, so `flatpak install` of a `.flatpak` file

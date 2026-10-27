@@ -11,7 +11,7 @@ name: Release
 #
 # Triggers:
 #   - PUSH A TAG `v*` -> builds the eight deliverables and publishes the
-#     release. In `v0.2.0-alpha.1` the version after the `v` is the one the
+#     release. In `v1.0.0-alpha.1` the version after the `v` is the one the
 #     release carries, and the suffix after the hyphen marks it as a
 #     pre-release.
 #   - MANUAL -> the same build, publishing only if `publish` is ticked. Without
@@ -20,8 +20,8 @@ name: Release
 # A push to a branch starts nothing (same policy as the per-platform workflows,
 # which only re-run when they themselves are touched or dispatched).
 #
-# The tag's CORE has to be the version of CMakeLists.txt (0.2.0), checked BEFORE
-# anything is built: a binary that says 0.2.0 inside a release called 0.3.0 is
+# The tag's CORE has to be the version of CMakeLists.txt (1.0.0), checked BEFORE
+# anything is built: a binary that says 1.0.0 inside a release called 1.1.0 is
 # the kind of thing nobody notices until it is installed.
 #
 # What each job produces (and what the release attaches):
@@ -96,9 +96,9 @@ jobs:
   #   - the release job, which names the assets with it.
   #
   # One string is not valid everywhere, and that is why there are four:
-  #   dpkg and rpm want "0.2.0~alpha.1" (a hyphen is the revision separator and
+  #   dpkg and rpm want "1.0.0~alpha.1" (a hyphen is the revision separator and
   #   "~" is what sorts a pre-release BEFORE the final one); pacman's pkgver
-  #   forbids both '-' and '~', so it takes "0.2.0.alpha.1"; the Flatpak, the
+  #   forbids both '-' and '~', so it takes "1.0.0.alpha.1"; the Flatpak, the
   #   Windows installers and the asset names take the display form.
   # ---------------------------------------------------------------------------
   version:
