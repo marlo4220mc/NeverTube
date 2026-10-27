@@ -51,6 +51,26 @@ SolidCompression=yes
 ; iscc runs. The same nt.ico is embedded in the .exe (resources/nt.rc), so the
 ; shortcut icon and the binary icon are the same file.
 SetupIconFile=resources\icon\nt.ico
+; ── Pages and metadata (modernization) ──────────────────────────────────────
+; WELCOME: the first screen a new user sees; Inno hides it by default.
+; LICENSE: the GPL-3 of the project — the SAME LICENSE file that the .deb, the
+; .rpm, the PKGBUILD and the Flatpak ship ("GPL-3.0-or-later"): it is the
+; project's own text, no term is invented here.
+; DIR PAGE: on a fresh install the folder can be chosen. DisableDirPage=auto
+; (Inno's default) means the page is SKIPPED when the same AppId is already
+; installed, so an upgrade can never land in a second folder: this is what
+; keeps the built-in updater and an in-place upgrade going to the same place.
+DisableWelcomePage=no
+LicenseFile=LICENSE
+DisableDirPage=auto
+; Inno 6's modern wizard; the default is the classic one.
+WizardStyle=modern
+; Programs and Features: the name and the icon of the entry. Without
+; UninstallDisplayIcon that entry shows the generic Windows icon.
+UninstallDisplayName=NeverTube
+UninstallDisplayIcon={app}\nevertube.exe
+; The version on the wizard's title bar and in the uninstall entry.
+AppVerName=NeverTube {#AppVersion}
 ; 32-bit payload: it always installs as 32-bit ({autopf}=Program Files (x86)
 ; on a 64-bit machine, Program Files on 32-bit). No
 ; ArchitecturesInstallIn64BitMode.
@@ -68,11 +88,21 @@ ArchitecturesAllowed=x86compatible
 ; with it: the redist is the CRT and the safety net for a trimmed machine).
 PrivilegesRequired=admin
 
+[Languages]
+; The whole wizard in Spanish: the app is Spanish-first (its base catalog is
+; es) and every string of this .iss is Spanish. With a single language Inno
+; shows no language picker. Spanish.isl ships with every Inno Setup install
+; ("compiler:" resolves it inside ISCC's own folder).
+Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
+
 [Tasks]
 ; Desktop shortcut with the checkbox marked BY DEFAULT (without Flags
 ; unchecked). It is created in the icons phase: the app is already installed,
 ; and the C++ runtime runs later in ssPostInstall. Groups.
 Name: "desktopicon"; Description: "Crear un acceso directo en el escritorio"; GroupDescription: "Acceso directo:"
+; The Start Menu shortcut is optional too: the box can be unchecked, and
+; [Icons] below creates that entry only for whoever leaves it checked.
+Name: "menuicon"; Description: "Crear un acceso directo en el menu Inicio"; GroupDescription: "Acceso directo:"
 
 [Files]
 Source: "dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs; Excludes: "VC_redist.x86.exe"
@@ -119,8 +149,19 @@ Type: filesandordirs; Name: "{localappdata}\nevertube\nevertube"
 ; IconFilename on both: without this the shortcuts come out with the default
 ; icon and the app is not recognizable on the desktop. nt.ico comes from
 ; [Files] and is the same one embedded in the .exe (resources/nt.rc).
-Name: "{group}\NeverTube"; Filename: "{app}\nevertube.exe"; IconFilename: "{app}\nt.ico"
+Name: "{group}\NeverTube"; Filename: "{app}\nevertube.exe"; Tasks: menuicon; IconFilename: "{app}\nt.ico"
 Name: "{autodesktop}\NeverTube"; Filename: "{app}\nevertube.exe"; Tasks: desktopicon; IconFilename: "{app}\nt.ico"
+; Uninstall shortcut in the group: without it the program can only be removed
+; from Programs and Features.
+Name: "{group}\Desinstalar NeverTube"; Filename: "{uninstallexe}"
+
+[Run]
+; The last page offers to open the app right away, which is the "come back"
+; half of an update: the same installer replaces the files and then relaunches
+; NeverTube with one click. nowait: the wizard does not wait for the app;
+; postinstall: the entry appears on the Finished page; skipifsilent: a silent
+; install (/SILENT) opens no window.
+Filename: "{app}\nevertube.exe"; Description: "Ejecutar NeverTube"; Flags: nowait postinstall skipifsilent
 
 [Code]
 // TARGET GUARD (before touching disk). This setup is the x86 build FOR
@@ -202,5 +243,34 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then begin
     InstallVcRedist();
+  end;
+end;
+
+// UNSIGNED INSTALLER NOTICE. It is a fact, not a legal term: this setup carries
+// no Authenticode signature (the project has no certificate yet), so
+// SmartScreen may warn on the first run, and the installation asks Windows for
+// administrator rights because it writes to Program Files and installs the
+// Microsoft runtime. It is shown once, on the READY page, and it also says what
+// is NOT touched: the person's data lives outside {app} (the SQLite database in
+// the documents folder, the caches in local app data, the downloads in the
+// chosen folder) and this installer only replaces the program's files.
+// No accents or odd characters, like the rest of the setup strings.
+var
+  AvisoMostrado: Boolean;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpReady) and (not AvisoMostrado) then begin
+    AvisoMostrado := True;
+    MsgBox('Este instalador no esta firmado digitalmente: Windows puede'
+           + #13#10
+           + 'mostrar un aviso de SmartScreen la primera vez.'
+           + #13#10 + #13#10
+           + 'Durante la instalacion Windows pedira permisos de administrador.'
+           + #13#10 + #13#10
+           + 'Tus datos (historial, suscripciones, ajustes y descargas) no se'
+           + #13#10
+           + 'tocan: el instalador solo reemplaza los archivos del programa.',
+           mbInformation, MB_OK);
   end;
 end;
