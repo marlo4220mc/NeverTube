@@ -139,6 +139,10 @@ add_executable(nevertube
   src/video_variant.h
   src/video_variant_selftest.cpp
   src/video_variant_selftest.h
+  # The folders of the system (downloads, documents) in any language: one
+  # resolution for the downloader and for the database.
+  src/xdg_dirs.cpp
+  src/xdg_dirs.h
   src/mainwindow.cpp
   src/mainwindow.h
   src/i18n.cpp

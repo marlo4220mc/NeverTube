@@ -1510,6 +1510,32 @@ really has and the plan is built **without a cap** (`maxHeight = 0`).
 **The folder is ONE function** (`downloads::folderOf`): the downloader writes
 there, the page of Descargas opens it and the setting of Ajustes shows it.
 
+**And it is the folder of the SYSTEM, in any language**
+(`downloads::systemDownloadsFolder` → `xdg::downloadsFolder`, `src/xdg_dirs.*`):
+`XDG_DOWNLOAD_DIR` when the session exports it, then the `XDG_DOWNLOAD_DIR=` line
+of `$XDG_CONFIG_HOME/user-dirs.dirs` **and of `~/.config/user-dirs.dirs`**, then
+Qt. Both files are read because Qt 5 reads ONLY `$XDG_CONFIG_HOME` (default
+`~/.config`) and never the variable, so a session with a custom
+`XDG_CONFIG_HOME` got the English `~/Downloads` while the folder of the system
+was `~/Descargas`. Inside a Flatpak the first file is the one flatpak GENERATES
+from the real folders of the host, which is why the sandbox also answers the
+translated folder (and why the permission is `xdg-download`). The parser is pure
+(`xdg::parseUserDir(contents, key, home)`) and `--selftest-download-folder`
+covers it: quotes, `$HOME`, `${HOME}`, a commented line, a relative value and the
+unquoted one.
+
+**The name of the file is valid on every system without losing the language**
+(`downloads::safeFileName`): the characters Windows forbids become spaces, the
+dots and spaces at the edges are dropped, and the stem has TWO caps that are not
+the same one: **120 characters** (the Windows limit counts UTF-16 units of the
+260 of the whole path) and **200 bytes** of UTF-8 (Linux counts bytes and rejects
+a name over 255, `ENAMETOOLONG`; a title in CJK or with emoji takes 3 or 4 bytes
+per character, so 120 characters can be 360 bytes). It is cut by code points, so
+a surrogate pair is never split. A stem that is a **Windows device name** (`CON`,
+`PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`, with or without extension) gets
+one underscore: on Windows `CON.mkv` cannot be created. The accents and the ñ are
+NOT folded to ASCII. `--selftest-download-folder` covers all of it.
+
 ### The button of "Reintentar" (the resume was lost, twice)
 
 **The retry DELETED the row of the repository** (`remove()`), and with it the

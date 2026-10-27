@@ -14,6 +14,18 @@ namespace downloads {
 // can be checked without a screen.
 QString folderOf(const QString &configuredFolder);
 
+// The folder of downloads of the SYSTEM, in ANY language and on any desktop:
+// the one the rest of the system uses ("Descargas", "Downloads",
+// "Téléchargements"...). It is never empty: it falls back to Documents, then
+// Home, then the temp folder.
+//
+// The resolution is `xdg::downloadsFolder()` (src/xdg_dirs.*), the SAME one the
+// database uses for its documents folder: it is not plain QStandardPaths because
+// Qt 5 reads ONLY $XDG_CONFIG_HOME/user-dirs.dirs and never the XDG_DOWNLOAD_DIR
+// variable, so a session with a custom XDG_CONFIG_HOME gets the English
+// "Downloads" even though the folder of the system is another one.
+QString systemDownloadsFolder();
+
 // The command that opens a path in the file manager of the desktop, with the
 // path as its last argument. Empty when there is none (the desktop handles
 // it by itself).
