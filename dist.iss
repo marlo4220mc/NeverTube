@@ -2,9 +2,9 @@
 ; The three installers partition the Windows space and each one refuses the
 ; other two (see InitializeSetup in [Code]):
 ;
-;   dist.iss              → 32-bit Windows BEFORE 10      → nevertube-setup-win7-x86.exe
-;   dist_x86_win10.iss    → Windows 10/11, 32-bit only    → nevertube-setup-win10-x86.exe
-;   dist64.iss            → Windows 10/11, 64-bit only    → nevertube-setup-x64.exe
+;   dist.iss              → 32-bit Windows BEFORE 10      → NeverTube-<version>-Windows-7-SP1-x86-Setup.exe
+;   dist_x86_win10.iss    → Windows 10/11, 32-bit only    → NeverTube-<version>-Windows-10-11-x86-Setup.exe
+;   dist64.iss            → Windows 10/11, 64-bit only    → NeverTube-<version>-Windows-10-11-x64-Setup.exe
 ;
 ; This one is the Win7 build: NO mpv (its only engine is the FfmpegBackend) and
 ; its CRT/imports are pinned to Win7 SP1. Windows 10 x86 has its own bundle with
@@ -171,8 +171,8 @@ Filename: "{app}\nevertube.exe"; Description: "Ejecutar NeverTube"; Flags: nowai
 // TARGET GUARD (before touching disk). This setup is the x86 build for 32-bit
 // Windows BEFORE 10 (the FfmpegBackend one, Win7-pinned). Windows 10 and later
 // have their own installers, one per architecture, so they are refused here:
-//   - 64-bit 10/11 → dist64.iss (nevertube-setup-x64.exe)
-//   - 32-bit 10/11 → dist_x86_win10.iss (nevertube-setup-win10-x86.exe)
+//   - 64-bit 10/11 → dist64.iss (NeverTube-<version>-Windows-10-11-x64-Setup.exe)
+//   - 32-bit 10/11 → dist_x86_win10.iss (NeverTube-<version>-Windows-10-11-x86-Setup.exe)
 // GetWindowsVersion: Major shl 24 | Minor shl 16 | Build -> Win10/Win11 =
 // $0A000000. Still allowed on 32-bit before 10 and on 64-bit before 10 (WOW64,
 // where the x64 build with modern mpv would not run).

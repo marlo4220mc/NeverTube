@@ -2,9 +2,9 @@
 ; The THIRD installer. The three of them partition the Windows space, and each
 ; one refuses the other two (see InitializeSetup in [Code]):
 ;
-;   dist.iss              → 32-bit Windows BEFORE 10      → nevertube-setup-win7-x86.exe
-;   dist_x86_win10.iss    → Windows 10/11, 32-bit only    → nevertube-setup-win10-x86.exe
-;   dist64.iss            → Windows 10/11, 64-bit only    → nevertube-setup-x64.exe
+;   dist.iss              → 32-bit Windows BEFORE 10      → NeverTube-<version>-Windows-7-SP1-x86-Setup.exe
+;   dist_x86_win10.iss    → Windows 10/11, 32-bit only    → NeverTube-<version>-Windows-10-11-x86-Setup.exe
+;   dist64.iss            → Windows 10/11, 64-bit only    → NeverTube-<version>-Windows-10-11-x64-Setup.exe
 ;
 ; This one exists because the x86 payload is NOT the same on both sides of the
 ; Windows 10 line: the Win7 build has no mpv (its only engine is the
@@ -167,11 +167,13 @@ Filename: "{app}\nevertube.exe"; Description: "Ejecutar NeverTube"; Flags: nowai
 // TARGET GUARD (before touching disk). This setup is the x86 build FOR
 // WINDOWS 10/11, so it refuses exactly the two machines that have their own
 // installer:
-//   - 64-bit Windows  → dist64.iss (nevertube-setup-x64.exe): that one runs the
-//     x64 libmpv with VP9/AV1 hardware and 4K, which this 32-bit binary cannot.
+//   - 64-bit Windows  → dist64.iss (NeverTube-<version>-Windows-10-11-x64-Setup.exe):
+//     that one runs the x64 libmpv with VP9/AV1 hardware and 4K, which this
+//     32-bit binary cannot.
 //   - Windows before 10 (i.e. Win7/Win8.x, 32-bit) → dist.iss
-//     (nevertube-setup-win7-x86.exe): that is the FfmpegBackend build, the only
-//     one that loads on Win7 SP1 (its CRT and imports are pinned to it).
+//     (NeverTube-<version>-Windows-7-SP1-x86-Setup.exe): that is the
+//     FfmpegBackend build, the only one that loads on Win7 SP1 (its CRT and
+//     imports are pinned to it).
 // GetWindowsVersion: Major shl 24 | Minor shl 16 | Build -> Win10/Win11 =
 // $0A000000. Windows 11 has no 32-bit edition, so "10+" here means Win10 22H2
 // in practice.

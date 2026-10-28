@@ -261,7 +261,8 @@ jobs:
           Get-ChildItem dist | Select-Object Name, Length
           # dist64.iss (NOT dist.iss: that one is the x86/Win7 setup and its
           # architecture guard cancels precisely on 64-bit 10/11, which is the target
-          # of this workflow). iscc compiles to setup-out/NeverTube-{#AppVersion}-Windows-10-11-x64-Setup.exe.
+          # of this workflow). iscc compiles to
+          # setup-out/NeverTube-<version>-Windows-10-11-x64-Setup.exe.
           $iscc = Get-ChildItem "$env:ProgramFiles\Inno Setup*\ISCC.exe",
             "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
             Select-Object -First 1
@@ -272,9 +273,13 @@ jobs:
           # of the next step validates against THIS log.
           & $iscc.FullName dist64.iss 2>&1 | Tee-Object -FilePath iscc.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $setup = "setup-out/NeverTube-{#AppVersion}-Windows-10-11-x64-Setup.exe"
-          if (-not (Test-Path $setup)) { Write-Host "no se generó $setup"; exit 1 }
-          Get-Item $setup | Select-Object Name, Length
+          # The name carries the version ({#AppVersion} in the .iss). This workflow
+          # does not pass /DAppVersion, so the version is the default of the .iss
+          # and the file is located by pattern instead of hardcoding one here.
+          $setup = Get-ChildItem setup-out -Filter 'NeverTube-*-Windows-10-11-x64-Setup.exe' |
+            Select-Object -First 1
+          if (-not $setup) { Write-Host 'no se generó el setup x64 en setup-out'; exit 1 }
+          $setup | Select-Object Name, Length
 
       # INSTALLER gate, in two parts:
       # 1) SIZE: Qt + mpv + Vulkan + OpenSSL compressed with LZMA2 are tens
@@ -289,8 +294,10 @@ jobs:
       - name: gate del instalador (tamaño + manifiesto de iscc)
         shell: pwsh
         run: |
-          $setup = "setup-out/NeverTube-{#AppVersion}-Windows-10-11-x64-Setup.exe"
-          $sz = (Get-Item $setup).Length
+          $setup = Get-ChildItem setup-out -Filter 'NeverTube-*-Windows-10-11-x64-Setup.exe' |
+            Select-Object -First 1
+          if (-not $setup) { Write-Host 'no está el setup x64 en setup-out'; exit 1 }
+          $sz = $setup.Length
           Write-Host ("setup: {0:N1} MB" -f ($sz / 1MB))
           if ($sz -lt 5MB) {
             Write-Host "el setup son menos de 5 MB: el paquete va vacío o incompleto"
@@ -386,5 +393,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nevertube-windows-x64-setup
-          path: setup-out/NeverTube-{#AppVersion}-Windows-10-11-x64-Setup.exe
+          path: setup-out/NeverTube-*-Windows-10-11-x64-Setup.exe
           retention-days: 21

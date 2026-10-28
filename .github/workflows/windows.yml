@@ -323,10 +323,17 @@ jobs:
           # was compiled and not one of the other two (dist_x86_win10.iss carries
           # the same redist but a different output name; dist64.iss carries
           # VC_redist.x64.exe).
-          $setup = 'setup-out/NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup.exe'
-          if (-not (Test-Path $setup)) {
-            Write-Host "no está $setup"; exit 1 }
-          $sz = (Get-Item $setup).Length
+          # The .iss names the setup with the version of the release
+          # (OutputBaseFilename=NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup).
+          # This workflow compiles it WITHOUT /DAppVersion, so {#AppVersion} is the
+          # default of the .iss and the version is not something to type here: the
+          # file is located by pattern, which keeps working when this workflow is
+          # the one validating a change to the name.
+          $setup = Get-ChildItem setup-out -Filter 'NeverTube-*-Windows-7-SP1-x86-Setup.exe' |
+            Select-Object -First 1
+          if (-not $setup) {
+            Write-Host "no está el setup de Win7 x86 en setup-out"; exit 1 }
+          $sz = $setup.Length
           Write-Host ("setup: {0:N1} MB" -f ($sz / 1MB))
           if ($sz -lt 5MB) {
             Write-Host "el setup son menos de 5 MB: el paquete va vacío o incompleto"
@@ -496,5 +503,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nevertube-windows-win7-x86-setup
-          path: setup-out/NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup.exe
+          path: setup-out/NeverTube-*-Windows-7-SP1-x86-Setup.exe
           retention-days: 21

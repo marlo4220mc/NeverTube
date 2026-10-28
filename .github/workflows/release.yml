@@ -809,7 +809,12 @@ jobs:
           # was compiled and not one of the other two (dist_x86_win10.iss carries
           # the same redist but a different output name; dist64.iss carries
           # VC_redist.x64.exe).
-          $setup = 'setup-out/NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup.exe'
+          # The setup is named with the version of the release, which is the
+          # same string that reaches the .iss as /DAppVersion
+          # (OutputBaseFilename=NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup).
+          # Spelling it out here is the gate: if the .iss stopped using the
+          # version, this file would not appear.
+          $setup = 'setup-out/NeverTube-${{ needs.version.outputs.version }}-Windows-7-SP1-x86-Setup.exe'
           if (-not (Test-Path $setup)) {
             Write-Host "no está $setup"; exit 1 }
           $sz = (Get-Item $setup).Length
@@ -982,7 +987,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nevertube-windows-win7-x86-setup
-          path: setup-out/NeverTube-{{ needs.version.outputs.version }}-Windows-7-SP1-x86-Setup.exe
+          path: setup-out/NeverTube-${{ needs.version.outputs.version }}-Windows-7-SP1-x86-Setup.exe
           retention-days: 21
 
   windows-win10-x86:
@@ -1245,7 +1250,9 @@ jobs:
           # (a pattern misspelled in [Files] compiles the same).
           & $iscc.FullName "/DAppVersion=${{ needs.version.outputs.version }}" dist_x86_win10.iss 2>&1 | Tee-Object -FilePath iscc.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $setup = "setup-out/NeverTube-{#AppVersion}-Windows-10-11-x86-Setup.exe"
+          # The setup is named with the version of the release, the same string
+          # that reaches the .iss as /DAppVersion.
+          $setup = "setup-out/NeverTube-${{ needs.version.outputs.version }}-Windows-10-11-x86-Setup.exe"
           if (-not (Test-Path $setup)) { Write-Host "no se generó $setup"; exit 1 }
           Get-Item $setup | Select-Object Name, Length
 
@@ -1284,10 +1291,11 @@ jobs:
           # 64-bit machines; both must stay in the .iss, and the output name
           # proves which script is the one being compiled. The two
           # `...-Setup.exe` needles are the installers the cancel-message points
-          # at (the names a user downloads, without the version).
+          # at (the names a user downloads, without the version: the version in
+          # front of them is {#AppVersion}, a macro of the .iss).
           $iss = Get-Content dist_x86_win10.iss -Raw
           foreach ($needle in @('IsWin64', '$0A000000',
-                                'OutputBaseFilename=NeverTube-{{ needs.version.outputs.version }}-Windows-10-11-x86-Setup',
+                                'OutputBaseFilename=NeverTube-{#AppVersion}-Windows-10-11-x86-Setup',
                                 'Windows-10-11-x64-Setup.exe',
                                 'Windows-7-SP1-x86-Setup.exe')) {
             if (-not $iss.Contains($needle)) {
@@ -1297,7 +1305,7 @@ jobs:
           }
           Write-Host 'gate del guard OK: el setup rechaza x64 y Windows anterior a 10'
 
-          $setup = "setup-out/NeverTube-{#AppVersion}-Windows-10-11-x86-Setup.exe"
+          $setup = "setup-out/NeverTube-${{ needs.version.outputs.version }}-Windows-10-11-x86-Setup.exe"
           $sz = (Get-Item $setup).Length
           Write-Host ("setup: {0:N1} MB" -f ($sz / 1MB))
           if ($sz -lt 5MB) {
@@ -1375,7 +1383,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nevertube-windows-win10-x86-setup
-          path: setup-out/NeverTube-{{ needs.version.outputs.version }}-Windows-10-11-x86-Setup.exe
+          path: setup-out/NeverTube-${{ needs.version.outputs.version }}-Windows-10-11-x86-Setup.exe
           retention-days: 21
 
   windows-win10-x64:
@@ -1617,7 +1625,8 @@ jobs:
           Get-ChildItem dist | Select-Object Name, Length
           # dist64.iss (NOT dist.iss: that one is the x86/Win7 setup and its
           # architecture guard cancels precisely on 64-bit 10/11, which is the target
-          # of this workflow). iscc compiles to setup-out/NeverTube-{#AppVersion}-Windows-10-11-x64-Setup.exe.
+          # of this workflow). iscc compiles to
+          # setup-out/NeverTube-<version>-Windows-10-11-x64-Setup.exe.
           $iscc = Get-ChildItem "$env:ProgramFiles\Inno Setup*\ISCC.exe",
             "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
             Select-Object -First 1
@@ -1628,7 +1637,9 @@ jobs:
           # of the next step validates against THIS log.
           & $iscc.FullName "/DAppVersion=${{ needs.version.outputs.version }}" dist64.iss 2>&1 | Tee-Object -FilePath iscc.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $setup = "setup-out/NeverTube-{#AppVersion}-Windows-10-11-x64-Setup.exe"
+          # The setup is named with the version of the release, the same string
+          # that reaches the .iss as /DAppVersion.
+          $setup = "setup-out/NeverTube-${{ needs.version.outputs.version }}-Windows-10-11-x64-Setup.exe"
           if (-not (Test-Path $setup)) { Write-Host "no se generó $setup"; exit 1 }
           Get-Item $setup | Select-Object Name, Length
 
@@ -1645,7 +1656,7 @@ jobs:
       - name: gate del instalador (tamaño + manifiesto de iscc)
         shell: pwsh
         run: |
-          $setup = "setup-out/NeverTube-{#AppVersion}-Windows-10-11-x64-Setup.exe"
+          $setup = "setup-out/NeverTube-${{ needs.version.outputs.version }}-Windows-10-11-x64-Setup.exe"
           $sz = (Get-Item $setup).Length
           Write-Host ("setup: {0:N1} MB" -f ($sz / 1MB))
           if ($sz -lt 5MB) {
@@ -1742,7 +1753,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nevertube-windows-x64-setup
-          path: setup-out/NeverTube-{{ needs.version.outputs.version }}-Windows-10-11-x64-Setup.exe
+          path: setup-out/NeverTube-${{ needs.version.outputs.version }}-Windows-10-11-x64-Setup.exe
           retention-days: 21
 
   # ---------------------------------------------------------------------------
@@ -1799,11 +1810,14 @@ jobs:
           cp artifacts/linux-arch/*.pkg.tar.zst       "out/NeverTube-$VERSION-Arch-Linux-x86_64.pkg.tar.zst"
           cp artifacts/linux-flatpak/*.flatpak        "out/NeverTube-$VERSION-Linux-Flatpak.flatpak"
           cp artifacts/linux-flatpak/*.tar.gz         "out/NeverTube-$VERSION-Linux-Flatpak-Repo.tar.gz"
-          cp artifacts/NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup.exe \
+          # Each Windows setup travels inside the artifact of its job
+          # (`artifacts/<name>/`), with the name the .iss gave it: the version
+          # comes from /DAppVersion and it is the one of this release.
+          cp "artifacts/nevertube-windows-win7-x86-setup/NeverTube-$VERSION-Windows-7-SP1-x86-Setup.exe" \
              "out/NeverTube-$VERSION-Windows-7-SP1-x86-Setup.exe"
-          cp artifacts/NeverTube-{#AppVersion}-Windows-10-11-x86-Setup.exe \
+          cp "artifacts/nevertube-windows-win10-x86-setup/NeverTube-$VERSION-Windows-10-11-x86-Setup.exe" \
              "out/NeverTube-$VERSION-Windows-10-11-x86-Setup.exe"
-          cp artifacts/NeverTube-{#AppVersion}-Windows-10-11-x64-Setup.exe \
+          cp "artifacts/nevertube-windows-x64-setup/NeverTube-$VERSION-Windows-10-11-x64-Setup.exe" \
              "out/NeverTube-$VERSION-Windows-10-11-x64-Setup.exe"
           ls -l out
           # The sums come from the explicit glob of the assets (every one of

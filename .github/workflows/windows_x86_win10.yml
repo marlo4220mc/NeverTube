@@ -4,9 +4,9 @@ name: Windows 10 x86 (mpv i686 — Win10 32 bits)
 # family, and the three partition the space (each installer refuses the other
 # two, see the InitializeSetup of dist*.iss):
 #
-#   dist.iss              → 32-bit Windows BEFORE 10 → nevertube-setup-win7-x86.exe
-#   dist_x86_win10.iss    → Windows 10/11, 32-bit    → nevertube-setup-win10-x86.exe
-#   dist64.iss            → Windows 10/11, 64-bit    → nevertube-setup-x64.exe
+#   dist.iss              → 32-bit Windows BEFORE 10 → NeverTube-<version>-Windows-7-SP1-x86-Setup.exe
+#   dist_x86_win10.iss    → Windows 10/11, 32-bit    → NeverTube-<version>-Windows-10-11-x86-Setup.exe
+#   dist64.iss            → Windows 10/11, 64-bit    → NeverTube-<version>-Windows-10-11-x64-Setup.exe
 #
 # WHY THIS BUILD EXISTS (it is not the Win7 one re-badged): the Win7 x86 build
 # has no mpv — its only engine is the FfmpegBackend, with the CRT and the
@@ -328,9 +328,13 @@ jobs:
           # (a pattern misspelled in [Files] compiles the same).
           & $iscc.FullName dist_x86_win10.iss 2>&1 | Tee-Object -FilePath iscc.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $setup = "setup-out/NeverTube-{#AppVersion}-Windows-10-11-x86-Setup.exe"
-          if (-not (Test-Path $setup)) { Write-Host "no se generó $setup"; exit 1 }
-          Get-Item $setup | Select-Object Name, Length
+          # The name carries the version ({#AppVersion} in the .iss). This workflow
+          # does not pass /DAppVersion, so the version is the default of the .iss
+          # and the file is located by pattern instead of hardcoding one here.
+          $setup = Get-ChildItem setup-out -Filter 'NeverTube-*-Windows-10-11-x86-Setup.exe' |
+            Select-Object -First 1
+          if (-not $setup) { Write-Host 'no se generó el setup de Win10 x86 en setup-out'; exit 1 }
+          $setup | Select-Object Name, Length
 
       # THREE gates, and each one covers a way this package can be silently
       # wrong:
@@ -365,7 +369,10 @@ jobs:
           # The guard of the installer, pinned as source text. `$0A000000` is the
           # Win10 marker of GetWindowsVersion and `IsWin64` is what refuses the
           # 64-bit machines; both must stay in the .iss, and the output name
-          # proves which script is the one being compiled.
+          # proves which script is the one being compiled. The two
+          # `...-Setup.exe` needles are the installers the cancel message points
+          # at: they are spelled with their platform only, because the version in
+          # front of them is {#AppVersion} (a macro of the .iss, not a literal).
           $iss = Get-Content dist_x86_win10.iss -Raw
           foreach ($needle in @('IsWin64', '$0A000000',
                                 'OutputBaseFilename=NeverTube-{#AppVersion}-Windows-10-11-x86-Setup',
@@ -378,8 +385,10 @@ jobs:
           }
           Write-Host 'gate del guard OK: el setup rechaza x64 y Windows anterior a 10'
 
-          $setup = "setup-out/NeverTube-{#AppVersion}-Windows-10-11-x86-Setup.exe"
-          $sz = (Get-Item $setup).Length
+          $setup = Get-ChildItem setup-out -Filter 'NeverTube-*-Windows-10-11-x86-Setup.exe' |
+            Select-Object -First 1
+          if (-not $setup) { Write-Host 'no está el setup de Win10 x86 en setup-out'; exit 1 }
+          $sz = $setup.Length
           Write-Host ("setup: {0:N1} MB" -f ($sz / 1MB))
           if ($sz -lt 5MB) {
             Write-Host "el setup son menos de 5 MB: el paquete va vacío o incompleto"
@@ -456,5 +465,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nevertube-windows-win10-x86-setup
-          path: setup-out/NeverTube-{#AppVersion}-Windows-10-11-x86-Setup.exe
+          path: setup-out/NeverTube-*-Windows-10-11-x86-Setup.exe
           retention-days: 21
