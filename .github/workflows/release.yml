@@ -69,7 +69,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to build (empty = the one of CMakeLists.txt plus -dev.<run>). To publish, the one of the tag.'
+        description: 'Version to build (empty = the one of CMakeLists.txt plus -dev.<n>, the next free dev number). To publish, the one of the tag.'
         type: string
         default: ''
       publish:
@@ -121,7 +121,11 @@ jobs:
       prerelease: ${{ steps.v.outputs.prerelease }}
       tag: ${{ steps.v.outputs.tag }}
     steps:
+      # The whole history (and the tags) because the number of the dry runs is
+      # counted from them.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - id: v
         shell: bash
         run: |
@@ -136,7 +140,15 @@ jobs:
           elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            version="${cmake_version}-dev.${GITHUB_RUN_NUMBER}"
+            # The number of the DRY RUNS is NOT GITHUB_RUN_NUMBER: that one
+            # only grows and GitHub does not let anybody reset it (it belongs to
+            # the workflow and survives its file), so a series could never start
+            # over. It is "one more than the dev tags that already exist", which
+            # is also what keeps two dry runs from publishing the same version,
+            # and it is reset by deleting those tags: with none, the next one is
+            # dev.1.
+            dev_tags="$(git tag -l "v${cmake_version}-dev.*" | wc -l)"
+            version="${cmake_version}-dev.$((dev_tags + 1))"
           fi
           if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
             echo "::error::'$version' no es X.Y.Z ni X.Y.Z-sufijo (alpha.1, beta.2, rc.1...)"; exit 1

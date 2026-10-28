@@ -94,9 +94,12 @@ artifacts of the run (21 days), named `linux-deb-2204`, `linux-rpm`,
 workflow or several packaging recipes at once. Add `-f online_selftests=true` if you also want
 the report of the network/GPU selftests (they never fail the job).
 
-The version of a dry run is `1.0.0-dev.<run number>`, so the packages do not
-pretend to be a release; pass `-f version=1.0.0-alpha.1` to build exactly the
-bytes of the release you are about to cut.
+The version of a dry run is `1.0.0-dev.<n>`, where `<n>` is one more than the
+`v1.0.0-dev.*` tags that already exist (it is what keeps two dry runs from
+publishing the same version, and deleting those tags starts the series over at
+`dev.1`), so the packages do not pretend to be a release; pass
+`-f version=1.0.0-alpha.1` to build exactly the bytes of the release you are
+about to cut.
 
 ## 3. Cut the release
 
