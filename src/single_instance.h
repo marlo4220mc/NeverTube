@@ -42,6 +42,18 @@ public:
     // The name of the instance of the current user.
     static QString name();
 
+    // Stops listening and REMOVES the name, so that the process that starts
+    // right after this one BECOMES the instance instead of handing its
+    // arguments over to this one and exiting. It is what the restart of
+    // "Restablecer aplicación" needs: without it the replacement hears the
+    // instance that is still running, answers as such, and exits; then the old
+    // one quits -> the app closes and never comes back.
+    void release();
+
+    // The same for the instance of THIS process (the one of main()), which the
+    // window does not hold a pointer to.
+    static void releaseCurrent();
+
 signals:
     // The arguments of another process, as they arrived (argv[0] included, the
     // same shape as QApplication::arguments()).
@@ -53,6 +65,10 @@ private:
 
     QString m_name;
     QLocalServer *m_server = nullptr;
+    // The name was released on purpose: nothing else of this process touches
+    // it again (the destructor included), because by then it may belong to the
+    // replacement process.
+    bool m_released = false;
     // The bytes received from each connection, until its line is complete.
     QHash<QLocalSocket *, QByteArray> m_buffers;
 };

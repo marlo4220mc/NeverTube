@@ -2196,6 +2196,19 @@ name is a file). It is created in `main()` and works like this:
   the same user share the instance and the second one brings the window of the
   other to the front. That is the decision ("one per user"); it is written down
   because with X2Go/RDP it is noticeable.
+- **A relaunch has to RELEASE the name first** (`SingleInstance::releaseCurrent()`,
+  called by `MainWindow::resetAppData` before `QProcess::startDetached`). Without it
+  the app that is restarting (`Restablecer aplicación`) is still the instance: the
+  replacement finds it on the socket, hands its arguments over and exits, and the old
+  one quits right after → **the app closes and never comes back** (reported and
+  measured: with the release there is one process alive afterwards and it owns the
+  name —a third launch hands its arguments over—; without it, none). Two details that
+  are part of the fix: the replacement is started with **no arguments** (a factory
+  reset does not reopen the link or the `--download` of the session) and the flag
+  `m_released` keeps the destructor from removing the name again, which by then may
+  belong to the replacement. If the relaunch fails the window does NOT quit (that
+  would be the same symptom): the DB is reopened —the reset is already applied— and
+  `settings.resetNoRestart` says so.
 - `--selftest-single-instance` (offline, in the smoke of the three CI and in the
   three `packaging/linux/*` recipes): the first process takes the name, a second
   **real process** hands its arguments over, a third also does, one with no

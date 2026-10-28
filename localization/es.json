@@ -210,6 +210,7 @@
     "settings.resetApp": "Restablecer aplicación",
     "settings.resetBody": "Esta acción borrará la base de datos local (historial, búsquedas, suscripciones y ajustes) y el caché de miniaturas. No se eliminarán archivos personales ni vídeos descargados. La aplicación se reiniciará con los valores por defecto. ¿Continuar?",
     "settings.reset": "Restablecer",
+    "settings.resetNoRestart": "Los datos se restablecieron, pero la aplicación no pudo reiniciarse sola. Ábrela de nuevo.",
     "settings.version": "NeverTube %1",
     "settings.checkUpdates": "Buscar actualizaciones",
     "update.title": "Actualización de NeverTube",

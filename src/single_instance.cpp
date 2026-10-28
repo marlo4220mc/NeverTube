@@ -30,6 +30,11 @@ constexpr int kMaxPayload = 64 * 1024;
 
 constexpr char kLineEnd = '\n';
 
+// The instance that owns the name in THIS process: the one of main(). The
+// window has no handle to it and it is the only one that can release the name
+// before launching its own replacement ("Restablecer aplicación").
+SingleInstance *g_current = nullptr;
+
 void sendTo(QLocalSocket *socket, const QStringList &args)
 {
     // One line of JSON: the array of the arguments, compact. A line (and not a
@@ -77,17 +82,36 @@ SingleInstance::SingleInstance(const QString &name, QObject *parent)
     : QObject(parent)
     , m_name(name)
 {
+    if (!g_current)
+        g_current = this;
 }
 
 SingleInstance::~SingleInstance()
 {
-    if (!m_server)
+    release();
+    if (g_current == this)
+        g_current = nullptr;
+}
+
+void SingleInstance::release()
+{
+    // A process that never listened does not own the name: removing it here
+    // would delete the socket file of the instance that IS running (the
+    // `--handover` child does exactly that on its way out).
+    if (m_released || !m_server)
         return;
+    m_released = true;
     m_server->close();
     // Unix: the file of the socket is left behind when the process dies without
     // closing it. removeServer() is a no-op on Windows (the pipe goes away with
     // its process).
     QLocalServer::removeServer(m_name);
+}
+
+void SingleInstance::releaseCurrent()
+{
+    if (g_current)
+        g_current->release();
 }
 
 bool SingleInstance::start(const QStringList &args)

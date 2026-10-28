@@ -44,6 +44,7 @@
 
 #include "models.h"
 #include "hwprobe.h"
+#include "single_instance.h"
 #include "i18n.h"
 #include "playerwidget.h"
 #include "../src/debug.h"
@@ -2093,11 +2094,35 @@ void MainWindow::resetAppData()
             t->clear();
     }
     // 5. Restart the application with defaults; the DB will be recreated on
-    // open
-    QProcess::startDetached(
-        QCoreApplication::applicationFilePath(),
-        QCoreApplication::arguments(),
+    // open.
+    //
+    // The name of the single instance is RELEASED FIRST, and that is the whole
+    // matter: this process was still the running instance, so the replacement
+    // found it on the socket, handed its arguments over and exited, while this
+    // one quit 200 ms later -> the app closed and never came back. With the
+    // name free, the process that starts now IS the app.
+    SingleInstance::releaseCurrent();
+    // No arguments: the app comes back with the default values, not with the
+    // link or the --download this session was opened with (and not with the
+    // hidden --handover of the selftest).
+    const bool relaunched = QProcess::startDetached(
+        QCoreApplication::applicationFilePath(), QStringList(),
         QDir::currentPath());
+    if (!relaunched) {
+        // Quitting here would be the same symptom this fixes (it closes and
+        // does not come back) and it would take the window away without a
+        // word. The data IS reset: the app keeps running on the fresh
+        // database, which open() creates, and the person reopens it.
+        NT_DEBUG("E2E reset: no se pudo relanzar %s\n",
+                 QCoreApplication::applicationFilePath().toUtf8().constData());
+        m_db.open();
+        if (m_downloadManager)
+            applyDownloadFolder();
+        nt::confirm(this, nt::tr("settings.resetApp"),
+                    nt::tr("settings.resetNoRestart"), nt::tr("common.close"),
+                    []() {});
+        return;
+    }
     // The current process exits; the new instance starts clean.
     QTimer::singleShot(200, this, []() { qApp->quit(); });
 }
