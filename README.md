@@ -130,6 +130,12 @@ nevertube --downloads | --library    # open that page
   Leave a star ⭐ on the repository, share it with friends, or help support future development!
 </p>
 
+## Disclaimer & Limitation of Liability
+
+- **Alpha software notice:** NeverTube is in active development (Alpha stage). The software is provided **"AS IS", WITHOUT WARRANTY OF ANY KIND**, either expressed or implied, including but not limited to the implied warranties of merchantability, fitness for a particular purpose, or non-infringement.
+- **Limitation of liability:** In no event shall the authors, maintainers, or copyright holders be liable for any direct, indirect, incidental, special, exemplary, or consequential damages (including, but not limited to, loss of data, system disruption, hardware failure, or lost profits) arising in any way out of the use or inability to use this software, even if advised of the possibility of such damage. You use this application entirely at your own risk.
+- **Third-party services & trademarks:** NeverTube is an independent project and is **not affiliated with, endorsed by, sponsored by, or officially connected to YouTube, Google LLC, or Alphabet Inc.** "YouTube" is a registered trademark of Google LLC. Users are solely responsible for complying with applicable local laws and third-party terms of service.
+
 ## License
 
 GPL-3.0-or-later. Third-party components keep their own licenses: Qt5 (LGPL-3.0), libmpv (LGPL-2.1+), FFmpeg (LGPL-2.1+), LAME (LGPL-2.0, the MP3 encoder of the Windows ffmpeg), Material Symbols icon geometry (Apache-2.0), OpenSSL (Apache-2.0).

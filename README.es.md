@@ -130,6 +130,12 @@ nevertube --downloads | --library    # abrir esa página
   ¡Dale una estrella ⭐ al repositorio, compártelo con tus amigos o apoya el desarrollo continuo del proyecto!
 </p>
 
+## Descargo de responsabilidad y limitación de responsabilidad
+
+- **Software en fase Alfa:** NeverTube se encuentra en fase de desarrollo activo (etapa Alfa). El software se proporciona **"TAL CUAL" ("AS IS"), SIN GARANTÍA DE NINGÚN TIPO**, ya sea expresa o implícita, incluyendo, pero sin limitarse a, las garantías implícitas de comerciabilidad, idoneidad para un propósito particular o no infracción.
+- **Limitación de responsabilidad:** En ningún caso los autores, desarrolladores o titulares de los derechos de autor serán responsables de ningún daño directo, indirecto, incidental, especial, ejemplar o consecuente (incluyendo, entre otros, pérdida de datos, fallos del sistema o hardware, o pérdida de beneficios) que surja de cualquier manera del uso o de la imposibilidad de usar este software, incluso si se advirtió de la posibilidad de tales daños. El usuario utiliza esta aplicación enteramente bajo su propio riesgo.
+- **Servicios de terceros y marcas registradas:** NeverTube es un proyecto independiente y **no está afiliado, respaldado, patrocinado ni conectado oficialmente con YouTube, Google LLC ni Alphabet Inc.** "YouTube" es una marca registrada de Google LLC. El usuario es el único responsable de cumplir con las leyes locales aplicables y los términos de servicio de terceros.
+
 ## Licencia
 
 GPL-3.0-or-later. Los componentes de terceros conservan sus propias licencias: Qt5 (LGPL-3.0), libmpv (LGPL-2.1+), FFmpeg (LGPL-2.1+), LAME (LGPL-2.0, el codificador MP3 del ffmpeg de Windows), geometría de iconos Material Symbols (Apache-2.0), OpenSSL (Apache-2.0).
