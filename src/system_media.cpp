@@ -31,7 +31,6 @@
 #if defined(_WIN32) && defined(NEVERTUBE_WIN_SMTC)
 #  include <windows.h>
 #  include <inspectable.h>
-#  include <systemmediatransportcontrolsinterop.h>
 
 #  include <winrt/Windows.Foundation.h>
 #  include <winrt/Windows.Media.h>
@@ -660,6 +659,18 @@ using winrt::Windows::Media::SystemMediaTransportControlsButtonPressedEventArgs;
 using winrt::Windows::Media::SystemMediaTransportControlsTimelineProperties;
 using winrt::Windows::Foundation::TimeSpan;
 
+// SMTC does not exist as a global object for a desktop app: it is created FOR
+// a window, through this interop factory (the same one every Win32 media app
+// uses). C++/WinRT has no projection for it, so the interface is declared
+// here with its IID and inherits from IInspectable (vtable slots 0..5 are
+// IUnknown + IInspectable, and GetForWindow is slot 6).
+struct __declspec(uuid("ddb0472d-c911-4a1f-86d9-dc3d71a95f5a"))
+    SmtcInterop : ::IInspectable
+{
+    virtual HRESULT __stdcall GetForWindow(HWND window, REFIID riid,
+                                           void **out) = 0;
+};
+
 // 100 ns ticks, which is what a WinRT TimeSpan is.
 TimeSpan ticks(qint64 value)
 {
@@ -694,7 +705,7 @@ void smAttachWindow(SystemMediaData *data, quintptr windowHandle)
     }
     try {
         auto interop = winrt::get_activation_factory<SystemMediaTransportControls,
-                                                     ISystemMediaTransportControlsInterop>();
+                                                     SmtcInterop>();
         void *raw = nullptr;
         winrt::check_hresult(interop->GetForWindow(
             hwnd,
