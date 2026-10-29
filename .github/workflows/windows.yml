@@ -324,12 +324,12 @@ jobs:
           # the same redist but a different output name; dist64.iss carries
           # VC_redist.x64.exe).
           # The .iss names the setup with the version of the release
-          # (OutputBaseFilename=NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup).
+          # (OutputBaseFilename=NeverTube-{#AppVersion}-Windows-7-8-x86-Setup).
           # This workflow compiles it WITHOUT /DAppVersion, so {#AppVersion} is the
           # default of the .iss and the version is not something to type here: the
           # file is located by pattern, which keeps working when this workflow is
           # the one validating a change to the name.
-          $setup = Get-ChildItem setup-out -Filter 'NeverTube-*-Windows-7-SP1-x86-Setup.exe' |
+          $setup = Get-ChildItem setup-out -Filter 'NeverTube-*-Windows-7-8-x86-Setup.exe' |
             Select-Object -First 1
           if (-not $setup) {
             Write-Host "no está el setup de Win7 x86 en setup-out"; exit 1 }
@@ -505,5 +505,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nevertube-windows-win7-x86-setup
-          path: setup-out/NeverTube-*-Windows-7-SP1-x86-Setup.exe
+          path: setup-out/NeverTube-*-Windows-7-8-x86-Setup.exe
           retention-days: 21

@@ -62,7 +62,7 @@ Released on @@DATE@@ (tag `@@TAG@@`).
 |---|---|
 | `NeverTube-@@VERSION@@-Windows-10-11-x64-Setup.exe` | Windows 10 / 11, 64-bit |
 | `NeverTube-@@VERSION@@-Windows-10-11-x86-Setup.exe` | Windows 10 / 11, 32-bit |
-| `NeverTube-@@VERSION@@-Windows-7-SP1-x86-Setup.exe` | Windows 7 SP1, 32-bit |
+| `NeverTube-@@VERSION@@-Windows-7-8-x86-Setup.exe` | Windows 7 / 8 / 8.1, 32-bit |
 | `NeverTube-@@VERSION@@-Ubuntu-22.04-amd64.deb` | Ubuntu 22.04, Linux Mint 21, Pop!_OS 22.04, Debian 12 |
 | `NeverTube-@@VERSION@@-Ubuntu-24.04-amd64.deb` | Ubuntu 24.04+, Linux Mint 22, Debian 13 |
 | `NeverTube-@@VERSION@@-Fedora-x86_64.rpm` | Fedora (and RHEL-family with those sonames) |
@@ -80,7 +80,7 @@ versa. Take the one that matches your distribution.
 
 **Windows.** Run the setup for your system. Each one refuses the other two and
 tells you which to use, so picking the wrong file cannot break anything:
-`Windows-7-SP1-x86` is 32-bit Windows 7 SP1, `Windows-10-11-x86` is 32-bit
+`Windows-7-8-x86` is 32-bit Windows 7 / 8 / 8.1, `Windows-10-11-x86` is 32-bit
 Windows 10/11 and `Windows-10-11-x64` is 64-bit Windows 10/11. They install the Visual C++ runtime they need and
 create a menu entry and a desktop shortcut. Once installed, the app checks for
 new versions by itself (Ajustes -> "Buscar actualizaciones") and installs the
@@ -173,7 +173,7 @@ It is not the same code on every Windows target, and the difference is visible:
 | Target | Engine | What it decodes |
 |---|---|---|
 | Linux, Windows x64, Windows 10 x86 | libmpv (`hwdec=auto`) | AV1 / VP9 / H.264 in hardware when the GPU can, software otherwise |
-| Windows 7 x86 | FFmpeg (no libmpv) | H.264 in hardware (DXVA2), VP9 in software. **No AV1**: there is no 32-bit decoder for it |
+| Windows 7 / 8 x86 | FFmpeg (no libmpv) | H.264 in hardware (DXVA2), VP9 in software. **No AV1**: there is no 32-bit decoder for it |
 
 On 32-bit Windows the AV1 hardware decoders do not exist and there is no
 software one either, so YouTube is asked for H.264/VP9 there.
@@ -272,7 +272,7 @@ Publicado el @@DATE@@ (tag `@@TAG@@`).
 
 Mismos ficheros que la tabla de arriba: `Windows-10-11-x64-Setup.exe`
 (Windows 10/11 64 bits), `Windows-10-11-x86-Setup.exe` (Windows 10/11 32
-bits), `Windows-7-SP1-x86-Setup.exe` (Windows 7 SP1 32 bits), los dos `.deb`
+bits), `Windows-7-8-x86-Setup.exe` (Windows 7 / 8 / 8.1 32 bits), los dos `.deb`
 (`Ubuntu-22.04` para 22.04 / Mint 21 / Debian 12 y `Ubuntu-24.04` para 24.04+ /
 Mint 22 / Debian 13: son el mismo programa compilado contra cada base), el
 `.rpm` de Fedora, el paquete de Arch Linux, el bundle `Linux-Flatpak` (para

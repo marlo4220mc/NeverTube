@@ -36,7 +36,7 @@ name: Release
 #   linux-arch         NeverTube-<v>-Arch-Linux-x86_64.pkg.tar.zst
 #   linux-flatpak      NeverTube-<v>-Linux-Flatpak.flatpak
 #                      NeverTube-<v>-Linux-Flatpak-Repo.tar.gz  (the OSTree repo)
-#   windows-win7-x86   NeverTube-<v>-Windows-7-SP1-x86-Setup.exe
+#   windows-win7-x86   NeverTube-<v>-Windows-7-8-x86-Setup.exe
 #   windows-win10-x86  NeverTube-<v>-Windows-10-11-x86-Setup.exe
 #   windows-win10-x64  NeverTube-<v>-Windows-10-11-x64-Setup.exe
 #   release            SHA256SUMS.txt + the GitHub Release itself
@@ -823,10 +823,10 @@ jobs:
           # VC_redist.x64.exe).
           # The setup is named with the version of the release, which is the
           # same string that reaches the .iss as /DAppVersion
-          # (OutputBaseFilename=NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup).
+          # (OutputBaseFilename=NeverTube-{#AppVersion}-Windows-7-8-x86-Setup).
           # Spelling it out here is the gate: if the .iss stopped using the
           # version, this file would not appear.
-          $setup = 'setup-out/NeverTube-${{ needs.version.outputs.version }}-Windows-7-SP1-x86-Setup.exe'
+          $setup = 'setup-out/NeverTube-${{ needs.version.outputs.version }}-Windows-7-8-x86-Setup.exe'
           if (-not (Test-Path $setup)) {
             Write-Host "no está $setup"; exit 1 }
           $sz = (Get-Item $setup).Length
@@ -1001,7 +1001,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nevertube-windows-win7-x86-setup
-          path: setup-out/NeverTube-${{ needs.version.outputs.version }}-Windows-7-SP1-x86-Setup.exe
+          path: setup-out/NeverTube-${{ needs.version.outputs.version }}-Windows-7-8-x86-Setup.exe
           retention-days: 21
 
   windows-win10-x86:
@@ -1311,7 +1311,7 @@ jobs:
           foreach ($needle in @('IsWin64', '$0A000000',
                                 'OutputBaseFilename=NeverTube-{#AppVersion}-Windows-10-11-x86-Setup',
                                 'Windows-10-11-x64-Setup.exe',
-                                'Windows-7-SP1-x86-Setup.exe')) {
+                                'Windows-7-8-x86-Setup.exe')) {
             if (-not $iss.Contains($needle)) {
               Write-Host "el .iss perdió '$needle': el instalador dejaría de ser exclusivo de Win10 x86"
               exit 1
@@ -1829,8 +1829,8 @@ jobs:
           # Each Windows setup travels inside the artifact of its job
           # (`artifacts/<name>/`), with the name the .iss gave it: the version
           # comes from /DAppVersion and it is the one of this release.
-          cp "artifacts/nevertube-windows-win7-x86-setup/NeverTube-$VERSION-Windows-7-SP1-x86-Setup.exe" \
-             "out/NeverTube-$VERSION-Windows-7-SP1-x86-Setup.exe"
+          cp "artifacts/nevertube-windows-win7-x86-setup/NeverTube-$VERSION-Windows-7-8-x86-Setup.exe" \
+             "out/NeverTube-$VERSION-Windows-7-8-x86-Setup.exe"
           cp "artifacts/nevertube-windows-win10-x86-setup/NeverTube-$VERSION-Windows-10-11-x86-Setup.exe" \
              "out/NeverTube-$VERSION-Windows-10-11-x86-Setup.exe"
           cp "artifacts/nevertube-windows-x64-setup/NeverTube-$VERSION-Windows-10-11-x64-Setup.exe" \

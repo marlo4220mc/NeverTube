@@ -97,8 +97,8 @@ bool updateSelfTest()
 
     check(nt::installerAssetNameFor(QStringLiteral("win7-x86"),
                                     QStringLiteral("1.0.0"))
-              == QLatin1String("NeverTube-1.0.0-Windows-7-SP1-x86-Setup.exe"),
-          "el instalador de Win7 x86");
+              == QLatin1String("NeverTube-1.0.0-Windows-7-8-x86-Setup.exe"),
+          "el instalador de Win7/8 x86");
     check(nt::installerAssetNameFor(QStringLiteral("win10-x86"),
                                     QStringLiteral("1.0.0-alpha.1"))
               == QLatin1String(
@@ -163,7 +163,7 @@ bool updateSelfTest()
         rel.version = QStringLiteral("9.9.9");
         rel.assets << asset("NeverTube-9.9.9-Windows-10-11-x64-Setup.exe")
                    << asset("NeverTube-9.9.9-Windows-10-11-x86-Setup.exe")
-                   << asset("NeverTube-9.9.9-Windows-7-SP1-x86-Setup.exe")
+                   << asset("NeverTube-9.9.9-Windows-7-8-x86-Setup.exe")
                    << asset("SHA256SUMS.txt");
         check(rel.installerAssetFor(QStringLiteral("x64")).name
                   == QLatin1String(
@@ -175,7 +175,7 @@ bool updateSelfTest()
               "el de Windows 10/11 de 32 bits no confunde con el de Win7");
         check(rel.installerAssetFor(QStringLiteral("win7-x86")).name
                   == QLatin1String(
-                         "NeverTube-9.9.9-Windows-7-SP1-x86-Setup.exe"),
+                         "NeverTube-9.9.9-Windows-7-8-x86-Setup.exe"),
               "el de Win7 se lleva el suyo");
         check(rel.installerAssetFor(QString()).name.isEmpty(),
               "sin cocina no se elige nada");
@@ -264,7 +264,7 @@ bool updateSelfTest()
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
             "  NeverTube-1.0.0-Windows-10-11-x64-Setup.exe\n"
             "1b4f0e9851971998e732078544c96b36c3d01cedf7caa332359d6f1d83567014"
-            " *NeverTube-1.0.0-Windows-7-SP1-x86-Setup.exe\n"
+            " *NeverTube-1.0.0-Windows-7-8-x86-Setup.exe\n"
             "# un comentario\n"
             "\n");
         QString hash;
@@ -279,7 +279,7 @@ bool updateSelfTest()
         // The binary-mode form `sha256sum` writes ("*name").
         check(nt::checksumFor(
                   sums,
-                  QStringLiteral("NeverTube-1.0.0-Windows-7-SP1-x86-Setup.exe"),
+                  QStringLiteral("NeverTube-1.0.0-Windows-7-8-x86-Setup.exe"),
                   &hash, &error)
                   && hash == QLatin1String("1b4f0e9851971998e732078544c96b3"
                                            "6c3d01cedf7caa332359d6f1d83567014"),
@@ -472,7 +472,7 @@ bool updateSelfTest()
             "NeverTube-",
             "Windows-10-11-x64-Setup.exe",
             "Windows-10-11-x86-Setup.exe",
-            "Windows-7-SP1-x86-Setup.exe",
+            "Windows-7-8-x86-Setup.exe",
             "SHA256SUMS.txt",
         };
         int present = 0;

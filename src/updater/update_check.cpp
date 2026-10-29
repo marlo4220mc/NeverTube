@@ -183,7 +183,7 @@ QString installerAssetNameFor(const QString &flavor, const QString &version)
     else if (flavor == QLatin1String("win10-x86"))
         platform = QStringLiteral("Windows-10-11-x86");
     else if (flavor == QLatin1String("win7-x86"))
-        platform = QStringLiteral("Windows-7-SP1-x86");
+        platform = QStringLiteral("Windows-7-8-x86");
     else
         return QString(); // not one of the three published installers
     return QStringLiteral("NeverTube-%1-%2-Setup.exe").arg(version, platform);
@@ -209,6 +209,9 @@ UpdateAsset UpdateRelease::installerAssetFor(const QString &flavor) const
 {
     const QString wanted[] = {
         installerAssetNameFor(flavor, version),
+        (flavor == QLatin1String("win7-x86"))
+            ? QStringLiteral("NeverTube-%1-Windows-7-SP1-x86-Setup.exe").arg(version)
+            : QString(),
         legacyInstallerAssetNameFor(flavor, version),
     };
     for (const QString &name : wanted) {

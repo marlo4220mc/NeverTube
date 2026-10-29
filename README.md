@@ -66,7 +66,7 @@ Linux packages are x86_64 only.
 | OSTree repo | `flatpak update` from a hosted repo | `NeverTube-<version>-Linux-Flatpak-Repo.tar.gz` |
 | setup.exe | Windows 10 / 11 (x64) | `NeverTube-<version>-Windows-10-11-x64-Setup.exe` |
 | setup.exe | Windows 10 / 11 (x86) | `NeverTube-<version>-Windows-10-11-x86-Setup.exe` |
-| setup.exe | Windows 7 SP1 (x86) | `NeverTube-<version>-Windows-7-SP1-x86-Setup.exe` |
+| setup.exe | Windows 7 / 8 (x86) | `NeverTube-<version>-Windows-7-8-x86-Setup.exe` |
 
 There are **two `.deb`** on purpose: 24.04 renamed the Qt5 runtime packages to the `t64` ones and ships FFmpeg 6.1, so a package built on 22.04 cannot install there and vice versa. They are the same program built against each base.
 
@@ -76,7 +76,7 @@ There are **two `.deb`** on purpose: 24.04 renamed the Qt5 runtime packages to t
 - Fedora: `sudo dnf install ./NeverTube-<version>-Fedora-x86_64.rpm` — dnf resolves the soname requirements (`ffmpeg-free`, or RPM Fusion's ffmpeg if already installed).
 - Arch: `sudo pacman -U NeverTube-<version>-Arch-Linux-x86_64.pkg.tar.zst`
 - Flatpak: `flatpak install --user https://marlo4220mc.github.io/NeverTube/flatpak/io.github.marlo4220mc.NeverTube.flatpakref` — one command adds the signed repository and installs the app, so `flatpak update` keeps it current. Alternatively, install the single-file bundle (`flatpak install --user NeverTube-<version>-Linux-Flatpak.flatpak`), which also configures the repository and signature automatically. Permissions, updates and the manual checks are in `packaging/linux/flatpak/README.md`.
-- Windows: run the setup for your system — `NeverTube-<version>-Windows-7-SP1-x86-Setup.exe` (32-bit Windows 7), `NeverTube-<version>-Windows-10-11-x86-Setup.exe` (32-bit Windows 10/11) or `NeverTube-<version>-Windows-10-11-x64-Setup.exe` (64-bit Windows 10/11). Each one refuses the other two and tells you which to use; they install the VC++ redistributable they need. The installers are not code-signed, so SmartScreen warns on first run.
+- Windows: run the setup for your system — `NeverTube-<version>-Windows-7-8-x86-Setup.exe` (32-bit Windows 7 / 8 / 8.1), `NeverTube-<version>-Windows-10-11-x86-Setup.exe` (32-bit Windows 10/11) or `NeverTube-<version>-Windows-10-11-x64-Setup.exe` (64-bit Windows 10/11). Each one refuses the other two and tells you which to use; they install the VC++ redistributable they need. The installers are not code-signed, so SmartScreen warns on first run.
 
 The binary is `nevertube`. On Linux the `.desktop` entry and the icons are installed in the `hicolor` theme, so the app shows up in the menu named **NeverTube**.
 

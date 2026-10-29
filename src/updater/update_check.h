@@ -55,7 +55,7 @@ QString installerFlavorForBuild();
 // The asset name of a flavor, spelled so a person scanning the release page
 // can pick their file without knowing what "x86" means:
 // "NeverTube-<version>-Windows-10-11-x64-Setup.exe", "...-Windows-10-11-x86-
-// Setup.exe" or "...-Windows-7-SP1-x86-Setup.exe". Kept as a function of the
+// Setup.exe" or "...-Windows-7-8-x86-Setup.exe". Kept as a function of the
 // flavor (not of the build) so the three names are testable from any platform.
 // A flavor that is not one of the three has NO name: a typo must not produce
 // an asset that does not exist.

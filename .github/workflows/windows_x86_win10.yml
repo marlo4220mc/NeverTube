@@ -4,7 +4,7 @@ name: Windows 10 x86 (mpv i686 — Win10 32 bits)
 # family, and the three partition the space (each installer refuses the other
 # two, see the InitializeSetup of dist*.iss):
 #
-#   dist.iss              → 32-bit Windows BEFORE 10 → NeverTube-<version>-Windows-7-SP1-x86-Setup.exe
+#   dist.iss              → Windows 7 / 8, 32-bit    → NeverTube-<version>-Windows-7-8-x86-Setup.exe
 #   dist_x86_win10.iss    → Windows 10/11, 32-bit    → NeverTube-<version>-Windows-10-11-x86-Setup.exe
 #   dist64.iss            → Windows 10/11, 64-bit    → NeverTube-<version>-Windows-10-11-x64-Setup.exe
 #
@@ -377,7 +377,7 @@ jobs:
           foreach ($needle in @('IsWin64', '$0A000000',
                                 'OutputBaseFilename=NeverTube-{#AppVersion}-Windows-10-11-x86-Setup',
                                 'Windows-10-11-x64-Setup.exe',
-                                'Windows-7-SP1-x86-Setup.exe')) {
+                                'Windows-7-8-x86-Setup.exe')) {
             if (-not $iss.Contains($needle)) {
               Write-Host "el .iss perdió '$needle': el instalador dejaría de ser exclusivo de Win10 x86"
               exit 1

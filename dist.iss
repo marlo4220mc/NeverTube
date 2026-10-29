@@ -1,12 +1,12 @@
-; ── Inno Setup script for nevertube x86 (32-bit Windows BEFORE 10) ───────────
+; ── Inno Setup script for nevertube x86 (Windows 7 / 8, 32-bit) ───────────────
 ; The three installers partition the Windows space and each one refuses the
 ; other two (see InitializeSetup in [Code]):
 ;
-;   dist.iss              → 32-bit Windows BEFORE 10      → NeverTube-<version>-Windows-7-SP1-x86-Setup.exe
+;   dist.iss              → Windows 7 / 8, 32-bit         → NeverTube-<version>-Windows-7-8-x86-Setup.exe
 ;   dist_x86_win10.iss    → Windows 10/11, 32-bit only    → NeverTube-<version>-Windows-10-11-x86-Setup.exe
 ;   dist64.iss            → Windows 10/11, 64-bit only    → NeverTube-<version>-Windows-10-11-x64-Setup.exe
 ;
-; This one is the Win7 build: NO mpv (its only engine is the FfmpegBackend) and
+; This one is the Win7/8 x86 build: NO mpv (its only engine is the FfmpegBackend) and
 ; its CRT/imports are pinned to Win7 SP1. Windows 10 x86 has its own bundle with
 ; the i686 libmpv, so it is refused here.
 ; Like a typical Inno setup, the deliverable for the target machine is this
@@ -38,7 +38,7 @@ DefaultDirName={autopf}\NeverTube
 DefaultGroupName=NeverTube
 DisableProgramGroupPage=yes
 OutputDir=setup-out
-OutputBaseFilename=NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup
+OutputBaseFilename=NeverTube-{#AppVersion}-Windows-7-8-x86-Setup
 Compression=lzma2
 SolidCompression=yes
 ; Icon of the setup itself (the first thing seen when launching it) and of the
@@ -189,7 +189,7 @@ begin
 
   if V >= $0A000000 then begin
     if IsWin64 then begin
-      MsgBox('Este instalador es solo para Windows 7 de 32 bits.'
+      MsgBox('Este instalador es solo para Windows 7 y 8 (32 bits).'
              + #13#10 + #13#10
              + 'Tu equipo tiene Windows 10/11 de 64 bits.'
              + #13#10 + #13#10
@@ -199,7 +199,7 @@ begin
              + #13#10 + #13#10
              + 'Instalacion cancelada.', mbCriticalError, MB_OK);
     end else begin
-      MsgBox('Este instalador es solo para Windows 7 de 32 bits.'
+      MsgBox('Este instalador es solo para Windows 7 y 8 de 32 bits.'
              + #13#10 + #13#10
              + 'Tu equipo tiene Windows 10 de 32 bits.'
              + #13#10 + #13#10
@@ -209,6 +209,13 @@ begin
              + #13#10 + #13#10
              + 'Instalacion cancelada.', mbCriticalError, MB_OK);
     end;
+    Result := False;
+  end else if V < $06010000 then begin
+    MsgBox('Este instalador es solo para Windows 7 y Windows 8 de 32 bits.'
+           + #13#10 + #13#10
+           + 'Tu equipo tiene una version anterior de Windows no soportada.'
+           + #13#10 + #13#10
+           + 'Instalacion cancelada.', mbCriticalError, MB_OK);
     Result := False;
   end;
 end;

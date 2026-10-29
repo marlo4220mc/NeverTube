@@ -2,7 +2,7 @@
 ; The THIRD installer. The three of them partition the Windows space, and each
 ; one refuses the other two (see InitializeSetup in [Code]):
 ;
-;   dist.iss              → 32-bit Windows BEFORE 10      → NeverTube-<version>-Windows-7-SP1-x86-Setup.exe
+;   dist.iss              → Windows 7 / 8, 32-bit         → NeverTube-<version>-Windows-7-8-x86-Setup.exe
 ;   dist_x86_win10.iss    → Windows 10/11, 32-bit only    → NeverTube-<version>-Windows-10-11-x86-Setup.exe
 ;   dist64.iss            → Windows 10/11, 64-bit only    → NeverTube-<version>-Windows-10-11-x64-Setup.exe
 ;
@@ -171,7 +171,7 @@ Filename: "{app}\nevertube.exe"; Description: "Ejecutar NeverTube"; Flags: nowai
 //     that one runs the x64 libmpv with VP9/AV1 hardware and 4K, which this
 //     32-bit binary cannot.
 //   - Windows before 10 (i.e. Win7/Win8.x, 32-bit) → dist.iss
-//     (NeverTube-<version>-Windows-7-SP1-x86-Setup.exe): that is the
+//     (NeverTube-<version>-Windows-7-8-x86-Setup.exe): that is the
 //     FfmpegBackend build, the only one that loads on Win7 SP1 (its CRT and
 //     imports are pinned to it).
 // GetWindowsVersion: Major shl 24 | Minor shl 16 | Build -> Win10/Win11 =
@@ -203,9 +203,9 @@ begin
            + #13#10 + #13#10
            + 'Tu equipo tiene una version anterior de Windows.'
            + #13#10 + #13#10
-           + 'Para Windows 7 de 32 bits usa el instalador'
+           + 'Para Windows 7/8 de 32 bits usa el instalador'
            + #13#10
-           + '(NeverTube-{#AppVersion}-Windows-7-SP1-x86-Setup.exe) de la pagina de releases.'
+           + '(NeverTube-{#AppVersion}-Windows-7-8-x86-Setup.exe) de la pagina de releases.'
            + #13#10 + #13#10
            + 'Instalacion cancelada.', mbCriticalError, MB_OK);
     Result := False;

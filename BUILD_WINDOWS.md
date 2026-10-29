@@ -228,7 +228,7 @@ belongs to Win7.
 
 The installer is exclusive to this target: it cancels on 64-bit Windows (→
 `NeverTube-<v>-Windows-10-11-x64-Setup.exe`) and on Windows before 10 (→
-`NeverTube-<v>-Windows-7-SP1-x86-Setup.exe`), spelling out the version of the
+`NeverTube-<v>-Windows-7-8-x86-Setup.exe`), spelling out the version of the
 release the user is downloading from.
 
 ## Vendored Qt and OpenSSL
