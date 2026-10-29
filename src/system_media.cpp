@@ -30,6 +30,8 @@
 
 #if defined(_WIN32) && defined(NEVERTUBE_WIN_SMTC)
 #  include <windows.h>
+#  include <inspectable.h>
+#  include <systemmediatransportcontrolsinterop.h>
 
 #  include <winrt/Windows.Foundation.h>
 #  include <winrt/Windows.Media.h>
@@ -658,17 +660,6 @@ using winrt::Windows::Media::SystemMediaTransportControlsButtonPressedEventArgs;
 using winrt::Windows::Media::SystemMediaTransportControlsTimelineProperties;
 using winrt::Windows::Foundation::TimeSpan;
 
-// SMTC does not exist as a global object for a desktop app: it is created FOR
-// a window, through this interop factory (the same one every Win32 media app
-// uses). C++/WinRT has no projection for it, so the interface is declared
-// here with its IID.
-struct __declspec(uuid("ddb0472d-c911-4a1f-86d9-dc3d71a95f5a"))
-    SmtcInterop : ::IUnknown
-{
-    virtual HRESULT __stdcall GetForWindow(HWND window, REFIID riid,
-                                           void **out) = 0;
-};
-
 // 100 ns ticks, which is what a WinRT TimeSpan is.
 TimeSpan ticks(qint64 value)
 {
@@ -688,6 +679,12 @@ void smAttachWindow(SystemMediaData *data, quintptr windowHandle)
 {
     if (data->smtcReady || windowHandle == 0)
         return;
+    // In headless/offscreen test runs there is no desktop session or valid shell.
+    if (QGuiApplication::platformName() == QLatin1String("offscreen"))
+        return;
+    HWND hwnd = reinterpret_cast<HWND>(windowHandle);
+    if (!IsWindow(hwnd))
+        return;
     try {
         // Qt already initialized COM on the GUI thread (OLE, apartment
         // threaded). This is only to be sure; a different apartment is not an
@@ -697,10 +694,10 @@ void smAttachWindow(SystemMediaData *data, quintptr windowHandle)
     }
     try {
         auto interop = winrt::get_activation_factory<SystemMediaTransportControls,
-                                                     SmtcInterop>();
+                                                     ISystemMediaTransportControlsInterop>();
         void *raw = nullptr;
         winrt::check_hresult(interop->GetForWindow(
-            reinterpret_cast<HWND>(windowHandle),
+            hwnd,
             winrt::guid_of<SystemMediaTransportControls>(),
             &raw));
         winrt::attach_abi(data->controls, raw);
