@@ -3,6 +3,7 @@
 #include "downloader/download_folder.h"
 #include "downloader/download_settings.h"
 #include "reels_filter.h"
+#include "system_media.h"
 
 #include <QAbstractButton>
 #include <QApplication>
@@ -23,6 +24,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScreen>
+#include <QShowEvent>
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QStyle>
@@ -41,6 +43,10 @@
 #include <QTimer>
 #include <QToolTip>
 #include <functional>
+
+#if defined(Q_OS_WIN)
+#  include <windows.h>
+#endif
 
 #include "models.h"
 #include "hwprobe.h"
@@ -1090,12 +1096,45 @@ MainWindow::MainWindow(QWidget *parent)
         if (key.startsWith(QLatin1String("v_")) && key == cur)
             setMiniThumb();
     });
+
+    setupSystemMedia();
 }
 
 MainWindow::~MainWindow() = default;
 
 bool MainWindow::handleShortcut(QKeyEvent *event)
 {
+    // Hardware media keys (keyboard, Bluetooth headphones) must work regardless of
+    // which widget has focus (even while typing in a search box or text input).
+    switch (event->key()) {
+    case Qt::Key_MediaPlay:
+        if (m_player.isActive() && m_player.isPaused())
+            m_player.playPause();
+        return true;
+    case Qt::Key_MediaPause:
+        if (m_player.isActive() && !m_player.isPaused())
+            m_player.playPause();
+        return true;
+    case Qt::Key_MediaTogglePlayPause:
+        if (m_player.isActive())
+            m_player.playPause();
+        return true;
+    case Qt::Key_MediaStop:
+        if (m_player.isActive())
+            m_player.stop();
+        return true;
+    case Qt::Key_MediaNext:
+        if (m_player.isActive() && m_player.hasNext())
+            m_player.next();
+        return true;
+    case Qt::Key_MediaPrevious:
+        if (m_player.isActive())
+            m_player.previous();
+        return true;
+    default:
+        break;
+    }
+
     // Do not steal keys while typing in a text field.
     if (const auto *fw = focusWidget()) {
         if (qobject_cast<const QLineEdit *>(fw)
@@ -1221,6 +1260,170 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
 {
     if (!handleShortcut(event))
         QMainWindow::keyPressEvent(event);
+}
+
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+    if (m_smc)
+        m_smc->attachToWindow(static_cast<quintptr>(winId()));
+}
+
+#if defined(Q_OS_WIN)
+bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, long *result)
+{
+    if (eventType == "windows_generic_MSG") {
+        const auto *msg = static_cast<const MSG *>(message);
+        if (msg->message == WM_APPCOMMAND) {
+            const int cmd = GET_APPCOMMAND_LPARAM(msg->lParam);
+            switch (cmd) {
+            case APPCOMMAND_MEDIA_PLAY_PAUSE:
+                if (m_player.isActive())
+                    m_player.playPause();
+                *result = 1;
+                return true;
+            case APPCOMMAND_MEDIA_PLAY:
+                if (m_player.isActive() && m_player.isPaused())
+                    m_player.playPause();
+                *result = 1;
+                return true;
+            case APPCOMMAND_MEDIA_PAUSE:
+                if (m_player.isActive() && !m_player.isPaused())
+                    m_player.playPause();
+                *result = 1;
+                return true;
+            case APPCOMMAND_MEDIA_STOP:
+                if (m_player.isActive())
+                    m_player.stop();
+                *result = 1;
+                return true;
+            case APPCOMMAND_MEDIA_NEXTTRACK:
+                if (m_player.isActive() && m_player.hasNext())
+                    m_player.next();
+                *result = 1;
+                return true;
+            case APPCOMMAND_MEDIA_PREVIOUSTRACK:
+                if (m_player.isActive())
+                    m_player.previous();
+                *result = 1;
+                return true;
+            default:
+                break;
+            }
+        }
+    }
+    return QMainWindow::nativeEvent(eventType, message, result);
+}
+#endif
+
+void MainWindow::setupSystemMedia()
+{
+    m_smc = new nt::SystemMediaControls(this);
+
+    connect(m_smc, &nt::SystemMediaControls::playRequested, this, [this]() {
+        if (m_player.isActive() && m_player.isPaused())
+            m_player.playPause();
+    });
+    connect(m_smc, &nt::SystemMediaControls::pauseRequested, this, [this]() {
+        if (m_player.isActive() && !m_player.isPaused())
+            m_player.playPause();
+    });
+    connect(m_smc, &nt::SystemMediaControls::playPauseRequested, this, [this]() {
+        if (m_player.isActive())
+            m_player.playPause();
+    });
+    connect(m_smc, &nt::SystemMediaControls::stopRequested, this, [this]() {
+        if (m_player.isActive())
+            m_player.stop();
+    });
+    connect(m_smc, &nt::SystemMediaControls::nextRequested, this, [this]() {
+        if (m_player.isActive() && m_player.hasNext())
+            m_player.next();
+    });
+    connect(m_smc, &nt::SystemMediaControls::previousRequested, this, [this]() {
+        if (m_player.isActive())
+            m_player.previous();
+    });
+    connect(m_smc, &nt::SystemMediaControls::seekRequested, this, [this](qint64 posMs) {
+        if (m_player.isActive())
+            m_player.seek(posMs / 1000.0);
+    });
+    connect(m_smc, &nt::SystemMediaControls::seekRelativeRequested, this, [this](qint64 offsetMs) {
+        if (m_player.isActive())
+            m_player.seek(m_player.position() + offsetMs / 1000.0);
+    });
+    connect(m_smc, &nt::SystemMediaControls::volumeRequested, this, [this](double percent) {
+        m_player.setVolume(percent);
+    });
+    connect(m_smc, &nt::SystemMediaControls::shuffleRequested, this, [this](bool on) {
+        m_player.setShuffle(on);
+        if (m_smc)
+            m_smc->setModes(m_player.shuffle(), m_player.repeat());
+    });
+    connect(m_smc, &nt::SystemMediaControls::repeatRequested, this, [this](bool on) {
+        m_player.setRepeat(on);
+        if (m_smc)
+            m_smc->setModes(m_player.shuffle(), m_player.repeat());
+    });
+    connect(m_smc, &nt::SystemMediaControls::raiseRequested, this, [this]() {
+        if (isMinimized())
+            showNormal();
+        raise();
+        activateWindow();
+    });
+
+    connect(&m_player, &PlayerController::phaseChanged, this, [this](const QString &) {
+        updateSystemMedia();
+    });
+    connect(&m_player, &PlayerController::currentChanged, this, [this]() {
+        updateSystemMedia();
+    });
+    connect(&m_player, &PlayerController::metadataChanged, this, [this]() {
+        updateSystemMedia();
+    });
+    connect(&m_player, &PlayerController::queueChanged, this, [this]() {
+        if (m_smc)
+            m_smc->setCapabilities(m_player.hasNext(), m_player.previousAvailable(),
+                                   m_player.isActive() && m_player.duration() > 0);
+    });
+    connect(&m_player, &PlayerController::positionChanged, this, [this](double pos, double dur) {
+        if (m_smc) {
+            m_smc->setPosition(static_cast<qint64>(pos * 1000.0),
+                               static_cast<qint64>(dur * 1000.0));
+            m_smc->setCapabilities(m_player.hasNext(), m_player.previousAvailable(),
+                                   m_player.isActive() && dur > 0);
+        }
+    });
+    connect(&m_player, &PlayerController::volumeChanged, this, [this]() {
+        if (m_smc)
+            m_smc->setVolume(m_player.volume());
+    });
+    connect(&m_player, &PlayerController::playbackModesChanged, this,
+            [this](bool shuffle, bool repeat) {
+                if (m_smc)
+                    m_smc->setModes(shuffle, repeat);
+            });
+}
+
+void MainWindow::updateSystemMedia()
+{
+    if (!m_smc)
+        return;
+    const VideoInfo cur = m_player.current();
+    const qint64 durMs = static_cast<qint64>(m_player.duration() * 1000.0);
+    m_smc->setTrack(cur.title, cur.channel, cur.thumbnailUrl, durMs);
+
+    nt::MediaPlayback status = nt::MediaPlayback::Stopped;
+    if (m_player.phase() == QLatin1String("playing"))
+        status = nt::MediaPlayback::Playing;
+    else if (m_player.phase() == QLatin1String("paused"))
+        status = nt::MediaPlayback::Paused;
+    m_smc->setStatus(status);
+
+    m_smc->setVolume(m_player.volume());
+    m_smc->setModes(m_player.shuffle(), m_player.repeat());
+    m_smc->setCapabilities(m_player.hasNext(), m_player.previousAvailable(),
+                           m_player.isActive() && m_player.duration() > 0);
 }
 
 namespace {

@@ -247,6 +247,7 @@ check() {
            --selftest-download-settings --selftest-download-transport \\
            --selftest-download-resume --selftest-single-instance \\
            --selftest-video-url --selftest-search-url --selftest-update \\
+           --selftest-mpris \\
            --selftest-settings-page; do
     echo "SELFTEST \$t"
     ./build/nevertube "\$t"

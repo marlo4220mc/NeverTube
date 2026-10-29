@@ -141,6 +141,7 @@ public:
 signals:
     void phaseChanged(const QString &phase);
     void positionChanged(double position, double duration);
+    void playbackModesChanged(bool shuffle, bool repeat);
     // The medium's real duration is reported by the backend on load (mpv or
     // the FfmpegBackend's audio clock). It is the authoritative datum: /next
     // and the origin renderers (search/home/channel) sometimes do not bring it

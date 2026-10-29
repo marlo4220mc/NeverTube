@@ -62,6 +62,7 @@ for t in --selftest-db --selftest-discover --selftest-ssl \
          --selftest-single-instance \
          --selftest-video-url --selftest-search-url \
          --selftest-update \
+         --selftest-mpris \
          --selftest-settings-page; do
   echo "SELFTEST $t"
   ./build-deb/nevertube "$t"

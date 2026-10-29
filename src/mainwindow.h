@@ -26,6 +26,9 @@ class DownloadsPage;
 namespace dl {
 class DownloadManager;
 }
+namespace nt {
+class SystemMediaControls;
+}
 class SettingsPage;
 class PlayerWidget;
 class ThumbnailCache;
@@ -95,6 +98,10 @@ public:
 protected:
     void keyPressEvent(QKeyEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void showEvent(QShowEvent *event) override;
+#if defined(Q_OS_WIN)
+    bool nativeEvent(const QByteArray &eventType, void *message, long *result) override;
+#endif
 
 private slots:
     void openWatch(const QVector<VideoInfo> &videos, int startIndex);
@@ -153,6 +160,8 @@ private:
     void updateMiniTimeText();
     void goToPlayerPage();
     bool handleShortcut(QKeyEvent *event);
+    void setupSystemMedia();
+    void updateSystemMedia();
     void openWatchAt(const QVector<VideoInfo> &videos, int startIndex,
                      qlonglong startPositionMs);
 
@@ -298,4 +307,6 @@ private:
     QVector<VideoInfo> m_pendingWatch;
     int m_pendingIndex = 0;
     qlonglong m_pendingPos = 0;
+
+    nt::SystemMediaControls *m_smc = nullptr;
 };

@@ -367,6 +367,7 @@ jobs:
                            '--selftest-video-url',
                            '--selftest-search-url',
                            '--selftest-update',
+                           '--selftest-mpris',
                            '--selftest-settings-page')) {
             $rc = Invoke-Selftest $t
             if ($rc -ne 0) {

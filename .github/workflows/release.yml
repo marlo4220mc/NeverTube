@@ -955,6 +955,8 @@ jobs:
           if ($rc -ne 0) { exit $rc }
           $rc = Invoke-Selftest '--selftest-settings-page'
           if ($rc -ne 0) { exit $rc }
+          $rc = Invoke-Selftest '--selftest-mpris'
+          if ($rc -ne 0) { exit $rc }
           # The updater (offline): the order of two versions, the installer of
           # each Windows build, the reading of SHA256SUMS.txt and the SHA-256
           # of a file. No network: the query is not exercised here.
@@ -1374,6 +1376,7 @@ jobs:
                            '--selftest-video-url',
                            '--selftest-search-url',
                            '--selftest-update',
+                           '--selftest-mpris',
                            '--selftest-settings-page')) {
             $rc = Invoke-Selftest $t
             if ($rc -ne 0) {
@@ -1739,6 +1742,7 @@ jobs:
                            '--selftest-video-url',
                            '--selftest-search-url',
                            '--selftest-update',
+                           '--selftest-mpris',
                            '--selftest-settings-page')) {
             $rc = Invoke-Selftest $t
             if ($rc -ne 0) {

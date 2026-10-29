@@ -655,6 +655,7 @@ all inside `m_ctrlBar` (`#playerOverlay`):
 ./build/nevertube --selftest-download-settings  # the codes of the settings of the downloader: runs in CI
 ./build/nevertube --selftest-single-instance  # one instance per user: the second process hands its args over and exits: runs in CI
 ./build/nevertube --selftest-update     # the updater, offline: order of two versions (SemVer + pre-release), the installer of THIS build, SHA256SUMS.txt and the SHA-256 of a file: runs in CI
+./build/nevertube --selftest-mpris      # system media controls (MPRIS/SMTC): pure conversions + D-Bus round-trip: runs in CI
 ./build/nevertube --selftest-settings-page  # the page of Ajustes (the new section of the downloads): runs in CI
 ```
 
@@ -784,7 +785,8 @@ the distinction is a hard rule:
   `--selftest-download`, `--selftest-download-button`,
   `--selftest-download-folder`, `--selftest-download-settings`,
   `--selftest-download-transport`, `--selftest-download-resume`,
-  `--selftest-single-instance`, `--selftest-update` and
+  `--selftest-single-instance`, `--selftest-update`,
+  `--selftest-mpris` and
   `--selftest-settings-page`. They run in every build (the three
   `packaging/linux/*` recipes and both Windows smokes) and can fail the
   job.
@@ -2274,6 +2276,39 @@ name is a file). It is created in `main()` and works like this:
   of `main()`): doing it from this same process would block the event loop that
   has to answer, and then the test measures nothing of what the app does —that
   is how it looked green here and red on Windows.
+
+## System media controls (hardware media keys, Bluetooth headphones, MPRIS & SMTC)
+
+Support for hardware media keys (keyboard, Bluetooth headphones with AVRCP) and the
+desktop/system media flyout widgets (equivalent to Chrome and Spotify):
+
+- **Linux (MPRIS v2 over D-Bus)**: registers `org.mpris.MediaPlayer2.<appId>` on the session
+  bus. Supports Root interface (`Identity`, `DesktopEntry`, `CanRaise`, `Raise`) and Player
+  interface (`PlaybackStatus`, `Metadata` with title, artist, artUrl, duration in µs, trackid
+  as object path, `CanGoNext`, `CanGoPrevious`, `CanPlay`, `CanPause`, `CanSeek`, `CanControl`,
+  `LoopStatus` [Playlist/None], `Volume`, `Position`). Signals `PropertiesChanged` and `Seeked`.
+  Actions: `Play`, `Pause`, `PlayPause`, `Stop`, `Next`, `Previous`, `Seek` (relative), `SetPosition`
+  (absolute). Name matches `desktopFileName` so under Flatpak it owns
+  `org.mpris.MediaPlayer2.io.github.marlo4220mc.NeverTube` within default permissions.
+- **Windows (SMTC on Win10/11 + WM_APPCOMMAND on Win7)**:
+  - On Windows 10/11 (x64 and Win10 x86): integrates with `SystemMediaTransportControls` via
+    C++/WinRT (`GetForWindow`). Updates `VideoProperties` (title, channel subtitle, thumbnail),
+    `PlaybackStatus`, timeline (`StartTime`, `Position`, `EndTime`), and button availability.
+    Hardware and headphone button presses are received through `ButtonPressed`.
+  - On Windows 7 x86 (`NEVERTUBE_X86_FFMPEG_BUILD`): SMTC does not exist. Hardware media keys
+    are handled via `WM_APPCOMMAND` in `MainWindow::nativeEvent`
+    (`APPCOMMAND_MEDIA_PLAY_PAUSE`, `APPCOMMAND_MEDIA_PLAY`, `APPCOMMAND_MEDIA_PAUSE`,
+    `APPCOMMAND_MEDIA_STOP`, `APPCOMMAND_MEDIA_NEXTTRACK`, `APPCOMMAND_MEDIA_PREVIOUSTRACK`).
+- **In-app hardware key routing**: `MainWindow::handleShortcut` intercepts `Qt::Key_MediaPlay`,
+  `Qt::Key_MediaPause`, `Qt::Key_MediaTogglePlayPause`, `Qt::Key_MediaStop`, `Qt::Key_MediaNext`,
+  `Qt::Key_MediaPrevious` BEFORE checking if a text input has focus, ensuring media keys work
+  even when typing in the search box.
+- **Strict safety & separation**: the media control layer NEVER touches the protected player core
+  directly; it only communicates via `PlayerController` public API (`playPause`, `next`, `previous`,
+  `stop`, `seek`, `setVolume`, `setShuffle`, `setRepeat`).
+- **Regression testing**: `--selftest-mpris` (or `--selftest-media`) validates all pure conversions
+  (status, loop, metadata, volume, track id) offline, and executes a real session bus round-trip
+  (registration, GetAll properties, and live `PlayPause` signal dispatch) on Linux. Runs in CI smoke.
 
 ## AV1 over HLS (synthetic)
 

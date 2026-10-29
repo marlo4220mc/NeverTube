@@ -161,6 +161,10 @@ add_executable(nevertube
   src/video_variant.h
   src/video_variant_selftest.cpp
   src/video_variant_selftest.h
+  src/system_media.cpp
+  src/system_media.h
+  src/system_media_selftest.cpp
+  src/system_media_selftest.h
   # The folders of the system (downloads, documents) in any language: one
   # resolution for the downloader and for the database.
   src/xdg_dirs.cpp
@@ -232,6 +236,40 @@ target_link_libraries(nevertube PRIVATE
   Qt5::Sql
   OpenGL::GL
 )
+
+# --- System Media Controls (MPRIS v2 on Linux / SMTC on Windows 10+) ---
+# Linux: MPRIS v2 over D-Bus (Qt5::DBus).
+if(NOT WIN32)
+  find_package(Qt5 QUIET COMPONENTS DBus)
+  if(Qt5DBus_FOUND)
+    message(STATUS "Qt5::DBus encontrado: habilitando soporte MPRIS v2 (Linux)")
+    target_compile_definitions(nevertube PRIVATE NEVERTUBE_HAVE_DBUS=1)
+    target_link_libraries(nevertube PRIVATE Qt5::DBus)
+  else()
+    message(STATUS "Qt5::DBus no disponible: MPRIS v2 desactivado")
+  endif()
+endif()
+
+# Windows: SMTC (System Media Transport Controls) via C++/WinRT on Windows 10/11.
+# The Win7 x86 build (NEVERTUBE_X86_FFMPEG_BUILD) does not compile SMTC (Win7 has
+# no WinRT; media keys arrive via WM_APPCOMMAND).
+if(WIN32 AND NOT NEVERTUBE_X86_FFMPEG_BUILD)
+  file(GLOB WIN10_SDK_CPPWINRT
+    "$ENV{ProgramFiles\(x86\)}/Windows Kits/10/Include/*/cppwinrt"
+    "$ENV{ProgramFiles}/Windows Kits/10/Include/*/cppwinrt"
+    "C:/Program Files (x86)/Windows Kits/10/Include/*/cppwinrt"
+    "C:/Program Files/Windows Kits/10/Include/*/cppwinrt"
+  )
+  if(WIN10_SDK_CPPWINRT)
+    list(GET WIN10_SDK_CPPWINRT -1 LATEST_CPPWINRT)
+    message(STATUS "C++/WinRT headers encontrados: ${LATEST_CPPWINRT} (habilitando SMTC)")
+    target_include_directories(nevertube PRIVATE "${LATEST_CPPWINRT}")
+    target_compile_definitions(nevertube PRIVATE NEVERTUBE_WIN_SMTC=1)
+    target_link_libraries(nevertube PRIVATE windowsapp)
+  else()
+    message(STATUS "C++/WinRT no encontrado: SMTC desactivado (degradación limpia)")
+  endif()
+endif()
 
 # nt::appVersion() reads this: the version on screen and the one the updater
 # compares against the releases. It is a #define and not a runtime string so

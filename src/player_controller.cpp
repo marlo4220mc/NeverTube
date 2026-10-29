@@ -512,6 +512,7 @@ void PlayerController::setShuffle(bool on)
             ++it;
     }
     emit queueChanged();
+    emit playbackModesChanged(m_shuffle, m_repeat);
 }
 
 void PlayerController::setRepeat(bool on)
@@ -520,6 +521,7 @@ void PlayerController::setRepeat(bool on)
         return;
     m_repeat = on;
     NT_DEBUG("E2E repeat=%d\n", m_repeat ? 1 : 0);
+    emit playbackModesChanged(m_shuffle, m_repeat);
 }
 
 void PlayerController::savePosition()

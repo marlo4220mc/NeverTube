@@ -41,6 +41,7 @@
 #include "single_instance.h"
 #include "single_instance_selftest.h"
 #include "video_variant_selftest.h"
+#include "system_media_selftest.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -895,6 +896,14 @@ int main(int argc, char *argv[])
         // Offline: the variants of a video (height, codec and real size) are
         // a pure function of the player response.
         return videoVariantSelfTest() ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-mpris"))
+        || args.contains(QLatin1String("--selftest-media"))) {
+        // Offline: pure conversions (playback status, loop, metadata, volume,
+        // track id) plus live session-bus round-trip on Linux when D-Bus is
+        // available. Runs in CI smoke.
+        return systemMediaSelfTest() ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-ffmpeg"))) {
