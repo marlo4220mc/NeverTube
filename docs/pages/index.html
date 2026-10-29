@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NeverTube — Lightweight YouTube Client for Windows & Linux</title>
+  <link rel="icon" type="image/png" href="icon.png">
+  <meta name="description" content="NeverTube is a lightweight YouTube client for Windows (7/10/11) and Linux. Native C++17 and Qt5, zero Electron, dual playback engines, and built-in parallel downloader.">
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --surface: #141414;
+      --surface-elevated: #1a1a1a;
+      --border: #262626;
+      --border-hover: #3a3a3a;
+      --accent: #fa011b;
+      --accent-glow: rgba(250, 1, 27, 0.35);
+      --accent-hover: #ff2a40;
+      --text: #ececec;
+      --text-muted: #9e9e9e;
+      --code-bg: #0f0f0f;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent); text-decoration: none; transition: color 0.2s; }
+    a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(10, 10, 10, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0.8rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-weight: 700;
+      font-size: 1.25rem;
+      color: #fff;
+    }
+    .brand img { width: 32px; height: 32px; border-radius: 8px; }
+    .brand span { color: var(--accent); }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 1.25rem;
+      font-size: 0.92rem;
+    }
+    .nav-links a { color: var(--text-muted); }
+    .nav-links a:hover { color: #fff; text-decoration: none; }
+
+    .btn-lang {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.4rem 0.8rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: all 0.2s;
+    }
+    .btn-lang:hover { border-color: var(--accent); }
+
+    main { max-width: 1100px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+
+    /* Hero */
+    .hero {
+      text-align: center;
+      margin-bottom: 3.5rem;
+    }
+    .hero-banner-wrap {
+      margin: 0 auto 2rem;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 8px 32px rgba(250, 1, 27, 0.15);
+      max-width: 1000px;
+    }
+    .hero-banner-wrap img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .hero h1 {
+      font-size: 2.5rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.8rem;
+    }
+    .hero p.lead {
+      font-size: 1.15rem;
+      color: var(--text-muted);
+      max-width: 750px;
+      margin: 0 auto 2rem;
+    }
+    .hero-actions {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.5rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.98rem;
+      text-decoration: none !important;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 4px 18px var(--accent-glow);
+    }
+    .btn-primary:hover {
+      background: var(--accent-hover);
+      transform: translateY(-2px);
+    }
+    .btn-secondary {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .btn-secondary:hover {
+      border-color: var(--border-hover);
+      background: var(--surface-elevated);
+      color: #fff;
+    }
+
+    /* Section titles */
+    .section-head {
+      text-align: center;
+      margin: 4rem 0 2rem;
+    }
+    .section-head h2 {
+      font-size: 1.85rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin-bottom: 0.5rem;
+    }
+    .section-head p { color: var(--text-muted); font-size: 1rem; }
+
+    /* Features Grid */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 3rem;
+    }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.5rem;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .feature-card:hover {
+      border-color: var(--border-hover);
+      transform: translateY(-3px);
+    }
+    .feature-icon {
+      font-size: 1.8rem;
+      margin-bottom: 1rem;
+      display: inline-block;
+    }
+    .feature-card h3 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: #fff;
+    }
+    .feature-card p {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* Install Tabs */
+    .install-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      margin-top: 1.5rem;
+    }
+    .install-tabs {
+      display: flex;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+    }
+    .tab-btn {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      padding: 1rem 1.4rem;
+      font-weight: 600;
+      font-size: 0.92rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s;
+    }
+    .tab-btn:hover { color: #fff; }
+    .tab-btn.active {
+      color: #fff;
+      border-bottom-color: var(--accent);
+      background: rgba(250, 1, 27, 0.05);
+    }
+    .tab-content {
+      padding: 1.8rem;
+      display: none;
+    }
+    .tab-content.active { display: block; }
+    .tab-content h4 {
+      font-size: 1.15rem;
+      margin-bottom: 0.6rem;
+      color: #fff;
+    }
+    .tab-content p {
+      color: var(--text-muted);
+      font-size: 0.93rem;
+      margin-bottom: 1.2rem;
+    }
+
+    /* Code Snippet */
+    .code-block {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.88rem;
+      color: #f0f0f0;
+      overflow-x: auto;
+      position: relative;
+      margin-bottom: 1.2rem;
+    }
+    .code-block pre { margin: 0; }
+    .copy-btn {
+      position: absolute;
+      top: 0.6rem;
+      right: 0.6rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 0.25rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .copy-btn:hover { color: #fff; border-color: var(--border-hover); }
+
+    .tag-pill {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.2rem 0.6rem;
+      border-radius: 12px;
+      background: rgba(250, 1, 27, 0.15);
+      color: #ff4d61;
+      margin-bottom: 0.8rem;
+      border: 1px solid rgba(250, 1, 27, 0.25);
+    }
+
+    /* Support Section */
+    .support-box {
+      background: linear-gradient(180deg, #161616 0%, #101010 100%);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      margin: 4rem auto 0;
+      max-width: 700px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+    .support-box img {
+      width: 120px;
+      height: 120px;
+      margin-bottom: 1rem;
+      filter: drop-shadow(0 0 20px rgba(250, 1, 27, 0.4));
+    }
+    .support-box h3 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: 0.6rem;
+    }
+    .support-box p {
+      color: var(--text-muted);
+      font-size: 0.96rem;
+      max-width: 500px;
+      margin: 0 auto 1.5rem;
+    }
+
+    footer {
+      border-top: 1px solid var(--border);
+      margin-top: 4rem;
+      padding: 2.5rem 1.25rem;
+      text-align: center;
+      color: #666;
+      font-size: 0.85rem;
+    }
+    footer a { color: var(--text-muted); }
+
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 1.9rem; }
+      .hero p.lead { font-size: 1rem; }
+      .nav-links { display: none; }
+      .tab-btn { padding: 0.8rem 1rem; font-size: 0.85rem; }
+      .tab-content { padding: 1.2rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="nav-container">
+      <a href="#" class="brand">
+        <img src="icon.png" alt="NeverTube">
+        Never<span>Tube</span>
+      </a>
+      <div class="nav-links">
+        <a href="#install" data-i18n="nav.install">Install</a>
+        <a href="#features" data-i18n="nav.features">Features</a>
+        <a href="#support" data-i18n="nav.support">Support</a>
+        <a href="https://github.com/marlo4220mc/NeverTube" target="_blank" rel="noopener">GitHub</a>
+      </div>
+      <button class="btn-lang" id="langToggle">
+        🌐 <span id="langLabel">Español</span>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <div class="hero-banner-wrap">
+        <img id="heroBanner" src="banner-en.png" alt="NeverTube — Lightweight. Fast. No limits.">
+      </div>
+      <h1 data-i18n="hero.title">Lightweight YouTube Client for Windows & Linux</h1>
+      <p class="lead" data-i18n="hero.desc">
+        Stream directly from YouTube's web API with zero Electron bloat. Built in native C++17 and Qt5 with hardware decoding, dual playback engines, and parallel fragmented downloads.
+      </p>
+      <div class="hero-actions">
+        <a href="https://github.com/marlo4220mc/NeverTube/releases/latest" class="btn btn-primary" data-i18n="hero.downloadBtn">
+          ⬇ Download Latest Release
+        </a>
+        <a href="#install" class="btn btn-secondary" data-i18n="hero.installGuideBtn">
+          🚀 Installation Guide
+        </a>
+        <a href="https://github.com/marlo4220mc/NeverTube" target="_blank" rel="noopener" class="btn btn-secondary">
+          ⭐ Star on GitHub
+        </a>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features">
+      <div class="section-head">
+        <h2 data-i18n="feat.title">Designed for Stability, Speed & Low Consumption</h2>
+        <p data-i18n="feat.subtitle">Lightweight before complete, play before decorate.</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">⚡</div>
+          <h3 data-i18n="feat.f1.title">Zero Electron Bloat</h3>
+          <p data-i18n="feat.f1.desc">Pure C++17 and Qt5. Linux packages are around 1 MB, pulling shared distro libraries instead of embedding an entire Chromium runtime.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🎬</div>
+          <h3 data-i18n="feat.f2.title">Dual Playback Engines</h3>
+          <p data-i18n="feat.f2.desc">libmpv for Linux, Windows x64 and modern x86. Dedicated from-scratch FFmpeg/DXVA2 engine for legacy Windows 7 x86.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🔍</div>
+          <h3 data-i18n="feat.f3.title">Hardware Probing</h3>
+          <p data-i18n="feat.f3.desc">Automatically tests AV1, VP9 and H.264 decoders on startup, gracefully falling back to avoid CPU stalls.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📥</div>
+          <h3 data-i18n="feat.f4.title">Parallel Downloader</h3>
+          <p data-i18n="feat.f4.desc">Bypasses throttle ceilings using concurrent byte-range streams, muxing cleanly without re-encoding into MKV or MP3.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Installation Matrix -->
+    <section id="install">
+      <div class="section-head">
+        <h2 data-i18n="install.title">Get NeverTube</h2>
+        <p data-i18n="install.subtitle">Choose your operating system or packaging format below.</p>
+      </div>
+
+      <div class="install-box">
+        <div class="install-tabs">
+          <button class="tab-btn active" data-tab="tab-apt">Ubuntu / Debian (APT)</button>
+          <button class="tab-btn" data-tab="tab-flatpak">Flatpak (Universal Linux)</button>
+          <button class="tab-btn" data-tab="tab-win">Windows (7 / 10 / 11)</button>
+          <button class="tab-btn" data-tab="tab-other">Fedora / Arch Linux</button>
+        </div>
+
+        <!-- APT -->
+        <div id="tab-apt" class="tab-content active">
+          <span class="tag-pill" data-i18n="apt.pill">Auto-Configured Signed Repository</span>
+          <h4 data-i18n="apt.head">Ubuntu 24.04 (noble) & 22.04 (jammy)</h4>
+          <p data-i18n="apt.desc">
+            Download the <code>.deb</code> package from GitHub Releases. Installing it automatically imports the GPG signing key to <code>/usr/share/keyrings/</code> and configures our official repository in <code>/etc/apt/sources.list.d/nevertube.list</code> so future updates arrive seamlessly via <code>apt update</code>.
+          </p>
+          <div class="code-block">
+            <button class="copy-btn">Copy</button>
+            <pre><code># Ubuntu 24.04 (or Ubuntu 22.04)
+sudo apt install ./NeverTube-1.0.0-Ubuntu-24.04-amd64.deb
+sudo apt update</code></pre>
+          </div>
+          <p style="font-size:0.85rem; color:#777;">
+            <span data-i18n="apt.manual">Manual repo setup:</span> <code>https://marlo4220mc.github.io/NeverTube/apt/</code>
+          </p>
+        </div>
+
+        <!-- Flatpak -->
+        <div id="tab-flatpak" class="tab-content">
+          <span class="tag-pill" data-i18n="flatpak.pill">Self-Updating Sandbox</span>
+          <h4 data-i18n="flatpak.head">Universal Linux (Silverblue, SteamOS, Arch, etc.)</h4>
+          <p data-i18n="flatpak.desc">
+            Install with a single command via our signed <code>.flatpakref</code>. It adds the remote repository with our verified GPG key and installs the app. Future updates are applied with <code>flatpak update</code>.
+          </p>
+          <div class="code-block">
+            <button class="copy-btn">Copy</button>
+            <pre><code>flatpak install --user https://marlo4220mc.github.io/NeverTube/flatpak/io.github.marlo4220mc.NeverTube.flatpakref
+flatpak run io.github.marlo4220mc.NeverTube</code></pre>
+          </div>
+          <p data-i18n="flatpak.bundleNote">
+            Or download the single-file <code>NeverTube-1.0.0-Linux-Flatpak.flatpak</code> bundle. Installing it automatically adds the repository as well.
+          </p>
+        </div>
+
+        <!-- Windows -->
+        <div id="tab-win" class="tab-content">
+          <span class="tag-pill" data-i18n="win.pill">Dedicated Installers</span>
+          <h4 data-i18n="win.head">Modern & Legacy Windows Support</h4>
+          <p data-i18n="win.desc">
+            NeverTube provides tailored installers for modern 64-bit/32-bit systems as well as dedicated Windows 7 SP1 builds.
+          </p>
+          <ul style="margin-left: 1.5rem; margin-bottom: 1.5rem; color: var(--text-muted); font-size: 0.93rem;">
+            <li><strong>Windows 10 / 11 (64-bit):</strong> <code>NeverTube-1.0.0-Windows-10-11-x64-Setup.exe</code> (libmpv engine, zero-copy support)</li>
+            <li><strong>Windows 10 / 11 (32-bit):</strong> <code>NeverTube-1.0.0-Windows-10-11-x86-Setup.exe</code> (libmpv i686 engine)</li>
+            <li><strong>Windows 7 SP1 (32-bit):</strong> <code>NeverTube-1.0.0-Windows-7-SP1-x86-Setup.exe</code> (dedicated FFmpeg/DXVA2 engine)</li>
+          </ul>
+          <a href="https://github.com/marlo4220mc/NeverTube/releases/latest" class="btn btn-primary" data-i18n="win.btn">
+            Download Windows Installer
+          </a>
+        </div>
+
+        <!-- Fedora / Arch -->
+        <div id="tab-other" class="tab-content">
+          <span class="tag-pill" data-i18n="other.pill">Native Packages</span>
+          <h4>Fedora & Arch Linux</h4>
+          <p data-i18n="other.desc">
+            Native, lightweight packages built without bundled runtimes:
+          </p>
+          <div class="code-block">
+            <button class="copy-btn">Copy</button>
+            <pre><code># Fedora (.rpm)
+sudo dnf install ./NeverTube-1.0.0-Fedora-x86_64.rpm
+
+# Arch Linux (pacman)
+sudo pacman -U NeverTube-1.0.0-Arch-Linux-x86_64.pkg.tar.zst</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Support Section -->
+    <section id="support">
+      <div class="support-box">
+        <img src="heart-support.png" alt="Support NeverTube">
+        <h3 data-i18n="support.title">Support NeverTube</h3>
+        <p data-i18n="support.desc">
+          NeverTube is open source and independently built with passion for lightweight, ad-free and privacy-respecting software. Star the project on GitHub, share it with your friends, or contribute code!
+        </p>
+        <a href="https://github.com/marlo4220mc/NeverTube" target="_blank" rel="noopener" class="btn btn-primary" data-i18n="support.btn">
+          ⭐ Star on GitHub
+        </a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      GPL-3.0-or-later · <a href="https://github.com/marlo4220mc/NeverTube">Source Code</a> ·
+      <span data-i18n="footer.disclaimer">Not affiliated with YouTube or Google LLC.</span>
+    </p>
+  </footer>
+
+  <script>
+    // Translations
+    const i18n = {
+      en: {
+        "nav.install": "Install",
+        "nav.features": "Features",
+        "nav.support": "Support",
+        "hero.title": "Lightweight YouTube Client for Windows & Linux",
+        "hero.desc": "Stream directly from YouTube's web API with zero Electron bloat. Built in native C++17 and Qt5 with hardware decoding, dual playback engines, and parallel fragmented downloads.",
+        "hero.downloadBtn": "⬇ Download Latest Release",
+        "hero.installGuideBtn": "🚀 Installation Guide",
+        "feat.title": "Designed for Stability, Speed & Low Consumption",
+        "feat.subtitle": "Lightweight before complete, play before decorate.",
+        "feat.f1.title": "Zero Electron Bloat",
+        "feat.f1.desc": "Pure C++17 and Qt5. Linux packages are around 1 MB, pulling shared distro libraries instead of embedding an entire Chromium runtime.",
+        "feat.f2.title": "Dual Playback Engines",
+        "feat.f2.desc": "libmpv for Linux, Windows x64 and modern x86. Dedicated from-scratch FFmpeg/DXVA2 engine for legacy Windows 7 x86.",
+        "feat.f3.title": "Hardware Probing",
+        "feat.f3.desc": "Automatically tests AV1, VP9 and H.264 decoders on startup, gracefully falling back to avoid CPU stalls.",
+        "feat.f4.title": "Parallel Downloader",
+        "feat.f4.desc": "Bypasses throttle ceilings using concurrent byte-range streams, muxing cleanly without re-encoding into MKV or MP3.",
+        "install.title": "Get NeverTube",
+        "install.subtitle": "Choose your operating system or packaging format below.",
+        "apt.pill": "Auto-Configured Signed Repository",
+        "apt.head": "Ubuntu 24.04 (noble) & 22.04 (jammy)",
+        "apt.desc": "Download the .deb package from GitHub Releases. Installing it automatically imports the GPG signing key to /usr/share/keyrings/ and configures our official repository in /etc/apt/sources.list.d/nevertube.list so future updates arrive seamlessly via apt update.",
+        "apt.manual": "Manual repo setup:",
+        "flatpak.pill": "Self-Updating Sandbox",
+        "flatpak.head": "Universal Linux (Silverblue, SteamOS, Arch, etc.)",
+        "flatpak.desc": "Install with a single command via our signed .flatpakref. It adds the remote repository with our verified GPG key and installs the app. Future updates are applied with flatpak update.",
+        "flatpak.bundleNote": "Or download the single-file NeverTube-1.0.0-Linux-Flatpak.flatpak bundle. Installing it automatically adds the repository as well.",
+        "win.pill": "Dedicated Installers",
+        "win.head": "Modern & Legacy Windows Support",
+        "win.desc": "NeverTube provides tailored installers for modern 64-bit/32-bit systems as well as dedicated Windows 7 SP1 builds.",
+        "win.btn": "Download Windows Installer",
+        "other.pill": "Native Packages",
+        "other.desc": "Native, lightweight packages built without bundled runtimes:",
+        "support.title": "Support NeverTube",
+        "support.desc": "NeverTube is open source and independently built with passion for lightweight, ad-free and privacy-respecting software. Star the project on GitHub, share it with your friends, or contribute code!",
+        "support.btn": "⭐ Star on GitHub",
+        "footer.disclaimer": "Not affiliated with YouTube or Google LLC."
+      },
+      es: {
+        "nav.install": "Instalación",
+        "nav.features": "Características",
+        "nav.support": "Apoyar",
+        "hero.title": "Cliente ligero de YouTube para Windows y Linux",
+        "hero.desc": "Reproduce directamente desde la API web de YouTube sin el sobrepeso de Electron. Creado con C++17 nativo y Qt5, decodificación por hardware, doble motor de reproducción y descargas en paralelo.",
+        "hero.downloadBtn": "⬇ Descargar última versión",
+        "hero.installGuideBtn": "🚀 Guía de instalación",
+        "feat.title": "Diseñado para estabilidad, velocidad y bajo consumo",
+        "feat.subtitle": "Ligero antes que completo, reproducir antes que decorar.",
+        "feat.f1.title": "Sin sobrepeso de Electron",
+        "feat.f1.desc": "Puro C++17 y Qt5. Los paquetes en Linux pesan ~1 MB al usar las librerías compartidas del sistema en vez de meter un navegador Chromium entero.",
+        "feat.f2.title": "Doble motor de reproducción",
+        "feat.f2.desc": "libmpv en Linux, Windows x64 y x86 moderno. Motor propio desde cero con FFmpeg/DXVA2 para Windows 7 x86.",
+        "feat.f3.title": "Sondeo de hardware",
+        "feat.f3.desc": "Comprueba automáticamente decodificadores AV1, VP9 y H.264 al inicio, bajando de perfil limpiamente para evitar tirones de CPU.",
+        "feat.f4.title": "Descargas en paralelo",
+        "feat.f4.desc": "Supera los límites de velocidad descargando fragmentos por rango de bytes en paralelo, uniendo el flujo a MKV o MP3 sin recodificar.",
+        "install.title": "Obtén NeverTube",
+        "install.subtitle": "Elige tu sistema operativo o formato de empaquetado a continuación.",
+        "apt.pill": "Repositorio firmado autoconfigurado",
+        "apt.head": "Ubuntu 24.04 (noble) y 22.04 (jammy)",
+        "apt.desc": "Descarga el paquete .deb desde GitHub Releases. Al instalarlo, automáticamente importa la clave pública GPG a /usr/share/keyrings/ y configura nuestro repositorio oficial en /etc/apt/sources.list.d/nevertube.list para que las actualizaciones futuras lleguen con apt update.",
+        "apt.manual": "Repositorio manual:",
+        "flatpak.pill": "Sandbox autoactualizable",
+        "flatpak.head": "Linux universal (Silverblue, SteamOS, Arch, etc.)",
+        "flatpak.desc": "Instala con un solo comando mediante nuestro .flatpakref firmado. Añade el repositorio remoto con nuestra clave GPG verificada e instala la app. Las próximas versiones se aplican con flatpak update.",
+        "flatpak.bundleNote": "O descarga el bundle NeverTube-1.0.0-Linux-Flatpak.flatpak de un solo archivo. Al instalarlo, también autoconfigura el repositorio.",
+        "win.pill": "Instaladores dedicados",
+        "win.head": "Soporte para Windows moderno y legado",
+        "win.desc": "NeverTube provee instaladores a medida tanto para sistemas modernos de 64/32 bits como para Windows 7 SP1.",
+        "win.btn": "Descargar instalador de Windows",
+        "other.pill": "Paquetes nativos",
+        "other.desc": "Paquetes nativos y ligeros compilados sin runtimes empaquetados:",
+        "support.title": "Apoyar NeverTube",
+        "support.desc": "NeverTube es de código abierto e independiente, hecho con pasión por el software ligero y respetuoso con la privacidad. ¡Dale una estrella al proyecto en GitHub, compártelo o contribuye!",
+        "support.btn": "⭐ Dar estrella en GitHub",
+        "footer.disclaimer": "Sin afiliación con YouTube ni Google LLC."
+      }
+    };
+
+    let currentLang = 'en';
+
+    function setLanguage(lang) {
+      currentLang = lang;
+      document.documentElement.lang = lang;
+      document.getElementById('langLabel').textContent = lang === 'en' ? 'Español' : 'English';
+      document.getElementById('heroBanner').src = lang === 'en' ? 'banner-en.png' : 'banner-es.png';
+
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (i18n[lang] && i18n[lang][key]) {
+          el.textContent = i18n[lang][key];
+        }
+      });
+      localStorage.setItem('nevertube_lang', lang);
+    }
+
+    document.getElementById('langToggle').addEventListener('click', () => {
+      setLanguage(currentLang === 'en' ? 'es' : 'en');
+    });
+
+    // Detect browser lang or stored lang
+    const savedLang = localStorage.getItem('nevertube_lang');
+    if (savedLang) {
+      setLanguage(savedLang);
+    } else if (navigator.language && navigator.language.startsWith('es')) {
+      setLanguage('es');
+    }
+
+    // Tabs
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        const target = document.getElementById(btn.getAttribute('data-tab'));
+        if (target) target.classList.add('active');
+      });
+    });
+
+    // Copy button
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const pre = btn.nextElementSibling;
+        if (pre) {
+          navigator.clipboard.writeText(pre.innerText.trim()).then(() => {
+            const orig = btn.textContent;
+            btn.textContent = 'Copied!';
+            setTimeout(() => { btn.textContent = orig; }, 2000);
+          });
+        }
+      });
+    });
+  </script>
+</body>
+</html>

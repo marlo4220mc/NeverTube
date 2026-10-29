@@ -236,6 +236,7 @@ jobs:
           rm -rf pages/apt pages/flatpak
           cp -r out/apt pages/apt
           cp -r out/flatpak pages/flatpak
+          cp -r docs/pages/* pages/
           git -C pages add -A
           if git -C pages diff --cached --quiet; then
             echo "nothing changed since the last publication"

@@ -2,6 +2,18 @@
   <b>English</b> · <a href="README.es.md">Español</a>
 </div>
 
+<p align="center">
+  <img src="docs/assets/banner-en.png" alt="NeverTube — Lightweight. Fast. No limits." width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/marlo4220mc/NeverTube/releases"><img src="https://img.shields.io/github/v/release/marlo4220mc/NeverTube?color=fa011b&label=Release&style=flat-square" alt="Release"></a>
+  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-181818?style=flat-square&logo=linux&logoColor=white" alt="Platform">
+  <img src="https://img.shields.io/badge/Qt-5.15%20%2B%20C%2B%2B17-41CD52?style=flat-square&logo=qt&logoColor=white" alt="Qt5">
+  <img src="https://img.shields.io/badge/No-Electron-red?style=flat-square" alt="No Electron">
+  <img src="https://img.shields.io/badge/License-GPL--3.0--or--later-262626?style=flat-square" alt="License">
+</p>
+
 # NeverTube
 
 **NeverTube** is a lightweight YouTube client for Windows (7 / 10 / 11) and Linux, built with Qt5 and C++17. It streams directly from YouTube's unofficial web API — no browser, no Electron, and on Linux no bundled runtime: the packages are about 1 MB and pull their dependencies from the distribution's own repositories.
@@ -63,7 +75,7 @@ There are **two `.deb`** on purpose: 24.04 renamed the Qt5 runtime packages to t
 - Debian / Ubuntu: `sudo apt install ./NeverTube-<version>-Ubuntu-24.04-amd64.deb` — apt installs the declared dependencies automatically. On **Ubuntu 22.04 (jammy) and 24.04 (noble)** the package also configures the project's signed APT repository: it installs `/usr/share/keyrings/nevertube-archive-keyring.gpg` (the public key) and writes `/etc/apt/sources.list.d/nevertube.list` with `signed-by=`, so the next `apt update && apt upgrade` receives the new versions. The postinst needs **no network** and does not run `apt update` itself; on any other distribution (Debian, Fedora, an Ubuntu that is neither 22.04 nor 24.04) it prints one warning and leaves apt alone, and uninstalling the package removes the source it added.
 - Fedora: `sudo dnf install ./NeverTube-<version>-Fedora-x86_64.rpm` — dnf resolves the soname requirements (`ffmpeg-free`, or RPM Fusion's ffmpeg if already installed).
 - Arch: `sudo pacman -U NeverTube-<version>-Arch-Linux-x86_64.pkg.tar.zst`
-- Flatpak: `flatpak install --user https://marlo4220mc.github.io/NeverTube/flatpak/io.github.marlo4220mc.NeverTube.flatpakref` — one command adds the signed repository and installs the app, so `flatpak update` keeps it current. It is the deliverable for the distributions where an `rpm`/`deb` is not an option (Silverblue / Kinoite / Bazzite, MicroOS / Aeon, SteamOS): the Flatpak brings its own Qt, libmpv and ffmpeg, so it is the same binary everywhere. The single-file bundle (`flatpak install --user NeverTube-<version>-Linux-Flatpak.flatpak`) is the offline equivalent, without updates. Permissions, updates and the manual checks are in `packaging/linux/flatpak/README.md`.
+- Flatpak: `flatpak install --user https://marlo4220mc.github.io/NeverTube/flatpak/io.github.marlo4220mc.NeverTube.flatpakref` — one command adds the signed repository and installs the app, so `flatpak update` keeps it current. Alternatively, install the single-file bundle (`flatpak install --user NeverTube-<version>-Linux-Flatpak.flatpak`), which also configures the repository and signature automatically. Permissions, updates and the manual checks are in `packaging/linux/flatpak/README.md`.
 - Windows: run the setup for your system — `NeverTube-<version>-Windows-7-SP1-x86-Setup.exe` (32-bit Windows 7), `NeverTube-<version>-Windows-10-11-x86-Setup.exe` (32-bit Windows 10/11) or `NeverTube-<version>-Windows-10-11-x64-Setup.exe` (64-bit Windows 10/11). Each one refuses the other two and tells you which to use; they install the VC++ redistributable they need. The installers are not code-signed, so SmartScreen warns on first run.
 
 The binary is `nevertube`. On Linux the `.desktop` entry and the icons are installed in the `hicolor` theme, so the app shows up in the menu named **NeverTube**.
@@ -109,6 +121,14 @@ nevertube --downloads | --library    # open that page
 - Windows x64: the default `d3d11va-copy` path uses more CPU; an experimental zero-copy mode (`NEVERTUBE_ANGLE=1`, ANGLE + `d3d11-egl`) is opt-in.
 - Linux packages are x86_64 only.
 - The app uses YouTube's unofficial web API to resolve streams and live status. This project is not affiliated with, endorsed by, or officially connected to YouTube or Google.
+
+## Support the project
+
+<p align="center">
+  <img src="docs/assets/heart-support.png" alt="Support NeverTube" width="130"><br>
+  <b>Enjoying NeverTube?</b><br>
+  Leave a star ⭐ on the repository, share it with friends, or help support future development!
+</p>
 
 ## License
 
