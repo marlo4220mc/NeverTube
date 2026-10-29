@@ -22,6 +22,9 @@ Released on @@DATE@@ (tag `@@TAG@@`).
   suggestions; shuffle and repeat work on the real queue.
 - Mini player while you browse, and a shortcut set for the basics
   (`Space`/`K`, `J`/`L`, `←`/`→`, `N`, `P`, `↑`/`↓`, `M`, `F`, `D`).
+- System media integration: MPRIS v2 on Linux (D-Bus) and System Media Transport
+  Controls (SMTC) on Windows 10/11; hardware media keys and Bluetooth headphones
+  (play/pause, stop, next, prev) control playback from anywhere (including lock screen).
 - Automatic recovery from YouTube's gated sessions (403s): re-resolve in a fresh
   session and, as a last resort, restart with the last video.
 
@@ -247,6 +250,10 @@ Publicado el @@DATE@@ (tag `@@TAG@@`).
   H.264) y descenso automático si el perfil acaba decodificando en software.
 - **Cola "A continuación"** con la radio de YouTube (estilo Music) o con
   sugerencias estáticas; mezclar y repetir funcionan sobre la cola real.
+- **Controles multimedia del sistema**: integración con MPRIS v2 en Linux (D-Bus)
+  y SMTC en Windows 10/11; teclas multimedia del teclado y auriculares Bluetooth
+  (reproducir/pausa, siguiente, anterior) controlan la reproducción desde cualquier
+  lugar (incluyendo pantalla de bloqueo o en segundo plano).
 - **Mini reproductor** mientras navegas, y atajos: `Espacio`/`K`, `J`/`L`,
   `←`/`→`, `N`, `P`, `↑`/`↓`, `M`, `F`, `D`.
 - **Navegación**: Inicio con Continuar viendo, Novedades de tus suscripciones,
