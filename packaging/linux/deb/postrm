@@ -1,0 +1,56 @@
+#!/bin/sh
+# nevertube -- post-removal script.
+#
+# It undoes the ONE thing postinst did to the system: the APT source this
+# package writes (/etc/apt/sources.list.d/nevertube.list). The keyring is a file
+# of the package, so dpkg removes it by itself.
+#
+# Two rules:
+#
+#  - NOT ON UPGRADE. dpkg calls postrm with `upgrade <version>` in the middle of
+#    an upgrade; the source has to survive that (and the new postinst rewrites
+#    it anyway). Only `remove`, `purge` and `disappear` remove it.
+#  - ONLY OUR FILE. The file carries a marker written by postinst; without that
+#    marker it is not ours (an administrator's own source for the same
+#    repository, say) and it is left alone. Nothing else is touched: not other
+#    sources, not /etc/apt/keyrings, not the apt lists.
+#
+# No network and no `apt update` here either: apt still has the cached index of
+# the removed source until the next `apt update`, which belongs to the user.
+#
+# NEVERTUBE_ROOT exists ONLY for the isolated test
+# (packaging/linux/deb/test-apt-source.sh); dpkg never sets it.
+
+set -u
+
+PKG=nevertube
+LIST=/etc/apt/sources.list.d/nevertube.list
+MARKER='# nevertube: written by the nevertube package; removed when it is uninstalled'
+
+ROOT="${NEVERTUBE_ROOT:-}"
+
+warn() {
+  echo "$PKG: $*" >&2
+}
+
+case "${1:-}" in
+  remove|purge|disappear) ;;
+  *) exit 0 ;;
+esac
+
+file="$ROOT$LIST"
+[ -e "$file" ] || exit 0
+
+if ! grep -qF "$MARKER" "$file" 2>/dev/null; then
+  warn "$LIST was not written by this package: left untouched"
+  exit 0
+fi
+
+if rm -f "$file"; then
+  echo "$PKG: removed the NeverTube APT source ($LIST)"
+  echo "$PKG: 'sudo apt update' forgets the packages of that repository from now on."
+else
+  warn "could not remove $LIST"
+fi
+
+exit 0

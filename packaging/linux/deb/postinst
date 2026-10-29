@@ -1,0 +1,185 @@
+#!/bin/sh
+# nevertube -- post-installation script.
+#
+# Installing this package is enough to get `apt update` / `apt upgrade` from
+# the project's own signed APT repository, on the Ubuntu releases the
+# repository is built for:
+#
+#   Ubuntu 22.04 (jammy)  ->  .../apt/ jammy main
+#   Ubuntu 24.04 (noble)  ->  .../apt/ noble main
+#
+# The rules this script follows, and the reason it is this wordy:
+#
+#  - NO NETWORK, NO APT CALLS, NO QUESTIONS. It writes one file and prints one
+#    line; it never runs `apt update` (a package must not depend on the
+#    network to be installed) and never waits for input.
+#  - NO apt-key, NO trusted=yes, NO globally trusted key. The repository is
+#    trusted only for the source written here, through
+#    `signed-by=/usr/share/keyrings/nevertube-archive-keyring.gpg`, a keyring
+#    this package installs (the public key; the private one never leaves CI).
+#  - IDEMPOTENT. Reinstalling or upgrading rewrites the same file or nothing at
+#    all, and the result does not depend on how many times it runs.
+#  - ONLY THIS PACKAGE'S FILE. The sources file carries a marker line; a file
+#    at the same path without it belongs to somebody else and is never
+#    overwritten (and postrm never deletes it).
+#  - UNSUPPORTED SYSTEMS ARE NOT AN ERROR. On Debian, Fedora or an Ubuntu that
+#    is neither 22.04 nor 24.04 the script says so once and does not touch apt:
+#    the application is installed and works, it just will not update from the
+#    repository. It never guesses a suite ("bookworm" is NOT "jammy").
+#
+# NEVERTUBE_ROOT and NEVERTUBE_OS_RELEASE exist ONLY so the behaviour can be
+# tested in isolation (packaging/linux/deb/test-apt-source.sh) without a second
+# machine. dpkg never sets them: on a real install both are the real paths.
+
+set -u
+
+PKG=nevertube
+KEYRING=/usr/share/keyrings/nevertube-archive-keyring.gpg
+LIST=/etc/apt/sources.list.d/nevertube.list
+REPO_URL=https://marlo4220mc.github.io/NeverTube/apt/
+DOCS_URL=https://github.com/marlo4220mc/NeverTube#install
+MARKER='# nevertube: written by the nevertube package; removed when it is uninstalled'
+
+ROOT="${NEVERTUBE_ROOT:-}"
+OS_RELEASE="${NEVERTUBE_OS_RELEASE:-/etc/os-release}"
+
+warn() {
+  echo "$PKG: $*" >&2
+}
+
+# The value of $1 in os-release, without blanks and surrounding quotes. It is
+# PARSED and not sourced on purpose: os-release is a data file and this script
+# runs as root.
+os_value() {
+  [ -r "$OS_RELEASE" ] || return 0
+  sed -n "s/^$1=//p" "$OS_RELEASE" 2>/dev/null | head -n 1 |
+    sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+        -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
+}
+
+# True when the sources file at the package path is the one this package wrote.
+list_is_ours() {
+  [ -f "$ROOT$LIST" ] || return 1
+  grep -qF "$MARKER" "$ROOT$LIST" 2>/dev/null
+}
+
+# Removes the source, if and only if it is ours. $1 is the reason, for the log.
+remove_ours() {
+  [ -e "$ROOT$LIST" ] || return 0
+  if list_is_ours; then
+    if rm -f "$ROOT$LIST"; then
+      echo "$PKG: removed the NeverTube APT source ($LIST): $1"
+    else
+      warn "could not remove $LIST"
+    fi
+  else
+    warn "$LIST exists and this package did not write it: left untouched"
+  fi
+}
+
+# Writes the signed source for $1 (the suite). Idempotent: if the file already
+# has exactly this content, nothing is written.
+write_sources() {
+  suite="$1"
+  file="$ROOT$LIST"
+  dir="$ROOT/etc/apt/sources.list.d"
+
+  if [ -e "$file" ] && ! list_is_ours; then
+    warn "$LIST already exists and was not written by this package: left untouched."
+    warn "The APT repository is not configured; edit or remove that file to let"
+    warn "the package write its own. NeverTube is installed and works either way."
+    return 0
+  fi
+
+  if [ ! -d "$dir" ]; then
+    if ! mkdir -p "$dir"; then
+      warn "cannot create $dir: the APT repository was not configured (no network is needed for it)"
+      return 0
+    fi
+    chmod 0755 "$dir" 2>/dev/null || true
+  fi
+
+  tmp="$file.nevertube.$$"
+  if ! printf '%s\n%s\n' "$MARKER" \
+        "deb [signed-by=$KEYRING] ${REPO_URL} $suite main" > "$tmp"; then
+    warn "cannot write $tmp: the APT repository was not configured"
+    rm -f "$tmp"
+    return 0
+  fi
+  chmod 0644 "$tmp" 2>/dev/null || true
+
+  if [ -f "$file" ] && cmp -s "$tmp" "$file"; then
+    rm -f "$tmp"
+    return 0
+  fi
+
+  if ! mv -f "$tmp" "$file"; then
+    warn "cannot replace $LIST: the APT repository was not configured"
+    rm -f "$tmp"
+    return 0
+  fi
+  echo "$PKG: APT repository configured for Ubuntu $suite ($LIST)"
+  echo "$PKG: 'sudo apt update' picks up the next version from it when you run it."
+}
+
+# dpkg calls postinst with: configure, abort-upgrade, abort-remove,
+# abort-deconfigure and triggered. Only `configure` has work to do here.
+case "${1:-}" in
+  configure) ;;
+  *) exit 0 ;;
+esac
+
+if [ ! -r "$ROOT$KEYRING" ]; then
+  warn "$KEYRING is missing, so the APT repository cannot be trusted: not configured."
+  warn "NeverTube is installed and works; run 'apt install --reinstall $PKG' to fix the package."
+  exit 0
+fi
+
+if [ ! -r "$OS_RELEASE" ]; then
+  warn "cannot read $OS_RELEASE: the APT repository was not configured."
+  warn "NeverTube is installed and works. To add the repository by hand: $DOCS_URL"
+  exit 0
+fi
+
+id="$(os_value ID)"
+id_like="$(os_value ID_LIKE)"
+version_id="$(os_value VERSION_ID)"
+series="$(os_value UBUNTU_CODENAME)"
+[ -n "$series" ] || series="$(os_value VERSION_CODENAME)"
+
+system="$id"
+[ -n "$version_id" ] && system="$id $version_id"
+[ -n "$system" ] || system="unknown"
+
+# Ubuntu itself, or a derivative that declares itself as such (Mint, Pop!_OS:
+# they use the Ubuntu packages and UBUNTU_CODENAME says which suite is theirs).
+is_ubuntu=0
+[ "$id" = ubuntu ] && is_ubuntu=1
+case " $id_like " in
+  *" ubuntu "*) is_ubuntu=1 ;;
+esac
+
+if [ "$is_ubuntu" -eq 0 ]; then
+  warn "this system ($system) is not Ubuntu: the NeverTube APT repository is only configured"
+  warn "automatically on Ubuntu 22.04 (jammy) and Ubuntu 24.04 (noble)."
+  remove_ours "system not supported by the repository"
+  warn "NeverTube is installed and works. To get updates from the repository, add it by hand:"
+  warn "  $DOCS_URL"
+  exit 0
+fi
+
+case "$series" in
+  jammy|noble)
+    write_sources "$series"
+    ;;
+  *)
+    warn "Ubuntu ${series:-unknown}${version_id:+ ($version_id)} is not supported by the NeverTube"
+    warn "APT repository: it is built for 22.04 (jammy) and 24.04 (noble) only, and a wrong"
+    warn "suite would install packages built for another release."
+    remove_ours "release not supported by the repository"
+    warn "NeverTube is installed and works; it will not receive updates from the repository"
+    warn "on this release. If it gets published for it: $DOCS_URL"
+    ;;
+esac
+
+exit 0

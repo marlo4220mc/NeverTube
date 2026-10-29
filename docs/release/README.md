@@ -181,11 +181,29 @@ gh workflow run publish-repos.yml --ref main -f version=1.0.0
 It downloads the `.deb` files, the Flatpak repository tar and `SHA256SUMS.txt`
 **of that release**, verifies them against it, builds the APT trees
 (`jammy` for 22.04, `noble` for 24.04: the two packages share their name and
-version but not their dependencies), signs both with the project's key and
-commits the result to `gh-pages`, which is what GitHub Pages serves. It is not
-part of `release.yml` on purpose: the release is immutable, and a repository that
-fails to publish must not be able to modify or block it. It never rebuilds
-anything, so what it serves is the bytes that were tested.
+version but not their dependencies), signs them and the Flatpak repository with
+the project's key and commits the result to `gh-pages`, which is what GitHub
+Pages serves. It is not part of `release.yml` on purpose: the release is
+immutable, and a repository that fails to publish must not be able to modify or
+block it. It never rebuilds anything, so what it serves is the bytes that were
+tested.
+
+What ends up served and can be handed to a user:
+
+| file | what it is |
+|---|---|
+| `apt/key.asc` + `apt/dists/{jammy,noble}` | the signed APT repository (the `.deb` configures it by itself) |
+| `flatpak/nevertube.flatpakrepo` | the Flatpak remote, with the public key |
+| `flatpak/io.github.marlo4220mc.NeverTube.flatpakref` | **the one-file installer**: `flatpak install --user <that URL>` adds the remote and installs the app |
+
+The Flatpak part signs the COMMITS of every app/runtime ref (`flatpak
+build-sign`) and regenerates the static deltas from them before signing the
+summary, because ostree verifies the commit — or the delta that carries it — and
+a signed summary over unsigned commits fails at `flatpak install` with "GPG
+verification enabled, but no signatures found". The job ends by **installing the
+`.flatpakref` it just wrote** against a copy of the repository served from
+localhost: the branch, the key and the signature are checked by flatpak itself,
+so an installer that points at a branch nobody has cannot be published.
 
 Two things are set up by hand, **once**:
 

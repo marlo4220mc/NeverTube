@@ -11,8 +11,8 @@ AppImage](#why-not-an-appimage-measured)).
 | tier | what the user does | updates | when |
 |---|---|---|---|
 | **Native package** | `rpm-ostree install nevertube.rpm` (Fedora Atomic), `dnf`, `apt`, `pacman` | with the OS / the distro repo | already works, no code needed. Only for the traditional distros; on an immutable one it needs a reboot and it is layered over the image |
-| **Flatpak bundle** | download `NeverTube-<ver>-Linux-Flatpak.flatpak` and `flatpak install` it | manual (a new file per release) | **now** — this directory |
-| **Flatpak + own OSTree repo** | `flatpak remote-add nevertube <url>` once | `flatpak update`, automatic | **now**, as a CI artifact; publish it when there is a URL (GitHub Pages) |
+| **Flatpak bundle** | download `NeverTube-<ver>-Linux-Flatpak.flatpak` and `flatpak install` it | `flatpak update`, automatic (the bundle embeds the repo URL and GPG key) | **now** — this directory |
+| **Flatpak + own OSTree repo** | `flatpak install --user <url>/io.github.marlo4220mc.NeverTube.flatpakref` (adds the signed remote and installs) | `flatpak update`, automatic | **now**, published on GitHub Pages by `publish-repos.yml` |
 | **Flathub** | search in the software center | automatic | later: it needs a human review, the manifest rebuilt from source in their infra, and `flatpak-builder-lint` clean |
 
 Shipping a Flatpak does **not** require Flathub. The bundle and the OSTree repo
@@ -29,21 +29,39 @@ are produced here and can be handed out from a release page.
 
 ## Install
 
-### The bundle (no repository)
+### The bundle (configures the remote repository)
 
 ```sh
 flatpak install --user NeverTube-1.0.0-Linux-Flatpak.flatpak
 flatpak run io.github.marlo4220mc.NeverTube
 ```
 
+Because the bundle is built with `--repo-url` and `--gpg-keys`, installing it
+automatically configures the project's repository and imports the signing key.
+After installation, `flatpak update` receives updates automatically.
+
 ### The OSTree repository (with updates)
 
-```sh
-# signed repo (once it is published with a key)
-flatpak remote-add --user --if-not-exists nevertube https://<host>/nevertube.flatpakrepo
-# unsigned repo (what CI produces today)
-flatpak remote-add --user --no-gpg-verify nevertube https://<host>/repo
+The published repository lives on GitHub Pages and is signed with the project's
+key. **One command adds the remote and installs the app**, because the
+`.flatpakref` carries the URL, the branch and the key:
 
+```sh
+flatpak install --user https://marlo4220mc.github.io/NeverTube/flatpak/io.github.marlo4220mc.NeverTube.flatpakref
+flatpak update --user io.github.marlo4220mc.NeverTube
+```
+
+The `.flatpakref` names the branch that really exists in the OSTree repository
+(today `master`, because the manifest does not set `branch:`; the publish job
+reads it from the refs instead of assuming it) and it is validated by installing
+it before it is published.
+
+The same thing in two steps, for a remote you want to keep separated from the
+suggested name:
+
+```sh
+flatpak remote-add --user --if-not-exists nevertube \
+  https://marlo4220mc.github.io/NeverTube/flatpak/nevertube.flatpakrepo
 flatpak install --user nevertube io.github.marlo4220mc.NeverTube
 flatpak update --user io.github.marlo4220mc.NeverTube
 ```
@@ -55,6 +73,43 @@ A `.flatpakrepo` file is just:
 Title=NeverTube
 Url=https://<host>/repo
 GPGKey=<base64 of the public key>   # omit only for an unsigned repo
+```
+
+and a `.flatpakref` adds the app, the branch and the runtime repository on top
+of that:
+
+```ini
+[Flatpak Ref]
+Version=1
+Name=io.github.marlo4220mc.NeverTube
+Branch=master
+Title=NeverTube
+Url=https://<host>/repo
+RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
+IsRuntime=false
+GPGKey=<base64 of the public key>
+SuggestRemoteName=nevertube
+```
+
+**What "signed" has to cover in a Flatpak repository** (it was measured the hard
+way): the SUMMARY signature is not enough. `flatpak install` verifies the commit
+of every ref it pulls — or the static delta that carries it — against the remote
+key too, so a repository with a signed summary and unsigned commits fails with
+`Commit ...: GPG verification enabled, but no signatures found`. The publish job
+(`.github/workflows/publish-repos.yml`) therefore signs every app/runtime ref
+with `flatpak build-sign`, deletes the deltas built from the unsigned commits
+and regenerates them, and then signs the summary. The `Repo.tar.gz` of a release
+is still **unsigned** (it comes out of a build without secrets): unpacking it and
+adding it by hand needs `--no-gpg-verify`, which is what the release notes say.
+
+**If you added the remote before that change** (`flatpak remote-add --user
+--no-gpg-verify nevertube ...`), that remote is configured to skip the
+signature. Remove it once and install from the `.flatpakref`, which imports the
+key and verifies the summary and the commits:
+
+```sh
+flatpak remote-delete --user nevertube
+flatpak install --user https://marlo4220mc.github.io/NeverTube/flatpak/io.github.marlo4220mc.NeverTube.flatpakref
 ```
 
 ### Permissions

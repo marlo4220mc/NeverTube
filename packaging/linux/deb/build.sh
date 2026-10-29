@@ -34,6 +34,7 @@ $SUDO apt-get install -y --no-install-recommends \
   libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
   libpulse-dev \
   libssl-dev ca-certificates \
+  gnupg \
   desktop-file-utils
 
 echo "== configure + build =="
@@ -100,6 +101,59 @@ mkdir -p "$root/usr/share/doc/nevertube"
 cp packaging/linux/deb/copyright "$root/usr/share/doc/nevertube/copyright"
 test -f "$root/usr/share/doc/nevertube/copyright"
 
+# ---------------------------------------------------------------------------
+# The APT repository: the PUBLIC key and the maintainer scripts.
+#
+# Installing the .deb is what makes `apt update && apt upgrade` work on the
+# Ubuntu releases the repository is built for, and that is only possible if the
+# package carries the key the repository is signed with: the source postinst
+# writes points at this keyring with `signed-by=`. The PRIVATE key never leaves
+# the CI secret (GPG_PRIVATE_KEY); what goes in here is the published public
+# key, byte for byte, in packaging/linux/deb/nevertube-archive-keyring.asc.
+#
+# The fingerprint is PINNED. It was read from the published repository itself
+# (apt/dists/jammy/InRelease, apt/dists/noble/InRelease and
+# flatpak/repo/summary.sig all carry this key), and the build STOPS if the file
+# in the tree is not that key: a package whose keyring does not match the
+# signature makes `apt update` answer NO_PUBKEY for every user, which is worse
+# than not shipping the repository at all. If the key of the project ever
+# changes on purpose, this constant changes in the same commit as the .asc.
+# ---------------------------------------------------------------------------
+KEY_FPR="D22DB9BBE7F4EF8FDD13CC9805A7DDE36DCDD33F"
+KEY_ASC="packaging/linux/deb/nevertube-archive-keyring.asc"
+KEYRING="$root/usr/share/keyrings/nevertube-archive-keyring.gpg"
+test -f "$KEY_ASC"
+mkdir -p "$tmp/gnupg"
+chmod 700 "$tmp/gnupg"
+gpg_home=(--batch --no-tty --homedir "$tmp/gnupg")
+key_fpr="$(gpg "${gpg_home[@]}" --with-colons --show-keys "$KEY_ASC" \
+             | awk -F: '/^fpr:/{print $10; exit}')"
+if [ "$key_fpr" != "$KEY_FPR" ]; then
+  echo "ERROR: $KEY_ASC carries the key ${key_fpr:-<none>} and the published" >&2
+  echo "       repository is signed with $KEY_FPR." >&2
+  echo "       Do not replace the key to make this pass: export the key that" >&2
+  echo "       signs dists/*/InRelease and find out why they differ first." >&2
+  exit 1
+fi
+mkdir -p "$root/usr/share/keyrings"
+gpg "${gpg_home[@]}" --dearmor < "$KEY_ASC" > "$KEYRING"
+chmod 0644 "$KEYRING"
+# The keyring apt will read (binary, 0644, root) really is that key.
+keyring_fpr="$(gpg "${gpg_home[@]}" --with-colons --show-keys "$KEYRING" \
+                 | awk -F: '/^fpr:/{print $10; exit}')"
+test "$keyring_fpr" = "$KEY_FPR"
+echo "APT keyring: $KEYRING ($KEY_FPR)"
+
+# postinst configures the signed source on Ubuntu 22.04/24.04 only (idempotent,
+# no network, no apt call); postrm removes it and only it, and not on upgrade.
+# Their behaviour is covered by an isolated test that needs no package and no
+# second machine, and which runs here so a broken script never reaches a user.
+install -D -m 0755 packaging/linux/deb/postinst "$root/DEBIAN/postinst"
+install -D -m 0755 packaging/linux/deb/postrm "$root/DEBIAN/postrm"
+sh -n "$root/DEBIAN/postinst"
+sh -n "$root/DEBIAN/postrm"
+bash packaging/linux/deb/test-apt-source.sh
+
 # NEEDED -> packages. dpkg-shlibdeps reads the package name from a
 # debian/control in the working directory, so it runs from a throwaway one.
 mkdir -p "$tmp/debian"
@@ -139,16 +193,57 @@ mkdir -p dist
 deb="dist/nevertube_${pkgver}_${arch}.deb"
 dpkg-deb --build --root-owner-group "$root" "$deb"
 dpkg-deb -f "$deb" Package Version Architecture Depends
-dpkg-deb -c "$deb" | grep -E 'usr/bin/nevertube$|applications/nevertube.desktop$|hicolor/48x48/apps/nevertube.png$|doc/nevertube/copyright$'
+dpkg-deb -c "$deb" | grep -E 'usr/bin/nevertube$|applications/nevertube.desktop$|hicolor/48x48/apps/nevertube.png$|doc/nevertube/copyright$|usr/share/keyrings/nevertube-archive-keyring.gpg$'
 
 chk="$tmp/chk"
 dpkg-deb -x "$deb" "$chk"
 test -x "$chk/usr/bin/nevertube"
+test -f "$chk/usr/share/keyrings/nevertube-archive-keyring.gpg"
+
+# The maintainer scripts travel in the control archive and have to be
+# executable there; the keyring read back FROM THE PACKAGE has to be the pinned
+# key (checking the tree would not catch a wrong install path).
+ctl="$tmp/ctl"
+mkdir -p "$ctl"
+dpkg-deb -e "$deb" "$ctl"
+for s in postinst postrm; do
+  test -f "$ctl/$s"
+  test -x "$ctl/$s"
+done
+pkg_fpr="$(gpg "${gpg_home[@]}" --with-colons --show-keys \
+            "$chk/usr/share/keyrings/nevertube-archive-keyring.gpg" \
+            | awk -F: '/^fpr:/{print $10; exit}')"
+if [ "$pkg_fpr" != "$KEY_FPR" ]; then
+  echo "ERROR: the keyring inside $deb is ${pkg_fpr:-<none>}, not $KEY_FPR" >&2
+  exit 1
+fi
+echo "package: keyring $pkg_fpr + postinst/postrm"
 
 # Installability (same "viability" gate as the .rpm and pacman jobs): install the
 # package and run the offline selftests from the INSTALLED path (not the build
 # tree). apt pulls the declared Depends, so nothing is assumed about the system.
 $SUDO apt-get install -y "$repo/$deb"
+# The postinst has to have configured the APT source of THIS release of Ubuntu,
+# pointing at the keyring that came in the package. Nothing here runs
+# `apt update`: the script must not need the network, and this checks the file
+# it wrote, not connectivity.
+if [ ! -f /usr/share/keyrings/nevertube-archive-keyring.gpg ]; then
+  echo "ERROR: the keyring is not installed" >&2
+  exit 1
+fi
+# shellcheck disable=SC1091
+. /etc/os-release
+suite="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
+grep -qF 'signed-by=/usr/share/keyrings/nevertube-archive-keyring.gpg' \
+  /etc/apt/sources.list.d/nevertube.list
+grep -qF " https://marlo4220mc.github.io/NeverTube/apt/ $suite main" \
+  /etc/apt/sources.list.d/nevertube.list
+if grep -qF 'trusted=yes' /etc/apt/sources.list.d/nevertube.list; then
+  echo "ERROR: the APT source is globally trusted" >&2
+  exit 1
+fi
+echo "APT source configured by postinst:"
+cat /etc/apt/sources.list.d/nevertube.list
 # The CLI of ffmpeg must be THERE after the install: it is what the
 # downloader runs to join the two tracks, and it is a dependency of its own
 # (the sonames of the binary do not cover it).

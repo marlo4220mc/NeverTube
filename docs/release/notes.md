@@ -93,8 +93,15 @@ sudo apt install ./NeverTube-@@VERSION@@-Ubuntu-22.04-amd64.deb
 
 The project also publishes an APT repository (`jammy` for 22.04, `noble` for
 24.04) on GitHub Pages, signed with its own key, so that `apt update && apt
-upgrade` keeps the app current. If it is not published yet, the `.deb` above is
-the whole story:
+upgrade` keeps the app current. **Installing the `.deb` configures it for you**
+on Ubuntu 22.04 and 24.04: the package brings the public key
+(`/usr/share/keyrings/nevertube-archive-keyring.gpg`) and its postinst writes
+`/etc/apt/sources.list.d/nevertube.list` with `signed-by=` for the right suite.
+It needs no network and does not run `apt update`; on any other distribution it
+only prints a warning, and removing the package removes the source it added.
+The next `sudo apt update` is all that is left to do.
+
+Adding the repository by hand (a system the postinst skips):
 
 ```sh
 curl -fsSL https://marlo4220mc.github.io/NeverTube/apt/key.asc -o /tmp/nevertube.asc
@@ -126,8 +133,19 @@ flatpak run io.github.marlo4220mc.NeverTube
 ```
 
 The Flatpak carries its own Qt, libmpv and ffmpeg, so it is the same binary on
-every distribution. The `.flatpak` file is a bundle with no update channel: for
-`flatpak update` to work you need the repository. Two ways:
+every distribution. The `.flatpak` bundle carries the repository URL and signing
+key embedded: installing it automatically configures the remote repository so
+`flatpak update` receives updates without extra steps.
+
+Alternatively, install directly from the published `.flatpakref`:
+
+```sh
+flatpak install --user https://marlo4220mc.github.io/NeverTube/flatpak/io.github.marlo4220mc.NeverTube.flatpakref
+flatpak run io.github.marlo4220mc.NeverTube
+```
+
+The same thing in two steps, or from the repository of THIS release (which is
+unsigned, so it needs `--no-gpg-verify`):
 
 ```sh
 # 1. the published repository (signed; the .flatpakrepo file carries the key)
@@ -140,10 +158,10 @@ tar -xzf NeverTube-@@VERSION@@-Linux-Flatpak-Repo.tar.gz
 flatpak remote-add --user --no-gpg-verify nevertube ./repo
 ```
 
-Option 1 needs the repository to have been published (it is signed with the
-project's GPG key, and `flatpak` verifies that signature). Option 2 works with
-the file attached here, and it is the one that needs `--no-gpg-verify`: that
-tarball travels before the signature is applied.
+Option 1 needs the repository to have been published (its summary **and its
+commits** are signed with the project's GPG key, and `flatpak` verifies both).
+Option 2 works with the file attached here, and it is the one that needs
+`--no-gpg-verify`: that tarball travels before the signature is applied.
 
 ## Which engine runs where
 
@@ -282,8 +300,17 @@ fuera de la carpeta del programa y no se tocan.
 También hay repositorios publicados en GitHub Pages, firmados con la clave del
 proyecto, para que actualicen `apt` y `flatpak`: el de APT tiene dos suites
 (`jammy` para 22.04, `noble` para 24.04) y el de Flatpak se añade con su
-`.flatpakrepo`. Si todavía no están publicados, los ficheros de arriba son todo
-lo necesario.
+`.flatpakrepo` o, en un solo paso, con su `.flatpakref`:
+
+```sh
+flatpak install --user https://marlo4220mc.github.io/NeverTube/flatpak/io.github.marlo4220mc.NeverTube.flatpakref
+```
+
+En Ubuntu 22.04 y 24.04 el `.deb` ya configura el repositorio APT por su cuenta
+(instala la clave pública en `/usr/share/keyrings/` y escribe
+`/etc/apt/sources.list.d/nevertube.list`), sin red y sin ejecutar `apt update`; en
+cualquier otra distribución solo avisa. Si todavía no están publicados, los
+ficheros de arriba son todo lo necesario.
 
 ### Límites conocidos
 

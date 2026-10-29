@@ -228,11 +228,27 @@ flatpak-builder --run "$BUILD" "$MANIFEST" sh -c '
 # ---------------------------------------------------------------------------
 say "bundle"
 BUNDLE="$OUT/nevertube-${VERSION}-${ARCH}.flatpak"
+REPO_URL="${FLATPAK_REPO_URL:-https://marlo4220mc.github.io/NeverTube/flatpak/repo}"
+RUNTIME_REPO="${FLATPAK_RUNTIME_REPO:-https://dl.flathub.org/repo/flathub.flatpakrepo}"
+KEY_ASC="$repo/packaging/linux/deb/nevertube-archive-keyring.asc"
+
+bundle_opts=(--arch="$ARCH")
 sign=()
 if [ -n "$GPG_KEY" ]; then
   sign=(--gpg-sign="$GPG_KEY")
+  bundle_opts+=("${sign[@]}")
 fi
-flatpak build-bundle ${sign[@]+"${sign[@]}"} --arch="$ARCH" "$OUT/repo" "$BUNDLE" "$APP_ID"
+if [ -n "$REPO_URL" ]; then
+  bundle_opts+=(--repo-url="$REPO_URL")
+fi
+if [ -n "$RUNTIME_REPO" ]; then
+  bundle_opts+=(--runtime-repo="$RUNTIME_REPO")
+fi
+if [ -f "$KEY_ASC" ]; then
+  bundle_opts+=(--gpg-keys="$KEY_ASC")
+fi
+
+flatpak build-bundle "${bundle_opts[@]}" "$OUT/repo" "$BUNDLE" "$APP_ID"
 
 say "OSTree repo (static deltas)"
 flatpak build-update-repo ${sign[@]+"${sign[@]}"} --generate-static-deltas "$OUT/repo"

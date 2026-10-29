@@ -3,7 +3,14 @@ name: Publish the package repositories (APT + Flatpak on GitHub Pages)
 # Publishes the package repositories of an ALREADY PUBLISHED release:
 #
 #   https://<user>.github.io/NeverTube/apt/       the APT repository (jammy, noble)
-#   https://<user>.github.io/NeverTube/flatpak/   the OSTree repository of the Flatpak
+#   https://<user>.github.io/NeverTube/flatpak/   the OSTree repository of the Flatpak,
+#                                                 its nevertube.flatpakrepo and the
+#                                                 io.github.marlo4220mc.NeverTube.flatpakref
+#
+# Since the .deb carries the public key and configures the APT source on
+# Ubuntu 22.04/24.04 (packaging/linux/deb/postinst), installing one of the two
+# packages from the release is enough to receive the updates of this
+# repository; nobody has to copy a key by hand.
 #
 # It is a workflow of its own and NOT part of release.yml on purpose: a release
 # is an immutable thing, and publishing (or failing to publish) a repository
@@ -66,11 +73,15 @@ jobs:
           fi
           echo "key present (id ${KEY_ID})"
 
-      - name: tools (dpkg-dev, apt-utils, gnupg, flatpak)
+      # ostree is not decoration: the refs of the extracted Flatpak repository
+      # are read with it (the branch of the .flatpakref comes from there, never
+      # from a constant) and every app/runtime ref is signed with
+      # `flatpak build-sign` before the summary is regenerated.
+      - name: tools (dpkg-dev, apt-utils, gnupg, flatpak, ostree)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            dpkg-dev apt-utils gnupg flatpak ca-certificates
+            dpkg-dev apt-utils gnupg flatpak ostree ca-certificates
 
       - name: import the key
         run: |
@@ -109,27 +120,100 @@ jobs:
           ls -R out/apt | head -30
 
       # The Flatpak repository travels as a release asset (one tar, because an
-      # OSTree repo is thousands of objects and symlinks). Its summary is
-      # signed HERE: the asset came out of a build without secrets, so without
-      # this step the published repo would have to be added with
-      # --no-gpg-verify.
-      - name: Flatpak repository, signed
+      # OSTree repo is thousands of objects and symlinks). It is signed HERE:
+      # the asset came out of a build without secrets, so without this step the
+      # published repo would have to be added with --no-gpg-verify.
+      #
+      # Signing the SUMMARY is not enough, and that was measured: with only the
+      # summary signed, `flatpak install` from the published repository dies
+      # with "Commit ...: GPG verification enabled, but no signatures found",
+      # because ostree verifies the commit of every pulled ref (or the static
+      # delta that carries it) against the remote key too. That is why every
+      # app/runtime ref goes through `flatpak build-sign` here, and why the
+      # OLD STATIC DELTAS ARE DELETED: build-update-repo only generates the
+      # deltas that are missing, so the ones from the build (made from unsigned
+      # commits) would keep being served and the pull would fail there.
+      - name: Flatpak repository, signed (repo + .flatpakrepo + .flatpakref)
         run: |
           set -euo pipefail
+          pages="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}"
           mkdir -p out/flatpak
           tar -xzf assets/NeverTube-*-Linux-Flatpak-Repo.tar.gz -C out/flatpak
           test -d out/flatpak/repo
+
+          echo "== signing the commits of every app/runtime ref =="
+          while IFS= read -r ref; do
+            case "$ref" in
+              app/*|runtime/*) ;;
+              *) continue ;;
+            esac
+            kind="${ref%%/*}"
+            rest="${ref#*/}"
+            id="${rest%%/*}"
+            rest="${rest#*/}"
+            arch="${rest%%/*}"
+            branch="${rest#*/}"
+            flag=""
+            if [ "$kind" = runtime ]; then
+              flag="--runtime"
+            fi
+            echo "sign $ref"
+            flatpak build-sign $flag --gpg-sign="$KEY_ID" --arch="$arch" \
+              out/flatpak/repo "$id" "$branch"
+          done < <(ostree --repo=out/flatpak/repo refs)
+
+          # Regenerate the summary AND the deltas from the signed commits.
+          rm -rf out/flatpak/repo/deltas out/flatpak/repo/delta-indexes
           flatpak build-update-repo --gpg-sign="$KEY_ID" --generate-static-deltas out/flatpak/repo
+
           gpg --batch --armor --export "$KEY_ID" > out/flatpak/key.asc
           base64 -w0 <(gpg --batch --export "$KEY_ID") > out/flatpak/key.base64
           {
             echo '[Flatpak Repo]'
             echo 'Title=NeverTube'
-            echo "Url=https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/flatpak/repo"
+            echo "Url=$pages/flatpak/repo"
             echo "GPGKey=$(cat out/flatpak/key.base64)"
           } > out/flatpak/nevertube.flatpakrepo
           rm -f out/flatpak/key.base64
+
+          # The one-file installer. The branch is READ from the refs of this
+          # very repository (the manifest does not pin one, so the branch is a
+          # fact of the repo, not a constant to guess) and the file fails the
+          # job if the ref is not in the summary or the key is not the signing
+          # one: an installer that points at a branch nobody has must never be
+          # published.
+          GPG_KEY="$KEY_ID" REPO_URL="$pages/flatpak/repo" \
+            bash packaging/linux/flatpak/make-flatpakref.sh out/flatpak/repo out/flatpak
           ls -la out/flatpak
+
+      # End to end and offline: flatpak itself installs the app from the
+      # .flatpakref that is about to be published, against a copy of the
+      # repository served from localhost. This is what proves the branch
+      # exists, the summary signature verifies with the key in the file and the
+      # commits are signed -- the three things a user's machine checks.
+      - name: validate the .flatpakref by installing it (localhost)
+        run: |
+          set -euo pipefail
+          app_id=io.github.marlo4220mc.NeverTube
+          port=8765
+          # bwrap (what flatpak uses to run the app's hooks) needs unprivileged
+          # user namespaces, and 24.04 restricts them through AppArmor. Same
+          # conditional as the Flatpak build job; a throwaway runner has
+          # nothing to protect.
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          python3 -m http.server "$port" --directory out >/dev/null 2>&1 &
+          server=$!
+          trap 'kill $server 2>/dev/null || true' EXIT
+          sleep 2
+          sed "s|^Url=.*|Url=http://127.0.0.1:$port/flatpak/repo|" \
+            "out/flatpak/$app_id.flatpakref" > "$RUNNER_TEMP/local.flatpakref"
+          export HOME="$RUNNER_TEMP/flatpak-home"
+          mkdir -p "$HOME"
+          flatpak install --user --noninteractive --no-deps --from "$RUNNER_TEMP/local.flatpakref"
+          flatpak list --user --columns=ref,origin | grep -F "$app_id"
+          echo "the published .flatpakref installs the app from the signed repository"
 
       # The branch is published from a clone of itself: the checkout of this
       # job (main) is never used as the source of the published tree, so
@@ -168,18 +252,40 @@ jobs:
           {
             echo "## Package repositories published ($VERSION)"
             echo
+            echo "### Flatpak (any distribution)"
+            echo '```sh'
+            echo "flatpak install --user $pages/flatpak/io.github.marlo4220mc.NeverTube.flatpakref"
+            echo '```'
+            echo
+            echo "That one command adds the signed remote (\`SuggestRemoteName=nevertube\`)"
+            echo "and installs the app; after that \`flatpak update\` keeps it current."
+            echo "The other two ways still work:"
+            echo '```sh'
+            echo "flatpak remote-add --user --if-not-exists nevertube $pages/flatpak/nevertube.flatpakrepo"
+            echo 'flatpak install --user nevertube io.github.marlo4220mc.NeverTube'
+            echo "# or the single-file bundle of the release"
+            echo "flatpak install --user NeverTube-$VERSION-Linux-Flatpak.flatpak"
+            echo '```'
             echo "### APT (Ubuntu 22.04 / 24.04)"
+            echo
+            echo "Installing the .deb of the release configures this repository by itself: the"
+            echo "package installs the public key in"
+            echo "/usr/share/keyrings/nevertube-archive-keyring.gpg and its postinst writes"
+            echo "\`/etc/apt/sources.list.d/nevertube.list\` for jammy (22.04) or noble (24.04),"
+            echo "with signed-by pointing at that keyring. It does not run apt update; on any"
+            echo "other system it only prints a warning and leaves apt alone."
+            echo '```sh'
+            echo "sudo apt install ./NeverTube-$VERSION-Ubuntu-24.04-amd64.deb   # or the 22.04 one"
+            echo 'sudo apt update'
+            echo '```'
+            echo
+            echo "Doing it by hand (any other case):"
             echo '```sh'
             echo "sudo curl -fsSL $pages/apt/key.asc -o /etc/apt/keyrings/nevertube.asc"
             echo "sudo gpg --dearmor -o /etc/apt/keyrings/nevertube.gpg /etc/apt/keyrings/nevertube.asc"
             echo "# jammy on 22.04, noble on 24.04"
             echo "echo 'deb [signed-by=/etc/apt/keyrings/nevertube.gpg] $pages/apt/ jammy main' | sudo tee /etc/apt/sources.list.d/nevertube.list"
             echo 'sudo apt update && sudo apt install nevertube'
-            echo '```'
-            echo "### Flatpak"
-            echo '```sh'
-            echo "flatpak remote-add --user --if-not-exists nevertube $pages/flatpak/nevertube.flatpakrepo"
-            echo 'flatpak install --user nevertube io.github.marlo4220mc.NeverTube'
             echo '```'
             echo
             echo "Remote: \`flatpak update\` picks up the next version on its own."
