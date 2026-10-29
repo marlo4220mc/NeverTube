@@ -136,7 +136,10 @@ APT::FTPArchive::Release {
   Description "NeverTube packages for $suite";
 };
 EOF
-  apt-ftparchive -c "$conf" release "dists/$suite" > "$OUT_ABS/dists/$suite/Release"
+  (
+    cd "$OUT_ABS"
+    apt-ftparchive -c "$conf" release "dists/$suite"
+  ) > "$OUT_ABS/dists/$suite/Release"
   rm -f "$conf"
 
   if [ -n "$KEY" ]; then
