@@ -1,0 +1,21 @@
+Package: nevertube
+Version: 1.0.0~dev.1
+Architecture: amd64
+Maintainer: marlo4220mc <marlo4220mc@users.noreply.github.com>
+Installed-Size: 3444
+Depends: libavcodec60 (>= 7:6.0), libavformat60 (>= 7:6.0), libavutil58 (>= 7:6.0), libc6 (>= 2.34), libgcc-s1 (>= 3.0), libmpv2 (>= 0.29), libopengl0, libpulse0 (>= 0.99.1), libqt5core5t64 (>= 5.15.1), libqt5gui5t64 (>= 5.14.1) | libqt5gui5-gles (>= 5.14.1), libqt5network5t64 (>= 5.15.1), libqt5sql5t64 (>= 5.0.2), libqt5widgets5t64 (>= 5.15.1), libstdc++6 (>= 11), libswresample4 (>= 7:6.0), libswscale7 (>= 7:6.0), libqt5sql5-sqlite, ffmpeg
+Recommends: qtwayland5, qt5-image-formats-plugins
+Filename: pool/noble/main/n/nevertube/NeverTube-1.0.0-dev.1-Ubuntu-24.04-amd64.deb
+Size: 1163704
+MD5sum: 4b9b36b0e3fb1b2838fcf69c023c5f35
+SHA1: 7d552b18a29a004b0a758400736dcf67f195f0a5
+SHA256: 22718dce5062f0f5fd8688815beba133b6c00db6505bb3ff6bfd8ad523ed107e
+Section: video
+Priority: optional
+Homepage: https://github.com/marlo4220mc/NeverTube
+Description: NeverTube - lightweight YouTube client (Qt5 + libmpv)
+ A lightweight YouTube client built with Qt5 and the mpv playback core.
+ The menu entry and the icons are installed in the hicolor theme, so GNOME,
+ KDE, XFCE, Cinnamon and MATE pick them up without per-DE files; the binary
+ goes to /usr/bin.
+
