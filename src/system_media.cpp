@@ -5,6 +5,9 @@
 #  ifndef NOMINMAX
 #    define NOMINMAX
 #  endif
+#  ifndef _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
+#    define _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
+#  endif
 #endif
 
 #include "system_media.h"
@@ -695,11 +698,11 @@ void smAttachWindow(SystemMediaData *data, quintptr windowHandle)
     try {
         auto interop = winrt::get_activation_factory<SystemMediaTransportControls,
                                                      SmtcInterop>();
-        ::IInspectable *raw = nullptr;
+        void *raw = nullptr;
         winrt::check_hresult(interop->GetForWindow(
             reinterpret_cast<HWND>(windowHandle),
             winrt::guid_of<SystemMediaTransportControls>(),
-            reinterpret_cast<void **>(&raw)));
+            &raw));
         winrt::attach_abi(data->controls, raw);
 
         data->controls.IsEnabled(true);
@@ -732,9 +735,6 @@ void smAttachWindow(SystemMediaData *data, quintptr windowHandle)
                             break;
                         case SystemMediaTransportControlsButton::Pause:
                             owner->pauseRequested();
-                            break;
-                        case SystemMediaTransportControlsButton::PlayPause:
-                            owner->playPauseRequested();
                             break;
                         case SystemMediaTransportControlsButton::Stop:
                             owner->stopRequested();
