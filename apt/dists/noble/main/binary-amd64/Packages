@@ -1,15 +1,15 @@
 Package: nevertube
-Version: 1.0.0
+Version: 1.0.1
 Architecture: amd64
 Maintainer: marlo4220mc <marlo4220mc@users.noreply.github.com>
-Installed-Size: 3568
+Installed-Size: 3616
 Depends: libavcodec60 (>= 7:6.0), libavformat60 (>= 7:6.0), libavutil58 (>= 7:6.0), libc6 (>= 2.34), libgcc-s1 (>= 3.0), libmpv2 (>= 0.29), libopengl0, libpulse0 (>= 0.99.1), libqt5core5t64 (>= 5.15.1), libqt5dbus5t64 (>= 5.0.2), libqt5gui5t64 (>= 5.14.1) | libqt5gui5-gles (>= 5.14.1), libqt5network5t64 (>= 5.15.1), libqt5sql5t64 (>= 5.0.2), libqt5widgets5t64 (>= 5.15.1), libstdc++6 (>= 11), libswresample4 (>= 7:6.0), libswscale7 (>= 7:6.0), libqt5sql5-sqlite, ffmpeg
 Recommends: qtwayland5, qt5-image-formats-plugins
-Filename: pool/noble/main/n/nevertube/NeverTube-1.0.0-Ubuntu-24.04-amd64.deb
-Size: 1197278
-MD5sum: 3680d09d0c24085dd7d4de2aba380f41
-SHA1: 21dca2c7dfe4677d2071f135264fc4025dc50947
-SHA256: 3dae6d6f4231763760c94b28d6b56ae22b84bcc93f150d25991163d6dba3fc16
+Filename: pool/noble/main/n/nevertube/NeverTube-1.0.1-Ubuntu-24.04-amd64.deb
+Size: 1213434
+MD5sum: d8ef8cdad7c4be8be4d96bb7bb70b4d3
+SHA1: 48459e78b2ce731fcaf2f419efa829d266187a97
+SHA256: 039323faa665a8e3279795b041f5dec73f785c5d0070f9c940bded472c2c2be5
 Section: video
 Priority: optional
 Homepage: https://github.com/marlo4220mc/NeverTube
