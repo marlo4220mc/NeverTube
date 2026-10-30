@@ -1771,6 +1771,7 @@ constexpr int kChannelTake = 12;
 // them and returns the Home; the WEB client does serve them.
 const char kChannelShortsParams[] = "EgZzaG9ydHPyBgUKA5oBAA==";
 const char kChannelLiveParams[] = "EgdzdHJlYW1z8gYECgJ6AA==";
+const char kChannelPlaylistsParams[] = "EglwbGF5bGlzdHPyBgoKCEIGCgIQaCIA";
 // Channel "About" tab (browse): description, country, canonical url.
 const char kChannelAboutParams[] = "EgVhYm91dPIGBAoCEgA=";
 // Page size of channel tabs and search: the UI shows "Show more" when the
@@ -1982,24 +1983,27 @@ void Innertube::handleChannel(bool ok, const QString &error,
 // pattern as Home: single-flight, visitorData, and one retry with fresh
 // visitorData if the browse responds empty/error.
 
-void Innertube::fetchSearch(const QString &query, int limit)
+void Innertube::fetchSearch(const QString &query, int limit,
+                            const QString &params)
 {
     const QString q = query.trimmed();
     if (q.isEmpty()) {
         emit searchReady(query, QVector<VideoInfo>(), false);
         return;
     }
-    if (m_searchInFlight && m_searchQuery == q) {
+    if (m_searchInFlight && m_searchQuery == q && m_searchParams == params) {
         NT_DEBUG("E2E innertube search single-flight q=%s\n",
                  q.toUtf8().constData());
         return;
     }
     m_searchInFlight = true;
     m_searchQuery = q;
+    m_searchParams = params;
     m_searchLimit = limit > 0 ? limit : kSearchTake;
     m_searchContinuation.clear();
     m_searchVisitorRetried = false;
-    NT_DEBUG("E2E innertube fetchSearch q=%s\n", q.toUtf8().constData());
+    NT_DEBUG("E2E innertube fetchSearch q=%s params=%s\n",
+             q.toUtf8().constData(), params.toUtf8().constData());
     if (!hasFreshVisitor()) {
         m_searchPending = true;
         fetchVisitorData();
@@ -2095,6 +2099,8 @@ void Innertube::requestSearch(bool more)
     } else {
         body = {{QStringLiteral("context"), context},
                 {QStringLiteral("query"), query}};
+        if (!m_searchParams.isEmpty())
+            body.insert(QStringLiteral("params"), m_searchParams);
     }
     const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
     m_http->post(kSearchEndpoint, json, pc.ua, pc.clientId, pc.version,
@@ -2291,6 +2297,8 @@ void Innertube::requestChannelTab(const QString &channelId, const QString &tab,
                                  ? kChannelShortsParams
                              : tab == QLatin1String("live")
                                  ? kChannelLiveParams
+                             : tab == QLatin1String("playlists")
+                                 ? kChannelPlaylistsParams
                                  : kChannelVideosParams;
         body.insert(QStringLiteral("params"), QString::fromLatin1(params));
     }
@@ -2426,6 +2434,7 @@ void Innertube::fetchPlaylist(const QString &playlistId, int limit)
     m_plInFlight = true;
     m_plId = playlistId;
     m_plVisitorRetried = false;
+    m_plWebRetried = false;
     NT_DEBUG("E2E innertube fetchPlaylist id=%s\n",
              playlistId.toUtf8().constData());
     if (!hasFreshVisitor()) {
@@ -2433,10 +2442,13 @@ void Innertube::fetchPlaylist(const QString &playlistId, int limit)
         fetchVisitorData();
         return;
     }
-    requestPlaylist();
+    // Playlists and mixes ALWAYS use the WEB client: VISIONOS returns 500
+    // Internal Server Error for many playlists and empty lists for mixes (RD…),
+    // whereas WEB serves both the classic and modern layouts cleanly.
+    requestPlaylist(true);
 }
 
-void Innertube::requestPlaylist()
+void Innertube::requestPlaylist(bool web)
 {
     const QString playlistId = m_plId;
     m_http->setResult([this, playlistId](int status, const QByteArray &body) {
@@ -2450,13 +2462,20 @@ void Innertube::requestPlaylist()
     m_http->setTimeoutMs(kPlayerTimeoutMs);
     m_http->setVisitorId(m_visitorData);
 
-    const PlayerClient &pc = kPlayerClients[0]; // VISIONOS
-    const QJsonObject client = clientContext(pc, m_visitorData, m_hl);
     const QJsonObject body{
-        {QStringLiteral("context"), QJsonObject{{QStringLiteral("client"), client}}},
+        {QStringLiteral("context"),
+         QJsonObject{{QStringLiteral("client"),
+                      web ? webClientContext(m_visitorData, m_hl)
+                          : clientContext(kPlayerClients[0], m_visitorData, m_hl)}}},
         {QStringLiteral("browseId"), QStringLiteral("VL") + playlistId},
     };
     const QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    if (web) {
+        m_http->post(kBrowseEndpoint, json, kChromeUA, kWebClientId,
+                     kWebClientVersion, nullptr, nullptr, nullptr);
+        return;
+    }
+    const PlayerClient &pc = kPlayerClients[0]; // VISIONOS
     m_http->post(kBrowseEndpoint, json, pc.ua, pc.clientId, pc.version,
                  nullptr, nullptr, nullptr);
 }
@@ -2482,6 +2501,17 @@ void Innertube::handlePlaylist(const QString &playlistId, bool ok,
     if (info.title.isEmpty() && videos.isEmpty()
         && retryBrowseWithFreshVisitor(&m_plVisitorRetried, &m_plPending))
         return;
+    // The VISIONOS answer for a MIX (RD…) or an auto-generated list can come
+    // back WITHOUT the video list: the same browse is asked once more with the
+    // WEB client, which serves it with the modern lockups.
+    if (ok && videos.isEmpty() && !m_plWebRetried) {
+        m_plWebRetried = true;
+        NT_DEBUG("E2E innertube playlist sin videos: reintento WEB id=%s\n",
+                 playlistId.toUtf8().constData());
+        m_plInFlight = true;
+        requestPlaylist(true);
+        return;
+    }
     NT_DEBUG("E2E innertube playlist ok title=%s videos=%d\n",
              info.title.toUtf8().constData(), videos.size());
     emit playlistReady(info, videos);
@@ -2842,6 +2872,69 @@ VideoInfo Innertube::videoFromHomeRenderer(const QJsonObject &item) const
 
 // Walks the tree collecting compactVideoRenderer/videoRenderer without
 // duplicating ids, respecting the response order and the limit.
+// Playlist card of the classic layouts: playlistRenderer (Web search and
+// channel), compactPlaylistRenderer (VISIONOS search and /next) and
+// gridPlaylistRenderer (a channel's grid). There is NO video behind the card:
+// its `id` is the PLAYLIST, and its videos are asked for only when it is
+// opened (Yt::playlistVideos -> playlistReady).
+VideoInfo videoFromPlaylistRenderer(const QJsonObject &item)
+{
+    const QJsonObject pr =
+        item.value(QStringLiteral("playlistRenderer")).toObject();
+    const QJsonObject cp =
+        item.value(QStringLiteral("compactPlaylistRenderer")).toObject();
+    const QJsonObject gp =
+        item.value(QStringLiteral("gridPlaylistRenderer")).toObject();
+    const QJsonObject *r = !pr.isEmpty() ? &pr : (!cp.isEmpty() ? &cp : &gp);
+    VideoInfo v;
+    if (r->isEmpty())
+        return v;
+    v.playlistId = r->value(QStringLiteral("playlistId")).toString();
+    if (v.playlistId.isEmpty())
+        v.playlistId = r->value(QStringLiteral("contentId")).toString();
+    if (v.playlistId.isEmpty())
+        return VideoInfo{};
+    // The card IS the playlist: the two fields carry it and isPlaylist() is
+    // true (the UI opens it instead of trying to play it as a video).
+    v.id = v.playlistId;
+    v.title = homeTextOf(r->value(QStringLiteral("title")));
+    v.channel = homeTextOf(r->value(QStringLiteral("longBylineText")));
+    if (v.channel.isEmpty())
+        v.channel = homeTextOf(r->value(QStringLiteral("shortBylineText")));
+    v.channelId =
+        channelIdFromByline(r->value(QStringLiteral("longBylineText")).toObject());
+    if (v.channelId.isEmpty()) {
+        v.channelId = channelIdFromByline(
+            r->value(QStringLiteral("shortBylineText")).toObject());
+    }
+    // The cover: `thumbnail.thumbnails` (VISIONOS/grid) or `thumbnails[].thumbnails`
+    // (a classic playlistRenderer, which nests one array per size).
+    QJsonArray thumbs =
+        r->value(QStringLiteral("thumbnail")).toObject()
+            .value(QStringLiteral("thumbnails")).toArray();
+    if (thumbs.isEmpty()) {
+        const QJsonArray outer =
+            r->value(QStringLiteral("thumbnails")).toArray();
+        if (!outer.isEmpty()) {
+            thumbs = outer.last().toObject()
+                         .value(QStringLiteral("thumbnails")).toArray();
+        }
+    }
+    if (!thumbs.isEmpty())
+        v.thumbnailUrl = thumbs.last().toObject()
+                             .value(QStringLiteral("url")).toString();
+    setThumbSize(v, thumbs);
+    v.playlistVideos = static_cast<int>(countFromText(
+        homeTextOf(r->value(QStringLiteral("videoCountText")))));
+    if (v.playlistVideos <= 0) {
+        v.playlistVideos = static_cast<int>(countFromText(
+            homeTextOf(r->value(QStringLiteral("videoCountShortText")))));
+    }
+    return v;
+}
+
+// Walks the tree collecting compactVideoRenderer/videoRenderer without
+// duplicating ids, respecting the response order and the limit.
 QVector<VideoInfo> Innertube::collectVideoRenderers(const QJsonObject &root,
                                                     int maxCount) const
 {
@@ -2859,20 +2952,29 @@ QVector<VideoInfo> Innertube::collectVideoRenderers(const QJsonObject &root,
             if (!val.isObject())
                 return;
             const QJsonObject o = val.toObject();
+            VideoInfo v;
             if (o.contains(QStringLiteral("compactVideoRenderer"))
                 || o.contains(QStringLiteral("videoRenderer"))) {
-                const VideoInfo v = videoFromHomeRenderer(o);
-                if (!v.id.isEmpty()) {
-                    bool seen = false;
-                    for (const VideoInfo &d : std::as_const(out))
-                        if (d.id == v.id) { seen = true; break; }
-                    if (!seen)
-                        out.append(v);
-                }
+                v = videoFromHomeRenderer(o);
+            } else if (o.contains(QStringLiteral("playlistRenderer"))
+                       || o.contains(QStringLiteral("compactPlaylistRenderer"))
+                       || o.contains(QStringLiteral("gridPlaylistRenderer"))) {
+                // A playlist CARD of the search/channel: it is a row of the
+                // list too (YouTube shows them mixed with the videos), only it
+                // opens its videos when it is clicked.
+                v = videoFromPlaylistRenderer(o);
+            } else {
+                for (auto it = o.begin(); it != o.end(); ++it)
+                    collect(it.value());
                 return;
             }
-            for (auto it = o.begin(); it != o.end(); ++it)
-                collect(it.value());
+            if (!v.id.isEmpty()) {
+                bool seen = false;
+                for (const VideoInfo &d : std::as_const(out))
+                    if (d.id == v.id) { seen = true; break; }
+                if (!seen)
+                    out.append(v);
+            }
         };
     collect(QJsonValue(root));
     return out;
@@ -3013,10 +3115,25 @@ namespace {
 
 QJsonArray webLockupSources(const QJsonObject &contentImage)
 {
-    return contentImage
+    const QJsonArray direct = contentImage
         .value(QStringLiteral("thumbnailViewModel"))
         .toObject().value(QStringLiteral("image"))
         .toObject().value(QStringLiteral("sources"))
+        .toArray();
+    if (!direct.isEmpty())
+        return direct;
+    // A PLAYLIST lockup (a mix of "A continuación", a Search/Channel playlist
+    // card) has no thumbnailViewModel: its stacked cover lives in
+    // collectionThumbnailViewModel → primaryThumbnail → thumbnailViewModel.
+    // Without this branch the row came out WITHOUT a thumbnail (`contentId` is
+    // the playlist id, 18+ characters, so the video fallback does not apply
+    // either).
+    return contentImage
+        .value(QStringLiteral("collectionThumbnailViewModel")).toObject()
+        .value(QStringLiteral("primaryThumbnail")).toObject()
+        .value(QStringLiteral("thumbnailViewModel")).toObject()
+        .value(QStringLiteral("image")).toObject()
+        .value(QStringLiteral("sources"))
         .toArray();
 }
 
@@ -3033,14 +3150,18 @@ QString webLockupThumb(const QJsonObject &contentImage)
 // VODs and the live one ("EN DIRECTO", badgeStyle THUMBNAIL_OVERLAY_
 // BADGE_STYLE_LIVE) for live streams.
 int webLockupMeta(const QJsonObject &contentImage, int *secondsOut,
-                  bool *isLiveOut)
+                  bool *isLiveOut, int *playlistVideosOut = nullptr)
 {
     int seconds = 0;
-    const QJsonArray overlays = contentImage
-                                    .value(QStringLiteral("thumbnailViewModel"))
-                                    .toObject().value(QStringLiteral("overlays"))
-                                    .toArray();
+    QJsonObject tvm = contentImage.value(QStringLiteral("thumbnailViewModel")).toObject();
+    if (tvm.isEmpty()) {
+        tvm = contentImage.value(QStringLiteral("collectionThumbnailViewModel")).toObject()
+                  .value(QStringLiteral("primaryThumbnail")).toObject()
+                  .value(QStringLiteral("thumbnailViewModel")).toObject();
+    }
+    const QJsonArray overlays = tvm.value(QStringLiteral("overlays")).toArray();
     for (const QJsonValue &ov : overlays) {
+        // VOD/Live bottom overlay
         const QJsonObject bvm = ov.toObject()
             .value(QStringLiteral("thumbnailBottomOverlayViewModel")).toObject();
         const QJsonArray badges = bvm.value(QStringLiteral("badges")).toArray();
@@ -3058,6 +3179,20 @@ int webLockupMeta(const QJsonObject &contentImage, int *secondsOut,
             else if (parts.size() == 3)
                 seconds = parts.at(0).toInt() * 3600 + parts.at(1).toInt() * 60
                           + parts.at(2).toInt();
+        }
+        // Playlist overlay badges (e.g. "9 videos" or icon PLAYLISTS)
+        const QJsonObject tobm = ov.toObject()
+            .value(QStringLiteral("thumbnailOverlayBadgeViewModel")).toObject();
+        const QJsonArray tBadges = tobm.value(QStringLiteral("thumbnailBadges")).toArray();
+        for (const QJsonValue &b : tBadges) {
+            const QJsonObject tbvm = b.toObject()
+                .value(QStringLiteral("thumbnailBadgeViewModel")).toObject();
+            const QString txt = tbvm.value(QStringLiteral("text")).toString();
+            if (playlistVideosOut && !txt.isEmpty()) {
+                const int n = static_cast<int>(countFromText(txt));
+                if (n > 0)
+                    *playlistVideosOut = n;
+            }
         }
     }
     if (secondsOut)
@@ -3093,6 +3228,20 @@ VideoInfo videoFromWebLockup(const QJsonObject &lv)
 {
     VideoInfo v;
     v.id = lv.value(QStringLiteral("contentId")).toString();
+    const QJsonObject contentImage = lv.value(QStringLiteral("contentImage")).toObject();
+    // A PLAYLIST lockup (a mix of "A continuación" or a playlist card): its
+    // `contentId` is the PLAYLIST id (18+ characters), it has a stacked cover
+    // in collectionThumbnailViewModel and its row says "N vídeos". It used to
+    // be collected as a video: the row came out without a thumbnail (the
+    // 11-character fallback does not apply) and clicking it tried to play an id
+    // that is not a video.
+    const bool isPlaylistLockup =
+        lv.value(QStringLiteral("contentType")).toString().contains(
+            QStringLiteral("PLAYLIST"))
+        || !contentImage.value(QStringLiteral("collectionThumbnailViewModel"))
+                .toObject().isEmpty();
+    if (isPlaylistLockup)
+        v.playlistId = v.id;
     const QJsonObject md = lv.value(QStringLiteral("metadata")).toObject()
                                .value(QStringLiteral("lockupMetadataViewModel"))
                                .toObject();
@@ -3120,6 +3269,10 @@ VideoInfo videoFromWebLockup(const QJsonObject &lv)
                 v.viewCount = countFromText(t);
             else if (looksLikeCountText(t))
                 v.viewCount = countFromText(t);
+            else if (isPlaylistLockup
+                     && sinAcentos(t).toLower().contains(
+                            QStringLiteral("video")))
+                v.playlistVideos = static_cast<int>(countFromText(t));
             else if (v.channel.isEmpty())
                 v.channel = t; // the first datum that is neither views nor date
         }
@@ -3137,10 +3290,10 @@ VideoInfo videoFromWebLockup(const QJsonObject &lv)
             .value(QStringLiteral("browseEndpoint")).toObject();
     if (v.channelId.isEmpty())
         v.channelId = channelEndpoint.value(QStringLiteral("browseId")).toString();
-    const QJsonObject contentImage = lv.value(QStringLiteral("contentImage")).toObject();
-    v.thumbnailUrl = webLockupThumb(contentImage);
-    setThumbSize(v, webLockupSources(contentImage));
-    v.durationSeconds = webLockupMeta(contentImage, nullptr, &v.isLive);
+    const QJsonObject contentImgObj = lv.value(QStringLiteral("contentImage")).toObject();
+    v.thumbnailUrl = webLockupThumb(contentImgObj);
+    setThumbSize(v, webLockupSources(contentImgObj));
+    v.durationSeconds = webLockupMeta(contentImgObj, nullptr, &v.isLive, &v.playlistVideos);
     if (v.thumbnailUrl.isEmpty())
         v.thumbnailUrl = fallbackThumbnailUrl(v.id);
     return v;
@@ -3182,13 +3335,16 @@ QString Innertube::firstContinuationToken(const QJsonObject &root)
     return token;
 }
 
-// /search page: compactVideoRenderer of the sectionListRenderer.
+// /search page: searches can bring classic renderers (VISIONOS) or modern lockups (WEB).
 QVector<VideoInfo> Innertube::parseSearchBrowse(const QJsonObject &root,
                                                 int maxCount,
                                                 QString *continuation) const
 {
     if (continuation)
         *continuation = firstContinuationToken(root);
+    QVector<VideoInfo> out = collectWebLockups(root, maxCount);
+    if (!out.isEmpty())
+        return out;
     return collectVideoRenderers(root, maxCount);
 }
 
@@ -3220,9 +3376,11 @@ QVector<VideoInfo> Innertube::collectWebLockups(const QJsonObject &root,
             // A Short outside its shelf: it is left out (the entityId says
             // "shorts-shelf-item-<id>").
             return;
-        } else if (o.contains(QStringLiteral("lockupViewModel")))
+        } else if (o.contains(QStringLiteral("lockupViewModel"))) {
             v = videoFromWebLockup(
                 o.value(QStringLiteral("lockupViewModel")).toObject());
+            // A playlist card: it is allowed in channel tabs (Playlists tab) and search.
+        }
         if (!v.id.isEmpty()) {
             bool seen = false;
             for (const VideoInfo &d : std::as_const(out))
@@ -3361,6 +3519,52 @@ void Innertube::parsePlaylistBrowse(const QJsonObject &root, PlaylistInfo *info,
         if (!val.isObject())
             return;
         const QJsonObject o = val.toObject();
+        // A mix served by the WEB client comes as the modern lockup layout.
+        if (o.contains(QStringLiteral("lockupViewModel"))) {
+            const VideoInfo v = videoFromWebLockup(
+                o.value(QStringLiteral("lockupViewModel")).toObject());
+            if (!v.id.isEmpty() && !v.isPlaylist())
+                videos->append(v);
+            return;
+        }
+        // The same list as the queue panel of the player (/next): it is the
+        // only layout a MIX brings when it is served as a radio.
+        if (o.contains(QStringLiteral("playlistPanelVideoRenderer"))) {
+            const QJsonObject pv = o.value(
+                QStringLiteral("playlistPanelVideoRenderer")).toObject();
+            VideoInfo v;
+            v.id = pv.value(QStringLiteral("videoId")).toString();
+            v.title = homeTextOf(pv.value(QStringLiteral("title")));
+            v.channel = homeTextOf(pv.value(QStringLiteral("longBylineText")));
+            if (v.channel.isEmpty())
+                v.channel = homeTextOf(pv.value(QStringLiteral("shortBylineText")));
+            v.channelId = channelIdFromByline(
+                pv.value(QStringLiteral("longBylineText")).toObject());
+            if (v.channelId.isEmpty()) {
+                v.channelId = channelIdFromByline(
+                    pv.value(QStringLiteral("shortBylineText")).toObject());
+            }
+            const QJsonArray thumbs = pv.value(QStringLiteral("thumbnail"))
+                                          .toObject()
+                                          .value(QStringLiteral("thumbnails"))
+                                          .toArray();
+            if (!thumbs.isEmpty())
+                v.thumbnailUrl = thumbs.last().toObject()
+                                     .value(QStringLiteral("url")).toString();
+            setThumbSize(v, thumbs);
+            const QString len = homeTextOf(pv.value(QStringLiteral("lengthText")));
+            const QStringList parts = len.split(QLatin1Char(':'));
+            if (parts.size() == 2)
+                v.durationSeconds = parts.at(0).toInt() * 60 + parts.at(1).toInt();
+            else if (parts.size() == 3)
+                v.durationSeconds = parts.at(0).toInt() * 3600
+                                    + parts.at(1).toInt() * 60 + parts.at(2).toInt();
+            if (v.thumbnailUrl.isEmpty())
+                v.thumbnailUrl = fallbackThumbnailUrl(v.id);
+            if (!v.id.isEmpty())
+                videos->append(v);
+            return;
+        }
         if (o.contains(QStringLiteral("playlistVideoRenderer"))) {
             const QJsonObject pv =
                 o.value(QStringLiteral("playlistVideoRenderer")).toObject();
@@ -3612,14 +3816,16 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
         if (r->isEmpty())
             return;
         VideoInfo v;
-        v.id = r->value(QStringLiteral("navigationEndpoint"))
-                   .toObject()
-                   .value(QStringLiteral("watchEndpoint"))
-                   .toObject()
-                   .value(QStringLiteral("videoId"))
-                   .toString();
+        const QJsonObject watchEndpoint =
+            r->value(QStringLiteral("navigationEndpoint")).toObject()
+                .value(QStringLiteral("watchEndpoint")).toObject();
+        v.id = watchEndpoint.value(QStringLiteral("videoId")).toString();
         if (v.id.isEmpty())
             return;
+        // A mix entry brings the video AND the mix it belongs to: clicking it
+        // loads the whole mix into "A continuación" (YouTube behavior) and the
+        // automatic advance skips it.
+        v.playlistId = watchEndpoint.value(QStringLiteral("playlistId")).toString();
         v.title = homeTextOf(r->value(QStringLiteral("title")));
         const QJsonArray ownerRuns =
             r->value(QStringLiteral("ownerText")).toObject()
@@ -3675,6 +3881,13 @@ QVector<VideoInfo> Innertube::parseRelated(const QJsonObject &root) const
                 if (o.contains(QStringLiteral("videoRenderer"))
                     || o.contains(QStringLiteral("compactVideoRenderer"))) {
                     pushRenderer(o);
+                } else if (o.contains(QStringLiteral("compactPlaylistRenderer"))
+                           || o.contains(QStringLiteral("playlistRenderer"))) {
+                    // A mix of the recommendations: a playlist CARD (its id is
+                    // the playlist, there is no video behind it).
+                    const VideoInfo p = videoFromPlaylistRenderer(o);
+                    if (!p.id.isEmpty())
+                        out.append(p);
                 } else if (o.contains(QStringLiteral("richItemRenderer"))) {
                     const QJsonValue content =
                         o.value(QStringLiteral("richItemRenderer"))
@@ -5526,9 +5739,9 @@ bool innertubeBrowseSelfTest()
         ok = ok && good;
     }
 
-    // 3) Channel tabs: videos by VISIONOS, shorts/live by WEB.
+    // 3) Channel tabs: videos by VISIONOS, shorts/live/playlists by WEB.
     const QStringList tabs{QStringLiteral("videos"), QStringLiteral("shorts"),
-                           QStringLiteral("live")};
+                           QStringLiteral("live"), QStringLiteral("playlists")};
     for (const QString &tab : tabs) {
         bool done = false;
         bool more = false;

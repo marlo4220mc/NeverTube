@@ -28,6 +28,7 @@
 #include <QTimer>
 #include <QToolTip>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 
 #include <functional>
 
@@ -84,8 +85,8 @@ constexpr int kMaxPlayerHeight = 560;
 // The progress slider is the only flexible one (stretch) and takes the rest; the
 // thresholds leave slack so as not to trim buttons (the setFixedWidth of the
 // volume slider do not yield and the trim would fall on the icons and the clock).
-constexpr int kCtrlWithVolMinW = 760;
-constexpr int kCtrlWithTimeMinW = 640;
+constexpr int kCtrlWithVolMinW = 540;
+constexpr int kCtrlWithTimeMinW = 420;
 
 // Video area inside the overlay. gl1 (the layout that carries the box) used
 // contentsMargins 0, so the box took the whole width with no separator. This
@@ -339,38 +340,141 @@ private:
         }
     }
 
+protected:
     bool m_handleHot = false;
 };
 
 // Seek slider: a click anywhere on the track seeks there and
 // dragging does not fight the position updates while it is held
 // down. It emits the sought value (seek trigger) on every change.
+// FreeTube / modern player style: full-width bar, loaded demuxer buffer,
+// hover pre-seek glow and floating timestamp bubble.
 class SeekSlider : public OverlaySlider
 {
 public:
     explicit SeekSlider(Qt::Orientation orientation, QWidget *parent = nullptr)
         : OverlaySlider(orientation, parent)
     {
+        setFixedHeight(16);
         setTracking(true);
     }
 
     bool isSeeking() const { return m_dragging; }
 
-    // Live ("EN VIVO"): the bar is informative (playhead at the edge, the
-    // live's "now"); a click must not seek to a meaningless value.
-    void setLive(bool live) { m_live = live; }
+    void setLive(bool live)
+    {
+        m_live = live;
+        if (live && m_timeBubble)
+            m_timeBubble->hide();
+    }
+
+    void setBufferedSeconds(double seconds)
+    {
+        if (qAbs(m_bufferedSeconds - seconds) > 0.5) {
+            m_bufferedSeconds = qMax(0.0, seconds);
+            update();
+        }
+    }
+
+    void setTimeBubbleHost(QWidget *host)
+    {
+        m_bubbleHost = host;
+    }
 
 protected:
     static int valueFromPos(const QSlider *slider, int x)
     {
-        // Same mapping as the painting (circle center between radius and
-        // width-radius) so the value falls right under the cursor.
         const qreal w = qMax(qreal(1.0), qreal(slider->width()));
         const qreal r = qBound(qreal(0.0),
                                (qreal(x) - kRadius) / qMax(qreal(1.0), w - 2.0 * kRadius),
                                qreal(1.0));
         return slider->minimum()
                + qRound(qreal(slider->maximum() - slider->minimum()) * r);
+    }
+
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setPen(Qt::NoPen);
+
+        const qreal w = qreal(width());
+        const qreal cy = qreal(height()) / 2.0;
+
+        const bool active = (m_hovering || m_dragging);
+        const qreal trackH = active ? 6.0 : 4.5;
+        const qreal handleR = active ? 6.0 : 5.0;
+
+        // Base background track (#FFFFFF with alpha 50)
+        const QRectF track(1.0, cy - trackH / 2.0, w - 2.0, trackH);
+        p.setBrush(QColor(255, 255, 255, 50));
+        p.drawRoundedRect(track, 2.0, 2.0);
+
+        // Buffer / demuxer cache bar (YouTube/FreeTube loaded progress)
+        const qreal span = maximum() - minimum();
+        if (!m_live && m_bufferedSeconds > 0.0 && span > 0.0) {
+            const qreal bufRatio = qBound(0.0, (m_bufferedSeconds - minimum()) / span, 1.0);
+            const qreal bufEnd = track.left() + bufRatio * track.width();
+            if (bufEnd > track.left() + 0.5) {
+                p.setBrush(QColor(255, 255, 255, 90)); // buffer lighter gray
+                p.drawRoundedRect(QRectF(track.left(), cy - trackH / 2.0,
+                                         bufEnd - track.left(), trackH),
+                                  2.0, 2.0);
+            }
+        }
+
+        // Hover position preview
+        if (m_hovering && !m_dragging && !m_live && span > 0.0) {
+            const int hoverVal = valueFromPos(this, m_hoverX);
+            const qreal hoverRatio = qBound(0.0, qreal(hoverVal - minimum()) / span, 1.0);
+            const qreal hoverEnd = track.left() + hoverRatio * track.width();
+            if (hoverEnd > track.left() + 0.5) {
+                p.setBrush(QColor(255, 255, 255, 45));
+                p.drawRoundedRect(QRectF(track.left(), cy - trackH / 2.0,
+                                         hoverEnd - track.left(), trackH),
+                                  2.0, 2.0);
+            }
+        }
+
+        // Played fill
+        const qreal cx = handleCenterX(width(), value(), minimum(), maximum());
+        const qreal fillEnd = cx - handleR;
+        if (fillEnd > track.left() + 0.5) {
+            p.setBrush(isEnabled() ? nt::kAccent : nt::kSelection);
+            p.drawRoundedRect(QRectF(track.left(), cy - trackH / 2.0,
+                                     fillEnd - track.left(), trackH),
+                              2.0, 2.0);
+        }
+
+        // Handle circle
+        p.setBrush(!isEnabled() ? nt::kDisabled
+                  : (m_handleHot || m_dragging) ? nt::kAccent
+                                                : QColor(0xFF, 0xFF, 0xFF));
+        p.drawEllipse(QPointF(cx, cy), handleR, handleR);
+    }
+
+    void enterEvent(QEvent *event) override
+    {
+        m_hovering = true;
+        update();
+        OverlaySlider::enterEvent(event);
+    }
+
+    void leaveEvent(QEvent *event) override
+    {
+        m_hovering = false;
+        if (m_timeBubble)
+            m_timeBubble->hide();
+        update();
+        OverlaySlider::leaveEvent(event);
+    }
+
+    void hideEvent(QHideEvent *event) override
+    {
+        m_hovering = false;
+        if (m_timeBubble)
+            m_timeBubble->hide();
+        OverlaySlider::hideEvent(event);
     }
 
     void mousePressEvent(QMouseEvent *event) override
@@ -381,9 +485,12 @@ protected:
         }
         if (event->button() == Qt::LeftButton) {
             m_dragging = true;
+            m_hoverX = event->pos().x();
+            updateTimeBubble(event->pos());
             const int v = valueFromPos(this, event->pos().x());
             setValue(v);
             emit sliderMoved(v);
+            update();
             event->accept();
             return;
         }
@@ -392,6 +499,10 @@ protected:
 
     void mouseMoveEvent(QMouseEvent *event) override
     {
+        m_hovering = true;
+        m_hoverX = event->pos().x();
+        updateTimeBubble(event->pos());
+        update();
         if (m_dragging) {
             const int v = valueFromPos(this, event->pos().x());
             setValue(v);
@@ -399,7 +510,6 @@ protected:
             event->accept();
             return;
         }
-        // Falls through to the base so the circle hover keeps working.
         OverlaySlider::mouseMoveEvent(event);
     }
 
@@ -410,15 +520,60 @@ protected:
             const int v = valueFromPos(this, event->pos().x());
             setValue(v);
             emit sliderMoved(v);
+            update();
             event->accept();
             return;
         }
         QSlider::mouseReleaseEvent(event);
     }
 
+    void wheelEvent(QWheelEvent *event) override
+    {
+        // The seek slider must NOT respond to the mouse wheel (only the volume
+        // bar should respond to the wheel).
+        event->ignore();
+    }
+
 private:
+    void updateTimeBubble(const QPoint &pos)
+    {
+        if (m_live || !m_bubbleHost || maximum() <= minimum()) {
+            if (m_timeBubble)
+                m_timeBubble->hide();
+            return;
+        }
+        if (!m_timeBubble) {
+            m_timeBubble = new QLabel(m_bubbleHost);
+            m_timeBubble->setObjectName(QStringLiteral("seekBubble"));
+            m_timeBubble->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        }
+        const int val = valueFromPos(this, pos.x());
+        m_timeBubble->setText(fmtTime(val));
+        m_timeBubble->adjustSize();
+
+        const QPoint globalPos = mapToGlobal(pos);
+        const QPoint hostPos = m_bubbleHost->mapFromGlobal(globalPos);
+
+        const int bw = m_timeBubble->width();
+        const int bh = m_timeBubble->height();
+        int bx = hostPos.x() - bw / 2;
+        int by = hostPos.y() - bh - 10;
+
+        bx = qBound(6, bx, m_bubbleHost->width() - bw - 6);
+        by = qMax(4, by);
+
+        m_timeBubble->move(bx, by);
+        m_timeBubble->show();
+        m_timeBubble->raise();
+    }
+
     bool m_dragging = false;
     bool m_live = false;
+    bool m_hovering = false;
+    int m_hoverX = 0;
+    double m_bufferedSeconds = 0.0;
+    QWidget *m_bubbleHost = nullptr;
+    QLabel *m_timeBubble = nullptr;
 };
 
 namespace {
@@ -513,46 +668,40 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     auto *gl = new OverlayHost;
     gl->setStyleSheet(QStringLiteral("background: transparent;"));
     auto *gl1 = new QVBoxLayout(gl);
-    // 12 px separator: used to be 0,0,0,0. m_ctrlBar receives no geometry (only
-    // gl1 places it), so the box touched the three edges of the video and its
-    // border-radius and border delimited nothing: they looked like ornaments of a
-    // band stuck to the edge. With the separator, the box floats and its shape says
-    // what it says. Top 0 on purpose: the box rests on the bottom edge.
-    gl1->setContentsMargins(12, 0, 12, 12);
+    gl1->setContentsMargins(0, 0, 0, 0);
     gl1->setSpacing(0);
     gl1->addStretch(1);
 
     m_ctrlBar = new QWidget(gl);
     m_ctrlBar->setObjectName(QStringLiteral("playerOverlay"));
     m_ctrlBar->setAttribute(Qt::WA_StyledBackground, true);
-    // The style (translucent background, two-tone border, radius 12) lives in the
-    // global QSS: it used to be an inline setStyleSheet with #2A2A2A, which also
-    // contradicted kBorder (#262626), and that is why this surface was the only one that
-    // did not cover an accent change.
     auto *barLay = new QVBoxLayout(m_ctrlBar);
-    // Before (10, 4, 10, 6) with spacing 2: 4 px of air above the track and 2
-    // between rows, versus 10 px on the sides. With the box floating that imbalance
-    // shows. 8/8/6 is what the rest of the app uses. The box grows ~10 px.
-    barLay->setContentsMargins(12, 8, 12, 8);
-    barLay->setSpacing(6);
+    barLay->setContentsMargins(14, 0, 14, 8);
+    barLay->setSpacing(4);
 
-    // SINGLE row of controls (YouTube style): the TRANSPORT starts the row
-    // with play/pause (like YouTube), then previous and next, and
-    // finally shuffle and repeat; elapsed time + progress slider +
-    // duration in the center, and volume/actions on the right. All the
-    // controls are #iconBtn (transparent, only fill on hover): no
-    // frames, no button boxes, no circular play. The icons are those of
-    // nt::playerIcon (Material Symbols drawn with QPainter, vector).
+    // Row 1: Full-width seek slider (FreeTube / modern player style)
+    m_ovSeek = new SeekSlider(Qt::Horizontal, m_ctrlBar);
+    m_ovSeek->setObjectName(QStringLiteral("ovSeek"));
+    m_ovSeek->setCursor(Qt::PointingHandCursor);
+    m_ovSeek->setTimeBubbleHost(gl);
+    connect(m_ovSeek, &QSlider::sliderMoved, this,
+            [this](int value) { m_player->seek(value); });
+    barLay->addWidget(m_ovSeek);
+
+    // Row 2: Controls row (left controls, stretch, right controls)
     auto *btnRow = new QHBoxLayout;
-    btnRow->setSpacing(6);
+    btnRow->setContentsMargins(0, 0, 0, 0);
+    btnRow->setSpacing(4);
 
     auto makeIconBtn = [](QWidget *parent) {
         auto *b = new QPushButton(parent);
         b->setObjectName(QStringLiteral("iconBtn"));
         b->setCursor(Qt::PointingHandCursor);
+        b->setFixedSize(36, 36);
         return b;
     };
 
+    // Left controls: Play, Prev, Next, Volume, Time
     m_ovPlayBtn = makeIconBtn(m_ctrlBar);
     nt::bindTooltip(m_ovPlayBtn, "player.playPause");
     connect(m_ovPlayBtn, &QPushButton::clicked, this,
@@ -561,8 +710,6 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
 
     m_ovPrevBtn = makeIconBtn(m_ctrlBar);
     nt::bindTooltip(m_ovPrevBtn, "player.prev");
-    // YouTube's behavior lives in PlayerController::previous() (and the
-    // button's enabled state in previousAvailable()): the logic is not the UI's.
     connect(m_ovPrevBtn, &QPushButton::clicked, this, [this]() {
         m_player->previous();
     });
@@ -576,6 +723,49 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     });
     btnRow->addWidget(m_ovNextBtn);
 
+    m_ovMuteBtn = makeIconBtn(m_ctrlBar);
+    nt::bindTooltip(m_ovMuteBtn, "player.mute");
+    connect(m_ovMuteBtn, &QPushButton::clicked, this,
+            &WatchPage::onToggleMute);
+    btnRow->addWidget(m_ovMuteBtn);
+
+    m_ovVolume = new OverlaySlider(Qt::Horizontal, m_ctrlBar);
+    m_ovVolume->setObjectName(QStringLiteral("ovVolume"));
+    m_ovVolume->setRange(0, m_player->volumeMax());
+    m_ovVolume->setValue(int(m_player->volume()));
+    m_ovVolume->setSingleStep(5);
+    m_ovVolume->setFixedSize(65, 36);
+    m_ovVolume->setCursor(Qt::PointingHandCursor);
+    connect(m_ovVolume, &QSlider::valueChanged, this, [this](int v) {
+        m_player->setVolume(v);
+        if (m_settings && v <= 100)
+            m_settings->set(QStringLiteral("volume"), QString::number(v));
+    });
+    btnRow->addWidget(m_ovVolume);
+
+    // Time text: 0:00 / 0:00
+    auto *timeLay = new QHBoxLayout;
+    timeLay->setContentsMargins(6, 0, 6, 0);
+    timeLay->setSpacing(3);
+
+    m_ovPos = new QLabel(QStringLiteral("0:00"), m_ctrlBar);
+    m_ovPos->setObjectName(QStringLiteral("ovPos"));
+    timeLay->addWidget(m_ovPos);
+
+    m_ovTimeSep = new QLabel(QStringLiteral("/"), m_ctrlBar);
+    m_ovTimeSep->setObjectName(QStringLiteral("ovTimeSep"));
+    timeLay->addWidget(m_ovTimeSep);
+
+    m_ovDur = new QLabel(QStringLiteral("0:00"), m_ctrlBar);
+    m_ovDur->setObjectName(QStringLiteral("ovDur"));
+    timeLay->addWidget(m_ovDur);
+
+    btnRow->addLayout(timeLay);
+
+    // Separator / flex stretch between left and right controls
+    btnRow->addStretch(1);
+
+    // Right controls: Shuffle, Repeat, Captions, Add to Playlist, Quality, Fullscreen
     m_ovShuffleBtn = makeIconBtn(m_ctrlBar);
     nt::bindTooltip(m_ovShuffleBtn, "player.shuffle");
     connect(m_ovShuffleBtn, &QPushButton::clicked, this, [this]() {
@@ -591,57 +781,6 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         updateOverlayIcons();
     });
     btnRow->addWidget(m_ovRepeatBtn);
-
-    // Elapsed time, progress and duration in the center: the slider takes
-    // all the flexible gap (stretch) between the two labels.
-    m_ovPos = new QLabel(QStringLiteral("0:00"), m_ctrlBar);
-    m_ovPos->setObjectName(QStringLiteral("ovPos"));
-    btnRow->addWidget(m_ovPos);
-
-    m_ovSeek = new SeekSlider(Qt::Horizontal, m_ctrlBar);
-    m_ovSeek->setObjectName(QStringLiteral("ovSeek"));
-    m_ovSeek->setCursor(Qt::PointingHandCursor);
-    m_ovSeek->setMinimumWidth(60);
-    connect(m_ovSeek, &QSlider::sliderMoved, this,
-            [this](int value) { m_player->seek(value); });
-    btnRow->addWidget(m_ovSeek, 1);
-
-    m_ovDur = new QLabel(QStringLiteral("0:00"), m_ctrlBar);
-    m_ovDur->setObjectName(QStringLiteral("ovDur"));
-    btnRow->addWidget(m_ovDur);
-
-    // Subtle vertical separators (1 px) between the subgroups of the row.
-    auto makeSep = [](QWidget *parent) {
-        auto *sep = new QFrame(parent);
-        sep->setObjectName(QStringLiteral("ovSep"));
-        sep->setFixedSize(1, 20);
-        return sep;
-    };
-    btnRow->addWidget(makeSep(m_ctrlBar));
-
-    m_ovMuteBtn = makeIconBtn(m_ctrlBar);
-    nt::bindTooltip(m_ovMuteBtn, "player.mute");
-    connect(m_ovMuteBtn, &QPushButton::clicked, this,
-            &WatchPage::onToggleMute);
-    btnRow->addWidget(m_ovMuteBtn);
-
-    m_ovVolume = new OverlaySlider(Qt::Horizontal, m_ctrlBar);
-    m_ovVolume->setObjectName(QStringLiteral("ovVolume"));
-    m_ovVolume->setRange(0, m_player->volumeMax());
-    m_ovVolume->setValue(int(m_player->volume()));
-    m_ovVolume->setFixedWidth(80);
-    m_ovVolume->setCursor(Qt::PointingHandCursor);
-    connect(m_ovVolume, &QSlider::valueChanged, this, [this](int v) {
-        m_player->setVolume(v);
-        // The cap at 100% on persistence is in MainWindow::persistVolume,
-        // called by other paths. Here, if v>100 (boost active) it is not persisted
-        // to prevent a high volume from surviving the app restart.
-        if (m_settings && v <= 100)
-            m_settings->set(QStringLiteral("volume"), QString::number(v));
-    });
-    btnRow->addWidget(m_ovVolume);
-
-    btnRow->addWidget(makeSep(m_ctrlBar));
 
     m_ovSubsBtn = makeIconBtn(m_ctrlBar);
     nt::bindTooltip(m_ovSubsBtn, "player.subtitles");
@@ -659,14 +798,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             &WatchPage::showPlaylistMenu);
     btnRow->addWidget(m_ovPlaylistBtn);
 
-    // The resolution menu is anchored to this button, which stopped being the text
-    // chip "720p" to be the settings icon of the row. The active resolution
-    // now lives in the tooltip (see onVideoSizeChanged/setQualityIndex).
     m_quality = makeIconBtn(m_ctrlBar);
-    // NOT bound: onVideoSizeChanged/setQualityIndex overwrite the tooltip with
-    // the active resolution, which is not a static key. All three paths
-    // (constructor, those two and retranslate()) go through
-    // refreshQualityTooltip().
     refreshQualityTooltip();
     connect(m_quality, &QPushButton::clicked, this,
             &WatchPage::toggleQualityMenu);
@@ -678,24 +810,22 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             &WatchPage::toggleFullscreen);
     btnRow->addWidget(m_ovFsBtn);
 
-    // Base icons of the row (nt::playerIcon). The ones that depend on the state
-    // (play/pause, shuffle, repeat, captions) are refreshed by
-    // updateOverlayIcons().
+    // Base icons of the row (nt::playerIcon)
     m_ovShuffleBtn->setIcon(
-        nt::playerIcon(nt::PlayerIcon::Shuffle, nt::kText, 20));
-    m_ovPrevBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Prev, nt::kText, 20));
+        nt::playerIcon(nt::PlayerIcon::Shuffle, nt::kText, 18));
+    m_ovPrevBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Prev, nt::kText, 18));
     m_ovPlayBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Play, nt::kText, 22));
-    m_ovNextBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Next, nt::kText, 20));
+    m_ovNextBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Next, nt::kText, 18));
     m_ovRepeatBtn->setIcon(
-        nt::playerIcon(nt::PlayerIcon::Repeat, nt::kText, 20));
-    m_ovMuteBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Volume, nt::kText, 20));
+        nt::playerIcon(nt::PlayerIcon::Repeat, nt::kText, 18));
+    m_ovMuteBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Volume, nt::kText, 19));
     m_ovSubsBtn->setIcon(
-        nt::playerIcon(nt::PlayerIcon::Captions, nt::kText, 20));
+        nt::playerIcon(nt::PlayerIcon::Captions, nt::kText, 18));
     m_ovPlaylistBtn->setIcon(
-        nt::playerIcon(nt::PlayerIcon::PlaylistAdd, nt::kText, 20));
-    m_quality->setIcon(nt::playerIcon(nt::PlayerIcon::Settings, nt::kText, 20));
+        nt::playerIcon(nt::PlayerIcon::PlaylistAdd, nt::kText, 18));
+    m_quality->setIcon(nt::playerIcon(nt::PlayerIcon::Settings, nt::kText, 18));
     m_ovFsBtn->setIcon(
-        nt::playerIcon(nt::PlayerIcon::Fullscreen, nt::kText, 20));
+        nt::playerIcon(nt::PlayerIcon::Fullscreen, nt::kText, 18));
 
     barLay->addLayout(btnRow);
     gl1->addWidget(m_ctrlBar);
@@ -714,6 +844,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             if (m_ovPos->isHidden()) {
                 m_ovPos->setVisible(true);
                 m_ovDur->setVisible(true);
+                if (m_ovTimeSep)
+                    m_ovTimeSep->setVisible(!m_liveMedia);
             }
             return;
         }
@@ -728,6 +860,8 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
         if (m_ovPos->isHidden() == showTime) {
             m_ovPos->setVisible(showTime);
             m_ovDur->setVisible(showTime);
+            if (m_ovTimeSep)
+                m_ovTimeSep->setVisible(showTime && !m_liveMedia);
         }
     };
 
@@ -1120,6 +1254,11 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
             &WatchPage::onPhaseChanged);
     connect(m_player, &PlayerController::positionChanged, this,
             &WatchPage::onPositionChanged);
+    connect(m_player, &PlayerController::cacheTimeChanged, this,
+            [this](double secs) {
+                if (m_ovSeek && !m_liveMedia)
+                    m_ovSeek->setBufferedSeconds(m_player->position() + secs);
+            });
     connect(m_player, &PlayerController::volumeChanged, this,
             &WatchPage::onVolumeChanged);
     connect(playerWidget, &PlayerWidget::videoSizeChanged, this,
@@ -1217,6 +1356,8 @@ void WatchPage::onCurrentChanged()
     // from scratch; the previous video's state is not carried over).
     m_liveDet.reset();
     m_liveDurPeak = 0.0;
+    if (m_ovSeek)
+        m_ovSeek->setBufferedSeconds(0.0);
     if (m_liveMedia) {
         m_liveMedia = false;
         m_ovSeek->setLive(false);
@@ -1852,14 +1993,16 @@ void WatchPage::onPositionChanged(double position, double duration)
         m_ovDur->setText(m_liveDurPeak > 0
                              ? QStringLiteral("-%1").arg(fmtTime(m_liveDurPeak))
                              : QString());
+        if (m_ovTimeSep)
+            m_ovTimeSep->hide();
     } else {
         m_ovSeek->setRange(0, duration > 0 ? qRound(duration) : 0);
         if (!m_ovSeek->isSeeking())
             m_ovSeek->setValue(qRound(position));
-        // The clock is split: elapsed to the left of the slider and
-        // duration to the right, like the mockup.
         m_ovPos->setText(fmtTime(position));
         m_ovDur->setText(fmtTime(duration));
+        if (m_ovTimeSep)
+            m_ovTimeSep->setVisible(duration > 0 && !m_ovDur->isHidden());
     }
     // "Anterior" is enabled on crossing the restart threshold (advanced); the
     // change is only applied when it differs, so it is not repainted every second.
@@ -2106,7 +2249,9 @@ void WatchPage::toggleQualityMenu()
     }
     QWidget *anchor = m_qualityMenuAnchor ? m_qualityMenuAnchor : m_quality;
     const QPoint btnPos = m_quality->mapTo(anchor, QPoint(0, 0));
-    m_qualityMenu->move(btnPos.x(), btnPos.y() - m_qualityMenu->height() - 4);
+    int mx = btnPos.x() - m_qualityMenu->width() + m_quality->width();
+    mx = qBound(8, mx, anchor->width() - m_qualityMenu->width() - 8);
+    m_qualityMenu->move(mx, btnPos.y() - m_qualityMenu->height() - 6);
     m_qualityMenu->show();
     m_qualityMenu->raise();
     m_qualityMenuActive = true;
@@ -2141,8 +2286,13 @@ void WatchPage::onToggleMute()
     updateOverlayIcons();
 }
 
-void WatchPage::onNextUpActivated(int index, const VideoInfo &)
+void WatchPage::onNextUpActivated(int index, const VideoInfo &video)
 {
+    if (video.isPlaylistEntry() && !video.playlistId.isEmpty()) {
+        const QString prefVideo = !video.isPlaylist() ? video.id : QString();
+        emit playlistRequested(video.playlistId, prefVideo);
+        return;
+    }
     m_player->playIndex(index);
 }
 

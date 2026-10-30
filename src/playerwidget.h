@@ -96,6 +96,7 @@ signals:
     // The position stalled for > 5 s while playing (no user pause nor
     // initial buffer). The controller re-resolves with fresh URLs and resumes.
     void streamStalled();
+    void cacheTimeUpdated(double seconds);
     // Playback interruption other than a position stall:
     // premature EOF (position << video duration) or external audio track
     // that never opened (e.g. YouTube 403 on the session's URLs: the

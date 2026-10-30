@@ -281,7 +281,8 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
         // A pasted YouTube link is not a query: asking YouTube to autocomplete
         // an address makes no sense and its "suggestions" would open a panel of
         // noise over the field. Enter opens the video (see doSearch).
-        if (!youtubeVideoIdFromText(q).isEmpty()) {
+        if (!youtubeVideoIdFromText(q).isEmpty()
+            || !youtubePlaylistIdFromText(q).isEmpty()) {
             hideSuggestPanel();
             return;
         }
@@ -357,6 +358,12 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
         m_searching = false;
         m_moreButton->hide();
         m_results.clear();
+        m_tabResults[0].clear();
+        m_tabResults[1].clear();
+        m_tabLoaded[0] = false;
+        m_tabLoaded[1] = false;
+        m_tabHasMore[0] = false;
+        m_tabHasMore[1] = false;
         m_list->clearVideos();
         while (QLayoutItem *item = m_channelBox->layout()->takeAt(0)) {
             delete item->widget();
@@ -435,6 +442,97 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     channelLayout->setContentsMargins(0, 0, 0, 0);
     channelLayout->setSpacing(2);
     m_channelBox->hide();
+
+    // Tabs for search results: "Todo" (All) and "Listas" (Playlists)
+    auto *tabRow = new QHBoxLayout;
+    tabRow->setSpacing(8);
+    m_tabsBox = new QWidget(this);
+    m_tabsBox->setObjectName(QStringLiteral("channelTabs"));
+    auto *tabsLay = new QHBoxLayout(m_tabsBox);
+    tabsLay->setContentsMargins(3, 3, 3, 3);
+    tabsLay->setSpacing(2);
+
+    m_tabAllBtn = new QPushButton(m_tabsBox);
+    m_tabAllBtn->setObjectName(QStringLiteral("tabBtn"));
+    nt::bindText(m_tabAllBtn, "search.tab.all");
+    m_tabAllBtn->setCursor(Qt::PointingHandCursor);
+    m_tabAllBtn->setFocusPolicy(Qt::NoFocus);
+    m_tabAllBtn->setProperty("selected", true);
+    tabsLay->addWidget(m_tabAllBtn);
+
+    m_tabPlaylistsBtn = new QPushButton(m_tabsBox);
+    m_tabPlaylistsBtn->setObjectName(QStringLiteral("tabBtn"));
+    nt::bindText(m_tabPlaylistsBtn, "search.tab.playlists");
+    m_tabPlaylistsBtn->setCursor(Qt::PointingHandCursor);
+    m_tabPlaylistsBtn->setFocusPolicy(Qt::NoFocus);
+    m_tabPlaylistsBtn->setProperty("selected", false);
+    tabsLay->addWidget(m_tabPlaylistsBtn);
+
+    tabRow->addWidget(m_tabsBox, 0, Qt::AlignLeft);
+    tabRow->addStretch(1);
+
+    connect(m_tabAllBtn, &QPushButton::clicked, this, [this]() {
+        if (m_searchTab == 0) return;
+        m_searchTab = 0;
+        updateSearchTabStyle();
+        if (m_tabLoaded[0]) {
+            m_results = m_tabResults[0];
+            m_searching = false;
+            if (m_busyLabel) m_busyLabel->hide();
+            if (m_results.isEmpty()) {
+                m_list->clearVideos();
+                m_channelBox->hide();
+                m_moreButton->hide();
+                if (m_emptyLabel) m_emptyLabel->show();
+            } else {
+                if (m_emptyLabel) m_emptyLabel->hide();
+                if (!m_channels.isEmpty())
+                    m_channelBox->show();
+                m_list->showVideos(m_results, VideoListView::ListMode);
+                m_moreButton->setVisible(m_tabHasMore[0]);
+                m_moreButton->setEnabled(true);
+            }
+        } else if (!m_activeQuery.isEmpty()) {
+            m_searching = true;
+            m_results.clear();
+            m_moreButton->hide();
+            m_list->clearVideos();
+            if (m_busyLabel) m_busyLabel->show();
+            if (m_emptyLabel) m_emptyLabel->hide();
+            m_yt->search(m_activeQuery);
+        }
+    });
+
+    connect(m_tabPlaylistsBtn, &QPushButton::clicked, this, [this]() {
+        if (m_searchTab == 1) return;
+        m_searchTab = 1;
+        updateSearchTabStyle();
+        if (m_tabLoaded[1]) {
+            m_results = m_tabResults[1];
+            m_searching = false;
+            m_channelBox->hide();
+            if (m_busyLabel) m_busyLabel->hide();
+            if (m_results.isEmpty()) {
+                m_list->clearVideos();
+                m_moreButton->hide();
+                if (m_emptyLabel) m_emptyLabel->show();
+            } else {
+                if (m_emptyLabel) m_emptyLabel->hide();
+                m_list->showVideos(m_results, VideoListView::ListMode);
+                m_moreButton->setVisible(m_tabHasMore[1]);
+                m_moreButton->setEnabled(true);
+            }
+        } else if (!m_activeQuery.isEmpty()) {
+            m_searching = true;
+            m_results.clear();
+            m_moreButton->hide();
+            m_list->clearVideos();
+            m_channelBox->hide();
+            if (m_busyLabel) m_busyLabel->show();
+            if (m_emptyLabel) m_emptyLabel->hide();
+            m_yt->search(m_activeQuery, 20, 0, QStringLiteral("EgIQAw=="));
+        }
+    });
     m_list = new VideoListView(m_thumbs, this);
     m_list->showVideos(QVector<VideoInfo>(), VideoListView::ListMode);
     // Per-row options button, as on the rest of the row surfaces. The menu is
@@ -456,8 +554,10 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     m_moreButton->setFixedHeight(34);
     connect(m_moreButton, &QPushButton::clicked, this, [this]() {
         m_moreButton->setEnabled(false);
-        m_yt->search(m_activeQuery, 20, m_results.size());
+        m_yt->search(m_activeQuery, 20, m_results.size(),
+                     m_searchTab == 1 ? QStringLiteral("EgIQAw==") : QString());
     });
+    rBox->addLayout(tabRow);
     rBox->addWidget(m_busyLabel);
     rBox->addWidget(m_emptyLabel);
     rBox->addWidget(m_channelBox);
@@ -467,6 +567,8 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     m_resultBox->hide();
     m_bottomStretch = new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Expanding);
     outer->addSpacerItem(m_bottomStretch);
+
+    updateSearchTabStyle();
 
     // Typing NO LONGER triggers a search: it only requests suggestions for the
     // dropdown. The search happens on Enter or the Buscar button and uses the
@@ -502,7 +604,11 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     m_field->installEventFilter(this);
 
     connect(m_list, &VideoListView::videoActivated, this,
-            [this](int index, const VideoInfo &) {
+            [this](int index, const VideoInfo &v) {
+                if (v.isPlaylistEntry() && !v.playlistId.isEmpty()) {
+                    emit playlistRequested(v.playlistId);
+                    return;
+                }
                 emit openRequested(m_results, index);
             });
 
@@ -522,6 +628,20 @@ SearchPage::~SearchPage()
     m_field->removeEventFilter(this);
     if (m_app)
         m_app->removeEventFilter(this);
+}
+
+void SearchPage::updateSearchTabStyle()
+{
+    if (!m_tabAllBtn || !m_tabPlaylistsBtn)
+        return;
+    m_tabAllBtn->setProperty("selected", m_searchTab == 0);
+    m_tabAllBtn->style()->unpolish(m_tabAllBtn);
+    m_tabAllBtn->style()->polish(m_tabAllBtn);
+    m_tabAllBtn->update();
+    m_tabPlaylistsBtn->setProperty("selected", m_searchTab == 1);
+    m_tabPlaylistsBtn->style()->unpolish(m_tabPlaylistsBtn);
+    m_tabPlaylistsBtn->style()->polish(m_tabPlaylistsBtn);
+    m_tabPlaylistsBtn->update();
 }
 
 void SearchPage::setResultsMode(bool active)
@@ -563,7 +683,18 @@ void SearchPage::doSearch()
     // opened and what the history gets is the TITLE, which arrives later (see
     // applyVideoTitle). Everything that is not a link of YouTube falls through
     // to the normal search below.
+    const QString playlistUrlId = youtubePlaylistIdFromText(q);
     const QString videoId = youtubeVideoIdFromText(q);
+    if (!playlistUrlId.isEmpty()) {
+        setResultsMode(false);
+        m_searching = false;
+        showHistory();
+        NT_DEBUG("E2E searchPlaylistUrl id=%s video=%s\n",
+                 playlistUrlId.toUtf8().constData(),
+                 videoId.toUtf8().constData());
+        emit playlistRequested(playlistUrlId, videoId);
+        return;
+    }
     if (!videoId.isEmpty()) {
         m_pendingUrlId = videoId;
         m_pendingUrlText = q;
@@ -581,7 +712,15 @@ void SearchPage::doSearch()
     setResultsMode(true);
     m_searching = true;
     m_activeQuery = q;
+    m_searchTab = 0;
+    updateSearchTabStyle();
     m_results.clear();
+    m_tabResults[0].clear();
+    m_tabResults[1].clear();
+    m_tabLoaded[0] = false;
+    m_tabLoaded[1] = false;
+    m_tabHasMore[0] = false;
+    m_tabHasMore[1] = false;
     m_moreButton->hide();
     m_list->clearVideos();
     while (QLayoutItem *item = m_channelBox->layout()->takeAt(0)) {
@@ -655,6 +794,9 @@ void SearchPage::onSearchReady(const QString &query, const QVector<VideoInfo> &v
         m_results = videos;
     else
         m_results += videos;
+    m_tabResults[m_searchTab] = m_results;
+    m_tabLoaded[m_searchTab] = true;
+    m_tabHasMore[m_searchTab] = (videos.size() >= 20);
     if (m_results.isEmpty()) {
         m_list->clearVideos();
         m_moreButton->hide();
@@ -665,7 +807,10 @@ void SearchPage::onSearchReady(const QString &query, const QVector<VideoInfo> &v
     if (m_emptyLabel)
         m_emptyLabel->hide();
     if (m_list->isEmpty()) {
-        buildChannelButtons();
+        if (m_searchTab == 0)
+            buildChannelButtons();
+        else
+            m_channelBox->hide();
         m_list->showVideos(m_results, VideoListView::ListMode);
     } else {
         m_list->appendVideos(videos);

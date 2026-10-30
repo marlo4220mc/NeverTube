@@ -76,6 +76,7 @@ void PlayerController::ensurePlayerConnections()
     disconnect(m_posConn);
     disconnect(m_durConn);
     disconnect(m_errConn);
+    disconnect(m_cacheConn);
     disconnect(m_stallConn);
     disconnect(m_interruptConn);
     m_stallConn = connect(m_player, &PlayerWidget::streamStalled, this,
@@ -90,6 +91,8 @@ void PlayerController::ensurePlayerConnections()
                         &PlayerController::onPlayerDuration);
     m_errConn = connect(m_player, &PlayerWidget::mediaError, this,
                         &PlayerController::onPlayerError);
+    m_cacheConn = connect(m_player, &PlayerWidget::cacheTimeUpdated, this,
+                          &PlayerController::cacheTimeChanged);
 }
 
 void PlayerController::setPlayer(PlayerWidget *player)
@@ -215,6 +218,10 @@ void PlayerController::playIndex(int index)
 {
     if (index < 0 || index >= m_queue.size())
         return;
+    if (m_queue.at(index).isPlaylistEntry()) {
+        next();
+        return;
+    }
     savePosition();
     m_index = index;
     m_reportedDuration = -1.0;
@@ -323,17 +330,10 @@ void PlayerController::onPlayerState()
             m_seekBack = 0.0;
         }
     } else if (s == QLatin1String("ended")) {
-        if (hasNext()) {
-            savePosition();
-            playIndex(m_index + 1);
-        } else if (m_repeat && !m_queue.isEmpty()) {
-            // Repeat the whole queue: when the last one ends, it goes back
-            // to the first (with a one-video queue, this is "repeat one").
-            savePosition();
-            playIndex(0);
-        } else {
+        savePosition();
+        next();
+        if (!hasNext() && !m_repeat)
             setPhase(QStringLiteral("paused"));
-        }
     } else if (s == QLatin1String("error")) {
         setPhase(QStringLiteral("error"));
     }
@@ -459,10 +459,44 @@ void PlayerController::renameCurrent(const QString &videoId,
 
 void PlayerController::next()
 {
-    if (hasNext())
-        playIndex(m_index + 1);
-    else if (m_repeat && !m_queue.isEmpty())
-        playIndex(0);
+    const int n = nextPlayableIndex(m_index + 1);
+    if (n >= 0) {
+        playIndex(n);
+        return;
+    }
+    if (!m_repeat || m_queue.isEmpty())
+        return;
+    const int first = nextPlayableIndex(0);
+    if (first >= 0)
+        playIndex(first);
+}
+
+int PlayerController::nextPlayableIndex(int from) const
+{
+    for (int i = qMax(0, from); i < m_queue.size(); ++i) {
+        if (!m_queue.at(i).isPlaylistEntry())
+            return i;
+    }
+    return -1;
+}
+
+int PlayerController::prevPlayableIndex(int from) const
+{
+    for (int i = qMin(from, m_queue.size() - 1); i >= 0; --i) {
+        if (!m_queue.at(i).isPlaylistEntry())
+            return i;
+    }
+    return -1;
+}
+
+bool PlayerController::hasNext() const
+{
+    return m_index >= 0 && nextPlayableIndex(m_index + 1) >= 0;
+}
+
+bool PlayerController::hasPrevious() const
+{
+    return m_index > 0 && prevPlayableIndex(m_index - 1) >= 0;
 }
 
 void PlayerController::previous()
@@ -479,8 +513,9 @@ void PlayerController::previous()
 
 void PlayerController::previousTrack()
 {
-    if (hasPrevious())
-        playIndex(m_index - 1);
+    const int p = prevPlayableIndex(m_index - 1);
+    if (p >= 0)
+        playIndex(p);
 }
 
 // Shuffle: randomly reorders ONLY the queue ahead of the video being

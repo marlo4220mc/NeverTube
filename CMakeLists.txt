@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(nevertube VERSION 1.0.0 LANGUAGES CXX)
+project(nevertube VERSION 1.0.1 LANGUAGES CXX)
 
 # The version the APP shows (Ajustes -> "NeverTube X.Y.Z", the About note and
 # the updater, which compares it against the newest release). One source only:

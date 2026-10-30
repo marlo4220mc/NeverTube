@@ -72,6 +72,7 @@ signals:
                            const QString &codec, bool audioOnly);
     void backRequested();
     void channelRequested(const QString &channelId, const QString &name);
+    void playlistRequested(const QString &playlistId, const QString &preferredVideoId = QString());
     void fullscreenToggled(bool on);
 
 private slots:
@@ -293,6 +294,7 @@ private:
     // the right (as in the mockup). It used to be a single "0:00 / 0:00".
     QLabel *m_ovPos = nullptr;
     QLabel *m_ovDur = nullptr;
+    QLabel *m_ovTimeSep = nullptr;
     // Visible state of live mode (bar at the end, "EN VIVO", negative
     // clock). The DETECTION lives in nt::LiveDetector (unstable-duration
     // evidence + unlock); it is reset when the video changes.

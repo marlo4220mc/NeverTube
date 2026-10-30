@@ -4,6 +4,7 @@
 #include "downloader/download_settings.h"
 #include "reels_filter.h"
 #include "system_media.h"
+#include "youtube_url.h"
 
 #include <QAbstractButton>
 #include <QApplication>
@@ -871,6 +872,28 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_home, &HomePage::navigateToSearchRequested, this,
             &MainWindow::goSearch);
     connect(m_search, &SearchPage::openRequested, this, &MainWindow::openWatch);
+    connect(m_search, &SearchPage::playlistRequested, this,
+            [this](const QString &playlistId, const QString &preferredVideoId) {
+                m_preferredPlaylistVideoId = preferredVideoId;
+                m_yt->playlistVideos(playlistId);
+            });
+    connect(m_yt, &Yt::playlistReady, this, [this](const QString &, const QVector<VideoInfo> &videos) {
+        if (!videos.isEmpty()) {
+            int startIdx = 0;
+            if (!m_preferredPlaylistVideoId.isEmpty()) {
+                for (int i = 0; i < videos.size(); ++i) {
+                    if (videos.at(i).id == m_preferredPlaylistVideoId) {
+                        startIdx = i;
+                        break;
+                    }
+                }
+                m_preferredPlaylistVideoId.clear();
+            }
+            m_openingPlaylist = true;
+            openWatch(videos, startIdx);
+            m_openingPlaylist = false;
+        }
+    });
     // A YouTube link pasted in the search box is a video, not a query: the
     // PLAYER is opened with it (the page does not search it nor save it in the
     // history). The queue is a single item with only the id: the title,
@@ -906,6 +929,10 @@ MainWindow::MainWindow(QWidget *parent)
             &MainWindow::showPreviousTab);
     connect(m_channel, &ChannelPage::openRequested, this,
             &MainWindow::openWatch);
+    connect(m_channel, &ChannelPage::playlistRequested, this, [this](const QString &playlistId) {
+        m_preferredPlaylistVideoId.clear();
+        m_yt->playlistVideos(playlistId);
+    });
     connect(m_watch, &WatchPage::backRequested, this,
             &MainWindow::showPreviousTab);
     connect(m_watch, &WatchPage::fullscreenToggled, this,
@@ -927,6 +954,11 @@ MainWindow::MainWindow(QWidget *parent)
                 m_currentTab = 2;
                 m_channel->openChannel(channelId);
                 m_pages->setCurrentWidget(m_channel);
+            });
+    connect(m_watch, &WatchPage::playlistRequested, this,
+            [this](const QString &playlistId, const QString &preferredVideoId) {
+                m_preferredPlaylistVideoId = preferredVideoId;
+                m_yt->playlistVideos(playlistId);
             });
     connect(m_library, &LibraryPage::channelRequested, this,
             [this](const QString &channelId, const QString &) {
@@ -2586,11 +2618,11 @@ void MainWindow::openWatchAt(const QVector<VideoInfo> &videos, int startIndex,
     m_currentTab = 3;
     m_pages->setCurrentIndex(3);
     const NextMode mode = nextMode();
-    if (mode == NextMode::Radio) {
+    if (mode == NextMode::Radio && !m_openingPlaylist) {
         // Radio mode: open with only the clicked video and generate the queue
         // of the RDAMVM mix for "A continuación". An explicit click from
-        // outside the list (search, home, channel) triggers the radio; inside
-        // the list it is not regenerated.
+        // outside the list (search, home, channel, history, library) triggers the radio;
+        // only genuine playlist batches (m_openingPlaylist) load their full queue.
         m_player.playQueue(QVector<VideoInfo>{videos.at(startIndex)}, 0,
                            startPositionMs);
         m_watch->setWatchData(m_player.queue(), m_player.index());
@@ -2650,7 +2682,14 @@ void MainWindow::searchFor(const QString &query)
 
 void MainWindow::playVideo(const QString &url)
 {
-    const QString id = Yt::videoIdFromUrl(url);
+    const QString playlistId = youtubePlaylistIdFromText(url);
+    const QString videoId = youtubeVideoIdFromText(url);
+    if (!playlistId.isEmpty()) {
+        m_preferredPlaylistVideoId = videoId;
+        m_yt->playlistVideos(playlistId);
+        return;
+    }
+    const QString id = !videoId.isEmpty() ? videoId : Yt::videoIdFromUrl(url);
     if (id.isEmpty())
         return;
     VideoInfo v;

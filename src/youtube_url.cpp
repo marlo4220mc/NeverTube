@@ -102,6 +102,49 @@ QString youtubeVideoIdFromText(const QString &text)
     return QString();
 }
 
+QString youtubePlaylistIdFromText(const QString &text)
+{
+    QString s = text.trimmed();
+    if (s.isEmpty())
+        return QString();
+
+    if (!s.contains(QLatin1String("://"))) {
+        static const char *const kHosts[] = {
+            "youtube.com/",   "www.youtube.com/",   "m.youtube.com/",
+            "music.youtube.com/", "youtu.be/",      "www.youtu.be/",
+        };
+        const QString low = s.toLower();
+        for (const char *host : kHosts) {
+            if (low.startsWith(QLatin1String(host))) {
+                s.prepend(QLatin1String("https://"));
+                break;
+            }
+        }
+    }
+
+    const QUrl url(s, QUrl::TolerantMode);
+    if (!url.isValid() || url.host().isEmpty())
+        return QString();
+    const QString scheme = url.scheme().toLower();
+    if (scheme != QLatin1String("http") && scheme != QLatin1String("https"))
+        return QString();
+    if (!isYouTubeHost(url.host()))
+        return QString();
+
+    const QUrlQuery q(url);
+    const QString list = q.queryItemValue(QStringLiteral("list"), QUrl::FullyDecoded);
+    if (!list.isEmpty() && list.size() >= 2)
+        return list;
+
+    const QString path = url.path();
+    if (path.startsWith(QLatin1String("/playlist"))) {
+        const QString listInPath = q.queryItemValue(QStringLiteral("list"), QUrl::FullyDecoded);
+        if (!listInPath.isEmpty())
+            return listInPath;
+    }
+    return QString();
+}
+
 bool youtubeUrlSelfTest()
 {
     struct Case

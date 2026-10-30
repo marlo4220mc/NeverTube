@@ -80,6 +80,7 @@ signals:
     // replace it when it arrives.
     void videoUrlRequested(const QString &videoId, const QString &url);
     void channelRequested(const QString &channelId);
+    void playlistRequested(const QString &playlistId, const QString &preferredVideoId = QString());
     // Click on the "⋯" of a results row: the page has no repos
     // (watch later, playlists), so it asks for the video and MainWindow shows
     // the shared menu.
@@ -147,6 +148,7 @@ private:
     // Moves the real focus to row index (or to the field with -1). That is what
     // Tab does when entering the dropdown.
     void focusRow(int index);
+    void updateSearchTabStyle();
 
     Yt *m_yt;
     SettingsRepo *m_settings;
@@ -162,11 +164,18 @@ private:
     QWidget *m_historyBox;
     QWidget *m_resultBox;
     QWidget *m_channelBox;
+    QWidget *m_tabsBox = nullptr;
+    QPushButton *m_tabAllBtn = nullptr;
+    QPushButton *m_tabPlaylistsBtn = nullptr;
+    int m_searchTab = 0; // 0 = all, 1 = playlists
     QSpacerItem *m_bottomStretch = nullptr;
     VideoListView *m_list;
     QPushButton *m_moreButton;
 
     QVector<VideoInfo> m_results;
+    QVector<VideoInfo> m_tabResults[2];
+    bool m_tabLoaded[2]{false, false};
+    bool m_tabHasMore[2]{false, false};
     QVector<ChannelInfo> m_channels;
     QHash<QString, ChannelRow *> m_channelButtons;
     // Last ChannelInfo per channel card, so retranslate() can recompose its meta

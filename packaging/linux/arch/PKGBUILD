@@ -14,7 +14,7 @@
 # build.sh refuses a pkgver that does not match CMakeLists.txt, so the two move
 # together. There is no hash to refresh: the source is a VCS one (see below).
 pkgname=nevertube
-pkgver=1.0.0
+pkgver=1.0.1
 pkgrel=1
 pkgdesc='NeverTube - lightweight YouTube client (Qt5 + libmpv)'
 arch=('x86_64')

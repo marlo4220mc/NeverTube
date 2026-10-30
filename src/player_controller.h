@@ -94,8 +94,8 @@ public:
     // Overwrites the current item's title (if the id matches) with the one
     // translated from /next. Emits metadataChanged() to refresh the UI.
     void renameCurrent(const QString &videoId, const QString &title);
-    bool hasNext() const { return m_index >= 0 && m_index < m_queue.size() - 1; }
-    bool hasPrevious() const { return m_index > 0; }
+    bool hasNext() const;
+    bool hasPrevious() const;
     // The "Anterior" button is operational if there is a previous video OR if
     // the current one is already advanced (then the button restarts the
     // current video, like YouTube).
@@ -141,6 +141,7 @@ public:
 signals:
     void phaseChanged(const QString &phase);
     void positionChanged(double position, double duration);
+    void cacheTimeChanged(double seconds);
     void playbackModesChanged(bool shuffle, bool repeat);
     // The medium's real duration is reported by the backend on load (mpv or
     // the FfmpegBackend's audio clock). It is the authoritative datum: /next
@@ -190,6 +191,11 @@ private:
     void onStreamResolved(const StreamInfo &stream);
     void resolveFailed(const QString &message);
     void savePosition();
+    // First PLAYABLE row from `from` forward / backward. A playlist or mix row
+    // (VideoInfo::isPlaylistEntry) is never played by itself: it is opened
+    // explicitly, which replaces the whole queue. -1 = there is none.
+    int nextPlayableIndex(int from) const;
+    int prevPlayableIndex(int from) const;
 
     Yt *m_yt;
     PlayerWidget *m_player;
@@ -254,4 +260,5 @@ private:
     QMetaObject::Connection m_posConn;
     QMetaObject::Connection m_durConn;
     QMetaObject::Connection m_errConn;
+    QMetaObject::Connection m_cacheConn;
 };

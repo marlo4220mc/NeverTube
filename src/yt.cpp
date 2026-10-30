@@ -24,6 +24,7 @@
 #include "debug.h"
 #include "db/repositories.h"
 #include "i18n.h"
+#include "reels_filter.h"
 
 namespace {
 
@@ -147,7 +148,12 @@ Yt::Yt(QObject *parent)
     connect(&m_innertube, &Innertube::channelTabReady, this,
             [this](const QString &channelId, const QString &tab,
                    const QVector<VideoInfo> &videos, bool) {
-                emit channelTabVideosFinished(channelId, tab, videos);
+                QVector<VideoInfo> valid;
+                for (const VideoInfo &v : videos) {
+                    if (v.isPlaylistEntry() || (v.id.size() == 11 && !v.isShort))
+                        valid.append(v);
+                }
+                emit channelTabVideosFinished(channelId, tab, valid);
             });
     connect(&m_innertube, &Innertube::videoDetailReady, this,
             [this](const VideoInfo &video, const QString &description,
@@ -158,6 +164,22 @@ Yt::Yt(QObject *parent)
                 }
                 emit detailReady(video, description, likeCount,
                                  QVector<FormatInfo>());
+            });
+    // A playlist or a mix opened from a card (Search, Channel) or from "A
+    // continuación": only its VIDEOS travel to the UI (the ones with a real
+    // video id), and the Shorts are left out like in every other list.
+    connect(&m_innertube, &Innertube::playlistReady, this,
+            [this](const PlaylistInfo &info,
+                   const QVector<VideoInfo> &videos) {
+                QVector<VideoInfo> valid;
+                for (const VideoInfo &v : videos) {
+                    if (v.id.size() == 11 && !v.isPlaylistEntry())
+                        valid.append(v);
+                }
+                NT_DEBUG("E2E playlist ready id=%s videos=%d utiles=%d\n",
+                         info.id.toUtf8().constData(), int(videos.size()),
+                         int(valid.size()));
+                emit playlistReady(info.id, reels::withoutShorts(valid));
             });
     // Video heights available for the resolutions menu:
     // they come from the HLS master (adaptiveFormats' videoHeights) and, as a
@@ -248,6 +270,11 @@ void Yt::radioMore()
     m_innertube.fetchRadioMore();
 }
 
+void Yt::playlistVideos(const QString &playlistId)
+{
+    m_innertube.fetchPlaylist(playlistId);
+}
+
 void Yt::home()
 {
     m_innertube.fetchHome();
@@ -305,12 +332,13 @@ void Yt::setNoAv1(bool on)
     m_noAv1 = on;
 }
 
-void Yt::search(const QString &query, int limit, int offset)
+void Yt::search(const QString &query, int limit, int offset,
+                const QString &params)
 {
     // Innertube: offset 0 = first page; offset > 0 = continuation.
     if (offset <= 0) {
         m_searchQuery = query;
-        m_innertube.fetchSearch(query, limit);
+        m_innertube.fetchSearch(query, limit, params);
     } else {
         m_innertube.fetchSearchMore(limit);
     }

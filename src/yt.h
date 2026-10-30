@@ -40,7 +40,8 @@ public:
     // (one RTT less before the POST /player).
     void setVisitorStorage(SettingsRepo *settings);
 
-    void search(const QString &query, int limit = 20, int offset = 0);
+    void search(const QString &query, int limit = 20, int offset = 0,
+                const QString &params = QString());
     // Search type-ahead suggestions. It does not launch a search: it only asks
     // for the prefix suggestions and delivers them through suggestReady(). It
     // is a plain GET that does not touch the Innertube session (see
@@ -80,6 +81,10 @@ public:
     // They arrive through radioReady().
     void radioVideos(const QString &videoId);
     void radioMore();
+    // Videos of a playlist or a MIX, opened from a card (Search, Channel
+    // Playlists) or from a mix entry of "A continuación". They arrive through
+    // playlistReady(); empty = the list could not be read.
+    void playlistVideos(const QString &playlistId);
     // Real Home through Innertube (browse FEwhat_to_watch). The results arrive
     // through homeReady(); empty = no feed. homeMore() asks for the continuation
     // if the response brought it.
@@ -177,6 +182,9 @@ signals:
     void resolveError(const QString &message);
     void relatedReady(const QString &videoId, const QVector<VideoInfo> &videos);
     void radioReady(const QString &videoId, const QVector<VideoInfo> &videos);
+    // Videos of a playlist or a mix (playlistVideos). Never a playlist card
+    // inside it: only playable videos, without Shorts.
+    void playlistReady(const QString &playlistId, const QVector<VideoInfo> &videos);
     // Translated detail of the current video (title and description) from the
     // normal /next, in the requested "hl" language. WatchPage uses it only when
     // the audio language is explicit (es/en/pt).

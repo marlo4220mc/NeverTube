@@ -43,6 +43,7 @@ protected:
 signals:
     void backRequested();
     void openRequested(const QVector<VideoInfo> &videos, int startIndex);
+    void playlistRequested(const QString &playlistId);
     // Click on the "⋯" of a video row: the page does not have the repos, so
     // MainWindow builds the shared menu.
     void rowMenuRequested(const VideoInfo &video, const QPoint &globalPos);

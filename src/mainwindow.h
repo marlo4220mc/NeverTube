@@ -237,6 +237,8 @@ private:
     // title arrives (the player resolves it) the address is still in the field
     // and the search history does not name it yet. Empty = nothing pending.
     QString m_searchUrlId;
+    QString m_preferredPlaylistVideoId;
+    bool m_openingPlaylist = false;
 
     HomePage *m_home = nullptr;
     SearchPage *m_search = nullptr;

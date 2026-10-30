@@ -273,9 +273,9 @@ public:
                    .value();
     }
 
-    void drawThumb(QPainter *p, const QRectF &r, const QString &key,
-                   const QString &duration, bool isLive) const
+    void drawThumb(QPainter *p, const QRectF &r, const VideoInfo &v) const
     {
+        const QString key = cacheKeyFor(v);
         const QPixmap pm = m_thumbs->pixmap(key);
         QPainterPath clip;
         clip.addRoundedRect(r, 8, 8);
@@ -300,10 +300,15 @@ public:
             p->drawPixmap(r, scaled, src);
         }
         p->restore();
-        if (isLive)
+        if (v.isPlaylist()) {
+            const QString badge = v.playlistVideos > 0
+                ? QString::number(v.playlistVideos)
+                : nt::tr("fmt.playlist");
+            drawBadge(p, r, badge);
+        } else if (v.isLive)
             drawLiveBadge(p, r);
-        else if (!duration.isEmpty())
-            drawBadge(p, r, duration);
+        else if (v.durationSeconds > 0)
+            drawBadge(p, r, durationLabel(v.durationSeconds));
     }
 
     // Lays out the text in `lines` lines with greedy word wrap; the LAST one
@@ -391,8 +396,7 @@ private:
                             gw - 12 * m_scale, (gw - 12 * m_scale) * 9.0 / 16.0);
         // The key is passed, not the pixmap: the scaling is cached by
         // (video, size), so the key is needed to look it up.
-        drawThumb(p, thumbR, cacheKeyFor(v), durationLabel(v.durationSeconds),
-                  v.isLive);
+        drawThumb(p, thumbR, v);
         drawProgressBar(p, thumbR, v);
 
         // Title and channel line at the size ruled by THIS cell (see
@@ -536,8 +540,7 @@ private:
                             136 * m_scale, 76 * m_scale);
         // The key is passed, not the pixmap: the scaling is cached by
         // (video, size), so the key is needed to look it up.
-        drawThumb(p, thumbR, cacheKeyFor(v), durationLabel(v.durationSeconds),
-                  v.isLive);
+        drawThumb(p, thumbR, v);
         drawProgressBar(p, thumbR, v);
 
         // Title: the app font in bold (the one the row already had) and 2

@@ -98,6 +98,15 @@ QString publishedLabel(const QString &publishedAt)
 
 QString metaLine(const VideoInfo &v)
 {
+    if (v.isPlaylist()) {
+        QStringList parts;
+        if (!v.channel.isEmpty())
+            parts << v.channel;
+        parts << nt::tr("fmt.playlist");
+        if (v.playlistVideos > 0)
+            parts << nt::tr("fmt.playlistVideos").arg(v.playlistVideos);
+        return parts.join(nt::tr("fmt.metaSep"));
+    }
     QStringList parts;
     if (!v.channel.isEmpty())
         parts << v.channel;

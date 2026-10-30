@@ -57,6 +57,11 @@
   </provides>
 
   <releases>
+    <release version="1.0.1" date="2026-10-30">
+      <description>
+        <p>New modern media controls overlay, YouTube playlist and mix support in Search, Channels, and Up Next queue.</p>
+      </description>
+    </release>
     <release version="1.0.0" date="2026-10-27">
       <description>
         <p>First Flatpak build: bundled libmpv, FFmpeg and the downloader's ffmpeg CLI.</p>

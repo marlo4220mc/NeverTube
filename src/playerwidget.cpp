@@ -468,6 +468,7 @@ void PlayerWidget::onCacheTime(double seconds)
 {
     if (seconds > 0.2)
         m_cacheOk = true; // there is data: the video track does load
+    emit cacheTimeUpdated(seconds);
 }
 
 void PlayerWidget::onLogMessage(const QString &prefix, const QString &text)

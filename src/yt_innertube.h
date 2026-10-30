@@ -123,10 +123,11 @@ public slots:
     // no videos.
     void fetchChannelVideos(const QString &channelId);
 
-    // Search (POST /search, VISIONOS). fetchSearch() brings the first page;
-    // fetchSearchMore() the continuation. searchReady() delivers only the new
-    // page (up to limit) and whether a continuation remains.
-    void fetchSearch(const QString &query, int limit = 20);
+    // Search (POST /search). params specifies optional search filters (e.g.
+    // playlists: EgIQAw==). fetchSearch() brings the first page; fetchSearchMore()
+    // the continuation. searchReady() delivers only the new page.
+    void fetchSearch(const QString &query, int limit = 20,
+                     const QString &params = QString());
     void fetchSearchMore(int limit = 20);
 
     // Type-ahead suggestions for the search field. Plain GET to
@@ -270,7 +271,7 @@ private:
     void requestVideoDetail();
     void handleVideoDetail(const QString &videoId, bool ok,
                            const QString &error, const QByteArray &body);
-    void requestPlaylist();
+    void requestPlaylist(bool web = false);
     void handlePlaylist(const QString &playlistId, bool ok,
                         const QString &error, const QByteArray &body);
     void handleNext(const QString &videoId, bool ok, const QString &error,
@@ -491,6 +492,7 @@ private:
     bool m_searchInFlight = false;
     bool m_searchVisitorRetried = false;
     QString m_searchQuery;
+    QString m_searchParams;
     QString m_searchContinuation;
     int m_searchLimit = 20;
     // Type-ahead suggestions. No paging or retry state: it is
@@ -529,6 +531,10 @@ private:
     bool m_plPending = false;
     bool m_plInFlight = false;
     bool m_plVisitorRetried = false;
+    // The VISIONOS answer for a MIX (RD…) or an auto-generated list can come
+    // back empty: the same browse is asked ONCE more with the WEB client (which
+    // serves the modern lockups) before giving up.
+    bool m_plWebRetried = false;
     QString m_plId;
 };
 

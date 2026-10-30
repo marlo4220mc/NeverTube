@@ -2,6 +2,9 @@
 
 #include <QString>
 
+// Returns the playlist ID if the URL represents a playlist or includes a list= parameter.
+QString youtubePlaylistIdFromText(const QString &text);
+
 // Strict reading of a YouTube LINK pasted in a text field (Ctrl+V, Súper+V,
 // right-click paste, ...). It returns the 11 characters of the video only when
 // the text IS an address of this site: youtube.com/watch?v=, youtu.be/<id>,

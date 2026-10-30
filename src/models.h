@@ -28,6 +28,20 @@ struct VideoInfo
     // is_short) so that the lists that come from the database ("Continuar
     // viendo", the history) can leave them out too.
     bool isShort = false;
+    // Playlist / mix the row belongs to (RD…, PL…, OLAK…): a mix does NOT have
+    // a video id of its own in the modern layout, it has the id of the
+    // playlist, so the row is only playable through it. Empty = plain video.
+    // When `id` IS the playlist (a card of Search or of the Channel's
+    // Playlists tab) both fields carry it and isPlaylist() says so.
+    QString playlistId;
+    // Videos of the playlist, when the row IS a playlist (0 = unknown).
+    int playlistVideos = 0;
+    // The row is the PLAYLIST itself (Search / Channel card), not a video.
+    bool isPlaylist() const { return !playlistId.isEmpty() && playlistId == id; }
+    // Any row that represents a playlist or a mix (the card, or a mix entry of
+    // "A continuación" that brings a video AND its mix). Those are never
+    // played automatically: clicking one loads the whole playlist.
+    bool isPlaylistEntry() const { return !playlistId.isEmpty(); }
 };
 
 struct ChannelInfo

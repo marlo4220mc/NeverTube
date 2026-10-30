@@ -48,6 +48,8 @@ QString emptyTextFor(const QString &tab)
         return nt::tr("channel.emptyShorts");
     if (tab == QLatin1String("live"))
         return nt::tr("channel.emptyLive");
+    if (tab == QLatin1String("playlists"))
+        return nt::tr("channel.emptyPlaylists");
     return nt::tr("channel.emptyVideos");
 }
 
@@ -160,7 +162,7 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
 
     // --- Tabs -------------------------------------------------------------
     const QStringList keys{QStringLiteral("videos"), QStringLiteral("shorts"),
-                           QStringLiteral("live")};
+                           QStringLiteral("live"), QStringLiteral("playlists")};
 
     auto *tabRow = new QHBoxLayout;
     tabRow->setSpacing(10);
@@ -184,8 +186,10 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
             nt::bindText(btn, "channel.tab.videos");
         else if (i == 1)
             nt::bindText(btn, "channel.tab.shorts");
-        else
+        else if (i == 2)
             nt::bindText(btn, "channel.tab.live");
+        else
+            nt::bindText(btn, "channel.tab.playlists");
         btn->setCursor(Qt::PointingHandCursor);
         btn->setFocusPolicy(Qt::NoFocus);
         btn->setProperty("selected", i == 0);
@@ -247,7 +251,11 @@ ChannelPage::ChannelPage(Yt *yt, ThumbnailCache *thumbs,
             loadTab(i);
         });
         connect(list, &VideoListView::videoActivated, this,
-                [this, i](int item, const VideoInfo &) {
+                [this, i](int item, const VideoInfo &v) {
+                    if (v.isPlaylistEntry() && !v.playlistId.isEmpty()) {
+                        emit playlistRequested(v.playlistId);
+                        return;
+                    }
                     emit openRequested(m_videos.at(i), item);
                 });
         connect(list, &VideoListView::moreRequested, this,
@@ -501,7 +509,8 @@ void ChannelPage::onTabVideos(const QString &channelId, const QString &tab,
     if (channelId != m_channelId)
         return;
     const int index = tab == QLatin1String("shorts") ? 1
-                    : tab == QLatin1String("live") ? 2 : 0;
+                    : tab == QLatin1String("live") ? 2
+                    : tab == QLatin1String("playlists") ? 3 : 0;
     QVector<VideoInfo> loaded = videos;
     m_moreButtons.at(index)->setEnabled(true);
     if (!m_channelName.isEmpty()) {

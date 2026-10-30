@@ -354,21 +354,35 @@ QWidget#cardPanel { background-color: #181818; border: 1px solid @BORDER@; borde
    The top one is white at 28 % and the rest in the border gray:
    separately none reads against every video (1.33:1 the gray on dark,
    1.04:1 the white on light), together there is always an edge that delimits it. */
+/* Docked controls at the bottom of the video with smooth dark gradient (FreeTube style) */
 QWidget#playerOverlay {
-    background-color: @OVERLAY_BG@;
-    border: 1px solid @BORDER@;
-    border-top: 1px solid @OVERLAY_EDGE@;
-    border-radius: 12px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 rgba(0, 0, 0, 0),
+                                stop:0.25 rgba(0, 0, 0, 130),
+                                stop:1.0 rgba(0, 0, 0, 220));
+    border: none;
+    border-radius: 0px;
 }
-/* Split clock of the row: elapsed to the left of the slider and duration to
-   the right (see WatchPage). Secondary text, below the icons. */
-QLabel#ovPos, QLabel#ovDur { color: @TEXTSOFT@; font-size: 12px; }
+QWidget#playerOverlay QPushButton#iconBtn {
+    border-radius: 17px;
+    padding: 6px;
+}
+/* Time display of the player row: elapsed / duration (see WatchPage). */
+QLabel#ovPos, QLabel#ovDur, QLabel#ovTimeSep { color: @TEXTSOFT@; font-size: 12px; }
 /* In a live stream (dynamic property live): the "EN VIVO" mark of the clock goes
    in the accent and the negative timer writes whatever WatchPage indicates. */
 QLabel#ovPos[live="true"] { color: @ACCENT@; }
-/* Subtle vertical separator between the subgroups of the row (transport / volume
-   / actions): 1x20 px, with the same light edge as the panel border. */
-QFrame#ovSep { background: @OVERLAY_EDGE@; border: none; }
+QLabel#ovTimeSep { color: @MUTED@; font-size: 11px; }
+/* Floating timestamp badge above the seek slider on hover */
+QLabel#seekBubble {
+    background-color: @POPOVER@;
+    color: @TEXT@;
+    border: 1px solid @OVERLAY_EDGE@;
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 11px;
+    font-weight: bold;
+}
 
 /* --- Player Page --------------------------------------------------------
    The two overlays (spinner and error) live inside m_overlay, over the
