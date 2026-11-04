@@ -3,7 +3,7 @@
 </div>
 
 <p align="center">
-  <img src="docs/assets/banner-es.png" alt="NeverTube — Ligero. Rápido. Sin límites." width="100%">
+  <img src="https://marlo4220mc.github.io/NeverTube/banner-es.png" alt="NeverTube — Ligero. Rápido. Sin límites." width="100%">
 </p>
 
 <p align="center">
