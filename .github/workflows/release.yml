@@ -1122,7 +1122,7 @@ jobs:
         shell: pwsh
         run: |
           curl.exe -sL -o vulkan-rt.zip `
-            https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime-components.zip
+            https://sdk.lunarg.com/sdk/download/1.4.304.0/windows/vulkan-runtime-components.zip
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "$env:ProgramFiles/7-Zip/7z.exe" x -y -ovulkan-rt vulkan-rt.zip | Out-Null
           $vk = Get-ChildItem vulkan-rt -Recurse -Filter vulkan-1.dll |
@@ -1497,7 +1497,7 @@ jobs:
         shell: pwsh
         run: |
           curl.exe -sL -o vulkan-rt.zip `
-            https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime-components.zip
+            https://sdk.lunarg.com/sdk/download/1.4.304.0/windows/vulkan-runtime-components.zip
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "$env:ProgramFiles/7-Zip/7z.exe" x -y -ovulkan-rt vulkan-rt.zip | Out-Null
           $vk = Get-ChildItem vulkan-rt -Recurse -Filter vulkan-1.dll |
