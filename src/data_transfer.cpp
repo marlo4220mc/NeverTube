@@ -15,10 +15,10 @@
 #include "db/app_database.h"
 #include "db/repositories.h"
 
-#include <QtGui/private/qzipreader_p.h>
-#include <QtGui/private/qzipwriter_p.h>
+#include "miniz.h"
 
 #include <cstdio>
+#include <cstring>
 
 // Data transfer (export / import): pure parsing and formatting. No repos, no
 // DB, no network. See the header for the format contract (NewPipe JSON +
@@ -339,70 +339,101 @@ ImportResult importPlaylistCsv(const QByteArray &csv, const QString &fileName)
 ImportResult importTakeoutZip(const QByteArray &zipData)
 {
     ImportResult res;
-    QBuffer buffer;
-    buffer.setData(zipData);
-    if (!buffer.open(QIODevice::ReadOnly)) {
-        res.error = QStringLiteral("cannot open zip");
-        return res;
-    }
-    QZipReader zip(&buffer);
-    if (!zip.isReadable()) {
-        res.error = QStringLiteral("cannot read zip");
+    if (zipData.isEmpty()) {
+        res.error = QStringLiteral("empty zip data");
         return res;
     }
 
-    const QVector<QZipReader::FileInfo> entries = zip.fileInfoList();
+    mz_zip_archive zip;
+    std::memset(&zip, 0, sizeof(zip));
+    if (!mz_zip_reader_init_mem(&zip, zipData.constData(), zipData.size(), 0)) {
+        res.error = QStringLiteral("cannot open zip");
+        return res;
+    }
+
+    const int fileCount = static_cast<int>(mz_zip_reader_get_num_files(&zip));
 
     // 1. Subscriptions: content-based detection across all CSV files in the zip.
     // Handles English (subscriptions.csv), Spanish (suscripciones.csv), French
     // (abonnements.csv), etc., picking the file with the most subscriptions.
-    for (const QZipReader::FileInfo &fi : entries) {
-        if (!fi.isFile || !fi.filePath.endsWith(QLatin1String(".csv"), Qt::CaseInsensitive))
+    for (int i = 0; i < fileCount; ++i) {
+        mz_zip_archive_file_stat stat;
+        if (!mz_zip_reader_file_stat(&zip, i, &stat) || stat.m_is_directory)
             continue;
-        const QString lower = fi.filePath.toLower();
+        const QString filePath = QString::fromUtf8(stat.m_filename);
+        if (!filePath.endsWith(QLatin1String(".csv"), Qt::CaseInsensitive))
+            continue;
+        const QString lower = filePath.toLower();
         if (lower.contains(QLatin1String("playlist")) || lower.contains(QLatin1String("lista"))
             || lower.contains(QLatin1String("metadatos")) || lower.contains(QLatin1String("comentario"))
             || lower.contains(QLatin1String("historial")) || lower.contains(QLatin1String("canal")))
             continue;
 
-        const ImportResult subs = importSubscriptionsCsv(zip.fileData(fi.filePath));
-        if (subs.subscriptions.size() > res.subscriptions.size())
-            res.subscriptions = subs.subscriptions;
+        size_t uncompSize = 0;
+        void *data = mz_zip_reader_extract_to_heap(&zip, i, &uncompSize, 0);
+        if (data) {
+            const QByteArray csvBytes(static_cast<const char *>(data), static_cast<int>(uncompSize));
+            mz_free(data);
+            const ImportResult subs = importSubscriptionsCsv(csvBytes);
+            if (subs.subscriptions.size() > res.subscriptions.size())
+                res.subscriptions = subs.subscriptions;
+        }
     }
     // Fallback: search any CSV whose filename contains subscription hints
     if (res.subscriptions.isEmpty()) {
-        for (const QZipReader::FileInfo &fi : entries) {
-            if (!fi.isFile || !fi.filePath.endsWith(QLatin1String(".csv"), Qt::CaseInsensitive))
+        for (int i = 0; i < fileCount; ++i) {
+            mz_zip_archive_file_stat stat;
+            if (!mz_zip_reader_file_stat(&zip, i, &stat) || stat.m_is_directory)
                 continue;
-            const QString b = baseName(fi.filePath).toLower();
+            const QString filePath = QString::fromUtf8(stat.m_filename);
+            if (!filePath.endsWith(QLatin1String(".csv"), Qt::CaseInsensitive))
+                continue;
+            const QString b = baseName(filePath).toLower();
             if (b.contains(QLatin1String("subscri")) || b.contains(QLatin1String("suscrip"))
                 || b.contains(QLatin1String("abonn"))) {
-                const ImportResult subs = importSubscriptionsCsv(zip.fileData(fi.filePath));
-                if (subs.subscriptions.size() > res.subscriptions.size())
-                    res.subscriptions = subs.subscriptions;
+                size_t uncompSize = 0;
+                void *data = mz_zip_reader_extract_to_heap(&zip, i, &uncompSize, 0);
+                if (data) {
+                    const QByteArray csvBytes(static_cast<const char *>(data), static_cast<int>(uncompSize));
+                    mz_free(data);
+                    const ImportResult subs = importSubscriptionsCsv(csvBytes);
+                    if (subs.subscriptions.size() > res.subscriptions.size())
+                        res.subscriptions = subs.subscriptions;
+                }
             }
         }
     }
 
     // 2. Playlists & Watch later: every CSV under any directory containing
     // "playlist" or "lista" (e.g. "playlists/" or "listas de reproducción/").
-    for (const QZipReader::FileInfo &fi : entries) {
-        if (!fi.isFile || !fi.filePath.endsWith(QLatin1String(".csv"), Qt::CaseInsensitive))
+    for (int i = 0; i < fileCount; ++i) {
+        mz_zip_archive_file_stat stat;
+        if (!mz_zip_reader_file_stat(&zip, i, &stat) || stat.m_is_directory)
             continue;
-        const QString path = fi.filePath;
+        const QString filePath = QString::fromUtf8(stat.m_filename);
+        if (!filePath.endsWith(QLatin1String(".csv"), Qt::CaseInsensitive))
+            continue;
+        const QString path = filePath;
         const QString lower = path.toLower();
         if (!lower.contains(QLatin1String("playlist")) && !lower.contains(QLatin1String("lista")))
             continue;
 
-        const QByteArray content = zip.fileData(path);
-        const ImportResult plRes = importPlaylistCsv(content, baseName(path));
-        if (plRes.hasNevertube) {
-            res.nevertube.playlists.append(plRes.nevertube.playlists);
-            res.nevertube.watchLater.append(plRes.nevertube.watchLater);
-            res.nevertube.favorites.append(plRes.nevertube.favorites);
-            res.hasNevertube = true;
+        size_t uncompSize = 0;
+        void *data = mz_zip_reader_extract_to_heap(&zip, i, &uncompSize, 0);
+        if (data) {
+            const QByteArray content(static_cast<const char *>(data), static_cast<int>(uncompSize));
+            mz_free(data);
+            const ImportResult plRes = importPlaylistCsv(content, baseName(path));
+            if (plRes.hasNevertube) {
+                res.nevertube.playlists.append(plRes.nevertube.playlists);
+                res.nevertube.watchLater.append(plRes.nevertube.watchLater);
+                res.nevertube.favorites.append(plRes.nevertube.favorites);
+                res.hasNevertube = true;
+            }
         }
     }
+
+    mz_zip_reader_end(&zip);
 
     const bool hasSubs = !res.subscriptions.isEmpty();
     const bool hasPlaylists = res.hasNevertube;
@@ -511,15 +542,20 @@ namespace
 // Used by the selftest so it does not depend on an external zip tool.
 QByteArray buildTestZip(const QList<QPair<QString, QByteArray>> &entries)
 {
-    QBuffer out;
-    out.open(QIODevice::WriteOnly);
-    QZipWriter writer(&out);
+    mz_zip_archive zip;
+    std::memset(&zip, 0, sizeof(zip));
+    mz_zip_writer_init_heap(&zip, 0, 0);
     for (const auto &e : entries) {
-        writer.setCompressionPolicy(QZipWriter::NeverCompress);
-        writer.addFile(e.first, e.second);
+        const QByteArray name = e.first.toUtf8();
+        mz_zip_writer_add_mem(&zip, name.constData(), e.second.constData(),
+                              static_cast<size_t>(e.second.size()), MZ_NO_COMPRESSION);
     }
-    writer.close();
-    return out.data();
+    void *buf = nullptr;
+    size_t size = 0;
+    mz_zip_writer_finalize_heap_archive(&zip, &buf, &size);
+    QByteArray res(static_cast<const char *>(buf), static_cast<int>(size));
+    mz_zip_writer_end(&zip);
+    return res;
 }
 }  // namespace
 

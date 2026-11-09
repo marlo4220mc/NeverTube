@@ -21,7 +21,7 @@ cd "$repo"
 
 echo "== installing Fedora build dependencies =="
 dnf install -y cmake gcc-c++ make pkgconf-pkg-config \
-  qt5-qtbase-devel qt5-qtbase-private-devel \
+  qt5-qtbase-devel \
   mpv-devel \
   pulseaudio-libs-devel \
   mesa-libGL-devel \

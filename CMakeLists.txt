@@ -148,6 +148,8 @@ add_executable(nevertube
   src/data_transfer.h
   src/channel_verifier.cpp
   src/channel_verifier.h
+  third_party/miniz/miniz.cpp
+  third_party/miniz/miniz.h
   # The built-in updater: the version of the binary, the async query of the
   # GitHub release, the download of the installer of this build with the
   # verification against SHA256SUMS.txt, and its dialog (Windows installs from
@@ -240,9 +242,7 @@ target_link_libraries(nevertube PRIVATE
   Qt5::Sql
   OpenGL::GL
 )
-if(TARGET Qt5::GuiPrivate)
-  target_link_libraries(nevertube PRIVATE Qt5::GuiPrivate)
-endif()
+target_include_directories(nevertube PRIVATE third_party/miniz)
 
 # --- System Media Controls (MPRIS v2 on Linux / SMTC on Windows 10+) ---
 # Linux: MPRIS v2 over D-Bus (Qt5::DBus).
