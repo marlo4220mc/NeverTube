@@ -19,6 +19,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSignalBlocker>
+#include <QStyle>
 #include <QStackedWidget>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -295,24 +296,23 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     outer->setSpacing(6);
 
     auto *title = new QLabel(this);
-    title->setObjectName(QStringLiteral("sectionTitle"));
+    title->setObjectName(QStringLiteral("pageHeading"));
     nt::bindText(title, "search.title");
     title->setFixedHeight(20);
     outer->addWidget(title);
 
     auto *searchCard = new QFrame(this);
-    searchCard->setObjectName(QStringLiteral("cardPanel"));
+    searchCard->setObjectName(QStringLiteral("searchCard"));
     searchCard->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    m_searchCard = searchCard;
     auto *searchRow = new QHBoxLayout(searchCard);
-    searchRow->setContentsMargins(10, 3, 10, 3);
+    searchRow->setContentsMargins(14, 4, 8, 4);
     searchRow->setSpacing(8);
     auto *searchIcon = new QLabel(searchCard);
     searchIcon->setPixmap(nt::icon(nt::Icon::Search, nt::kMuted, 18).pixmap(20, 20));
     m_field = new QLineEdit(searchCard);
+    m_field->setObjectName(QStringLiteral("searchField"));
     nt::bindPlaceholder(m_field, "search.placeholder");
-    // 36 px, not 32: the global QSS applies padding 8px 12px, so with 32 the
-    // vertical padding ate the text (8+8+line_height > 32). 36 leaves the 8+8
-    // and a 13 px line comfortable.
     m_field->setFixedHeight(36);
     // Icon instead of the "✕" glyph (U+2715): that character is NOT in the
     // default font (Liberation Sans on Linux; on Windows it depends on the
@@ -330,10 +330,10 @@ SearchPage::SearchPage(Yt *yt, SettingsRepo *settings, ThumbnailCache *thumbs,
     m_clearBtn->setFocusPolicy(Qt::NoFocus);
     m_clearBtn->hide();
     auto *searchBtn = new QPushButton(searchCard);
-    searchBtn->setObjectName(QStringLiteral("primary"));
+    searchBtn->setObjectName(QStringLiteral("searchBtn"));
     nt::bindText(searchBtn, "search.button");
     searchBtn->setCursor(Qt::PointingHandCursor);
-    searchBtn->setFixedHeight(36);
+    searchBtn->setFixedHeight(34);
     searchRow->addWidget(searchIcon);
     searchRow->addWidget(m_field, 1);
     searchRow->addWidget(m_clearBtn);
@@ -1236,6 +1236,21 @@ bool SearchPage::eventFilter(QObject *watched, QEvent *event)
     // key reaches the page.
     if (watched == m_field && event->type() == QEvent::KeyPress)
         return fieldKey(static_cast<QKeyEvent *>(event));
+
+    // Focus ring of the search pill. Qt5's QSS has no `:focus-within` (that is a
+    // CSS selector and Qt silently ignores it, so the rule painted nothing): the
+    // card carries a dynamic property instead and the QSS matches
+    // `QFrame#searchCard[focused="true"]`. re-polish is mandatory: setting a
+    // property does not repaint by itself.
+    if (watched == m_field
+        && (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut)) {
+        if (m_searchCard) {
+            const bool focused = event->type() == QEvent::FocusIn;
+            m_searchCard->setProperty("focused", focused);
+            m_searchCard->style()->unpolish(m_searchCard);
+            m_searchCard->style()->polish(m_searchCard);
+        }
+    }
 
     if (event->type() == QEvent::MouseButtonPress && m_suggestPanel
         && !m_suggestPanel->isHidden()) {

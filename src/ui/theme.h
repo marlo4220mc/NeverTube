@@ -7,23 +7,30 @@
 
 namespace nt {
 
-inline const QColor kBg(0x0F, 0x0F, 0x0F);
-inline const QColor kPanel(0x18, 0x18, 0x18);
-inline const QColor kElevated(0x1F, 0x1F, 0x1F);
+// Palette "casi negro" inmersiva (content-first). The values follow the
+// mockup in docs/redesign-propuesta-spotify-v2.html: fondo #0B0B0B,
+// superficies #131313 / #1A1A1A, hairline principal #202020,
+// hairline secundario #262626, hover #191919, selección #222222,
+// texto #F2F2F2, muted #9C9C9C, meta #949CA6.
+inline const QColor kBg(0x0B, 0x0B, 0x0B);
+inline const QColor kPanel(0x13, 0x13, 0x13);
+inline const QColor kElevated(0x1A, 0x1A, 0x1A);
 inline const QColor kTop(0x10, 0x10, 0x10);
-inline const QColor kBorder(0x26, 0x26, 0x26);
-inline const QColor kHover(0x24, 0x24, 0x24);
-inline const QColor kText(0xEC, 0xEC, 0xEC);
-inline const QColor kMuted(0x8F, 0x8F, 0x8F);
+inline const QColor kBorder(0x20, 0x20, 0x20);
+inline const QColor kBorderSoft(0x26, 0x26, 0x26); // hairline secundaria de cards y paneles
+inline const QColor kHover(0x19, 0x19, 0x19);
+inline const QColor kHoverSoft(0x14, 0x14, 0x14); // miniBar hover, one step above kTop
+inline const QColor kText(0xF2, 0xF2, 0xF2);
+inline const QColor kMuted(0x9C, 0x9C, 0x9C);
 
 // Roles that used to live as hex literals inside the theme.cpp QSS. They are
 // moved up here so the palette has a SINGLE source: the QSS is generated with
 // placeholders as it already did with the accent. The QSS used to write #2A2A2A
-// for borders (and kBorder is #262626) and #232323 for hover (and kHover is
-// #242424), so the same role had two values depending on whether it was painted
+// for borders (and kBorder is #202020) and #232323 for hover (and kHover is
+// #191919), so the same role had two values depending on whether it was painted
 // by hand or through the QSS.
 inline const QColor kDisabled(0x6A, 0x6A, 0x6A);
-inline const QColor kSelection(0x2D, 0x2D, 0x2D);
+inline const QColor kSelection(0x22, 0x22, 0x22);
 inline const QColor kHandle(0x2F, 0x2F, 0x2F);
 inline const QColor kHandleHover(0x3A, 0x3A, 0x3A);
 inline const QColor kPopover(0x20, 0x20, 0x20);
@@ -64,7 +71,7 @@ inline QString tooltipRule()
 //
 // They were also written by hand as #9aa2ad / #c8c8c8 (with two different
 // capitalizations for the same color) in five places.
-inline const QColor kMetaText(0x9A, 0xA2, 0xAD);
+inline const QColor kMetaText(0x94, 0x9C, 0xA6);
 inline const QColor kTextSoft(0xC8, 0xC8, 0xC8);
 
 // App accent (by default the icon's red: measured on the new icon's play

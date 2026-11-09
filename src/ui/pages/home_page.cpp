@@ -33,11 +33,13 @@ const int kGridH = 258;
 const int kMiniBarReservedPx = 96;
 
 // Subscriptions feed harvest per channel: maximum number of channels queried
-// per refresh and the number of videos per channel (5) after which a given
-// channel stops being requested. Each channel contributes up to 5 recents.
-const int kFeedMaxChannels = 6;
-const int kFeedPerChannel = 5;
-const int kFeedTargetVideos = kFeedMaxChannels * kFeedPerChannel;
+// per refresh and the number of videos per channel (4) after which a given
+// channel stops being requested. Each channel contributes up to 4 recents.
+const int kFeedMaxChannels = 18;
+const int kFeedPerChannel = 4;
+const int kFeedTargetVideos = 20;
+// Maximum age of a video to be accepted into "Nuevos de tus suscripciones" (days).
+const int kFeedMaxAgeDays = 60;
 
 // Cache TTLs per section (ms). TTL != polling: on entering Home the cached
 // content is shown immediately and, if expired, refreshed ONCE in the
@@ -116,7 +118,7 @@ HomePage::HomePage(Yt *yt, SubscriptionsRepo *subs, HistoryRepo *history,
 
     auto *topRow = new QHBoxLayout;
     auto *title = new QLabel(this);
-    title->setObjectName(QStringLiteral("sectionTitle"));
+    title->setObjectName(QStringLiteral("pageHeading"));
     nt::bindText(title, "home.title");
     auto *refresh = new QPushButton(this);
     refresh->setObjectName(QStringLiteral("ghost"));
@@ -578,12 +580,42 @@ void HomePage::loadFeed()
         return;
     }
     m_channelNames.clear();
+    QStringList allIds;
     for (const SubscriptionInfo &s : channels) {
         m_channelNames.insert(s.id, s.title);
-        m_pendingChannels << s.id;
+        allIds << s.id;
         if (!s.avatar.isEmpty())
             m_thumbs->requestChannelAvatar(s.id, s.avatar);
     }
+
+    // 1. Prioritize channels the user actively watched in recent history
+    QSet<QString> watchedChannels;
+    if (m_history && m_videoCache) {
+        for (const QString &vid : m_history->recentIds(50)) {
+            VideoInfo v;
+            if (m_videoCache->get(vid, v) && !v.channelId.isEmpty()) {
+                if (m_channelNames.contains(v.channelId)
+                    && !watchedChannels.contains(v.channelId)) {
+                    watchedChannels.insert(v.channelId);
+                    m_pendingChannels << v.channelId;
+                }
+            }
+        }
+    }
+
+    // 2. Sample remaining subscriptions in shuffled order so Home discovers
+    // uploads across the whole subscription list instead of always the first 6 A-Z
+    QStringList remaining;
+    for (const QString &id : allIds) {
+        if (!watchedChannels.contains(id))
+            remaining << id;
+    }
+    for (int i = remaining.size() - 1; i > 0; --i) {
+        const int j = QRandomGenerator::global()->bounded(i + 1);
+        remaining.swapItemsAt(i, j);
+    }
+    m_pendingChannels << remaining;
+
     m_pendingIdx = 0;
     refreshBusy();
     requestNextChannel();
@@ -617,7 +649,7 @@ void HomePage::onChannelVideos(const QVector<VideoInfo> &videos)
         if (v.channelId.isEmpty())
             v.channelId = cid;
     }
-    // Up to 5 recents per channel, sorting that channel by date.
+    // Up to kFeedPerChannel recents per channel, sorting that channel by date.
     std::stable_sort(patched.begin(), patched.end(), [](const VideoInfo &a,
                                                         const VideoInfo &b) {
         const QDateTime ad = QDateTime::fromString(a.publishedAt, Qt::ISODate);
@@ -628,9 +660,23 @@ void HomePage::onChannelVideos(const QVector<VideoInfo> &videos)
             return ad.isValid();
         return false;
     });
-    if (patched.size() > kFeedPerChannel)
-        patched.resize(kFeedPerChannel);
-    m_feed += patched;
+
+    // Only accept videos that are genuinely "Nuevos" (within kFeedMaxAgeDays).
+    // Avoids filling the feed with 3-year-old videos from dormant channels.
+    const QDateTime cutoff =
+        QDateTime::currentDateTimeUtc().addDays(-kFeedMaxAgeDays);
+    QVector<VideoInfo> recentOnly;
+    for (const VideoInfo &v : std::as_const(patched)) {
+        const QDateTime d = QDateTime::fromString(v.publishedAt, Qt::ISODate);
+        if (!d.isValid() || d >= cutoff)
+            recentOnly.append(v);
+    }
+
+    if (!recentOnly.isEmpty()) {
+        if (recentOnly.size() > kFeedPerChannel)
+            recentOnly.resize(kFeedPerChannel);
+        m_feed += recentOnly;
+    }
     m_pendingIdx++;
     requestNextChannel();
 }

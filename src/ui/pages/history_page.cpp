@@ -64,7 +64,7 @@ HistoryPage::HistoryPage(HistoryRepo *history, VideoCacheRepo *cache,
     titleRow->setSpacing(8);
 
     m_title = new QLabel(this);
-    m_title->setObjectName(QStringLiteral("sectionTitle"));
+    m_title->setObjectName(QStringLiteral("pageHeading"));
     nt::bindText(m_title, "history.title");
     titleRow->addWidget(m_title, 0, Qt::AlignVCenter);
     titleRow->addStretch(1);

@@ -36,6 +36,32 @@ void nt::addRowMenuActions(QMenu *menu, const VideoInfo &video,
     if (!menu || video.id.isEmpty())
         return;
 
+    // A PLAYLIST ROW (in Search, Channel or Library):
+    // Standard actions for playlists: Compartir, Ver canal y Guardar este playlist.
+    if (video.isPlaylist()) {
+        addAction(menu, nt::tr("row.share"), [id = video.playlistId.isEmpty() ? video.id : video.playlistId]() {
+            const QString url =
+                QStringLiteral("https://www.youtube.com/playlist?list=%1").arg(id);
+            QGuiApplication::clipboard()->setText(url);
+            QToolTip::showText(QCursor::pos(), nt::tr("row.linkCopied"));
+        });
+
+        if (!video.channelId.isEmpty() && hooks.onChannel) {
+            addAction(menu, nt::tr("row.viewChannel"),
+                      [hooks, id = video.channelId, name = video.channel]() {
+                          hooks.onChannel(id, name);
+                      });
+        }
+
+        if (hooks.onSavePlaylist) {
+            addAction(menu, nt::tr("row.savePlaylist"),
+                      [hooks, id = video.playlistId.isEmpty() ? video.id : video.playlistId, title = video.title]() {
+                          hooks.onSavePlaylist(id, title);
+                      });
+        }
+        return;
+    }
+
     if (withWatchLater && watchLater) {
         const bool marked = watchLater->isWatchLater(video.id);
         addAction(menu,

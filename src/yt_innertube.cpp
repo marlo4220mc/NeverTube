@@ -3238,6 +3238,8 @@ VideoInfo videoFromWebLockup(const QJsonObject &lv)
     const bool isPlaylistLockup =
         lv.value(QStringLiteral("contentType")).toString().contains(
             QStringLiteral("PLAYLIST"))
+        || lv.value(QStringLiteral("contentType")).toString().contains(
+            QStringLiteral("COURSE"))
         || !contentImage.value(QStringLiteral("collectionThumbnailViewModel"))
                 .toObject().isEmpty();
     if (isPlaylistLockup)

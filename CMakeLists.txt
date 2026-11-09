@@ -144,6 +144,10 @@ add_executable(nevertube
   src/reels_filter.h
   src/youtube_url.cpp
   src/youtube_url.h
+  src/data_transfer.cpp
+  src/data_transfer.h
+  src/channel_verifier.cpp
+  src/channel_verifier.h
   # The built-in updater: the version of the binary, the async query of the
   # GitHub release, the download of the installer of this build with the
   # verification against SHA256SUMS.txt, and its dialog (Windows installs from
@@ -231,6 +235,7 @@ endif()
 target_link_libraries(nevertube PRIVATE
   Qt5::Core
   Qt5::Gui
+  Qt5::GuiPrivate
   Qt5::Widgets
   Qt5::Network
   Qt5::Sql

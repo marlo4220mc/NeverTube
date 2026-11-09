@@ -113,6 +113,8 @@ private slots:
     void showPreviousTab();
     void openHistory();
     void resetAppData();
+    void onExportData();
+    void onImportData();
     void onNavButton(int index);
     void onRadioReadyDiscover(const QString &videoId,
                               const QVector<VideoInfo> &videos);
@@ -239,6 +241,8 @@ private:
     QString m_searchUrlId;
     QString m_preferredPlaylistVideoId;
     bool m_openingPlaylist = false;
+    QString m_savingPlaylistId;
+    QString m_savingPlaylistTitle;
 
     HomePage *m_home = nullptr;
     SearchPage *m_search = nullptr;

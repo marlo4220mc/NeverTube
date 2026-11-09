@@ -15,13 +15,15 @@
 #include "../theme.h"
 #include "../thumbnail_cache.h"
 #include "../video_list_view.h"
+#include "../../yt.h"
 
 PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
-                           ThumbnailCache *thumbs, QWidget *parent)
+                           ThumbnailCache *thumbs, Yt *yt, QWidget *parent)
     : QWidget(parent)
     , m_playlists(playlists)
     , m_cache(cache)
     , m_thumbs(thumbs)
+    , m_yt(yt)
 {
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(16, 16, 16, 16);
@@ -171,6 +173,18 @@ PlaylistPage::PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
     // y=500 inside the area y=141..956), same as the Channel tabs.
     areaLay->addWidget(m_empty, 1);
     root->addWidget(m_area, 1);
+
+    if (m_yt) {
+        connect(m_yt, &Yt::detailReady, this,
+                [this](const VideoInfo &video, const QString &, qint64,
+                       const QVector<FormatInfo> &) {
+                    onVideoDetailResolved(video);
+                });
+        connect(m_yt, &Yt::detailFailed, this, [this](const QString &) {
+            m_resolveInFlight = false;
+            resolveNext();
+        });
+    }
 }
 
 void PlaylistPage::openPlaylist(const QString &id, const QString &title)
@@ -199,6 +213,25 @@ void PlaylistPage::reload()
         return;
     const QStringList ids = m_playlists->videoIds(m_playlistId);
     m_videos = m_cache->getMany(ids);
+    if (m_videos.size() < ids.size()) {
+        QHash<QString, VideoInfo> byId;
+        for (const VideoInfo &v : std::as_const(m_videos))
+            byId.insert(v.id, v);
+        m_videos.clear();
+        m_videos.reserve(ids.size());
+        for (const QString &id : ids) {
+            auto it = byId.constFind(id);
+            if (it != byId.constEnd()) {
+                m_videos.append(it.value());
+            } else {
+                VideoInfo placeholder;
+                placeholder.id = id;
+                placeholder.title = id;
+                m_videos.append(placeholder);
+                m_cache->upsert(placeholder);
+            }
+        }
+    }
     m_list->showVideos(m_videos, VideoListView::ListMode);
     m_list->setCurrentRow(-1);
     m_removeBtn->setEnabled(false);
@@ -206,6 +239,38 @@ void PlaylistPage::reload()
     // List or empty box, never both (see the constructor's comment).
     m_empty->setVisible(m_videos.isEmpty());
     m_list->setVisible(!m_videos.isEmpty());
+
+    // Queue placeholder videos for background metadata resolution
+    m_resolveQueue.clear();
+    for (const VideoInfo &v : std::as_const(m_videos)) {
+        if (v.title == v.id || v.channel.isEmpty())
+            m_resolveQueue.append(v.id);
+    }
+    m_resolveInFlight = false;
+    resolveNext();
+}
+
+void PlaylistPage::resolveNext()
+{
+    if (!m_yt || m_resolveInFlight || m_resolveQueue.isEmpty())
+        return;
+    m_resolveInFlight = true;
+    const QString nextId = m_resolveQueue.takeFirst();
+    m_yt->getDetail(nextId);
+}
+
+void PlaylistPage::onVideoDetailResolved(const VideoInfo &video)
+{
+    m_resolveInFlight = false;
+    for (int i = 0; i < m_videos.size(); ++i) {
+        if (m_videos.at(i).id == video.id) {
+            m_videos[i] = video;
+            m_cache->upsert(video);
+            m_list->updateVideo(i, video);
+            break;
+        }
+    }
+    resolveNext();
 }
 
 // Removes from the playlist the MARKED row (currentRow, the one from the last

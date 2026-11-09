@@ -750,6 +750,24 @@ void SettingsPage::buildUI()
         return btn;
     };
 
+    // Export data: saves a JSON backup compatible with NewPipe (subscriptions)
+    // and NeverTube (playlists, watch later, history, favorites, starred).
+    QPushButton *exportBtn = addActionButton(
+        nt::tr("settings.exportData"), false);
+    exportBtn->setProperty("dataAction", QStringLiteral("export"));
+    connect(exportBtn, &QPushButton::clicked, this, [this]() {
+        emit exportDataRequested();
+    });
+
+    // Import data: loads subscriptions and playlists from a NewPipe/NeverTube
+    // JSON backup, or from a Google Takeout CSV/ZIP.
+    QPushButton *importBtn = addActionButton(
+        nt::tr("settings.importData"), false);
+    importBtn->setProperty("dataAction", QStringLiteral("import"));
+    connect(importBtn, &QPushButton::clicked, this, [this]() {
+        emit importDataRequested();
+    });
+
     // Clear thumbnail cache: deletes only the images saved to disk
     // (they are re-downloaded on their own when videos are shown). Touches no data nor the DB.
     QPushButton *clearBtn = addActionButton(

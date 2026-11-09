@@ -32,10 +32,14 @@ QString cacheKeyFor(const VideoInfo &v)
 
 // Shrunken font without warnings: if the base font has no point size set
 // (returns -1, the usual case when the app uses pixel size), we start from a
-// default logical size and never go below 4 pt.
+// default logical size and never go below 4 pt / 9 px.
 QFont shrunkFont(const QFont &base, qreal delta)
 {
     QFont f = base;
+    if (f.pixelSize() > 0) {
+        f.setPixelSize(qMax(qRound(f.pixelSize() - delta), 9));
+        return f;
+    }
     qreal pt = f.pointSizeF();
     if (pt <= 0)
         pt = 9.0;
@@ -388,7 +392,12 @@ private:
     {
         const QRect r = opt.rect;
         if (opt.state & QStyle::State_MouseOver) {
-            p->fillRect(r, nt::kHover);
+            p->save();
+            p->setRenderHint(QPainter::Antialiasing);
+            p->setPen(Qt::NoPen);
+            p->setBrush(nt::kHover);
+            p->drawRoundedRect(QRectF(r).adjusted(2, 2, -2, -2), 10, 10);
+            p->restore();
         }
 
         const qreal gw = m_cellW > 0 ? m_cellW : kGridW * m_scale;
@@ -790,6 +799,15 @@ void VideoListView::showVideos(const QVector<VideoInfo> &videos, Mode mode)
     if (mode == GridMode)
         applyGridGeometry();
     refreshThumbnails();
+    viewport()->update();
+}
+
+void VideoListView::updateVideo(int index, const VideoInfo &v)
+{
+    if (index < 0 || index >= m_videos.size() || index >= m_model->rowCount())
+        return;
+    m_videos[index] = v;
+    m_model->item(index)->setData(QVariant::fromValue(v), Qt::UserRole);
     viewport()->update();
 }
 

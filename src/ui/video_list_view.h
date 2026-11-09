@@ -20,6 +20,7 @@ public:
 
     void showVideos(const QVector<VideoInfo> &videos, Mode mode);
     void appendVideos(const QVector<VideoInfo> &videos);
+    void updateVideo(int index, const VideoInfo &v);
     void clearVideos();
     // Row of the video being played: drawn with a highlight frame.
     // -1 (or an out-of-range index) hides the mark.

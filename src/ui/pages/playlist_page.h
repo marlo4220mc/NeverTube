@@ -12,6 +12,7 @@ class ThumbnailCache;
 
 class QFrame;
 class QLabel;
+class Yt;
 class QPushButton;
 
 class PlaylistPage : public QWidget
@@ -20,7 +21,8 @@ class PlaylistPage : public QWidget
 
 public:
     explicit PlaylistPage(PlaylistsRepo *playlists, VideoCacheRepo *cache,
-                          ThumbnailCache *thumbs, QWidget *parent = nullptr);
+                          ThumbnailCache *thumbs, Yt *yt = nullptr,
+                          QWidget *parent = nullptr);
 
     void openPlaylist(const QString &id, const QString &title);
 
@@ -41,10 +43,15 @@ private:
     void onRemoveMarked();
     void onRename();
     void onDelete();
+    void resolveNext();
+    void onVideoDetailResolved(const VideoInfo &video);
 
     PlaylistsRepo *m_playlists;
     VideoCacheRepo *m_cache;
     ThumbnailCache *m_thumbs;
+    Yt *m_yt = nullptr;
+    QStringList m_resolveQueue;
+    bool m_resolveInFlight = false;
     QString m_playlistId;
     // Title as given by openPlaylist: the QLabel shows it (or the "playlist.title"
     // fallback) and retranslate() needs it to recompose in another language.

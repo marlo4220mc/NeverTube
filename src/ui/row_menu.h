@@ -25,6 +25,7 @@ struct RowMenuHooks {
     std::function<void(const QString &videoId)> onNewPlaylist;
     std::function<void(const QString &channelId,
                        const QString &channelName)> onChannel;
+    std::function<void(const QString &playlistId, const QString &title)> onSavePlaylist;
     std::function<void()> onChanged;
 };
 

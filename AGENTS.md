@@ -657,6 +657,7 @@ all inside `m_ctrlBar` (`#playerOverlay`):
 ./build/nevertube --selftest-update     # the updater, offline: order of two versions (SemVer + pre-release), the installer of THIS build, SHA256SUMS.txt and the SHA-256 of a file: runs in CI
 ./build/nevertube --selftest-mpris      # system media controls (MPRIS/SMTC): pure conversions + D-Bus round-trip: runs in CI
 ./build/nevertube --selftest-settings-page  # the page of Ajustes (the new section of the downloads): runs in CI
+./build/nevertube --selftest-data-transfer # data backup/restore: NewPipe JSON + Takeout CSV/ZIP + round-trip: runs in CI
 ```
 
 The player selftest verifies invariants of the protected core without
@@ -786,8 +787,9 @@ the distinction is a hard rule:
   `--selftest-download-folder`, `--selftest-download-settings`,
   `--selftest-download-transport`, `--selftest-download-resume`,
   `--selftest-single-instance`, `--selftest-update`,
-  `--selftest-mpris` and
-  `--selftest-settings-page`. They run in every build (the three
+  `--selftest-mpris`,
+  `--selftest-settings-page` and
+  `--selftest-data-transfer`. They run in every build (the three
   `packaging/linux/*` recipes and both Windows smokes) and can fail the
   job.
 - **Online (report, NEVER a gate)**: `--selftest-tls` (a REAL handshake),
@@ -2310,6 +2312,31 @@ desktop/system media flyout widgets (equivalent to Chrome and Spotify):
   (status, loop, metadata, volume, track id) offline, and executes a real session bus round-trip
   (registration, GetAll properties, and live `PlayPause` signal dispatch) on Linux. Runs in CI smoke.
 
+## Data export & import (NewPipe JSON + Google Takeout CSV/ZIP)
+
+User data backup and migration compatible with both **NewPipe** and **Google Takeout**:
+
+- **Export (NeverTube → NewPipe-compatible JSON)**: produces a single JSON file
+  with `subscriptions[]` in the exact format of NewPipe's `ImportExportJsonHelper`
+  (`{ service_id: 0, url, name }`). NewPipe imports this array directly without
+  errors. The file also carries a `nevertube` root object containing playlists (title +
+  ordered video ids), watch later list, history with resume positions, favorites, and
+  starred videos. NewPipe ignores `nevertube` entirely, providing full backup for NeverTube
+  reinstalls while serving as a phone migration tool for NewPipe users.
+- **Import (File → NeverTube)**: accepts three input formats seamlessly:
+  1. **NewPipe / NeverTube JSON**: imports subscriptions into `subscriptions` repo, and
+     if present, restores playlists, watch later, history, favorites, and starred videos.
+  2. **Google Takeout CSV (`subscriptions.csv`)**: skips locale-dependent header row and
+     reads channels by column order (`Channel Id, Channel Url, Channel Title`), normalizing
+     `http://` to `https://`.
+  3. **Google Takeout `.zip`**: reads `subscriptions.csv` from inside the archive, plus
+     individual playlist CSVs from `playlists/*.csv` (where each filename is the playlist title
+     and rows are `Video ID,Time Added`), and extracts `Watch later.csv` into the watch later list.
+- **Pure logic and offline testing**: implemented in `src/data_transfer.{h,cpp}`. Tested via
+  `--selftest-data-transfer` (runs in CI): verifies export format, NewPipe JSON parsing,
+  Takeout CSV with English and Spanish headers, in-memory ZIP extraction, and a full SQLite
+  database round-trip with real repositories.
+
 ## AV1 over HLS (synthetic)
 
 YouTube **does not publish AV1 in its HLS master** (`hlsManifestUrl`): only VP9/h264
@@ -2543,6 +2570,7 @@ other one QA has to confirm.
   `--selftest-feeds` / `--selftest-av1hls` / `--selftest-hwprobe` / `--selftest-search` /
   `--selftest-grid` / `--selftest-theme` / `--selftest-glyphs` /
   `--selftest-dates` / `--selftest-i18n` / `--selftest-single-instance` /
+  `--selftest-data-transfer` /
   `--selftest-video-url` / `--selftest-search-url` → tests
 
 ## Configurable accent color

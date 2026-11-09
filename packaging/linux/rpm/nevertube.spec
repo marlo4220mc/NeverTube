@@ -58,7 +58,7 @@ Requires: /usr/bin/ffmpeg
 # %prep accepts both (see below).
 Source0: https://github.com/marlo4220mc/NeverTube/archive/v%{version}.tar.gz
 BuildRequires: cmake gcc-c++ make
-BuildRequires: qt5-qtbase-devel mpv-devel
+BuildRequires: qt5-qtbase-devel qt5-qtbase-private-devel mpv-devel
 BuildRequires: ffmpeg-free-devel libavformat-free-devel libavcodec-free-devel
 BuildRequires: pulseaudio-libs-devel mesa-libGL-devel openssl-devel
 %endif

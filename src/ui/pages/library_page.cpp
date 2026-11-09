@@ -96,7 +96,12 @@ void drawThumbBadge(QPainter *p, const QSize &sz, const QString &text,
     if (text.isEmpty())
         return;
     QFont bf = p->font();
-    bf.setPointSizeF(bf.pointSizeF() - 1.0);
+    if (bf.pointSizeF() > 1.0)
+        bf.setPointSizeF(bf.pointSizeF() - 1.0);
+    else if (bf.pixelSize() > 1)
+        bf.setPixelSize(bf.pixelSize() - 1);
+    else
+        bf.setPixelSize(10);
     bf.setBold(true);
     p->save();
     p->setFont(bf);
@@ -362,7 +367,7 @@ protected:
     {
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
-        const QColor col(m_hover ? "#ECECEC" : "#8F8F8F");
+        const QColor col(m_hover ? nt::kText : nt::kMuted);
         p.setPen(Qt::NoPen);
         p.setBrush(col);
         const int cx = width() / 2;
@@ -469,7 +474,7 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     lay->setSpacing(8);
 
     m_pageTitle = new QLabel(m_body);
-    m_pageTitle->setObjectName(QStringLiteral("sectionTitle"));
+    m_pageTitle->setObjectName(QStringLiteral("pageHeading"));
     nt::bindText(m_pageTitle, "library.title");
     lay->addWidget(m_pageTitle);
     lay->addSpacing(12);
@@ -633,10 +638,35 @@ LibraryPage::LibraryPage(Yt *yt, FavoritesRepo *favorites, StarredRepo *starred,
     // for a surface to request the renderers again.
     connect(m_yt, &Yt::detailReady, this,
             [this](const VideoInfo &video, const QString &, qint64,
-                   const QVector<FormatInfo> &) { onLiveDetailReady(video); });
+                   const QVector<FormatInfo> &) {
+                onLiveDetailReady(video);
+                m_resolveInFlight = false;
+                bool updated = false;
+                for (int i = 0; i < m_later.videos.size(); ++i) {
+                    if (m_later.videos.at(i).id == video.id) {
+                        m_later.videos[i] = video;
+                        m_cache->upsert(video);
+                        updated = true;
+                    }
+                }
+                for (int i = 0; i < m_fav.videos.size(); ++i) {
+                    if (m_fav.videos.at(i).id == video.id) {
+                        m_fav.videos[i] = video;
+                        m_cache->upsert(video);
+                        updated = true;
+                    }
+                }
+                if (updated) {
+                    rebuildWatchLater();
+                    rebuildFavorites();
+                }
+                resolveNextPlaceholder();
+            });
     connect(m_yt, &Yt::detailFailed, this, [this](const QString &id) {
         if (m_liveRefreshPending.remove(id))
             m_liveRefreshedAt.insert(id, QDateTime::currentMSecsSinceEpoch());
+        m_resolveInFlight = false;
+        resolveNextPlaceholder();
     });
 
     reload();
@@ -649,6 +679,27 @@ void LibraryPage::reload()
     rebuildWatchLater();
     rebuildHistory();
     rebuildPlaylists();
+
+    m_resolveQueue.clear();
+    for (const VideoInfo &v : std::as_const(m_later.videos)) {
+        if ((v.title == v.id || v.channel.isEmpty()) && !m_resolveQueue.contains(v.id))
+            m_resolveQueue.append(v.id);
+    }
+    for (const VideoInfo &v : std::as_const(m_fav.videos)) {
+        if ((v.title == v.id || v.channel.isEmpty()) && !m_resolveQueue.contains(v.id))
+            m_resolveQueue.append(v.id);
+    }
+    m_resolveInFlight = false;
+    resolveNextPlaceholder();
+}
+
+void LibraryPage::resolveNextPlaceholder()
+{
+    if (!m_yt || m_resolveInFlight || m_resolveQueue.isEmpty())
+        return;
+    m_resolveInFlight = true;
+    const QString nextId = m_resolveQueue.takeFirst();
+    m_yt->getDetail(nextId);
 }
 
 void LibraryPage::applyAccent()
@@ -731,6 +782,7 @@ void LibraryPage::rebuildSubscriptions()
     m_channelHint->setVisible(channels.isEmpty());
     setSectionCount(m_subsTitle, channels.size());
 
+    m_avatarPreloadQueue.clear();
     for (const SubscriptionInfo &s : channels) {
         auto *row = new ChannelRow(m_thumbs, s.id,
                                    s.avatar.isEmpty() ? QString() : s.avatar,
@@ -751,11 +803,54 @@ void LibraryPage::rebuildSubscriptions()
         row->setActivate([this, s]() { emit channelRequested(s.id, s.title); });
         m_subRowLay->addWidget(row);
 
-        if (!m_subCounts.contains(s.id) || s.avatar.isEmpty())
-            m_yt->channelInfo(s.id);
+        if (s.avatar.isEmpty())
+            m_avatarPreloadQueue.append(s.id);
     }
     m_subRowLay->addStretch(1);
     QTimer::singleShot(0, this, &LibraryPage::updateSubsRowGeometry);
+
+    if (!m_playbackActive)
+        startAvatarPreload();
+}
+
+void LibraryPage::setPlaybackActive(bool active)
+{
+    if (m_playbackActive == active)
+        return;
+    m_playbackActive = active;
+    if (m_playbackActive) {
+        // Real-time playback started: yield network/CPU immediately
+        if (m_avatarPreloadTimer)
+            m_avatarPreloadTimer->stop();
+        m_avatarPreloadInFlight = false;
+    } else {
+        // Playback idle or paused: resume preloading subscription icons
+        startAvatarPreload();
+    }
+}
+
+void LibraryPage::startAvatarPreload()
+{
+    if (m_playbackActive || m_avatarPreloadQueue.isEmpty())
+        return;
+    if (!m_avatarPreloadTimer) {
+        m_avatarPreloadTimer = new QTimer(this);
+        m_avatarPreloadTimer->setSingleShot(true);
+        connect(m_avatarPreloadTimer, &QTimer::timeout, this,
+                &LibraryPage::processNextAvatar);
+    }
+    if (!m_avatarPreloadTimer->isActive() && !m_avatarPreloadInFlight) {
+        m_avatarPreloadTimer->start(400);
+    }
+}
+
+void LibraryPage::processNextAvatar()
+{
+    if (m_playbackActive || m_avatarPreloadQueue.isEmpty() || m_avatarPreloadInFlight || !m_yt)
+        return;
+    m_avatarPreloadInFlight = true;
+    const QString nextChannelId = m_avatarPreloadQueue.takeFirst();
+    m_yt->channelInfo(nextChannelId);
 }
 
 void LibraryPage::updateSubsRowGeometry()
@@ -796,6 +891,17 @@ void LibraryPage::onChannelInfo(const ChannelInfo &channel)
             m_subs->setAvatar(channel.id, channel.avatarUrl);
     }
     QTimer::singleShot(0, this, &LibraryPage::updateSubsRowGeometry);
+
+    m_avatarPreloadInFlight = false;
+    if (!m_playbackActive && !m_avatarPreloadQueue.isEmpty()) {
+        if (!m_avatarPreloadTimer) {
+            m_avatarPreloadTimer = new QTimer(this);
+            m_avatarPreloadTimer->setSingleShot(true);
+            connect(m_avatarPreloadTimer, &QTimer::timeout, this,
+                    &LibraryPage::processNextAvatar);
+        }
+        m_avatarPreloadTimer->start(400);
+    }
 }
 
 // --------------------------------------------------------------------------
@@ -837,10 +943,36 @@ void LibraryPage::buildRows(
     }
 }
 
+static QVector<VideoInfo> ensureVideosWithPlaceholders(VideoCacheRepo *cache,
+                                                       const QStringList &ids)
+{
+    QVector<VideoInfo> videos = cache->getMany(ids);
+    if (videos.size() < ids.size()) {
+        QHash<QString, VideoInfo> byId;
+        for (const VideoInfo &v : std::as_const(videos))
+            byId.insert(v.id, v);
+        videos.clear();
+        videos.reserve(ids.size());
+        for (const QString &id : ids) {
+            auto it = byId.constFind(id);
+            if (it != byId.constEnd()) {
+                videos.append(it.value());
+            } else {
+                VideoInfo placeholder;
+                placeholder.id = id;
+                placeholder.title = id;
+                videos.append(placeholder);
+                cache->upsert(placeholder);
+            }
+        }
+    }
+    return videos;
+}
+
 void LibraryPage::rebuildFavorites()
 {
     clearRows(m_fav.lay);
-    m_fav.videos = m_cache->getMany(m_favs->ids());
+    m_fav.videos = ensureVideosWithPlaceholders(m_cache, m_favs->ids());
     const bool has = !m_fav.videos.isEmpty();
     m_fav.host->setVisible(has);
     m_fav.empty->setVisible(!has);
@@ -866,7 +998,7 @@ void LibraryPage::rebuildFavorites()
 void LibraryPage::rebuildWatchLater()
 {
     clearRows(m_later.lay);
-    m_later.videos = m_cache->getMany(m_watchLater->ids());
+    m_later.videos = ensureVideosWithPlaceholders(m_cache, m_watchLater->ids());
     const bool has = !m_later.videos.isEmpty();
     m_later.host->setVisible(has);
     m_later.empty->setVisible(!has);

@@ -38,6 +38,7 @@
 #include "updater/update_check.h"
 #include "updater/update_selftest.h"
 #include "youtube_url.h"
+#include "data_transfer.h"
 #include "single_instance.h"
 #include "single_instance_selftest.h"
 #include "video_variant_selftest.h"
@@ -750,6 +751,8 @@ int main(int argc, char *argv[])
             bool sawFolder = false;
             bool sawConnections = false;
             bool sawUpdate = false;
+            bool sawExport = false;
+            bool sawImport = false;
             for (QPushButton *b : page->findChildren<QPushButton *>()) {
                 const QString kind =
                     b->property("downloadSetting").toString();
@@ -760,6 +763,12 @@ int main(int argc, char *argv[])
                 if (b->property("updateAction").toString()
                     == QLatin1String("check"))
                     sawUpdate = true;
+                if (b->property("dataAction").toString()
+                    == QLatin1String("export"))
+                    sawExport = true;
+                if (b->property("dataAction").toString()
+                    == QLatin1String("import"))
+                    sawImport = true;
             }
             std::fprintf(stderr, "SETTINGS-PAGE %s: hay fila de carpeta\n",
                          sawFolder ? "OK" : "FAIL");
@@ -769,6 +778,10 @@ int main(int argc, char *argv[])
             // button of the updater: the manual check lives there.
             std::fprintf(stderr, "SETTINGS-PAGE %s: hay boton de actualizaciones\n",
                          sawUpdate ? "OK" : "FAIL");
+            std::fprintf(stderr, "SETTINGS-PAGE %s: hay boton de exportar datos\n",
+                         sawExport ? "OK" : "FAIL");
+            std::fprintf(stderr, "SETTINGS-PAGE %s: hay boton de importar datos\n",
+                         sawImport ? "OK" : "FAIL");
             const QLabel *verLabel =
                 page->findChild<QLabel *>(QStringLiteral("settingsVersion"));
             const bool sawVersion =
@@ -776,7 +789,7 @@ int main(int argc, char *argv[])
             std::fprintf(stderr,
                          "SETTINGS-PAGE %s: la version mostrada es la del build\n",
                          sawVersion ? "OK" : "FAIL");
-            ok = sawFolder && sawConnections && sawUpdate && sawVersion;
+            ok = sawFolder && sawConnections && sawUpdate && sawVersion && sawExport && sawImport;
         }
         // The menu of the download with the codec of the REAL setting: the
         // one that is marked is the default.
@@ -896,6 +909,12 @@ int main(int argc, char *argv[])
         // Offline: the variants of a video (height, codec and real size) are
         // a pure function of the player response.
         return videoVariantSelfTest() ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-data-transfer"))) {
+        // Offline: export round-trip (NewPipe JSON + nevertube block),
+        // Google Takeout CSV (en/es headers), and Takeout .zip parsing.
+        return data_transfer::dataTransferSelfTest() ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-mpris"))

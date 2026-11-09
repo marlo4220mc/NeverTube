@@ -68,10 +68,10 @@ QString styleSheet()
     static const char *const kTrozos[] = {
         R"QSS(QWidget {
     background-color: transparent;
-    color: #ECECEC;
+    color: @TEXT@;
     font-size: 13px;
 }
-QMainWindow { background-color: #0F0F0F; }
+QMainWindow { background-color: @BG@; }
 
 /* Tooltips: they are framework windows and by default are painted with the
    SYSTEM THEME palette (outside the app's control), so the text could come out
@@ -90,7 +90,7 @@ QToolTip {
    them, they were leftovers of the reverted split layout. Verified by grep.) */
 
 QWidget#navBottom {
-    background-color: #101010;
+    background-color: @TOP@;
     /* Top hairline: separates the bar from the content (and from the mini
        player, which already has its own) without adding a widget. */
     border-top: 1px solid @BORDER@;
@@ -109,15 +109,15 @@ QToolButton#navBtn {
        above and below 52 fits. Lowering the height clips the text or the
        icon, it does not shrink them. */
     padding: 3px 0;
-    color: #8F8F8F;
+    color: @MUTED@;
     font-size: 11px;
 }
-QToolButton#navBtn:hover { background: @HOVER@; color: #ECECEC; }
+QToolButton#navBtn:hover { background: @HOVER@; color: @TEXT@; }
 /* IMPORTANT ORDER: :checked comes AFTER :focus. They have the same
    specificity and the last rule wins; with :focus last, focus overrode the
    accent fill and the freshly clicked tab came out gray with the accent
    text over #242424 = 3.92:1 (below the AA minimum of 4.5:1). */
-QToolButton#navBtn:focus { background: @HOVER@; color: #ECECEC; }
+QToolButton#navBtn:focus { background: @HOVER@; color: @TEXT@; }
 /* The BOX that indicates position (the active tab) is a SHADE VARIATION
    of the icon's red, not a solid fill: the background mixes the accent with
    the bar at 25% (@ACCENT_A25@ = #4A0C13 over #101010, from #FA011B). The text
@@ -137,25 +137,25 @@ QToolButton#navBtn:pressed { background: @ACCENT_A10@; color: @ACCENT_HOVER@; }
 QToolButton#navBtn:disabled { color: @DISABLED@; }
 
 QLabel { background: transparent; }
-QLabel#sectionTitle { font-size: 16px; font-weight: 600; color: #ECECEC; }
+QLabel#sectionTitle { font-size: 16px; font-weight: 600; color: @TEXT@; }
 /* Video title on the Player page: one point larger than the section
    titles (it is the page's H1). */
 QLabel#watchTitle { font-size: 17px; font-weight: 600; color: @TEXT@; }
-QLabel#sectionSub { font-size: 12px; color: #8F8F8F; }
+QLabel#sectionSub { font-size: 12px; color: @MUTED@; }
 /* Empty state of a Library section: box with a dashed border and the
    text centered, instead of a lone line of gray text. */
 QLabel#emptyState {
     color: @METATEXT@; font-size: 13px;
-    background: #181818; border: 1px dashed @BORDER@; border-radius: 10px;
+    background: @PANEL@; border: 1px dashed @BORDER@; border-radius: 12px;
     padding: 18px;
 }
 
 QPushButton {
-    background-color: #1F1F1F;
+    background-color: @ELEVATED@;
     border: 1px solid @BORDER@;
-    border-radius: 8px;
-    padding: 7px 14px;
-    color: #ECECEC;
+    border-radius: 18px;
+    padding: 7px 16px;
+    color: @TEXT@;
 }
 QPushButton:hover { background-color: @HOVER@; }
 QPushButton:pressed { background-color: @SELECTION@; }
@@ -176,6 +176,8 @@ QPushButton:disabled {
    hover lighter, pressed darker. */
 QPushButton#primary {
     background: @ACCENT@; border: 1px solid rgba(255,255,255,38);
+    border-radius: 18px;
+    padding: 7px 18px;
     color: #FFFFFF; font-weight: 600;
 }
 QPushButton#primary:hover { background: @ACCENT_HOVER@; }
@@ -184,8 +186,8 @@ QPushButton#primary:disabled {
     color: @DISABLED_ON_ACCENT@; background: @ACCENT_MUTED@;
     border-color: @ACCENT_MUTED@;
 }
-QPushButton#ghost { background: transparent; border: 1px solid @BORDER@; border-radius: 6px; }
-QPushButton#ghost:hover { background: #1F1F1F; }
+QPushButton#ghost { background: transparent; border: 1px solid @BORDER@; border-radius: 18px; }
+QPushButton#ghost:hover { background: @ELEVATED@; }
 QPushButton#ghost:pressed { background: @HOVER@; }
 QPushButton#ghost:focus { border-color: @ACCENT@; }
 /* Ghost with icon ONLY (the search clear X). The global padding
@@ -193,25 +195,25 @@ QPushButton#ghost:focus { border-color: @ACCENT@; }
    without this the icon overflows. It is a property selector so the button
    keeps inheriting the rest of #ghost. */
 QPushButton#ghost[iconOnly="true"] { padding: 0; }
-QPushButton#iconBtn { background: transparent; border: none; border-radius: 6px; padding: 6px; }
+QPushButton#iconBtn { background: transparent; border: none; border-radius: 17px; padding: 6px; }
 QPushButton#iconBtn:hover { background: @HOVER@; }
 QPushButton#iconBtn:pressed { background: @SELECTION@; }
 /* iconBtn has no border, so focus goes by background (same as navBtn). */
-QPushButton#iconBtn:focus { background: @HOVER@; color: @ACCENT@; }
+QPushButton#iconBtn:focus { background: @HOVER@; color: @ACCENT@; border: none; }
 QPushButton#iconBtn:disabled { color: @DISABLED@; }
 
 QLineEdit, QComboBox {
-    background-color: #1F1F1F;
+    background-color: @ELEVATED@;
     border: 1px solid @BORDER@;
-    border-radius: 10px;
-    padding: 8px 12px;
+    border-radius: 18px;
+    padding: 8px 14px;
     /* Selecting text in the search field goes in the app's gray, like the rest
        of the app, not in the accent: in red it looked like an error. It is the
        same token as the menus (kSelection) and the selected text stays in kText
        so that it remains readable (11:1). */
     selection-background-color: @SELECTION@;
     selection-color: @TEXT@;
-    color: #ECECEC;
+    color: @TEXT@;
 }
 QLineEdit:focus, QComboBox:focus { border-color: @ACCENT@; }
 QLineEdit:disabled, QComboBox:disabled { color: @DISABLED@; background-color: @BORDER@; }
@@ -220,15 +222,15 @@ QLineEdit:disabled, QComboBox:disabled { color: @DISABLED@; background-color: @B
    block the rest of the page. */
 QFrame#popupDialog {
     background-color: @POPOVER@;
-    border: 1px solid @BORDER@;
-    border-radius: 12px;
+    border: 1px solid @BORDER_SOFT@;
+    border-radius: 14px;
 }
 
 /* The update dialog (nt::UpdateDialog) is a window of its own: it can be open
    while something plays and it is NOT the app's overlay. Without a background
    of its own it came out with the desktop palette (light) over a dark app, so
    it declares one. Its text uses the same tokens as the rest of the app. */
-QDialog#updateDialog { background-color: #0F0F0F; }
+QDialog#updateDialog { background-color: @BG@; }
 QLabel#updateValue { color: @TEXT@; font-size: 14px; font-weight: 600; }
 QLabel#updateStatus { color: @METATEXT@; font-size: 12px; }
 /* The notes of the release are Markdown rendered into rich text: they are a
@@ -241,7 +243,7 @@ QScrollArea#updateNotesScroll { background: transparent; border: none; }
    pointer from the user). That is why the QDialog { background: transparent }
    rule is no longer needed, it existed only so that its frame showed with
    rounded corners. */
-QLabel#popupTitle { font-size: 15px; font-weight: 600; color: #ECECEC; }
+QLabel#popupTitle { font-size: 15px; font-weight: 600; color: @TEXT@; }
 /* The check box of the confirmation dialog (the delete of a download asks
    with one whether to delete the file from the disk too). */
 QCheckBox#popupCheck { color: @TEXT@; spacing: 8px; }
@@ -249,7 +251,7 @@ QCheckBox#popupCheck::indicator {
     width: 16px; height: 16px;
     border: 1px solid @BORDER@;
     border-radius: 4px;
-    background-color: #1F1F1F;
+    background-color: @ELEVATED@;
 }
 QCheckBox#popupCheck::indicator:hover { border-color: @ACCENT@; }
 QCheckBox#popupCheck::indicator:checked {
@@ -262,14 +264,14 @@ QComboBox::down-arrow {
     image: none;
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
-    border-top: 5px solid #8F8F8F;
+    border-top: 5px solid @MUTED@;
     margin-right: 8px;
 }
 QComboBox QAbstractItemView {
-    background-color: #1F1F1F;
+    background-color: @ELEVATED@;
     border: 1px solid @BORDER@;
     selection-background-color: @SELECTION@;
-    color: #ECECEC;
+    color: @TEXT@;
     outline: 0;
 }
 
@@ -326,28 +328,77 @@ QListView#cards {
 QListView#cards::item { background: transparent; border: none; }
 QListView#cards::item:selected { background: transparent; }
 
-QMenu { background-color: #1F1F1F; border: 1px solid @BORDER@; }
-QMenu::item { padding: 7px 24px; }
-QMenu::item:selected { background-color: @SELECTION@; }
-QMenu::item:disabled { color: @DISABLED@; }
+QMenu {
+    background-color: @POPOVER@;
+    border: 1px solid @BORDER_SOFT@;
+    border-radius: 10px;
+    padding: 4px;
+}
+QMenu::item {
+    padding: 7px 20px;
+    border-radius: 6px;
+    color: @TEXT@;
+}
+QMenu::item:selected {
+    background-color: @SELECTION@;
+}
+QMenu::item:disabled {
+    color: @DISABLED@;
+}
+QMenu::separator {
+    height: 1px;
+    background: @BORDER@;
+    margin: 4px 6px;
+}
 
-QStatusBar { background: #101010; color: #8F8F8F; border-top: 1px solid #1F1F1F; }
+QStatusBar { background: @TOP@; color: @MUTED@; border-top: 1px solid @BORDER@; }
 
 /* The mini player used kPanel (#181818), the same as the bottom nav, so
    the two bars merged into a single line. kElevated separates them. */
 /* The mini player shares the tone of the bottom bar (kTop #101010), not the
    kElevated of before: the two bars read as a single piece. */
-QWidget#miniBar { background-color: #101010; border-top: 1px solid @BORDER@; }
+QWidget#miniBar { background-color: @TOP@; border-top: 1px solid @BORDER@; }
 /* Hover of the whole bar: lightens the background to signal that it is clickable
    (expands to the Player). The property is set by MiniPlayerBar. #181818 (the
    previous tone) looked pale next to #101010: it was lowered to #141414, a subtle
    lift that still signals hover without breaking the single piece with the nav. */
-QWidget#miniBar[hover="true"] { background-color: #141414; }
+QWidget#miniBar[hover="true"] { background-color: @HOVER_SOFT@; }
 /* Mini bar buttons: denser than those of the player row
    (padding 4 instead of 6), because the mini is a compact surface. */
 QWidget#miniBar QPushButton#iconBtn { padding: 4px; }
-QWidget#watchBody { background-color: #0F0F0F; }
-QWidget#cardPanel { background-color: #181818; border: 1px solid @BORDER@; border-radius: 10px; }
+QWidget#watchBody { background-color: @BG@; }
+
+/* Search bar: pill shaped container (Spotify/content-first design) */
+QFrame#searchCard {
+    background-color: @ELEVATED@;
+    border: 1px solid @BORDER@;
+    border-radius: 22px;
+}
+QFrame#searchCard[focused="true"] {
+    border-color: @ACCENT@;
+    background-color: @PANEL@;
+}
+QLineEdit#searchField {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: @TEXT@;
+    font-size: 14px;
+}
+QLineEdit#searchField:focus {
+    border: none;
+}
+QPushButton#searchBtn {
+    background: @ACCENT@;
+    border: 1px solid rgba(255, 255, 255, 38);
+    border-radius: 17px;
+    padding: 0 16px;
+    color: #FFFFFF;
+    font-weight: 600;
+    font-size: 13px;
+}
+QPushButton#searchBtn:hover { background: @ACCENT_HOVER@; }
+QPushButton#searchBtn:pressed { background: @ACCENT_PRESSED@; }
 
 /* Player controls box. The 12 px separator that makes it float is not from
    QSS but from the layout (gl1 in watch_page.cpp); here only the borders go.
@@ -400,20 +451,20 @@ QLabel#watchDesc { color: @METATEXT@; font-size: 12px; background: transparent; 
 /* Player description card: groups the text, which is shown
    COMPLETE (no collapse and no "…more"). */
 QFrame#watchDescCard {
-    background: #181818; border: 1px solid @BORDER@; border-radius: 10px;
+    background: @PANEL@; border: 1px solid @BORDER@; border-radius: 12px;
 }
 /* Bottom gradient of the collapsed description. The Channel page uses it (its
    description IS trimmed to 3 lines with "…more"); the Player no longer uses it. */
 QFrame#descFade {
     border: none;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                stop:0 rgba(24,24,24,0), stop:1 #181818);
+                                stop:0 rgba(19,19,19,0), stop:1 @PANEL@);
 }
 /* Title of the "A continuacion" block and counter to its right. */
 QLabel#queueTitle { font-weight: 600; font-size: 13px; color: @TEXT@; }
 QLabel#queueCount {
     color: @METATEXT@; font-size: 11px;
-    background: #1F1F1F; border: 1px solid @BORDER@; border-radius: 9px;
+    background: @ELEVATED@; border: 1px solid @BORDER@; border-radius: 10px;
     padding: 1px 8px;
 }
 
@@ -460,7 +511,7 @@ QPushButton#channelBtn {
     text-align: left; padding: 8px;
     color: @TEXT@; font-weight: 600; font-size: 13px;
 }
-QPushButton#channelBtn:hover { background: #1F1F1F; }
+QPushButton#channelBtn:hover { background: @ELEVATED@; }
 /* Player action buttons: icon only, in a circular pill. The state is
    decided by the boolean property `active`, like #subscribe with its own; the
    icon color is painted by updateActionButtons (the QSS does not tint QIcons).
@@ -468,7 +519,7 @@ QPushButton#channelBtn:hover { background: #1F1F1F; }
    transparent and the :focus stays transparent, because the
    global QPushButton:focus paints it in the accent and pressing showed a red ring. */
 QPushButton#actionChip {
-    background: #1F1F1F; border: 1px solid transparent; border-radius: 22px;
+    background: @ELEVATED@; border: 1px solid transparent; border-radius: 22px;
     padding: 0;
 }
 QPushButton#actionChip:hover { background: @HOVER@; }
@@ -479,7 +530,7 @@ QPushButton#actionChip[active="true"]:hover { background: @SELECTION@; }
 )QSS",
         R"QSS(/* Me gusta / No me gusta segmented group: the outer corners
    rounded and a hairline between the two. The group background is the chip's. */
-QWidget#actionSeg { background: #1F1F1F; border-radius: 22px; }
+QWidget#actionSeg { background: @ELEVATED@; border-radius: 22px; }
 QPushButton#actionSegL, QPushButton#actionSegR {
     background: transparent; border: none; padding: 0;
 }
@@ -508,7 +559,7 @@ QFrame#qualityMenu {
     border-radius: 12px;
 }
 QFrame#qualityMenu QPushButton {
-    background: transparent; color: #ECECEC; border: none;
+    background: transparent; color: @TEXT@; border: none;
     text-align: left; padding: 6px 8px; border-radius: 6px;
 }
 QFrame#qualityMenu QPushButton:hover { background: @SELECTION@; }
@@ -520,14 +571,14 @@ QPushButton#historyRow {
     text-align: left; background: transparent; border: none;
     color: @TEXTSOFT@; padding: 7px 4px;
 }
-QPushButton#historyRow:hover { background: #1F1F1F; border-radius: 6px; }
+QPushButton#historyRow:hover { background: @ELEVATED@; border-radius: 8px; }
 
 /* Search suggestions dropdown. It reuses the color variables
    of the popover (#202020) and the historyRow hover so that it does not introduce
    new tones. suggestRow is the clickable row; suggestDivider separates the two
    groups (what YouTube suggests on top, what you already searched below). */
 QFrame#suggestPanel {
-    background-color: @POPOVER@; border: 1px solid @BORDER@; border-radius: 10px;
+    background-color: @POPOVER@; border: 1px solid @BORDER_SOFT@; border-radius: 12px;
 }
 /* Label of the second group, in uppercase with the line beside it (CSS ::after
    does not exist in QSS, so the line is a sibling QFrame: suggestDividerRule).
@@ -545,7 +596,7 @@ QFrame#suggestDividerRule { color: @BORDER@; background: @BORDER@; border: none;
    highlighted) so that the accent bar does not push the text when it appears. */
 QWidget#suggestRow {
     background: transparent; border: none; border-left: 3px solid transparent;
-    border-radius: 6px; color: @TEXTSOFT@;
+    border-radius: 8px; color: @TEXTSOFT@;
 }
 QWidget#suggestRow:hover { background: @SELECTION@; }
 /* Keyboard highlight: accent bar on the left + background with an accent
@@ -591,7 +642,7 @@ QLabel#settingsVersion { font-size: 12px; color: @TEXT@; }
 /* Card that groups the rows of a Settings section: it replaces the flat
    list of separate rows split by hairlines. */
 QFrame#settingsCard {
-    background: #181818; border: 1px solid @BORDER@; border-radius: 10px;
+    background: @PANEL@; border: 1px solid @BORDER@; border-radius: 12px;
 }
 QLabel#popupText { color: @MUTED@; }
 /* The Settings scroll area paints no background: the page already has its own. */
@@ -601,21 +652,21 @@ QScrollArea#settingsScroll { background: transparent; }
    aspect with a slightly larger padding (150 px minimum-width rows versus those
    of the DATA section); they are kept separate so as not to change the box. */
 QPushButton#actionBtn {
-    font-size: 12px; padding: 7px 14px; background-color: #1F1F1F;
-    border: 1px solid @BORDER@; border-radius: 8px; color: @TEXT@;
+    font-size: 12px; padding: 7px 16px; background-color: @ELEVATED@;
+    border: 1px solid @BORDER@; border-radius: 18px; color: @TEXT@;
     /* Common minimum width: aligns the controls column inside the card. */
     min-width: 150px;
 }
 QPushButton#dataActionBtn {
-    font-size: 12px; padding: 8px 16px; background-color: #1F1F1F;
-    border: 1px solid @BORDER@; border-radius: 8px; color: @TEXT@;
+    font-size: 12px; padding: 8px 18px; background-color: @ELEVATED@;
+    border: 1px solid @BORDER@; border-radius: 18px; color: @TEXT@;
 }
 /* "Restablecer aplicacion": same background as the previous ones and only the
    border and the text in accent, so that it reads as destructive without being a
    primary button. The accent comes from @ACCENT@, so it repaints itself. */
 QPushButton#accentOutline {
-    font-size: 12px; padding: 8px 16px; background-color: #1F1F1F;
-    border: 1px solid @ACCENT@; border-radius: 8px;
+    font-size: 12px; padding: 8px 18px; background-color: @ELEVATED@;
+    border: 1px solid @ACCENT@; border-radius: 18px;
     color: @ACCENT@; font-weight: 600;
 }
 
@@ -639,14 +690,14 @@ QPushButton#subscribe[subscribed="true"]:hover { background: @SELECTION@; }
 
 /* Compact channel rows (channel_row) */
 QWidget#downloadRow {
-  background-color: #181818;
+  background-color: @PANEL@;
   border: 1px solid @BORDER@;
-  border-radius: 10px;
+  border-radius: 12px;
 }
 QLabel#downloadTitle { color: @TEXT@; background: transparent; }
 QLabel#downloadMeta { color: @MUTED@; background: transparent; }
 QProgressBar#downloadProgress {
-  background-color: #262626;
+  background-color: @BORDER_SOFT@;
   border: none;
   border-radius: 2px;
   height: 4px;
@@ -679,7 +730,7 @@ QLabel#placeholderHint { color: @MUTED@; font-size: 14px; padding: 40px; }
    The card groups avatar, name, subscribers, actions and description in a
    box (#181818), like #settingsCard and #watchDescCard. */
 QFrame#channelCard {
-    background: #181818; border: 1px solid @BORDER@; border-radius: 12px;
+    background: @PANEL@; border: 1px solid @BORDER@; border-radius: 12px;
 }
 /* Channel name: it is the H1 of the page, one point above the 18 px of
    #pageHeading because it is the datum you enter into. */
@@ -691,22 +742,22 @@ QLabel#channelDesc { color: @METATEXT@; font-size: 12px; background: transparent
 QLabel#channelAvatar { border-radius: 40px; background: transparent; }
 /* Tabs capsule: the background is the card's, with a hairline border
    like the rest of the surfaces. */
-QWidget#channelTabs { background: #181818; border: 1px solid @BORDER@; border-radius: 9px; }
+QWidget#channelTabs { background: @PANEL@; border: 1px solid @BORDER@; border-radius: 20px; padding: 2px; }
 QPushButton#tabBtn {
-    background: transparent; border: none; border-radius: 6px;
-    padding: 6px 16px; color: @MUTED@; font-size: 12px; font-weight: 600;
+    background: transparent; border: none; border-radius: 18px;
+    padding: 6px 18px; color: @MUTED@; font-size: 12px; font-weight: 600;
 }
 /* Focus is NOT marked: they are tabs, not action buttons, and the accent ring
    when pressing them would read as an error (same criteria as #iconBtn). */
 QPushButton#tabBtn:focus { border-color: transparent; }
-QPushButton#tabBtn:hover { background: #1F1F1F; color: @TEXT@; }
+QPushButton#tabBtn:hover { background: @ELEVATED@; color: @TEXT@; }
 /* The selected one carries the accent in the text, like the bottom nav. The
    background cannot be distinguished from the capsule: both are #181818. */
-QPushButton#tabBtn[selected="true"] { color: @ACCENT_HOVER@; }
+QPushButton#tabBtn[selected="true"] { color: @ACCENT_HOVER@; background: @ACCENT_A10@; }
 /* Video counter of the active tab: same pill as #queueCount. */
 QLabel#tabCount {
     color: @METATEXT@; font-size: 11px;
-    background: #1F1F1F; border: 1px solid @BORDER@; border-radius: 9px;
+    background: @ELEVATED@; border: 1px solid @BORDER@; border-radius: 10px;
     padding: 1px 8px;
 }
 
@@ -715,8 +766,8 @@ QLabel#tabCount {
    CTA as #primary — flat fill + hairline + crisp states. */
 QPushButton#accentChip {
     background: @ACCENT@; border: 1px solid rgba(255,255,255,38);
-    border-radius: 8px;
-    color: #FFFFFF; font-size: 12px; padding: 8px 18px;
+    border-radius: 18px;
+    color: #FFFFFF; font-size: 12px; padding: 8px 20px; font-weight: 600;
 }
 QPushButton#accentChip:hover { background: @ACCENT_HOVER@; }
 QPushButton#accentChip:pressed { background: @ACCENT_PRESSED@; }
@@ -747,7 +798,7 @@ QLabel#libraryItemMeta {
 QWidget#hwProbePopup {
     background-color: @POPOVER@;
     border: 1px solid @HANDLE@;
-    border-radius: 10px;
+    border-radius: 12px;
 }
 QLabel#hwPopupTitle { color: #FFFFFF; font-size: 16px; font-weight: 600; }
 QLabel#hwPopupBody { color: @TEXTSOFT@; font-size: 12px; }
@@ -765,7 +816,7 @@ QLabel#miniTitle {
     background: transparent; border: none;
 }
 
-/* Video area. Pure black, NOT kBg (#0F0F0F): it is the background of the
+/* Video area. Pure black, NOT kBg (#0B0B0B): it is the background of the
    letterbox bands when the video does not fill the box, and it has to be truly
    black so that the frame is not noticeable. It was in an inline setStyleSheet. */
 QWidget#playerArea { background-color: #000000; }
@@ -795,8 +846,14 @@ QWidget#playerArea { background-color: #000000; }
                        accentPressed(kAccent).darker(160).name())
               .replace(QStringLiteral("@DISABLED_ON_ACCENT@"),
                        QColor(0xFF, 0xFF, 0xFF).name())
+              .replace(QStringLiteral("@BG@"), kBg.name())
+              .replace(QStringLiteral("@PANEL@"), kPanel.name())
+              .replace(QStringLiteral("@ELEVATED@"), kElevated.name())
+              .replace(QStringLiteral("@TOP@"), kTop.name())
               .replace(QStringLiteral("@BORDER@"), kBorder.name())
+              .replace(QStringLiteral("@BORDER_SOFT@"), kBorderSoft.name())
               .replace(QStringLiteral("@HOVER@"), kHover.name())
+              .replace(QStringLiteral("@HOVER_SOFT@"), kHoverSoft.name())
               .replace(QStringLiteral("@DISABLED@"), kDisabled.name())
               .replace(QStringLiteral("@SELECTION@"), kSelection.name())
               .replace(QStringLiteral("@HANDLE@"), kHandle.name())

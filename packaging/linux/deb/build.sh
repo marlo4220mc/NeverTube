@@ -28,7 +28,7 @@ echo "== installing Debian/Ubuntu build dependencies =="
 $SUDO apt-get update
 $SUDO apt-get install -y --no-install-recommends \
   build-essential cmake pkg-config git \
-  qtbase5-dev libqt5sql5-sqlite \
+  qtbase5-dev qtbase5-private-dev libqt5sql5-sqlite \
   libgl1-mesa-dev \
   libmpv-dev \
   libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \

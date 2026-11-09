@@ -513,11 +513,11 @@ void ChannelPage::onTabVideos(const QString &channelId, const QString &tab,
                     : tab == QLatin1String("playlists") ? 3 : 0;
     QVector<VideoInfo> loaded = videos;
     m_moreButtons.at(index)->setEnabled(true);
-    if (!m_channelName.isEmpty()) {
-        for (VideoInfo &v : loaded) {
-            if (v.channel.isEmpty())
-                v.channel = m_channelName;
-        }
+    for (VideoInfo &v : loaded) {
+        if (!m_channelName.isEmpty() && v.channel.isEmpty())
+            v.channel = m_channelName;
+        if (index == 3 && !v.id.isEmpty() && v.playlistId.isEmpty())
+            v.playlistId = v.id;
     }
     if (m_videos.at(index).isEmpty()) {
         m_videos[index] = loaded;

@@ -125,6 +125,14 @@ public:
         overlay->setGeometry(player->rect());
         overlay->raise();
         overlay->show();
+        // The overlay is a child of the player but it does NOT live in a layout:
+        // its geometry is copied from the player by hand. Doing it only in this
+        // container's resizeEvent is NOT enough: reparenting the player to/from
+        // the mini bar changes the PLAYER's size without the CONTAINER changing,
+        // so the overlay kept the mini slot's geometry (all the controls piled in
+        // the top-left corner) until some later container resize fixed it. The
+        // player's own resize is the authoritative signal.
+        player->installEventFilter(this);
 
         m_lay = new QVBoxLayout(this);
         m_lay->setContentsMargins(0, 0, 0, 0);
@@ -145,9 +153,22 @@ public:
         if (m_lay->indexOf(m_player) < 0)
             m_lay->addWidget(m_player);
         m_player->show();
+        // Force the layout NOW: right after the reparent the player still has the
+        // mini slot's rect, and copying that to the overlay is exactly the bug.
+        m_lay->activate();
+        syncOverlay();
+        updateMaxHeight();
+    }
+
+    // Copies the player's rect to the overlay (its child, painted on top). This
+    // is the ONLY place that does it; the player's resize and this container's
+    // resize both end up here.
+    void syncOverlay()
+    {
+        if (!m_overlay || !m_player)
+            return;
         m_overlay->setGeometry(m_player->rect());
         m_overlay->raise();
-        updateMaxHeight();
     }
 
     QSize sizeHint() const override
@@ -177,11 +198,21 @@ public:
     }
 
 protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        // The player's OWN resize is what keeps the overlay glued to it. This
+        // covers the mini bar reparent (player grows back without this container
+        // resizing) and every other case where the layout gives the player a new
+        // size after the container already had its final one.
+        if (watched == m_player && event->type() == QEvent::Resize)
+            syncOverlay();
+        return QWidget::eventFilter(watched, event);
+    }
+
     void resizeEvent(QResizeEvent *event) override
     {
         QWidget::resizeEvent(event);
-        m_overlay->setGeometry(m_player->rect());
-        m_overlay->raise();
+        syncOverlay();
         updateMaxHeight();
         NT_DEBUG("E2E pc resize %dx%d\n", width(), height());
     }
@@ -1344,7 +1375,7 @@ void WatchPage::attachPlayer()
     if (!m_playerWidget || !m_playerContainer || !m_playerDetached)
         return;
     m_playerContainer->givePlayerBack();
-    m_overlay->setGeometry(m_playerWidget->rect());
+    m_playerContainer->syncOverlay();
     m_overlay->show();
     m_playerDetached = false;
     NT_DEBUG("E2E player attach\n");

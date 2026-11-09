@@ -5,12 +5,15 @@
 #include "reels_filter.h"
 #include "system_media.h"
 #include "youtube_url.h"
+#include "data_transfer.h"
+#include "channel_verifier.h"
 
 #include <QAbstractButton>
 #include <QApplication>
 #include <QButtonGroup>
 #include <QCursor>
 #include <QDesktopServices>
+#include <QFileDialog>
 #include <QGuiApplication>
 #include <QHelpEvent>
 #include <QHBoxLayout>
@@ -30,6 +33,7 @@
 #include <QStatusBar>
 #include <QStyle>
 #include <QTextEdit>
+#include <QThread>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QMouseEvent>
@@ -581,7 +585,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_library = new LibraryPage(m_yt, &m_fav, &m_starred, &m_watchLater,
                                 &m_history, &m_subs, &m_videoCache, m_libraryThumbs,
                                 &m_playlists, this);
-    m_playlist = new PlaylistPage(&m_playlists, &m_videoCache, m_libraryThumbs, this);
+    m_playlist = new PlaylistPage(&m_playlists, &m_videoCache, m_libraryThumbs, m_yt, this);
     m_historyPage = new HistoryPage(&m_history, &m_videoCache, m_libraryThumbs,
                                    &m_watchLater, &m_playlists, this);
     m_settingsPage = new SettingsPage(&m_settings, this);
@@ -833,6 +837,10 @@ MainWindow::MainWindow(QWidget *parent)
                     if (t)
                         t->clear();
             });
+    connect(m_settingsPage, &SettingsPage::exportDataRequested,
+            this, &MainWindow::onExportData);
+    connect(m_settingsPage, &SettingsPage::importDataRequested,
+            this, &MainWindow::onImportData);
     // The custom Settings popup already asks for confirmation; no native
     // QMessageBox (it hijacked the pointer with a second dialog).
     connect(m_settingsPage, &SettingsPage::resetRequested,
@@ -877,7 +885,27 @@ MainWindow::MainWindow(QWidget *parent)
                 m_preferredPlaylistVideoId = preferredVideoId;
                 m_yt->playlistVideos(playlistId);
             });
-    connect(m_yt, &Yt::playlistReady, this, [this](const QString &, const QVector<VideoInfo> &videos) {
+    connect(m_yt, &Yt::playlistReady, this, [this](const QString &playlistId, const QVector<VideoInfo> &videos) {
+        if (!m_savingPlaylistId.isEmpty() && m_savingPlaylistId == playlistId) {
+            const QString targetTitle = m_savingPlaylistTitle.isEmpty()
+                                            ? nt::tr("playlist.title")
+                                            : m_savingPlaylistTitle;
+            const QString localId = m_playlists.create(targetTitle);
+            if (!localId.isEmpty()) {
+                for (const VideoInfo &v : videos) {
+                    if (!v.id.isEmpty() && v.id.size() == 11) {
+                        m_videoCache.upsert(v);
+                        m_playlists.addVideo(localId, v.id);
+                    }
+                }
+                QToolTip::showText(QCursor::pos(), nt::tr("row.playlistSaved"));
+                if (m_library)
+                    m_library->update();
+            }
+            m_savingPlaylistId.clear();
+            m_savingPlaylistTitle.clear();
+            return;
+        }
         if (!videos.isEmpty()) {
             int startIdx = 0;
             if (!m_preferredPlaylistVideoId.isEmpty()) {
@@ -1030,6 +1058,7 @@ MainWindow::MainWindow(QWidget *parent)
     if (m_settingsPage)
         applyThumbSize(m_settingsPage->thumbSize());
 
+    updateDownloadPlaybackState();
     goHome();
     m_home->reload();
     connect(&m_player, &PlayerController::phaseChanged, this,
@@ -1860,20 +1889,14 @@ void MainWindow::setupMiniBar()
 // going back to Player or when playback stops (isActive()==false).
 void MainWindow::updateDownloadPlaybackState()
 {
-    if (!m_downloadManager)
-        return;
-    // Real-time playback is what the downloader must yield to: a video that is
-    // PLAYING (Player page, full screen or the mini player, the three of them
-    // paint frames continuously) or LOADING (the moment the stream is opened,
-    // the most sensitive one). A paused, stopped or failed video does not need
-    // CPU, so the downloads go back to full speed by themselves. This is the
-    // whole recoverability of the scheduling: no state is saved anywhere, it
-    // is derived from the player on every phase change.
     const QString phase = m_player.phase();
     const bool realtime = m_player.isActive()
                           && (phase == QLatin1String("playing")
                               || phase == QLatin1String("loading"));
-    m_downloadManager->setPlaybackActive(realtime);
+    if (m_downloadManager)
+        m_downloadManager->setPlaybackActive(realtime);
+    if (m_library)
+        m_library->setPlaybackActive(realtime);
 }
 
 void MainWindow::updateMiniPlayer()
@@ -2287,6 +2310,11 @@ void MainWindow::showVideoRowMenu(const VideoInfo &video, const QPoint &globalPo
     hooks.onChannel = [this](const QString &channelId, const QString &) {
         openChannel(channelId);
     };
+    hooks.onSavePlaylist = [this](const QString &playlistId, const QString &title) {
+        m_savingPlaylistId = playlistId;
+        m_savingPlaylistTitle = title;
+        m_yt->playlistVideos(playlistId);
+    };
     nt::addRowMenuActions(&menu, video, &m_watchLater, &m_playlists, hooks);
     menu.exec(globalPos);
 }
@@ -2304,6 +2332,297 @@ void MainWindow::applyDownloadFolder()
         m_downloadsPage->setFolder(m_downloadManager->directory());
     NT_DEBUG("E2E downloads folder=%s\n",
              m_downloadManager->directory().toUtf8().constData());
+}
+
+namespace {
+class ImportProgressOverlay : public QWidget
+{
+public:
+    ImportProgressOverlay(QWidget *parent, int total, std::function<void()> onCancel)
+        : QWidget(parent->window())
+        , m_total(total)
+        , m_onCancel(std::move(onCancel))
+    {
+        setAttribute(Qt::WA_DeleteOnClose);
+        setGeometry(parent->window()->rect());
+        setStyleSheet(QStringLiteral("background-color: rgba(0, 0, 0, 160);"));
+
+        auto *lay = new QVBoxLayout(this);
+        lay->setContentsMargins(0, 0, 0, 0);
+        lay->addStretch(1);
+
+        auto *mid = new QHBoxLayout;
+        mid->setContentsMargins(0, 0, 0, 0);
+        mid->addStretch(1);
+
+        auto *frame = new QFrame(this);
+        frame->setObjectName(QStringLiteral("popupDialog"));
+        frame->setFixedWidth(420);
+        mid->addWidget(frame);
+        mid->addStretch(1);
+        lay->addLayout(mid);
+        lay->addStretch(1);
+
+        auto *v = new QVBoxLayout(frame);
+        v->setContentsMargins(20, 18, 20, 16);
+        v->setSpacing(12);
+
+        auto *title = new QLabel(nt::tr("import.verifyingTitle"), frame);
+        title->setObjectName(QStringLiteral("popupTitle"));
+        v->addWidget(title);
+
+        m_status = new QLabel(
+            nt::tr("import.verifyingProgress").arg(0).arg(total).arg(0).arg(0), frame);
+        m_status->setObjectName(QStringLiteral("popupText"));
+        m_status->setWordWrap(true);
+        v->addWidget(m_status);
+
+        m_bar = new QProgressBar(frame);
+        m_bar->setRange(0, total);
+        m_bar->setValue(0);
+        m_bar->setTextVisible(false);
+        m_bar->setFixedHeight(6);
+        v->addWidget(m_bar);
+
+        auto *btnRow = new QHBoxLayout;
+        btnRow->addStretch(1);
+        auto *cancel = new QPushButton(nt::tr("common.cancel"), frame);
+        cancel->setObjectName(QStringLiteral("ghost"));
+        cancel->setCursor(Qt::PointingHandCursor);
+        connect(cancel, &QPushButton::clicked, this, [this]() {
+            if (m_onCancel)
+                m_onCancel();
+            close();
+        });
+        btnRow->addWidget(cancel);
+        v->addLayout(btnRow);
+
+        show();
+        raise();
+    }
+
+    void updateProgress(int done, int total, int alive, int dead)
+    {
+        m_bar->setValue(done);
+        m_status->setText(nt::tr("import.verifyingProgress").arg(done).arg(total).arg(alive).arg(dead));
+    }
+
+private:
+    int m_total = 0;
+    std::function<void()> m_onCancel;
+    QLabel *m_status = nullptr;
+    QProgressBar *m_bar = nullptr;
+};
+}
+
+void MainWindow::onExportData()
+{
+    // 1. Collect subscriptions in NewPipe shape
+    QVector<data_transfer::Subscription> subs;
+    for (const SubscriptionInfo &s : m_subs.all()) {
+        data_transfer::Subscription sub;
+        sub.serviceId = 0;  // YouTube
+        sub.url = QStringLiteral("https://www.youtube.com/channel/") + s.id;
+        sub.name = s.title;
+        subs.append(sub);
+    }
+
+    // 2. Collect NeverTube extra data
+    data_transfer::NevertubeData ntData;
+    for (const PlaylistItem &p : m_playlists.all()) {
+        data_transfer::Playlist pl;
+        pl.title = p.title;
+        pl.videoIds = m_playlists.videoIds(p.id);
+        ntData.playlists.append(pl);
+    }
+    ntData.watchLater = m_watchLater.ids();
+    for (const QString &vid : m_history.recentIds(500)) {
+        data_transfer::HistoryEntry h;
+        h.videoId = vid;
+        h.positionMs = m_history.positionOf(vid);
+        ntData.historyBreaks.append(h);
+    }
+    ntData.favorites = m_fav.ids();
+    ntData.starred = m_starred.ids();
+
+    const QByteArray json = data_transfer::exportJson(
+        subs, ntData, nt::appVersion(), 1);
+
+    const QString path = QFileDialog::getSaveFileName(
+        this, nt::tr("settings.exportData"),
+        QStringLiteral("NeverTube-backup.json"),
+        QStringLiteral("JSON (*.json)"));
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        nt::confirm(this, nt::tr("settings.exportError"),
+                    file.errorString(), nt::tr("common.accept"), []() {});
+        return;
+    }
+    file.write(json);
+    file.close();
+
+    const QString msg = nt::tr("settings.exportSuccessBody")
+                            .arg(subs.size())
+                            .arg(ntData.playlists.size());
+    nt::confirm(this, nt::tr("settings.exportSuccess"), msg,
+                nt::tr("common.accept"), []() {});
+}
+
+void MainWindow::onImportData()
+{
+    const QString filter =
+        QStringLiteral("Todos los soportados (*.json *.csv *.zip);;"
+                       "Backup NewPipe / NeverTube (*.json);;"
+                       "Google Takeout CSV (*.csv);;"
+                       "Google Takeout ZIP (*.zip)");
+    const QString path = QFileDialog::getOpenFileName(
+        this, nt::tr("settings.importData"), QString(), filter);
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        nt::confirm(this, nt::tr("settings.importError"),
+                    file.errorString(), nt::tr("common.accept"), []() {});
+        return;
+    }
+    const QByteArray data = file.readAll();
+    file.close();
+
+    const data_transfer::ImportResult res =
+        data_transfer::importFile(data, QFileInfo(path).fileName());
+
+    if (!res.error.isEmpty()) {
+        nt::confirm(this, nt::tr("settings.importError"),
+                    res.error, nt::tr("common.accept"), []() {});
+        return;
+    }
+
+    if (res.subscriptions.isEmpty() && !res.hasNevertube) {
+        const QString warn = res.warning.isEmpty()
+                                 ? nt::tr("settings.importError")
+                                 : res.warning;
+        nt::confirm(this, nt::tr("settings.importError"), warn,
+                    nt::tr("common.accept"), []() {});
+        return;
+    }
+
+    const QString prompt = nt::tr("settings.importPrompt")
+                               .arg(res.subscriptions.size())
+                               .arg(res.nevertube.playlists.size())
+                               .arg(res.nevertube.watchLater.size());
+
+    nt::confirm(
+        this, nt::tr("settings.importData"), prompt,
+        nt::tr("settings.importData"),
+        [this, res]() {
+            auto applyData = [this, res](const QVector<data_transfer::Subscription> &subsToImport, int deadCount) {
+                int subsAdded = 0;
+                for (const data_transfer::Subscription &s : subsToImport) {
+                    const int slash = s.url.lastIndexOf(QLatin1Char('/'));
+                    const QString channelId = slash >= 0 ? s.url.mid(slash + 1) : s.url;
+                    if (!channelId.isEmpty()) {
+                        if (m_subs.add(channelId, s.name, s.avatarUrl))
+                            ++subsAdded;
+                    }
+                }
+
+                int playlistsAdded = 0;
+                if (res.hasNevertube) {
+                    for (const data_transfer::Playlist &pl : res.nevertube.playlists) {
+                        if (pl.title.isEmpty() && pl.videoIds.isEmpty())
+                            continue;
+                        const QString plId = m_playlists.create(pl.title);
+                        if (!plId.isEmpty()) {
+                            ++playlistsAdded;
+                            for (const QString &vid : pl.videoIds) {
+                                m_playlists.addVideo(plId, vid);
+                                VideoInfo v;
+                                if (!m_videoCache.get(vid, v)) {
+                                    v.id = vid;
+                                    v.title = vid;
+                                    m_videoCache.upsert(v);
+                                }
+                            }
+                        }
+                        QThread::msleep(2);
+                    }
+                    for (const QString &vid : res.nevertube.watchLater) {
+                        if (!m_watchLater.isWatchLater(vid))
+                            m_watchLater.toggle(vid);
+                        VideoInfo v;
+                        if (!m_videoCache.get(vid, v)) {
+                            v.id = vid;
+                            v.title = vid;
+                            m_videoCache.upsert(v);
+                        }
+                    }
+                    for (const QString &vid : res.nevertube.favorites) {
+                        if (!m_fav.isFavorite(vid))
+                            m_fav.toggle(vid);
+                        VideoInfo v;
+                        if (!m_videoCache.get(vid, v)) {
+                            v.id = vid;
+                            v.title = vid;
+                            m_videoCache.upsert(v);
+                        }
+                    }
+                    for (const QString &vid : res.nevertube.starred) {
+                        if (!m_starred.isStarred(vid))
+                            m_starred.toggle(vid);
+                    }
+                    for (const data_transfer::HistoryEntry &h : res.nevertube.historyBreaks) {
+                        m_history.add(h.videoId, h.positionMs);
+                    }
+                }
+
+                if (m_library)
+                    m_library->reload();
+
+                const QString msg = (deadCount > 0)
+                    ? nt::tr("settings.importSummaryWithFiltered")
+                          .arg(subsAdded)
+                          .arg(deadCount)
+                          .arg(playlistsAdded)
+                          .arg(res.nevertube.watchLater.size())
+                    : nt::tr("settings.importSummary")
+                          .arg(subsAdded)
+                          .arg(playlistsAdded)
+                          .arg(res.nevertube.watchLater.size());
+
+                nt::confirm(this, nt::tr("settings.importSuccess"), msg,
+                            nt::tr("common.accept"), []() {});
+            };
+
+            if (res.subscriptions.isEmpty()) {
+                applyData(res.subscriptions, 0);
+                return;
+            }
+
+            // Verify channels in parallel: discard terminated/deleted ones and
+            // fetch live avatar URLs before saving to DB.
+            auto *verifier = new ChannelVerifier(this);
+            auto *overlay = new ImportProgressOverlay(this, res.subscriptions.size(), [verifier]() {
+                verifier->cancel();
+            });
+
+            connect(verifier, &ChannelVerifier::progress, overlay,
+                    [overlay](int done, int total, int alive, int dead) {
+                        overlay->updateProgress(done, total, alive, dead);
+                    });
+
+            connect(verifier, &ChannelVerifier::finished, this,
+                    [this, overlay, verifier, applyData](const QVector<data_transfer::Subscription> &alive, int deadCount) {
+                        overlay->close();
+                        verifier->deleteLater();
+                        applyData(alive, deadCount);
+                    });
+
+            verifier->start(res.subscriptions, 8);
+        });
 }
 
 void MainWindow::resetAppData()

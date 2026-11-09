@@ -63,6 +63,8 @@ signals:
     void clearThumbsRequested();
     void resetRequested();
     void redetectHwRequested();
+    void exportDataRequested();
+    void importDataRequested();
     // "Buscar actualizaciones" (About section): the query and the dialog are
     // MainWindow's, which owns the player (the automatic check holds the
     // dialog while a video plays) and the settings (it remembers when the

@@ -155,6 +155,9 @@ private:
     ThumbnailCache *m_thumbs;
 
     QLineEdit *m_field;
+    // The pill that holds the field. It is a member because the focus ring is
+    // applied to it (Qt5 QSS has no `:focus-within`, see the constructor).
+    QFrame *m_searchCard = nullptr;
     QPushButton *m_clearBtn = nullptr;
     // "Buscando" / "Sin resultados": members so their visibility is not decided
     // by matching translated text (see the constructor).

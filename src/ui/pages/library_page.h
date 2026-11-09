@@ -12,6 +12,7 @@
 
 class QLabel;
 class QPushButton;
+class QTimer;
 class QVBoxLayout;
 class QHBoxLayout;
 class QGridLayout;
@@ -44,6 +45,9 @@ public:
                          QWidget *parent = nullptr);
 
     void reload();
+    // Preloads subscription icons (avatars) gently in the background only
+    // while playback is NOT active (yields immediately when video starts).
+    void setPlaybackActive(bool active);
 
     // Re-applies the texts that are NOT live-bound: a section title with its
     // count and the "Ver todo / Ver menos" toggles are composed dynamically, so
@@ -158,6 +162,17 @@ private:
     // last check time of each.
     QSet<QString> m_liveRefreshPending;
     QHash<QString, qint64> m_liveRefreshedAt;
+
+    QStringList m_resolveQueue;
+    bool m_resolveInFlight = false;
+    void resolveNextPlaceholder();
+
+    bool m_playbackActive = false;
+    QStringList m_avatarPreloadQueue;
+    bool m_avatarPreloadInFlight = false;
+    QTimer *m_avatarPreloadTimer = nullptr;
+    void startAvatarPreload();
+    void processNextAvatar();
 
     QFrame *m_managePopup = nullptr;
     QVBoxLayout *m_manageLay = nullptr;

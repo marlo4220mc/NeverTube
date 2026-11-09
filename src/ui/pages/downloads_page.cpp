@@ -31,7 +31,7 @@ DownloadsPage::DownloadsPage(DownloadRepo *repo, QWidget *parent)
 
     auto *header = new QHBoxLayout();
     m_title = new QLabel(this);
-    m_title->setObjectName(QStringLiteral("sectionTitle"));
+    m_title->setObjectName(QStringLiteral("pageHeading"));
     nt::bindText(m_title, "downloads.title");
     header->addWidget(m_title);
     header->addStretch(1);
