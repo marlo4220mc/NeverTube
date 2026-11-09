@@ -1417,8 +1417,8 @@ jobs:
       # fire here — the i686 deliverable is the one that carries the pinned
       # 2026-03 build for that reason (windows_x86_win10.yml). If it ever fires,
       # move these two to an earlier build (tag + release asset name).
-      MPV_TAG: '20260924'
-      MPV_ASSET: 'mpv-dev-x86_64-20260924-git-2a4eb8067c.7z'
+      MPV_TAG: '20261109'
+      MPV_ASSET: 'mpv-dev-x86_64-20261109-git-8bc468896e.7z'
       # Qt is DOWNLOADED from a release of a separate build repository, not read
       # from this checkout and not compiled here. Qt stopped publishing Windows
       # binaries at 5.15.2 (the 5.15.19 archive is source only), so the tree is
