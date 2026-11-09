@@ -235,12 +235,14 @@ endif()
 target_link_libraries(nevertube PRIVATE
   Qt5::Core
   Qt5::Gui
-  Qt5::GuiPrivate
   Qt5::Widgets
   Qt5::Network
   Qt5::Sql
   OpenGL::GL
 )
+if(TARGET Qt5::GuiPrivate)
+  target_link_libraries(nevertube PRIVATE Qt5::GuiPrivate)
+endif()
 
 # --- System Media Controls (MPRIS v2 on Linux / SMTC on Windows 10+) ---
 # Linux: MPRIS v2 over D-Bus (Qt5::DBus).

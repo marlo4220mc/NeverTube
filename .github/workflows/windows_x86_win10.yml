@@ -445,7 +445,8 @@ jobs:
                            '--selftest-search-url',
                            '--selftest-update',
                            '--selftest-mpris',
-                           '--selftest-settings-page')) {
+                           '--selftest-settings-page',
+                           '--selftest-data-transfer')) {
             $rc = Invoke-Selftest $t
             if ($rc -ne 0) {
               Remove-Item dist\platforms\qoffscreen.dll -Force -ErrorAction SilentlyContinue

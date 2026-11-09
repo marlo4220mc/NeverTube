@@ -218,7 +218,8 @@ flatpak-builder --run "$BUILD" "$MANIFEST" sh -c '
            --selftest-video-url --selftest-search-url \
            --selftest-update \
            --selftest-mpris \
-           --selftest-settings-page; do
+           --selftest-settings-page \
+           --selftest-data-transfer; do
     echo "SELFTEST $t"
     /app/bin/nevertube "$t"
   done
