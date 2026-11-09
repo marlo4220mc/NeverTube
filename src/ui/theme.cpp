@@ -368,7 +368,7 @@ QWidget#miniBar[hover="true"] { background-color: @HOVER_SOFT@; }
 QWidget#miniBar QPushButton#iconBtn { padding: 4px; }
 QWidget#watchBody { background-color: @BG@; }
 
-/* Search bar: pill shaped container (Spotify/content-first design) */
+/* Search bar: pill shaped container (content-first design) */
 QFrame#searchCard {
     background-color: @ELEVATED@;
     border: 1px solid @BORDER@;

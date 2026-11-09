@@ -9,7 +9,7 @@
 // including with the window minimized, on another workspace or on the lock
 // screen — and what puts NeverTube in the desktop's media widget.
 //
-// Chrome and Spotify do exactly this and nothing else; there is no private
+// Chrome and other desktop players do exactly this and nothing else; there is no private
 // protocol:
 //
 //   Linux   MPRIS v2 over D-Bus (org.mpris.MediaPlayer2.<appId>). The desktop

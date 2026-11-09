@@ -7,8 +7,7 @@
 
 namespace nt {
 
-// Palette "casi negro" inmersiva (content-first). The values follow the
-// mockup in docs/redesign-propuesta-spotify-v2.html: fondo #0B0B0B,
+// Palette "casi negro" inmersiva (content-first): fondo #0B0B0B,
 // superficies #131313 / #1A1A1A, hairline principal #202020,
 // hairline secundario #262626, hover #191919, selección #222222,
 // texto #F2F2F2, muted #9C9C9C, meta #949CA6.

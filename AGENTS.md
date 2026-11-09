@@ -2282,7 +2282,7 @@ name is a file). It is created in `main()` and works like this:
 ## System media controls (hardware media keys, Bluetooth headphones, MPRIS & SMTC)
 
 Support for hardware media keys (keyboard, Bluetooth headphones with AVRCP) and the
-desktop/system media flyout widgets (equivalent to Chrome and Spotify):
+desktop/system media flyout widgets (equivalent to system media players):
 
 - **Linux (MPRIS v2 over D-Bus)**: registers `org.mpris.MediaPlayer2.<appId>` on the session
   bus. Supports Root interface (`Identity`, `DesktopEntry`, `CanRaise`, `Raise`) and Player
