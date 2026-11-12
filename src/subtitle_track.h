@@ -24,3 +24,26 @@ QVector<SubtitleTranslation> parseSubtitleTranslations(const QJsonArray &languag
 QString subtitleUrl(const SubtitleTrack &track, const QString &targetLanguage = QString());
 int preferredSubtitleIndex(const QVector<SubtitleTrack> &tracks,
                            const QString &preferredLanguage);
+
+// What to load for the CC overlay.
+struct SubtitlePick {
+    int index = -1;   // track index into the list; -1 = nothing to show
+    QString target;   // translation target language; empty = no tlang
+};
+
+// Picks the track to load and, when automatic translation is wanted, the
+// translation target. The subtle rule this encodes: YouTube only translates
+// tracks that are `isTranslatable` (normally the auto-generated/ASR ones, NOT
+// the manual ones). So when the preferred language is not natively present,
+// the source must be a translatable track, or the tlang request is silently
+// ignored and the user sees the untranslated text.
+// - preferredLanguage: "" for "original"; a code ("es"/"en"/"pt"); or the
+//   resolved "system" language. Empty means "prefer a manual track, any".
+// - autoTranslate: true only when the setting is on AND YouTube offers
+//   translation languages for this video (translationLanguages non-empty).
+// - interfaceLanguage: the UI language; used as the translation target when
+//   preferredLanguage is "" ("original" + auto-translate).
+SubtitlePick pickSubtitleSource(const QVector<SubtitleTrack> &tracks,
+                                const QString &preferredLanguage,
+                                bool autoTranslate,
+                                const QString &interfaceLanguage);

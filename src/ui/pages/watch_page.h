@@ -332,6 +332,10 @@ private:
     // The tracks of the current video, kept so a settings change (language /
     // auto-translate) can re-pick the URL without asking YouTube again.
     QVector<SubtitleTrack> m_subtitleTracks;
+    // Whether YouTube offers translation languages for the current video
+    // (translationLanguages non-empty): the gate that auto-translate needs,
+    // because a tlang request on a video without translations is ignored.
+    bool m_subtitleCanTranslate = false;
     // Chooses the track and the translation URL from the persistent subtitle
     // settings. Empty when there are no tracks for the current video.
     QString pickSubtitleUrl() const;

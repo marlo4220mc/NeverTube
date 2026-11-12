@@ -1343,7 +1343,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     connect(m_yt, &Yt::captionsReady, this,
             [this](const QString &videoId,
                    const QVector<SubtitleTrack> &tracks,
-                   const QVector<SubtitleTranslation> &) {
+                   const QVector<SubtitleTranslation> &translations) {
                 if (!isCurrentVideo(videoId) || !m_playerWidget)
                     return;
                 // A re-resolve of the SAME video (recovery/stall) re-emits
@@ -1355,10 +1355,12 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
                 m_subsVisible = false;
                 if (m_subtitleOverlay)
                     m_subtitleOverlay->clear();
-                NT_DEBUG("E2E captions ready video=%s tracks=%d\n",
-                         videoId.toUtf8().constData(), int(tracks.size()));
+                NT_DEBUG("E2E captions ready video=%s tracks=%d translations=%d\n",
+                         videoId.toUtf8().constData(), int(tracks.size()),
+                         int(translations.size()));
                 m_ovSubsBtn->setEnabled(!tracks.isEmpty());
                 m_subtitleTracks = tracks;
+                m_subtitleCanTranslate = !translations.isEmpty();
                 m_pendingSubtitleUrl = pickSubtitleUrl();
                 if (wasVisible && !m_pendingSubtitleUrl.isEmpty())
                     loadPendingSubtitles();
@@ -1458,7 +1460,7 @@ QString WatchPage::pickSubtitleUrl() const
     // Preferred subtitle language (persistent setting "subtitle_language"):
     //   "system"   -> the interface language,
     //   "es|en|pt" -> that language,
-    //   "original" -> no preference: the manual (non-ASR) track of the video.
+    //   "original" -> empty: prefer the manual (non-ASR) track of the video.
     QString lang;
     const QString stored = m_settings
         ? m_settings->getString(QStringLiteral("subtitle_language"),
@@ -1470,26 +1472,18 @@ QString WatchPage::pickSubtitleUrl() const
     else if (stored != QLatin1String("original"))
         lang = nt::language();
 
-    const int index = preferredSubtitleIndex(m_subtitleTracks, lang);
-    if (index < 0)
-        return QString();
-    const SubtitleTrack track = m_subtitleTracks.at(index);
-
-    // Automatic translation (persistent setting "subtitle_auto_translate"):
-    // ask YouTube for the chosen track translated to the viewing language
-    // (tlang), but only when the track is not already in that language —
-    // asking tlang of a track that already matches is redundant.
+    // Automatic translation only when the setting is on AND YouTube offers
+    // translation languages for this video (otherwise tlang is ignored).
     const bool autoTranslate = m_settings
         && m_settings->getString(QStringLiteral("subtitle_auto_translate"),
-                                 QStringLiteral("off")) == QLatin1String("on");
-    QString target = lang;
-    if (target.isEmpty() && autoTranslate)
-        target = nt::language();  // "original" + auto-translate -> interface language
-    if (autoTranslate && !target.isEmpty()
-        && track.languageCode != target
-        && !track.languageCode.startsWith(target + QLatin1Char('-')))
-        return subtitleUrl(track, target);
-    return subtitleUrl(track);
+                                 QStringLiteral("off")) == QLatin1String("on")
+        && m_subtitleCanTranslate;
+
+    const SubtitlePick pick =
+        pickSubtitleSource(m_subtitleTracks, lang, autoTranslate, nt::language());
+    if (pick.index < 0)
+        return QString();
+    return subtitleUrl(m_subtitleTracks.at(pick.index), pick.target);
 }
 
 void WatchPage::applySubtitleSettings()
@@ -1521,6 +1515,7 @@ void WatchPage::onCurrentChanged()
     m_pendingSubtitleUrl.clear();
     m_subsVisible = false;
     m_subtitleTracks.clear();
+    m_subtitleCanTranslate = false;
     if (m_subtitleOverlay)
         m_subtitleOverlay->clear();
     if (!m_player->isActive()) {

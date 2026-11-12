@@ -69,5 +69,70 @@ bool subtitleTrackSelfTest()
           "vtt: acepta M:SS.mmm");
     check(vtt::parse(QByteArray("WEBVTT\n\n")).isEmpty(),
           "vtt: payload vacío no produce cues");
+
+    // ── pickSubtitleSource (the translation logic) ────────────────────────
+    // YouTube only translates isTranslatable tracks (usually ASR), so when
+    // the preferred language is not natively present the source must be a
+    // translatable track or the tlang request is silently ignored.
+    QJsonArray mix;
+    mix.append(QJsonObject{{"baseUrl", "https://x.test/es-manual"}, {"languageCode", "es"}, {"name", QJsonObject{{"simpleText", "Español"}}}});
+    mix.append(QJsonObject{{"baseUrl", "https://x.test/es-asr"}, {"languageCode", "es"}, {"name", QJsonObject{{"simpleText", "Español (auto)"}}}, {"kind", "asr"}, {"isTranslatable", true}});
+    mix.append(QJsonObject{{"baseUrl", "https://x.test/en-manual"}, {"languageCode", "en"}, {"name", QJsonObject{{"simpleText", "English"}}}});
+    const auto mixed = parseSubtitleTracks(mix);
+
+    // The reported bug: requesting "en" with auto-translate on a video whose
+    // tracks are only Spanish (manual + ASR) picked the manual "es" and
+    // applied tlang over a non-translatable track -> no translation. Now the
+    // ASR is the source and tlang goes to it.
+    QJsonArray noEn;
+    noEn.append(QJsonObject{{"baseUrl", "https://x.test/es-manual"}, {"languageCode", "es"}, {"name", QJsonObject{{"simpleText", "Español"}}}});
+    noEn.append(QJsonObject{{"baseUrl", "https://x.test/es-asr"}, {"languageCode", "es"}, {"name", QJsonObject{{"simpleText", "Español (auto)"}}}, {"kind", "asr"}, {"isTranslatable", true}});
+    const auto noEnTracks = parseSubtitleTracks(noEn);
+    const SubtitlePick pickTranslated = pickSubtitleSource(
+        noEnTracks, QLatin1String("en"), true, QLatin1String("en"));
+    check(pickTranslated.index == 1 && pickTranslated.target == QLatin1String("en"),
+          "pick: auto-traducción usa la pista translatable (ASR) como fuente");
+    check(pickTranslated.index == 1
+          && subtitleUrl(noEnTracks.at(1), pickTranslated.target).contains("tlang=en"),
+          "pick: añade tlang=<destino> sobre la fuente translatable");
+
+    // Native track already in the target language -> no tlang.
+    const SubtitlePick pickNative = pickSubtitleSource(
+        mixed, QLatin1String("es"), true, QLatin1String("es"));
+    check(pickNative.index == 0 && pickNative.target.isEmpty(),
+          "pick: pista nativa en el idioma pedido, sin traducción");
+
+    // No translatable track at all -> native untranslated, never a tlang.
+    QJsonArray onlyManual;
+    onlyManual.append(QJsonObject{{"baseUrl", "https://x.test/es"}, {"languageCode", "es"}, {"name", QJsonObject{{"simpleText", "Español"}}}});
+    const auto noTranslatable = parseSubtitleTracks(onlyManual);
+    const SubtitlePick pickNoT = pickSubtitleSource(
+        noTranslatable, QLatin1String("en"), true, QLatin1String("en"));
+    check(pickNoT.index == 0 && pickNoT.target.isEmpty(),
+          "pick: sin pista translatable se carga la nativa sin tlang");
+
+    // Auto-translate off -> never translates, but still prefers the language.
+    const SubtitlePick pickOff = pickSubtitleSource(
+        mixed, QLatin1String("en"), false, QLatin1String("en"));
+    check(pickOff.index == 2 && pickOff.target.isEmpty(),
+          "pick: traducción apagada elige la pista del idioma sin tlang");
+
+    // "original" + auto-translate -> translate the manual track's language
+    // to the interface language (target = "en").
+    const SubtitlePick pickOrig = pickSubtitleSource(
+        mixed, QString(), true, QLatin1String("en"));
+    check(pickOrig.index == 1 && pickOrig.target == QLatin1String("en"),
+          "pick: original + auto-traducción traduce al idioma de la interfaz");
+
+    // "original" without auto-translate -> the manual track, untranslated.
+    const SubtitlePick pickOrigOff = pickSubtitleSource(
+        mixed, QString(), false, QLatin1String("en"));
+    check(pickOrigOff.index == 0 && pickOrigOff.target.isEmpty(),
+          "pick: original sin auto-traducción usa la pista manual tal cual");
+
+    // Empty list -> nothing to pick.
+    check(pickSubtitleSource(QVector<SubtitleTrack>(), QLatin1String("es"),
+                             true, QLatin1String("en")).index == -1,
+          "pick: sin pistas no hay selección");
     return ok;
 }
