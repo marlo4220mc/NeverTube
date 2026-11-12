@@ -167,6 +167,12 @@ add_executable(nevertube
   src/video_variant.h
   src/video_variant_selftest.cpp
   src/video_variant_selftest.h
+  src/subtitle_track.cpp
+  src/subtitle_track.h
+  src/subtitle_track_selftest.cpp
+  src/subtitle_track_selftest.h
+  src/ui/subtitle_overlay.cpp
+  src/ui/subtitle_overlay.h
   src/system_media.cpp
   src/system_media.h
   src/system_media_selftest.cpp

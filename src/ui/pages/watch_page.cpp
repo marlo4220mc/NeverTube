@@ -1,4 +1,5 @@
 #include "watch_page.h"
+#include "../../subtitle_track.h"
 
 #include "../../downloader/download_settings.h"
 
@@ -46,6 +47,7 @@
 #include "../confirm_dialog.h"
 #include "../flow_layout.h"
 #include "../row_menu.h"
+#include "../subtitle_overlay.h"
 #include "../theme.h"
 #include "../thumbnail_cache.h"
 #include "../video_list_view.h"
@@ -816,9 +818,20 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_ovSubsBtn = makeIconBtn(m_ctrlBar);
     nt::bindTooltip(m_ovSubsBtn, "player.subtitles");
     connect(m_ovSubsBtn, &QPushButton::clicked, this, [this]() {
-        m_subsVisible = !m_subsVisible;
-        if (m_playerWidget)
-            m_playerWidget->setSubVisibility(m_subsVisible);
+        if (!m_subtitleOverlay)
+            return;
+        if (m_subsVisible) {
+            m_subsVisible = false;
+            m_subtitleOverlay->setVisible(false);
+            updateOverlayIcons();
+            return;
+        }
+        if (!m_pendingSubtitleUrl.isEmpty()) {
+            loadPendingSubtitles();
+            return;
+        }
+        m_subsVisible = true;
+        m_subtitleOverlay->setVisible(true);
         updateOverlayIcons();
     });
     btnRow->addWidget(m_ovSubsBtn);
@@ -852,6 +865,7 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_ovMuteBtn->setIcon(nt::playerIcon(nt::PlayerIcon::Volume, nt::kText, 19));
     m_ovSubsBtn->setIcon(
         nt::playerIcon(nt::PlayerIcon::Captions, nt::kText, 18));
+    m_ovSubsBtn->setEnabled(false);  // enabled by captionsReady when tracks exist
     m_ovPlaylistBtn->setIcon(
         nt::playerIcon(nt::PlayerIcon::PlaylistAdd, nt::kText, 18));
     m_quality->setIcon(nt::playerIcon(nt::PlayerIcon::Settings, nt::kText, 18));
@@ -1215,6 +1229,26 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     m_back->raise();
     m_back->hide(); // appears with the controls, not before
 
+    // Subtitle overlay: a transparent Qt widget that paints the current cue
+    // as white text with a thin shadow at the bottom centre of the video.
+    // It is a sibling of m_back inside the OverlayHost (gl), so it moves
+    // with the overlay on reparent and has no impact on mpv's render path.
+    m_subtitleOverlay = new SubtitleOverlay(gl);
+    m_subtitleOverlay->setGeometry(gl->rect());
+    m_subtitleOverlay->setVisible(false);
+    connect(m_subtitleOverlay, &SubtitleOverlay::downloadFinished,
+            this, [this](bool ok) {
+        if (!ok) {
+            m_subsVisible = false;
+            m_ovSubsBtn->setEnabled(false);
+        } else {
+            // On success the button stays enabled: CC keeps toggling the
+            // overlay off/on (loadPendingSubtitles disables it while loading).
+            m_ovSubsBtn->setEnabled(true);
+        }
+        updateOverlayIcons();
+    });
+
     connect(m_back, &QPushButton::clicked, this,
             &WatchPage::backRequested);
     connect(m_channelBtn, &QPushButton::clicked, this, [this]() {
@@ -1306,6 +1340,29 @@ WatchPage::WatchPage(Yt *yt, PlayerController *player, PlayerWidget *playerWidge
     // The variants (height, codec and real size) for the menu of the
     // download: they come with the player response.
     connect(m_yt, &Yt::streamVariantsReady, this, &WatchPage::onStreamVariants);
+    connect(m_yt, &Yt::captionsReady, this,
+            [this](const QString &videoId,
+                   const QVector<SubtitleTrack> &tracks,
+                   const QVector<SubtitleTranslation> &) {
+                if (!isCurrentVideo(videoId) || !m_playerWidget)
+                    return;
+                // A re-resolve of the SAME video (recovery/stall) re-emits
+                // captionsReady: remember whether the CC overlay was on so it
+                // is restored with the fresh URL instead of silently turning
+                // off (a NEW video clears the state in onCurrentChanged).
+                const bool wasVisible = m_subsVisible;
+                m_pendingSubtitleUrl.clear();
+                m_subsVisible = false;
+                if (m_subtitleOverlay)
+                    m_subtitleOverlay->clear();
+                NT_DEBUG("E2E captions ready video=%s tracks=%d\n",
+                         videoId.toUtf8().constData(), int(tracks.size()));
+                m_ovSubsBtn->setEnabled(!tracks.isEmpty());
+                m_subtitleTracks = tracks;
+                m_pendingSubtitleUrl = pickSubtitleUrl();
+                if (wasVisible && !m_pendingSubtitleUrl.isEmpty())
+                    loadPendingSubtitles();
+            });
     connect(m_player, &PlayerController::durationChanged, this,
             &WatchPage::onDurationKnown);
     connect(m_yt, &Yt::detailReady, this, &WatchPage::onDetailReady);
@@ -1381,6 +1438,69 @@ void WatchPage::attachPlayer()
     NT_DEBUG("E2E player attach\n");
 }
 
+void WatchPage::loadPendingSubtitles()
+{
+    if (m_pendingSubtitleUrl.isEmpty() || !m_subtitleOverlay)
+        return;
+    m_subsVisible = true;
+    m_ovSubsBtn->setEnabled(false);  // re-enabled in downloadFinished
+    m_subtitleOverlay->loadUrl(m_pendingSubtitleUrl);
+    m_pendingSubtitleUrl.clear();
+    m_subtitleOverlay->setVisible(true);
+    updateOverlayIcons();
+}
+
+QString WatchPage::pickSubtitleUrl() const
+{
+    if (m_subtitleTracks.isEmpty())
+        return QString();
+
+    // Preferred subtitle language (persistent setting "subtitle_language"):
+    //   "system"   -> the interface language,
+    //   "es|en|pt" -> that language,
+    //   "original" -> no preference: the manual (non-ASR) track of the video.
+    QString lang;
+    const QString stored = m_settings
+        ? m_settings->getString(QStringLiteral("subtitle_language"),
+                                QStringLiteral("system"))
+        : QStringLiteral("system");
+    if (stored == QLatin1String("es") || stored == QLatin1String("en")
+        || stored == QLatin1String("pt"))
+        lang = stored;
+    else if (stored != QLatin1String("original"))
+        lang = nt::language();
+
+    const int index = preferredSubtitleIndex(m_subtitleTracks, lang);
+    if (index < 0)
+        return QString();
+    const SubtitleTrack track = m_subtitleTracks.at(index);
+
+    // Automatic translation (persistent setting "subtitle_auto_translate"):
+    // ask YouTube for the chosen track translated to the viewing language
+    // (tlang), but only when the track is not already in that language —
+    // asking tlang of a track that already matches is redundant.
+    const bool autoTranslate = m_settings
+        && m_settings->getString(QStringLiteral("subtitle_auto_translate"),
+                                 QStringLiteral("off")) == QLatin1String("on");
+    QString target = lang;
+    if (target.isEmpty() && autoTranslate)
+        target = nt::language();  // "original" + auto-translate -> interface language
+    if (autoTranslate && !target.isEmpty()
+        && track.languageCode != target
+        && !track.languageCode.startsWith(target + QLatin1Char('-')))
+        return subtitleUrl(track, target);
+    return subtitleUrl(track);
+}
+
+void WatchPage::applySubtitleSettings()
+{
+    m_pendingSubtitleUrl = pickSubtitleUrl();
+    // If the CC overlay is showing, reload it with the new track/translation
+    // right away; otherwise the next click on CC uses the new settings.
+    if (m_subsVisible && m_subtitleOverlay && !m_pendingSubtitleUrl.isEmpty())
+        loadPendingSubtitles();
+}
+
 void WatchPage::onCurrentChanged()
 {
     // New video: live detection restarts (the duration is received
@@ -1397,6 +1517,12 @@ void WatchPage::onCurrentChanged()
         m_ovPos->style()->polish(m_ovPos);
         m_ovPos->update();
     }
+    m_ovSubsBtn->setEnabled(false);
+    m_pendingSubtitleUrl.clear();
+    m_subsVisible = false;
+    m_subtitleTracks.clear();
+    if (m_subtitleOverlay)
+        m_subtitleOverlay->clear();
     if (!m_player->isActive()) {
         m_title->setText(nt::tr("watch.playing"));
         return;
@@ -1971,6 +2097,9 @@ void WatchPage::onPositionChanged(double position, double duration)
     // segment; and if the duration stabilizes, it unlocks (false positive
     // → normal bar and seek recovered). A normal video is never marked.
     NT_DEBUG("E2E tick pos=%.1f dur=%.1f\n", position, duration);
+    // Feed the Qt subtitle overlay (it only repaints when the cue changes).
+    if (m_subtitleOverlay)
+        m_subtitleOverlay->setPosition(position);
     // Synthetic AV1 HLS (built by the app from a finite fMP4):
     // by construction it CANNOT be a live, and mpv reports unstable durations
     // there (they grow/reset while the BYTERANGE ranges are loaded),

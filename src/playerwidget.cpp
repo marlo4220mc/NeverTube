@@ -246,6 +246,24 @@ void PlayerWidget::setSubVisibility(bool visible)
     m_backend->setSubVisibility(visible);
 }
 
+bool PlayerWidget::subtitlesSupported() const
+{
+    return m_backend && m_backend->subtitlesSupported();
+}
+
+int PlayerWidget::addSubtitleTrack(const QString &url)
+{
+    if (!m_backend || !m_backend->isValid())
+        return -1;
+    return m_backend->addSubtitleTrack(url);
+}
+
+void PlayerWidget::clearSubtitleTracks()
+{
+    if (m_backend)
+        m_backend->clearSubtitleTracks();
+}
+
 void PlayerWidget::setAudioFile(const QString &url)
 {
     m_pendingAudioFile = url;

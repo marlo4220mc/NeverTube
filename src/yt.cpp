@@ -121,6 +121,10 @@ Yt::Yt(QObject *parent)
     qRegisterMetaType<QVector<FormatInfo>>("QVector<FormatInfo>");
     qRegisterMetaType<StreamInfo>("StreamInfo");
     qRegisterMetaType<PlaylistInfo>("PlaylistInfo");
+    qRegisterMetaType<QVector<SubtitleTrack>>("QVector<SubtitleTrack>");
+    qRegisterMetaType<QVector<SubtitleTranslation>>("QVector<SubtitleTranslation>");
+    connect(&m_innertube, &Innertube::captionsReady, this,
+            &Yt::captionsReady);
 
     // /next: direct forwarding from Innertube to the rest of the app.
     connect(&m_innertube, &Innertube::relatedReady, this,

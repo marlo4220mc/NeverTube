@@ -89,6 +89,38 @@ static QString audioLangDisplay(const QString &code)
     return nt::tr("settings.audioLang.original");
 }
 
+static QStringList subtitleLangOptions()
+{
+    return {QStringLiteral("system"), QStringLiteral("es"),
+            QStringLiteral("en"), QStringLiteral("pt"),
+            QStringLiteral("original")};
+}
+
+static QString subtitleLangDisplay(const QString &code)
+{
+    if (code == QLatin1String("es"))
+        return nt::tr("settings.subtitleLang.es");
+    if (code == QLatin1String("en"))
+        return nt::tr("settings.subtitleLang.en");
+    if (code == QLatin1String("pt"))
+        return nt::tr("settings.subtitleLang.pt");
+    if (code == QLatin1String("original"))
+        return nt::tr("settings.subtitleLang.original");
+    return nt::tr("settings.subtitleLang.system");
+}
+
+static QStringList subtitleTranslateOptions()
+{
+    return {QStringLiteral("off"), QStringLiteral("on")};
+}
+
+static QString subtitleTranslateDisplay(const QString &code)
+{
+    return code == QLatin1String("on")
+        ? nt::tr("settings.subtitleTranslate.on")
+        : nt::tr("settings.subtitleTranslate.off");
+}
+
 // Maximum volume (mpv "volume-max"): 100% by default, 150/175/200 available
 // as "headroom" for those who need more volume. Each option above 100% asks
 // for confirmation for hearing safety (risk of damage with headphones).
@@ -481,6 +513,25 @@ void SettingsPage::buildUI()
         [this](const QString &code) {
             m_settings->set(QStringLiteral("mini_video"), code);
             emit miniVideoModeChanged(code);
+        });
+
+    addOptionRow(
+        nt::tr("settings.subtitleLang"), subtitleLangOptions(),
+        m_settings->getString(QStringLiteral("subtitle_language"),
+                              QStringLiteral("system")),
+        subtitleLangDisplay,
+        [this](const QString &code) {
+            m_settings->set(QStringLiteral("subtitle_language"), code);
+            emit subtitleLanguageChanged(code);
+        });
+    addOptionRow(
+        nt::tr("settings.subtitleTranslate"), subtitleTranslateOptions(),
+        m_settings->getString(QStringLiteral("subtitle_auto_translate"),
+                              QStringLiteral("off")),
+        subtitleTranslateDisplay,
+        [this](const QString &code) {
+            m_settings->set(QStringLiteral("subtitle_auto_translate"), code);
+            emit subtitleAutoTranslateChanged(code == QLatin1String("on"));
         });
 
     // Video acceleration: result of the offline probe (HwProbe). Informational

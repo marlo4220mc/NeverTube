@@ -7,6 +7,7 @@
 #include <QVector>
 
 #include "models.h"
+#include "subtitle_track.h"
 
 class Ipv4Https;
 
@@ -190,6 +191,9 @@ signals:
     void formatsFailed(const QString &videoId);
     void formatsReady(const QString &videoId, const QJsonArray &adaptiveFormats,
                       int durationSeconds);
+    void captionsReady(const QString &videoId,
+                       const QVector<SubtitleTrack> &tracks,
+                       const QVector<SubtitleTranslation> &translations);
     void failed(const QString &videoId, const QString &reason);
     // Related videos of the requested video via /next. Empty list if it could
     // not be extracted or the response does not bring them.

@@ -42,6 +42,9 @@ public:
     void setVolume(double volume) override;
     void setVolumeMax(double maxPercent) override;
     void setSubVisibility(bool visible) override;
+    bool subtitlesSupported() const override { return true; }
+    int addSubtitleTrack(const QString &url) override;
+    void clearSubtitleTracks() override;
     void setAudioLanguage(const QString &lang) override;
     int attachAudio(const QString &url) override;
     void dropExternalAudio() override;

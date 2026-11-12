@@ -1396,7 +1396,7 @@ fails" conclusion, run the control **and read what the control did**.
 The app can now **fetch** a video, not only watch it: the Player has a
 download button and the bottom bar a "Descargas" tab with the list, the
 progress and the state. The design is in
-`docs/superpowers/specs/2026-10-19-downloader-design.md`.
+`docs/design/specs/2026-10-19-downloader-design.md`.
 
 ### Where the bytes come from
 
@@ -3092,3 +3092,49 @@ accumulated frames.
   opening a video).
 - `PlayerContainer` (previously in an anonymous namespace) lives in `watch_page.cpp` at global scope
   only so it can be referenced from `WatchPage` (member `m_playerContainer`).
+
+## Subtitles (Qt overlay, both engines)
+
+Subtitles are rendered by a **Qt overlay** (`SubtitleOverlay` in
+`src/ui/subtitle_overlay.{h,cpp}`), NOT by mpv/libass: the first approach
+loaded the WebVTT with `sub-add` and it produced a **visible FPS drop**
+(libass + OSD texture, plus `mpv_render_context_render()` stall warnings), so
+it was reverted. Today mpv never receives a `sub-add`; the CC button downloads
+the VTT (`QNetworkAccessManager`), parses it in memory (`vtt::parse`, pure) and
+paints the active cue with `QPainter` as white text with a thin black shadow,
+bottom-centre, on a transparent widget child of the `OverlayHost` (a sibling of
+`m_back`). It is **backend-agnostic**: it works identically on mpv (x64) and on
+the Win7 x86 `FfmpegBackend` (which has no libmpv at all), so subtitles are
+REAL on x86, not promised. The old requirement "Win7 x86 must not promise
+subtitle support" is obsolete.
+
+- **Performance**: the 100 ms timer only repaints when the cue index changes
+  (`onTick()` returns without `update()` otherwise); `setPosition()` per player
+  tick just stores a double; the `paintEvent` fires ~1–2×/s and draws one line.
+  Measured: no FPS drop with CC on, same video/resolution/position. The overlay
+  hides with the controls on mini-player detach (`m_overlay->hide()`).
+- **CC button** (`m_ovSubsBtn`, gear-free Captions icon): born disabled, enabled
+  by `captionsReady` when there are tracks, loads on demand (NOT when the video
+  opens), toggles off/on, active colour follows `m_subsVisible`.
+- **Track choice** (`WatchPage::pickSubtitleUrl`): reads the persistent settings
+  `subtitle_language` (`system` default / `es` / `en` / `pt` / `original`) and
+  `subtitle_auto_translate` (`off`/`on`). With auto-translate it appends
+  `tlang=<target>` **only when the chosen track is not already in that
+  language**. `original` + auto-translate translates the manual track to the
+  interface language. Manual beats `kind=="asr"` for the same language
+  (`preferredSubtitleIndex`).
+- **Lifecycle**: `onCurrentChanged()` clears everything (overlay, URL, tracks,
+  flag); a re-resolve of the SAME video (recovery/stall) re-emits
+  `captionsReady` and RESTORES the CC that was on with the fresh URL.
+  `MainWindow::applySubtitleSettings()` (connected to
+  `subtitleLanguageChanged`/`subtitleAutoTranslateChanged`) reloads the CC live.
+- **WebVTT**: `vtt::parse` strips inline tags and word-timing marks
+  (`<00:00:00.599><c>...`) and joins multi-line cues with spaces; timings are
+  kept INTACT (YouTube can jump explicitly inside a cue — `vtt::cueAt` keeps the
+  whole cue active). One display line, elided with `...` if wider than the
+  overlay (the VTT is never rewritten). Covered by `--selftest-subtitles`
+  (track model + parser, offline).
+- The `subtitlesSupported`/`addSubtitleTrack`/`clearSubtitleTracks`/
+  `setSubVisibility` backend API still exists in the code but CC does not use
+  it; `MpvBackend` has no `sub-ass-override`/`sub-ass-style-overrides` options.
+- Design document: `docs/design/plans/2026-11-11-subtitulos-mpv-idioma-traduccion.md`.

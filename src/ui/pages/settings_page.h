@@ -52,6 +52,8 @@ signals:
     void nextModeChanged(const QString &mode);
     void miniVideoModeChanged(const QString &mode);
     void audioLanguageChanged(const QString &code);
+    void subtitleLanguageChanged(const QString &code);
+    void subtitleAutoTranslateChanged(bool enabled);
     // The folder of the downloads changed (empty = the default one).
     void downloadFolderChanged(const QString &folder);
     // The number of connections of the downloader changed.

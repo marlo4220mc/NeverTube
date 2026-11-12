@@ -5,6 +5,7 @@
 
 #include "../../models.h"
 #include "../../video_variant.h"
+#include "../../subtitle_track.h"
 #include "../icons.h"
 #include "../live_detect.h"
 
@@ -90,6 +91,7 @@ private slots:
     void onAvatarReady(const QString &key);
     void onQualityChanged(int index);
     void onVideoSizeChanged(int width, int height);
+    void loadPendingSubtitles();
     void onPlayPause();
     void onToggleMute();
     void onNextUpActivated(int index, const VideoInfo &video);
@@ -112,6 +114,12 @@ public slots:
     // from MainWindow when the accent changes in Settings, so everything follows
     // the color without rebuilding the page.
     void applyAccent();
+
+    // Re-picks the subtitle track/translation from the persistent settings
+    // ("subtitle_language", "subtitle_auto_translate") and, if the CC overlay
+    // is showing, reloads it with the new URL. Called from MainWindow when
+    // those settings change in Ajustes.
+    void applySubtitleSettings();
 
     // Re-applies the composed labels (title, channel/subscribe buttons, meta line,
     // queue counter, quality tooltip) in the active language. Called by MainWindow
@@ -319,6 +327,14 @@ private:
     QPoint m_lastMousePos = QPoint(-100000, -100000);
     double m_volume = 100.0;
     bool m_subsVisible = false;
+    QString m_pendingSubtitleUrl;
+    class SubtitleOverlay *m_subtitleOverlay = nullptr;
+    // The tracks of the current video, kept so a settings change (language /
+    // auto-translate) can re-pick the URL without asking YouTube again.
+    QVector<SubtitleTrack> m_subtitleTracks;
+    // Chooses the track and the translation URL from the persistent subtitle
+    // settings. Empty when there are no tracks for the current video.
+    QString pickSubtitleUrl() const;
     qint64 m_lastVideoPressMs = -100000;
     QPoint m_lastVideoPressPos = QPoint(-100000, -100000);
     // A control in the box is pressed: the auto-hide timer must not

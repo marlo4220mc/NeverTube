@@ -783,6 +783,10 @@ MainWindow::MainWindow(QWidget *parent)
                 if (m_yt)
                     m_yt->setAudioLanguage(val);
             });
+    connect(m_settingsPage, &SettingsPage::subtitleLanguageChanged,
+            this, [this](const QString &) { if (m_watch) m_watch->applySubtitleSettings(); });
+    connect(m_settingsPage, &SettingsPage::subtitleAutoTranslateChanged,
+            this, [this](bool) { if (m_watch) m_watch->applySubtitleSettings(); });
     // Maximum volume: applies the cap to mpv hot. Since the current volume is
     // capped to 100 in persistVolume, enabling >100 leaves the visible volume
     // AT its value (≤100) and the overlay slider readjusts itself.

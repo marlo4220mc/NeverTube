@@ -59,6 +59,9 @@ public slots:
     // headroom.
     void setVolumeMax(double maxPercent);
     void setSubVisibility(bool visible);
+    bool subtitlesSupported() const;
+    int addSubtitleTrack(const QString &url);
+    void clearSubtitleTracks();
     void setAudioLanguage(const QString &lang);
     // For VP9/webm: attach an external audio track (opus webm direct URL).
     // Stores in m_pendingAudioFile and applies it with the "audio-file-add"

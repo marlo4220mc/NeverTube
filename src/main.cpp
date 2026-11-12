@@ -42,6 +42,7 @@
 #include "single_instance.h"
 #include "single_instance_selftest.h"
 #include "video_variant_selftest.h"
+#include "subtitle_track_selftest.h"
 #include "system_media_selftest.h"
 
 #ifdef Q_OS_WIN
@@ -909,6 +910,10 @@ int main(int argc, char *argv[])
         // Offline: the variants of a video (height, codec and real size) are
         // a pure function of the player response.
         return videoVariantSelfTest() ? 0 : 1;
+    }
+
+    if (args.contains(QLatin1String("--selftest-subtitles"))) {
+        return subtitleTrackSelfTest() ? 0 : 1;
     }
 
     if (args.contains(QLatin1String("--selftest-data-transfer"))) {

@@ -9,6 +9,7 @@
 #include "hls_server.h"
 #include "models.h"
 #include "video_variant.h"
+#include "subtitle_track.h"
 #include "yt_innertube.h"
 
 // "A continuación" generation mode (selected via NEVERTUBE_NEXT_MODE:
@@ -178,6 +179,9 @@ signals:
     // ask YouTube for anything.
     void streamVariantsReady(const QString &videoId,
                              const QVector<VideoVariant> &variants);
+    void captionsReady(const QString &videoId,
+                       const QVector<SubtitleTrack> &tracks,
+                       const QVector<SubtitleTranslation> &translations);
     void error(const QString &message);
     void resolveError(const QString &message);
     void relatedReady(const QString &videoId, const QVector<VideoInfo> &videos);

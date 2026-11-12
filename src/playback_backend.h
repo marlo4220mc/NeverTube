@@ -88,6 +88,10 @@ public:
     // "Maximum volume" setting can raise it to 150/175/200 for headroom.
     virtual void setVolumeMax(double maxPercent) = 0;
     virtual void setSubVisibility(bool visible) = 0;
+    virtual bool subtitlesSupported() const { return false; }
+    virtual int addSubtitleTrack(const QString &url)
+    { Q_UNUSED(url); return -1; }
+    virtual void clearSubtitleTracks() {}
     // Audio language preference ("alang"): re-applied before every
     // playUrl so the engine picks the right dub in each load.
     virtual void setAudioLanguage(const QString &lang) = 0;

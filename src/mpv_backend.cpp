@@ -488,6 +488,25 @@ void MpvBackend::setSubVisibility(bool visible)
     mpv_set_property(m_mpv, "sub-visibility", MPV_FORMAT_FLAG, &flag);
 }
 
+int MpvBackend::addSubtitleTrack(const QString &url)
+{
+    if (!m_mpv)
+        return MPV_ERROR_UNINITIALIZED;
+    const QByteArray u = url.toUtf8();
+    const char *command[] = {"sub-add", u.constData(), "select", nullptr};
+    const int result = mpv_command(m_mpv, command);
+    NT_DEBUG("E2E subtitle-add result=%d\\n", result);
+    return result;
+}
+
+void MpvBackend::clearSubtitleTracks()
+{
+    if (!m_mpv)
+        return;
+    const char *command[] = {"sub-remove", "0", nullptr};
+    mpv_command(m_mpv, command);
+}
+
 int MpvBackend::attachAudio(const QString &url)
 {
     if (!m_mpv)

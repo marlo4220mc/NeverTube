@@ -4101,6 +4101,19 @@ void Innertube::handlePlayer(bool ok, const QString &error, const QByteArray &bo
         return;
     }
 
+    const QJsonObject captions = root.value(QStringLiteral("captions")).toObject();
+    const QJsonObject captionRenderer =
+        captions.value(QStringLiteral("playerCaptionsTracklistRenderer")).toObject();
+    const QVector<SubtitleTrack> subtitleTracks = parseSubtitleTracks(
+        captionRenderer.value(QStringLiteral("captionTracks")).toArray());
+    const QVector<SubtitleTranslation> subtitleTranslations =
+        parseSubtitleTranslations(
+            captionRenderer.value(QStringLiteral("translationLanguages")).toArray());
+    NT_DEBUG("E2E captions video=%s tracks=%d translations=%d\\n",
+             m_videoId.toUtf8().constData(), int(subtitleTracks.size()),
+             int(subtitleTranslations.size()));
+    emit captionsReady(m_videoId, subtitleTracks, subtitleTranslations);
+
     const QJsonObject streamingData =
         root.value(QStringLiteral("streamingData")).toObject();
     const QString hls =
