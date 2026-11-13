@@ -137,11 +137,12 @@ SubtitleOverlay::SubtitleOverlay(QWidget *parent)
     connect(&m_timer, &QTimer::timeout, this, &SubtitleOverlay::onTick);
 }
 
-void SubtitleOverlay::loadUrl(const QString &url)
+void SubtitleOverlay::loadUrl(const QString &url, const QString &fallbackUrl)
 {
     m_cues.clear();
     m_activeCue = -1;
     m_currentText.clear();
+    m_fallbackUrl = fallbackUrl;
     m_timer.stop();
     update();
 
@@ -150,11 +151,21 @@ void SubtitleOverlay::loadUrl(const QString &url)
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                      QNetworkRequest::NoLessSafeRedirectPolicy);
     QNetworkReply *reply = m_nam.get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, url]() {
         reply->deleteLater();
-        const bool ok = (reply->error() == QNetworkReply::NoError);
-        if (ok)
+        bool ok = (reply->error() == QNetworkReply::NoError);
+        if (ok) {
             m_cues = vtt::parse(reply->readAll());
+        } else if (!m_fallbackUrl.isEmpty() && m_fallbackUrl != url) {
+            // Translation was rate-limited (YouTube 429): fall back to the
+            // original track so subtitles still show. Do not hammer the
+            // translated endpoint again — that makes the block worse.
+            const QString fallback = m_fallbackUrl;
+            m_fallbackUrl.clear();
+            NT_DEBUG("E2E SubtitleOverlay translated failed, falling back\n");
+            loadUrl(fallback);
+            return;
+        }
         NT_DEBUG("E2E SubtitleOverlay download ok=%d cues=%d\n", int(ok), int(m_cues.size()));
         emit downloadFinished(ok);
         if (ok && m_show && !m_cues.isEmpty())

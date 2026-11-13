@@ -41,7 +41,11 @@ public:
 
     // Load the subtitle track at url (WebVTT from YouTube timedtext endpoint).
     // Fires downloadFinished() when ready; already-loaded cues are discarded.
-    void loadUrl(const QString &url);
+    // fallbackUrl: plain track URL WITHOUT tlang. YouTube rate-limits the
+    // machine-translated tracks much harder than the originals (HTTP 429), so
+    // if the translated request fails the overlay retries the original track —
+    // the user always gets subtitles, translated when YouTube allows it.
+    void loadUrl(const QString &url, const QString &fallbackUrl = QString());
 
     // Clear the loaded cues and hide the overlay.
     void clear();
@@ -70,5 +74,6 @@ private:
     double m_posMs = 0.0;    // current position in milliseconds
     int    m_activeCue = -1; // index into m_cues of the active cue, -1 = none
     QString m_currentText;   // text currently painted
+    QString m_fallbackUrl;   // original track URL without tlang (retried on 429)
     bool m_show = false;
 };

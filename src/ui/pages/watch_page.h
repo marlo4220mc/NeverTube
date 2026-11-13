@@ -328,6 +328,9 @@ private:
     double m_volume = 100.0;
     bool m_subsVisible = false;
     QString m_pendingSubtitleUrl;
+    // Plain track URL without tlang, retried by the overlay when the
+    // translated request is rate-limited by YouTube (HTTP 429).
+    QString m_pendingSubtitleFallback;
     class SubtitleOverlay *m_subtitleOverlay = nullptr;
     // The tracks of the current video, kept so a settings change (language /
     // auto-translate) can re-pick the URL without asking YouTube again.
@@ -336,9 +339,11 @@ private:
     // (translationLanguages non-empty): the gate that auto-translate needs,
     // because a tlang request on a video without translations is ignored.
     bool m_subtitleCanTranslate = false;
-    // Chooses the track and the translation URL from the persistent subtitle
-    // settings. Empty when there are no tracks for the current video.
-    QString pickSubtitleUrl() const;
+    // Computes the track URL (m_pendingSubtitleUrl, with tlang when
+    // auto-translate applies) AND the plain track URL without tlang
+    // (m_pendingSubtitleFallback), which the overlay retries when YouTube
+    // rate-limits the translation (429). Empty when there are no tracks.
+    void pickSubtitleUrls();
     qint64 m_lastVideoPressMs = -100000;
     QPoint m_lastVideoPressPos = QPoint(-100000, -100000);
     // A control in the box is pressed: the auto-hide timer must not
